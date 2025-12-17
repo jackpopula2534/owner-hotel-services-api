@@ -1,0 +1,163 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// User model for authentication
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  firstName String?
+  lastName  String?
+  role      String   @default("user") // user, admin, manager
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  refreshTokens RefreshToken[]
+
+  @@map("users")
+}
+
+// RefreshToken model
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  revokedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+  @@index([token])
+  @@index([userId])
+}
+
+// Guest model
+model Guest {
+  id        String   @id @default(uuid())
+  firstName String
+  lastName  String
+  email     String?
+  phone     String?
+  address   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  bookings Booking[]
+
+  @@map("guests")
+}
+
+// Room model
+model Room {
+  id          String   @id @default(uuid())
+  number      String   @unique
+  type        String   // single, double, suite, etc.
+  floor       Int?
+  price       Decimal  @db.Decimal(10, 2)
+  status      String   @default("available") // available, occupied, maintenance
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  bookings Booking[]
+
+  @@map("rooms")
+}
+
+// Booking model
+model Booking {
+  id          String   @id @default(uuid())
+  guestId     String
+  roomId      String
+  channelId   String?
+  checkIn     DateTime
+  checkOut    DateTime
+  status      String   @default("pending") // pending, confirmed, checked-in, checked-out, cancelled
+  totalPrice  Decimal  @db.Decimal(10, 2)
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  guest   Guest    @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  room    Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  channel Channel? @relation(fields: [channelId], references: [id], onDelete: SetNull)
+  review  Review?
+
+  @@map("bookings")
+}
+
+// Review model
+model Review {
+  id        String   @id @default(uuid())
+  bookingId String?  @unique
+  rating    Int      // 1-5
+  comment   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  booking Booking? @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@map("reviews")
+}
+
+// Restaurant model
+model Restaurant {
+  id          String   @id @default(uuid())
+  name        String
+  code        String   @unique
+  description String?
+  location    String?
+  capacity    Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("restaurants")
+}
+
+// Employee model
+model Employee {
+  id           String   @id @default(uuid())
+  firstName    String
+  lastName     String
+  email        String   @unique
+  employeeCode String?  @unique
+  department   String?
+  position     String?
+  startDate    DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("employees")
+}
+
+// Channel model (OTA channels like Booking.com, Agoda, etc.)
+model Channel {
+  id          String   @id @default(uuid())
+  name        String   // Booking.com, Agoda, Expedia, etc.
+  code        String   @unique
+  type        String   // ota, direct, corporate
+  apiKey      String?
+  apiSecret   String?
+  isActive    Boolean  @default(true)
+  syncEnabled Boolean  @default(false)
+  lastSyncAt  DateTime?
+  settings    String?  @db.Text // JSON settings
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  bookings Booking[]
+
+  @@map("channels")
+}
+
