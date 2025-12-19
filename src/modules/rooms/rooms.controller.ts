@@ -15,17 +15,20 @@ import { RoomsService } from './rooms.service';
 import { CreateRoomDto } from './dto/create-room.dto';
 import { UpdateRoomDto } from './dto/update-room.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { RolesGuard } from '../../common/guards/roles.guard';
 
 @ApiTags('rooms')
 @ApiBearerAuth('JWT-auth')
-@Controller('rooms')
-@UseGuards(JwtAuthGuard)
+@Controller({ path: 'rooms', version: '1' })
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class RoomsController {
   constructor(private readonly roomsService: RoomsService) {}
 
   @Get()
   @ApiOperation({ summary: 'Get all rooms' })
   @ApiResponse({ status: 200, description: 'List of rooms' })
+  @Roles('admin', 'manager')
   async findAll(@Query() query: any) {
     return this.roomsService.findAll(query);
   }
@@ -33,6 +36,7 @@ export class RoomsController {
   @Get('available')
   @ApiOperation({ summary: 'Get available rooms for date range' })
   @ApiResponse({ status: 200, description: 'List of available rooms' })
+  @Roles('admin', 'manager')
   async getAvailableRooms(
     @Query('checkIn') checkIn: string,
     @Query('checkOut') checkOut: string,
@@ -44,6 +48,7 @@ export class RoomsController {
   @ApiOperation({ summary: 'Get room by ID' })
   @ApiResponse({ status: 200, description: 'Room details' })
   @ApiResponse({ status: 404, description: 'Room not found' })
+  @Roles('admin', 'manager')
   async findOne(@Param('id') id: string) {
     return this.roomsService.findOne(id);
   }
@@ -51,6 +56,7 @@ export class RoomsController {
   @Post()
   @ApiOperation({ summary: 'Create a new room' })
   @ApiResponse({ status: 201, description: 'Room created successfully' })
+  @Roles('admin')
   async create(@Body() createRoomDto: CreateRoomDto) {
     return this.roomsService.create(createRoomDto);
   }
@@ -58,6 +64,7 @@ export class RoomsController {
   @Patch(':id')
   @ApiOperation({ summary: 'Update room' })
   @ApiResponse({ status: 200, description: 'Room updated successfully' })
+  @Roles('admin')
   async update(@Param('id') id: string, @Body() updateRoomDto: UpdateRoomDto) {
     return this.roomsService.update(id, updateRoomDto);
   }
@@ -65,6 +72,7 @@ export class RoomsController {
   @Patch(':id/status')
   @ApiOperation({ summary: 'Update room status' })
   @ApiResponse({ status: 200, description: 'Room status updated' })
+  @Roles('admin', 'manager')
   async updateStatus(
     @Param('id') id: string,
     @Body('status') status: string,
@@ -75,6 +83,7 @@ export class RoomsController {
   @Delete(':id')
   @ApiOperation({ summary: 'Delete room' })
   @ApiResponse({ status: 200, description: 'Room deleted successfully' })
+  @Roles('admin')
   async remove(@Param('id') id: string) {
     return this.roomsService.remove(id);
   }

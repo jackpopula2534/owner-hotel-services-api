@@ -12,14 +12,47 @@ datasource db {
 
 // User model for authentication
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  password  String
-  firstName String?
-  lastName  String?
-  role      String   @default("user") // user, admin, manager
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String   @id @default(uuid())
+  email      String   @unique
+  password   String
+  firstName  String?
+  lastName   String?
+
+  /// Role of the user:
+  /// - platform_admin: SaaS platform admin (ดูแลทั้งระบบ)
+  /// - tenant_admin: เจ้าของโรงแรม / ผู้ซื้อ subscription
+  /// - manager: ผู้จัดการโรงแรม
+  /// - staff: พนักงาน (แม่บ้าน, เสิร์ฟ, ช่างซ่อม ฯลฯ)
+  /// - user: ผู้ใช้ทั่วไป
+  /// - admin: legacy alias (ยังรองรับของเดิม)
+  role       String   @default("user")
+
+  /// Optional: โรงแรม / tenant ที่ user นี้สังกัด (ถ้า multi-tenant)
+  tenantId   String?
+
+  /// Optional: เชื่อมกับ Employee record ถ้าเป็นพนักงาน
+  employeeId String?
+
+  /// Account status: active, suspended, invited, deleted
+  status     String   @default("active")
+
+  /// Optional contact / UX fields
+  phone      String?
+  language   String?  // e.g. "th", "en"
+  timezone   String?  // e.g. "Asia/Bangkok"
+
+  /// Security / audit fields
+  lastLoginAt DateTime?
+  lastLoginIp String?
+
+  /// Authentication provider: local, google, apple, ...
+  authProvider String  @default("local")
+
+  /// Flexible JSON metadata (stored as text)
+  metadata   String?  @db.Text
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   refreshTokens RefreshToken[]
 

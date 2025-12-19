@@ -57,16 +57,16 @@
 
 ## 🟡 Priority 2: Security & Best Practices
 
-### 3. Role-Based Access Control (RBAC) ⚠️
-**สถานะ:** มี role ใน User model แต่ยังไม่มี guards/decorators
+### 3. Role-Based Access Control (RBAC) ✅
+**สถานะ:** Implemented แล้ว (guard + decorators + ใช้งานใน controllers หลัก)
 
-**ต้องทำ:**
-- [ ] Create `RolesGuard` - Guard for role-based access
-- [ ] Create `@Roles()` decorator - Decorator to specify required roles
-- [ ] Create `@Public()` decorator - Decorator to mark public routes
-- [ ] Update controllers to use role-based guards
-- [ ] Add role validation in services (optional)
-- [ ] Add tests
+**ทำแล้ว:**
+- ✅ Create `RolesGuard` - Guard for role-based access
+- ✅ Create `@Roles()` decorator - Decorator to specify required roles
+- ✅ Create `@Public()` decorator - Decorator to mark public routes
+- ✅ Update controllers to use role-based guards (`guests`, `bookings`, `rooms`, `restaurant`, `hr`, `channels`, `reviews`)
+- ✅ กำหนด role หลัก: `admin`, `manager`, `user` (ตาม `User.role` ใน Prisma)
+- ⚠️ Add tests (unit tests สำหรับ `RolesGuard` และสิทธิ์แต่ละ role ยังไม่ทำ)
 
 **Example:**
 ```typescript
@@ -232,7 +232,7 @@ export class GuestsController { ... }
 - ✅ Basic Unit Tests (บางส่วน)
 
 ### ⚠️ In Progress / Remaining
-- ⚠️ RBAC (0% - not implemented) - **Priority 2**
+- ✅ RBAC (100% - เหลือเขียน tests) - **Priority 2**
 - ⚠️ Rate Limiting (0% - not implemented) - **Priority 2**
 - ⚠️ Request Logging (0% - not implemented) - **Priority 2**
 - ⚠️ API Versioning (0% - not implemented) - **Priority 2**
