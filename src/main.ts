@@ -24,8 +24,24 @@ async function bootstrap() {
   app.useGlobalInterceptors(new LoggingInterceptor());
 
   // CORS configuration
+  // Read allowed origins from .env or use defaults
+  const allowedOriginsEnv = process.env.ALLOWED_ORIGINS || 'http://localhost:3000,http://localhost:2000,http://localhost:3001';
+  const allowedOrigins = allowedOriginsEnv.split(',').map(origin => origin.trim());
+
+  console.log('🌐 CORS allowed origins:', allowedOrigins);
+
   app.enableCors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps, curl, Postman)
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        console.warn(`⚠️  CORS blocked origin: ${origin}`);
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],

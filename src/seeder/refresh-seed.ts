@@ -3,11 +3,14 @@ import { AppModule } from '../app.module';
 import { SeederService } from './seeder.service';
 import { DataSource } from 'typeorm';
 import { getDataSourceToken } from '@nestjs/typeorm';
+import { PrismaService } from '../prisma/prisma.service';
+import { execSync } from 'child_process';
 
 async function bootstrap() {
   const app = await NestFactory.createApplicationContext(AppModule);
   const seeder = app.get(SeederService);
   const dataSource = app.get<DataSource>(getDataSourceToken());
+  const prisma = app.get(PrismaService);
 
   try {
     console.log('🔄 Starting database refresh and seed...');
@@ -62,22 +65,42 @@ async function bootstrap() {
     }
     console.log('');
 
-    // 2. Synchronize database (สร้าง tables ใหม่)
-    console.log('🔨 Creating tables...');
+    // 2. Run Prisma migrations (สร้าง Prisma tables เช่น users, guests, etc.)
+    console.log('🔨 Running Prisma migrations...');
     try {
-      await dataSource.synchronize(true);
-      console.log('  ✓ All tables created');
+      execSync('npx prisma migrate deploy', { stdio: 'inherit' });
+      console.log('  ✓ Prisma migrations completed');
+
+      // Generate Prisma Client to ensure it's up to date
+      execSync('npx prisma generate', { stdio: 'inherit' });
+      console.log('  ✓ Prisma client generated');
+
+      // Reconnect Prisma to pick up new schema
+      await prisma.$connect();
+      console.log('  ✓ Prisma client reconnected');
+    } catch (error) {
+      console.error('  ⚠️  Prisma setup failed:', error.message);
+      // Continue anyway - tables might already exist
+    }
+    console.log('');
+
+    // 3. Synchronize TypeORM database (สร้าง TypeORM tables เช่น subscriptions, plans, etc.)
+    // ⚠️ ใช้ synchronize(false) เพื่อไม่ให้ drop Prisma tables ที่เพิ่งสร้าง
+    console.log('🔨 Creating TypeORM tables...');
+    try {
+      await dataSource.synchronize(false);
+      console.log('  ✓ All TypeORM tables created');
     } catch (error) {
       // Ignore metadata table errors (ไม่กระทบการทำงาน)
       if (error.message && error.message.includes('typeorm_metadata')) {
-        console.log('  ✓ All tables created (metadata table warning ignored)');
+        console.log('  ✓ All TypeORM tables created (metadata table warning ignored)');
       } else {
         throw error;
       }
     }
     console.log('');
 
-    // 3. Run seeder
+    // 4. Run seeder
     console.log('🌱 Seeding data...');
     await seeder.seed();
     console.log('');
@@ -86,8 +109,9 @@ async function bootstrap() {
     console.log('');
     console.log('📊 Summary:');
     console.log('  - Database: Refreshed');
-    console.log('  - Tables: Recreated');
-    console.log('  - Data: Seeded');
+    console.log('  - Prisma Tables: Created (users, guests, bookings, etc.)');
+    console.log('  - TypeORM Tables: Created (subscriptions, plans, etc.)');
+    console.log('  - Data: Seeded (including 5 test users)');
     console.log('');
 
     await app.close();

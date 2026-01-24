@@ -9,6 +9,8 @@ import { FeatureType } from '../features/entities/feature.entity';
 import { AdminRole } from '../admins/entities/admin.entity';
 import { TenantStatus } from '../tenants/entities/tenant.entity';
 import { SubscriptionStatus } from '../subscriptions/entities/subscription.entity';
+import { PrismaService } from '../prisma/prisma.service';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class SeederService {
@@ -21,6 +23,7 @@ export class SeederService {
     private adminsService: AdminsService,
     private tenantsService: TenantsService,
     private subscriptionsService: SubscriptionsService,
+    private prisma: PrismaService,
   ) {}
 
   /**
@@ -34,6 +37,7 @@ export class SeederService {
       await this.seedFeatures();
       await this.seedPlanFeatures();
       await this.seedAdmins();
+      await this.seedUsers();
       await this.seedSampleData();
 
       this.logger.log('✅ Database seeding completed successfully!');
@@ -273,7 +277,93 @@ export class SeederService {
   }
 
   /**
-   * 5️⃣ Seed Sample Data (Optional - สำหรับทดสอบ)
+   * 5️⃣ Seed Test Users (สำหรับทดสอบ login)
+   */
+  private async seedUsers(): Promise<void> {
+    this.logger.log('👥 Seeding Test Users...');
+
+    const testUsers = [
+      {
+        email: 'platform.admin@test.com',
+        password: 'Admin@123',
+        firstName: 'Platform',
+        lastName: 'Admin',
+        role: 'platform_admin',
+        status: 'active',
+      },
+      {
+        email: 'tenant.owner@test.com',
+        password: 'Owner@123',
+        firstName: 'Hotel',
+        lastName: 'Owner',
+        role: 'tenant_admin',
+        status: 'active',
+      },
+      {
+        email: 'manager@test.com',
+        password: 'Manager@123',
+        firstName: 'Hotel',
+        lastName: 'Manager',
+        role: 'manager',
+        status: 'active',
+      },
+      {
+        email: 'staff@test.com',
+        password: 'Staff@123',
+        firstName: 'Hotel',
+        lastName: 'Staff',
+        role: 'staff',
+        status: 'active',
+      },
+      {
+        email: 'user@test.com',
+        password: 'User@123',
+        firstName: 'Test',
+        lastName: 'User',
+        role: 'user',
+        status: 'active',
+      },
+    ];
+
+    for (const userData of testUsers) {
+      try {
+        // Use raw SQL to check if user exists
+        const existing = await this.prisma.$queryRaw`
+          SELECT id FROM users WHERE email = ${userData.email} LIMIT 1
+        `;
+
+        if (Array.isArray(existing) && existing.length === 0) {
+          // Hash password
+          const hashedPassword = await bcrypt.hash(userData.password, 10);
+
+          // Use raw SQL to insert user (more reliable after migration)
+          await this.prisma.$executeRaw`
+            INSERT INTO users (id, email, password, firstName, lastName, role, status, createdAt, updatedAt)
+            VALUES (
+              UUID(),
+              ${userData.email},
+              ${hashedPassword},
+              ${userData.firstName},
+              ${userData.lastName},
+              ${userData.role},
+              ${userData.status},
+              NOW(),
+              NOW()
+            )
+          `;
+
+          this.logger.log(`  ✓ Created user: ${userData.email} (${userData.role})`);
+        } else {
+          this.logger.log(`  ⊙ User already exists: ${userData.email}`);
+        }
+      } catch (error) {
+        this.logger.warn(`  ⚠️  Could not create user ${userData.email}:`, error.message);
+      }
+    }
+  }
+
+  /**
+   * 6️⃣ Seed Sample Data (Optional - สำหรับทดสอบ)
    */
   private async seedSampleData(): Promise<void> {
     this.logger.log('🏨 Seeding Sample Data...');
