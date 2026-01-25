@@ -145,6 +145,14 @@ export class HotelDetailService {
         bgColor: 'bg-red-100',
         textColor: 'text-red-800',
       },
+      [SubscriptionStatus.CANCELLED]: {
+        status: 'cancelled',
+        label: 'Cancelled',
+        labelTh: 'ยกเลิก',
+        color: 'gray',
+        bgColor: 'bg-gray-100',
+        textColor: 'text-gray-800',
+      },
     };
 
     return statusMap[status];

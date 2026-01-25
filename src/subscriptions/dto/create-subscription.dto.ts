@@ -3,10 +3,18 @@ import { SubscriptionStatus } from '../entities/subscription.entity';
 
 export class CreateSubscriptionDto {
   @IsString()
+  @IsOptional()
+  subscriptionCode?: string;
+
+  @IsString()
   tenantId: string;
 
   @IsString()
   planId: string;
+
+  @IsString()
+  @IsOptional()
+  previousPlanId?: string;
 
   @IsEnum(SubscriptionStatus)
   @IsOptional()

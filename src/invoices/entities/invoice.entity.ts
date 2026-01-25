@@ -3,6 +3,7 @@ import {
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
+  UpdateDateColumn,
   ManyToOne,
   OneToMany,
   JoinColumn,
@@ -16,6 +17,7 @@ export enum InvoiceStatus {
   PENDING = 'pending',
   PAID = 'paid',
   REJECTED = 'rejected',
+  VOIDED = 'voided',
 }
 
 @Entity('invoices')
@@ -35,6 +37,12 @@ export class Invoice {
   @Column({ type: 'decimal', precision: 10, scale: 2 })
   amount: number;
 
+  @Column({ name: 'original_amount', type: 'decimal', precision: 10, scale: 2, nullable: true })
+  originalAmount: number;
+
+  @Column({ name: 'adjusted_amount', type: 'decimal', precision: 10, scale: 2, nullable: true })
+  adjustedAmount: number;
+
   @Column({
     type: 'enum',
     enum: InvoiceStatus,
@@ -45,8 +53,20 @@ export class Invoice {
   @Column({ name: 'due_date', type: 'date' })
   dueDate: Date;
 
+  @Column({ name: 'voided_at', type: 'timestamp', nullable: true })
+  voidedAt: Date;
+
+  @Column({ name: 'voided_reason', type: 'text', nullable: true })
+  voidedReason: string;
+
+  @Column({ type: 'text', nullable: true })
+  notes: string;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
+
+  @UpdateDateColumn({ name: 'updated_at' })
+  updatedAt: Date;
 
   @ManyToOne(() => Tenant, (tenant) => tenant.invoices)
   @JoinColumn({ name: 'tenant_id' })

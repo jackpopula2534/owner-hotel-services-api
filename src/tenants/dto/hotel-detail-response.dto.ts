@@ -14,10 +14,10 @@ export type HotelStatusBadge = {
 };
 
 export type SubscriptionStatusBadge = {
-  status: 'trial' | 'pending' | 'active' | 'expired';
+  status: 'trial' | 'pending' | 'active' | 'expired' | 'cancelled';
   label: string;
   labelTh: string;
-  color: 'blue' | 'green' | 'yellow' | 'red';
+  color: 'blue' | 'green' | 'yellow' | 'red' | 'gray';
   bgColor: string;
   textColor: string;
 };

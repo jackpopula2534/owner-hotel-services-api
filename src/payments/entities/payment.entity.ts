@@ -19,6 +19,8 @@ export enum PaymentStatus {
   PENDING = 'pending',
   APPROVED = 'approved',
   REJECTED = 'rejected',
+  REFUNDED = 'refunded',
+  PARTIALLY_REFUNDED = 'partially_refunded',
 }
 
 @Entity('payments')
@@ -26,8 +28,14 @@ export class Payment {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  @Column({ name: 'payment_no', unique: true, nullable: true })
+  paymentNo: string;
+
   @Column({ name: 'invoice_id' })
   invoiceId: string;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  amount: number;
 
   @Column({
     type: 'enum',
@@ -44,6 +52,9 @@ export class Payment {
     default: PaymentStatus.PENDING,
   })
   status: PaymentStatus;
+
+  @Column({ name: 'refunded_amount', type: 'decimal', precision: 10, scale: 2, default: 0 })
+  refundedAmount: number;
 
   @Column({ name: 'approved_by', nullable: true })
   approvedBy: string; // admin_id

@@ -29,6 +29,7 @@ import { SubscriptionModule } from './subscription/subscription.module';
 import { AdminApprovalModule } from './admin-approval/admin-approval.module';
 import { SubscriptionManagementModule } from './subscription-management/subscription-management.module';
 import { AdminPanelModule } from './admin-panel/admin-panel.module';
+import { AdminModule } from './admin/admin.module';
 import { SeederModule } from './seeder/seeder.module';
 
 @Module({
@@ -62,6 +63,7 @@ import { SeederModule } from './seeder/seeder.module';
     AdminApprovalModule,
     SubscriptionManagementModule,
     AdminPanelModule,
+    AdminModule,
     SeederModule,
     ThrottlerModule.forRoot([
       {

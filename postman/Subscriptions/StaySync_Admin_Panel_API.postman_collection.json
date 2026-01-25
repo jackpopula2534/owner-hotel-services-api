@@ -1,0 +1,149 @@
+{
+  "info": {
+    "_postman_id": "staysync-admin-panel-api",
+    "name": "StaySync Admin Panel API",
+    "description": "Admin Panel API for StaySync SaaS - Complete Admin Panel with Hotels, Invoices, Subscriptions, Add-ons, Invoice Adjustments, Billing Cycle & Refund/Credit Management\n\nUser: platform_admin\nPrefix: /api/v1/admin/",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:3000/api/v1", "type": "string" },
+    { "key": "access_token", "value": "", "type": "string" },
+    { "key": "hotel_id", "value": "", "type": "string" },
+    { "key": "tenant_id", "value": "", "type": "string" },
+    { "key": "invoice_id", "value": "", "type": "string" },
+    { "key": "invoice_item_id", "value": "", "type": "string" },
+    { "key": "subscription_id", "value": "SUB-001", "type": "string" },
+    { "key": "feature_id", "value": "", "type": "string" },
+    { "key": "subscription_feature_id", "value": "", "type": "string" },
+    { "key": "payment_id", "value": "", "type": "string" },
+    { "key": "refund_id", "value": "", "type": "string" },
+    { "key": "credit_id", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "🔐 Auth",
+      "item": [
+        { "name": "Login (Platform Admin)", "event": [{ "listen": "test", "script": { "exec": ["var jsonData = pm.response.json();", "if (jsonData.accessToken) { pm.collectionVariables.set('access_token', jsonData.accessToken); }"], "type": "text/javascript" }}], "request": { "auth": { "type": "noauth" }, "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"email\": \"platform.admin@staysync.io\",\n  \"password\": \"admin123\"\n}" }, "url": { "raw": "{{base_url}}/auth/login", "host": ["{{base_url}}"], "path": ["auth", "login"] }}}
+      ]
+    },
+    {
+      "name": "🏨 Hotels Management",
+      "item": [
+        { "name": "Get All Hotels", "event": [{ "listen": "test", "script": { "exec": ["var jsonData = pm.response.json();", "if (jsonData.data && jsonData.data.length > 0) { pm.collectionVariables.set('hotel_id', jsonData.data[0].id); pm.collectionVariables.set('tenant_id', jsonData.data[0].id); }"], "type": "text/javascript" }}], "request": { "method": "GET", "url": { "raw": "{{base_url}}/admin/hotels?page=1&limit=10", "host": ["{{base_url}}"], "path": ["admin", "hotels"], "query": [{ "key": "page", "value": "1" }, { "key": "limit", "value": "10" }] }}},
+        { "name": "Get Hotels Summary", "request": { "method": "GET", "url": { "raw": "{{base_url}}/admin/hotels/summary", "host": ["{{base_url}}"], "path": ["admin", "hotels", "summary"] }}},
+        { "name": "Get Hotel Detail", "request": { "method": "GET", "url": { "raw": "{{base_url}}/admin/hotels/{{hotel_id}}", "host": ["{{base_url}}"], "path": ["admin", "hotels", "{{hotel_id}}"] }}},
+        { "name": "Update Hotel Status (Suspend)", "request": { "method": "PATCH", "header": [{"key": "Content-Type", "value": "application/json"}], "body": { "mode": "raw", "raw": "{\n  \"status\": \"suspended\"\n}" }, "url": { "raw": "{{base_url}}/admin/hotels/{{hotel_id}}/status", "host": ["{{base_url}}"], "path": ["admin", "hotels", "{{hotel_id}}", "status"] }}},
+        { "name": "Update Hotel Status (Activate)", "request": { "method": "PATCH", "header": [{"key": "Content-Type", "value": "application/json"}], "body": { "mode": "raw", "raw": "{\n  \"status\": \"active\"\n}" }, "url": { "raw": "{{base_url}}/admin/hotels/{{hotel_id}}/status", "host": ["{{base_url}}"], "path": ["admin", "hotels", "{{hotel_id}}", "status"] }}}
+      ]
+    },
+    {
+      "name": "💸 Invoices Management",
+      "item": [
+        { "name": "Get All Invoices", "event": [{ "listen": "test", "script": { "exec": ["var jsonData = pm.response.json();", "if (jsonData.data && jsonData.data.length > 0) { pm.collectionVariables.set('invoice_id', jsonData.data[0].id); }"], "type": "text/javascript" }}], "request": { "method": "GET", "url": { "raw": "{{base_url}}/admin/invoices?page=1&limit=10", "host": ["{{base_url}}"], "path": ["admin", "invoices"], "query": [{"key": "page", "value": "1"}, {"key": "limit", "value": "10"}] }}},
+        { "name": "Get Invoices Summary", "request": { "method": "GET", "url": { "raw": "{{base_url}}/admin/invoices/summary", "host": ["{{base_url}}"], "path": ["admin", "invoices", "summary"] }}},
+        { "name": "Get Invoice Detail", "request": { "method": "GET", "url": { "raw": "{{base_url}}/admin/invoices/{{invoice_id}}", "host": ["{{base_url}}"], "path": ["admin", "invoices", "{{invoice_id}}"] }}},
+        { "name": "Approve Invoice", "request": { "method": "PATCH", "header": [{"key": "Content-Type", "value": "application/json"}], "body": { "mode": "raw", "raw": "{\n  \"status\": \"approved\"\n}" }, "url": { "raw": "{{base_url}}/admin/invoices/{{invoice_id}}/status", "host": ["{{base_url}}"], "path": ["admin", "invoices", "{{invoice_id}}", "status"] }}}
+      ]
+    },
+    {
+      "name": "📦 Subscriptions Management",
+      "item": [
+        { "name": "Get All Subscriptions", "event": [{ "listen": "test", "script": { "exec": ["var jsonData = pm.response.json();", "if (jsonData.data && jsonData.data.length > 0) { pm.collectionVariables.set('subscription_id', jsonData.data[0].id); }"], "type": "text/javascript" }}], "request": { "method": "GET", "url": { "raw": "{{base_url}}/admin/subscriptions?page=1&limit=10", "host": ["{{base_url}}"], "path": ["admin", "subscriptions"], "query": [{"key": "page", "value": "1"}, {"key": "limit", "value": "10"}] }}},
+        { "name": "Get Subscriptions Summary", "request": { "method": "GET", "url": { "raw": "{{base_url}}/admin/subscriptions/summary", "host": ["{{base_url}}"], "path": ["admin", "subscriptions", "summary"] }}},
+        { "name": "Get Subscription Detail", "request": { "method": "GET", "url": { "raw": "{{base_url}}/admin/subscriptions/{{subscription_id}}", "host": ["{{base_url}}"], "path": ["admin", "subscriptions", "{{subscription_id}}"] }}}
+      ]
+    },
+    {
+      "name": "⚡ Add-on Management (Phase 1)",
+      "item": [
+        { "name": "Get Subscription Add-ons", "event": [{ "listen": "test", "script": { "exec": ["var jsonData = pm.response.json();", "if (jsonData.addons && jsonData.addons.length > 0) { pm.collectionVariables.set('subscription_feature_id', jsonData.addons[0].id); }"], "type": "text/javascript" }}], "request": { "method": "GET", "url": { "raw": "{{base_url}}/admin/subscription-features/{{subscription_id}}", "host": ["{{base_url}}"], "path": ["admin", "subscription-features", "{{subscription_id}}"] }}},
+        { "name": "Get Add-on Change Logs", "request": { "method": "GET", "url": { "raw": "{{base_url}}/admin/subscription-features/{{subscription_id}}/logs", "host": ["{{base_url}}"], "path": ["admin", "subscription-features", "{{subscription_id}}", "logs"] }}},
+        { "name": "Add New Add-on", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"subscriptionId\": \"{{subscription_id}}\",\n  \"featureId\": \"{{feature_id}}\",\n  \"quantity\": 1,\n  \"price\": 990\n}" }, "url": { "raw": "{{base_url}}/admin/subscription-features", "host": ["{{base_url}}"], "path": ["admin", "subscription-features"] }}},
+        { "name": "Update Add-on", "request": { "method": "PATCH", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"quantity\": 5,\n  \"price\": 1490,\n  \"reason\": \"Customer upgrade\"\n}" }, "url": { "raw": "{{base_url}}/admin/subscription-features/{{subscription_feature_id}}", "host": ["{{base_url}}"], "path": ["admin", "subscription-features", "{{subscription_feature_id}}"] }}},
+        { "name": "Remove Add-on", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"reason\": \"Customer cancellation\",\n  \"createCredit\": true\n}" }, "url": { "raw": "{{base_url}}/admin/subscription-features/{{subscription_feature_id}}/remove", "host": ["{{base_url}}"], "path": ["admin", "subscription-features", "{{subscription_feature_id}}", "remove"] }}}
+      ]
+    },
+    {
+      "name": "📝 Invoice Adjustment (Phase 2)",
+      "item": [
+        { "name": "Get Invoice with Items", "event": [{ "listen": "test", "script": { "exec": ["var jsonData = pm.response.json();", "if (jsonData.items && jsonData.items.length > 0) { pm.collectionVariables.set('invoice_item_id', jsonData.items[0].id); }"], "type": "text/javascript" }}], "request": { "method": "GET", "url": { "raw": "{{base_url}}/admin/invoices/{{invoice_id}}/items", "host": ["{{base_url}}"], "path": ["admin", "invoices", "{{invoice_id}}", "items"] }}},
+        { "name": "Get Invoice Adjustments", "request": { "method": "GET", "url": { "raw": "{{base_url}}/admin/invoices/{{invoice_id}}/adjustments", "host": ["{{base_url}}"], "path": ["admin", "invoices", "{{invoice_id}}", "adjustments"] }}},
+        { "name": "Adjust Invoice (Discount)", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"type\": \"discount\",\n  \"amount\": 500,\n  \"reason\": \"Loyalty discount\",\n  \"generateCreditMemo\": true\n}" }, "url": { "raw": "{{base_url}}/admin/invoices/{{invoice_id}}/adjust", "host": ["{{base_url}}"], "path": ["admin", "invoices", "{{invoice_id}}", "adjust"] }}},
+        { "name": "Void Invoice", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"reason\": \"Customer cancelled\",\n  \"createCredit\": true\n}" }, "url": { "raw": "{{base_url}}/admin/invoices/{{invoice_id}}/void", "host": ["{{base_url}}"], "path": ["admin", "invoices", "{{invoice_id}}", "void"] }}},
+        { "name": "Update Invoice Item", "request": { "method": "PATCH", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"quantity\": 2,\n  \"unitPrice\": 4990\n}" }, "url": { "raw": "{{base_url}}/admin/invoice-items/{{invoice_item_id}}", "host": ["{{base_url}}"], "path": ["admin", "invoice-items", "{{invoice_item_id}}"] }}}
+      ]
+    },
+    {
+      "name": "🔄 Billing Cycle (Phase 3)",
+      "item": [
+        { "name": "Get Billing Info", "request": { "method": "GET", "url": { "raw": "{{base_url}}/admin/subscriptions/{{subscription_id}}/billing-info", "host": ["{{base_url}}"], "path": ["admin", "subscriptions", "{{subscription_id}}", "billing-info"] }}},
+        { "name": "Get Billing History", "request": { "method": "GET", "url": { "raw": "{{base_url}}/admin/subscriptions/{{subscription_id}}/billing-history", "host": ["{{base_url}}"], "path": ["admin", "subscriptions", "{{subscription_id}}", "billing-history"] }}},
+        { "name": "Update Billing Cycle (to Yearly)", "request": { "method": "PATCH", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"billingCycle\": \"yearly\",\n  \"applyProration\": true,\n  \"reason\": \"Customer requested yearly\"\n}" }, "url": { "raw": "{{base_url}}/admin/subscriptions/{{subscription_id}}/billing-cycle", "host": ["{{base_url}}"], "path": ["admin", "subscriptions", "{{subscription_id}}", "billing-cycle"] }}},
+        { "name": "Renew Subscription", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"createInvoice\": true,\n  \"notes\": \"Manual renewal\"\n}" }, "url": { "raw": "{{base_url}}/admin/subscriptions/{{subscription_id}}/renew", "host": ["{{base_url}}"], "path": ["admin", "subscriptions", "{{subscription_id}}", "renew"] }}},
+        { "name": "Cancel Renewal", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"reason\": \"Customer requested\",\n  \"cancelImmediately\": false\n}" }, "url": { "raw": "{{base_url}}/admin/subscriptions/{{subscription_id}}/cancel-renewal", "host": ["{{base_url}}"], "path": ["admin", "subscriptions", "{{subscription_id}}", "cancel-renewal"] }}}
+      ]
+    },
+    {
+      "name": "💰 Refund & Credit (Phase 4)",
+      "item": [
+        {
+          "name": "Get Refund Summary",
+          "request": { "method": "GET", "url": { "raw": "{{base_url}}/admin/refunds/summary", "host": ["{{base_url}}"], "path": ["admin", "refunds", "summary"] }, "description": "Get summary statistics of refunds" }
+        },
+        {
+          "name": "Get All Refunds",
+          "event": [{ "listen": "test", "script": { "exec": ["var jsonData = pm.response.json();", "if (jsonData && jsonData.length > 0) { pm.collectionVariables.set('refund_id', jsonData[0].id); }"], "type": "text/javascript" }}],
+          "request": { "method": "GET", "url": { "raw": "{{base_url}}/admin/refunds", "host": ["{{base_url}}"], "path": ["admin", "refunds"] }, "description": "Get list of all refunds" }
+        },
+        {
+          "name": "Get Refunds (Pending Only)",
+          "request": { "method": "GET", "url": { "raw": "{{base_url}}/admin/refunds?status=pending", "host": ["{{base_url}}"], "path": ["admin", "refunds"], "query": [{"key": "status", "value": "pending"}] }}
+        },
+        {
+          "name": "Create Refund (as Credit)",
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"amount\": 1000,\n  \"reason\": \"Customer requested refund\",\n  \"method\": \"credit\",\n  \"notes\": \"Processed as account credit\"\n}" }, "url": { "raw": "{{base_url}}/admin/payments/{{payment_id}}/refund", "host": ["{{base_url}}"], "path": ["admin", "payments", "{{payment_id}}", "refund"] }, "description": "Create refund as account credit (instant)" }
+        },
+        {
+          "name": "Create Refund (Bank Transfer)",
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"amount\": 2000,\n  \"reason\": \"Service cancellation refund\",\n  \"method\": \"bank_transfer\",\n  \"bankAccount\": \"123-456-789\",\n  \"bankName\": \"Bangkok Bank\",\n  \"accountHolder\": \"John Doe\"\n}" }, "url": { "raw": "{{base_url}}/admin/payments/{{payment_id}}/refund", "host": ["{{base_url}}"], "path": ["admin", "payments", "{{payment_id}}", "refund"] }, "description": "Create refund via bank transfer (requires approval)" }
+        },
+        {
+          "name": "Approve Refund",
+          "request": { "method": "PATCH", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"action\": \"approved\",\n  \"notes\": \"Verified and approved\"\n}" }, "url": { "raw": "{{base_url}}/admin/refunds/{{refund_id}}/process", "host": ["{{base_url}}"], "path": ["admin", "refunds", "{{refund_id}}", "process"] }}
+        },
+        {
+          "name": "Reject Refund",
+          "request": { "method": "PATCH", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"action\": \"rejected\",\n  \"rejectedReason\": \"Invalid refund request - service was used\"\n}" }, "url": { "raw": "{{base_url}}/admin/refunds/{{refund_id}}/process", "host": ["{{base_url}}"], "path": ["admin", "refunds", "{{refund_id}}", "process"] }}
+        },
+        {
+          "name": "Get Tenant Credits",
+          "event": [{ "listen": "test", "script": { "exec": ["var jsonData = pm.response.json();", "if (jsonData.credits && jsonData.credits.length > 0) { pm.collectionVariables.set('credit_id', jsonData.credits[0].id); }"], "type": "text/javascript" }}],
+          "request": { "method": "GET", "url": { "raw": "{{base_url}}/admin/tenants/{{tenant_id}}/credits", "host": ["{{base_url}}"], "path": ["admin", "tenants", "{{tenant_id}}", "credits"] }, "description": "Get all credits and balance for a tenant" }
+        },
+        {
+          "name": "Add Manual Credit",
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"amount\": 500,\n  \"type\": \"manual\",\n  \"description\": \"Courtesy credit for service issue\"\n}" }, "url": { "raw": "{{base_url}}/admin/tenants/{{tenant_id}}/credits", "host": ["{{base_url}}"], "path": ["admin", "tenants", "{{tenant_id}}", "credits"] }, "description": "Add manual credit to tenant account" }
+        },
+        {
+          "name": "Add Promotional Credit",
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"amount\": 1000,\n  \"type\": \"promotion\",\n  \"description\": \"New Year 2024 promotion\",\n  \"expiresAt\": \"2024-12-31\"\n}" }, "url": { "raw": "{{base_url}}/admin/tenants/{{tenant_id}}/credits", "host": ["{{base_url}}"], "path": ["admin", "tenants", "{{tenant_id}}", "credits"] }, "description": "Add promotional credit with expiration" }
+        },
+        {
+          "name": "Apply Credit to Invoice",
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"useOldestFirst\": true\n}" }, "url": { "raw": "{{base_url}}/admin/invoices/{{invoice_id}}/apply-credit", "host": ["{{base_url}}"], "path": ["admin", "invoices", "{{invoice_id}}", "apply-credit"] }, "description": "Apply available credit to pay invoice" }
+        },
+        {
+          "name": "Apply Specific Credit to Invoice",
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"creditId\": \"{{credit_id}}\",\n  \"amount\": 500\n}" }, "url": { "raw": "{{base_url}}/admin/invoices/{{invoice_id}}/apply-credit", "host": ["{{base_url}}"], "path": ["admin", "invoices", "{{invoice_id}}", "apply-credit"] }, "description": "Apply specific credit with specific amount" }
+        }
+      ]
+    },
+    {
+      "name": "📋 Helpers",
+      "item": [
+        { "name": "Get All Features", "event": [{ "listen": "test", "script": { "exec": ["var jsonData = pm.response.json();", "if (jsonData && jsonData.length > 0) { pm.collectionVariables.set('feature_id', jsonData[0].id); }"], "type": "text/javascript" }}], "request": { "method": "GET", "url": { "raw": "{{base_url}}/features", "host": ["{{base_url}}"], "path": ["features"] }}}
+      ]
+    }
+  ]
+}
