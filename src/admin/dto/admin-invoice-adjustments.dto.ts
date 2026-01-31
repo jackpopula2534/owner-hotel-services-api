@@ -221,7 +221,10 @@ export class InvoiceItemDetailDto {
 }
 
 export class InvoiceWithItemsDto {
-  @ApiProperty({ example: 'INV-2024-045' })
+  @ApiProperty({ example: 'uuid', description: 'Invoice UUID for updates' })
+  id: string;
+
+  @ApiProperty({ example: 'INV-2024-045', description: 'Invoice number for display' })
   invoiceNo: string;
 
   @ApiProperty({ example: 'โรงแรมสุขใจ' })

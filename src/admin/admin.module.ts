@@ -28,6 +28,10 @@ import { AdminBillingCycleController } from './admin-billing-cycle.controller';
 import { AdminBillingCycleService } from './admin-billing-cycle.service';
 import { AdminRefundCreditController } from './admin-refund-credit.controller';
 import { AdminRefundCreditService } from './admin-refund-credit.service';
+import { AdminFeaturesController } from './admin-features.controller';
+import { AdminFeaturesService } from './admin-features.service';
+import { AdminPlansController } from './admin-plans.controller';
+import { AdminPlansService } from './admin-plans.service';
 
 @Module({
   imports: [
@@ -56,6 +60,8 @@ import { AdminRefundCreditService } from './admin-refund-credit.service';
     AdminInvoiceAdjustmentsController,
     AdminBillingCycleController,
     AdminRefundCreditController,
+    AdminFeaturesController,
+    AdminPlansController,
   ],
   providers: [
     AdminHotelsService,
@@ -65,6 +71,8 @@ import { AdminRefundCreditService } from './admin-refund-credit.service';
     AdminInvoiceAdjustmentsService,
     AdminBillingCycleService,
     AdminRefundCreditService,
+    AdminFeaturesService,
+    AdminPlansService,
   ],
   exports: [
     AdminHotelsService,
@@ -74,6 +82,8 @@ import { AdminRefundCreditService } from './admin-refund-credit.service';
     AdminInvoiceAdjustmentsService,
     AdminBillingCycleService,
     AdminRefundCreditService,
+    AdminFeaturesService,
+    AdminPlansService,
   ],
 })
 export class AdminModule {}

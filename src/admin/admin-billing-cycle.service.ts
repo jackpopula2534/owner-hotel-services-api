@@ -68,16 +68,16 @@ export class AdminBillingCycleService {
       planPrice,
       billingCycle: subscription.billingCycle || 'monthly',
       status: subscription.status,
-      currentPeriodStart: subscription.startDate?.toISOString().split('T')[0] || 'N/A',
-      currentPeriodEnd: subscription.endDate?.toISOString().split('T')[0] || 'N/A',
-      nextBillingDate: subscription.nextBillingDate?.toISOString().split('T')[0] || subscription.endDate?.toISOString().split('T')[0] || 'N/A',
-      billingAnchorDate: subscription.billingAnchorDate?.toISOString().split('T')[0] || subscription.startDate?.toISOString().split('T')[0] || 'N/A',
+      currentPeriodStart: this.formatDate(subscription.startDate),
+      currentPeriodEnd: this.formatDate(subscription.endDate),
+      nextBillingDate: this.formatDate(subscription.nextBillingDate) || this.formatDate(subscription.endDate) || 'N/A',
+      billingAnchorDate: this.formatDate(subscription.billingAnchorDate) || this.formatDate(subscription.startDate) || 'N/A',
       autoRenew: subscription.autoRenew,
       renewedCount: subscription.renewedCount || 0,
-      lastRenewedAt: subscription.lastRenewedAt?.toISOString() || undefined,
+      lastRenewedAt: this.formatDateTime(subscription.lastRenewedAt),
       addonAmount,
       totalMonthlyAmount,
-      cancelledAt: subscription.cancelledAt?.toISOString() || undefined,
+      cancelledAt: this.formatDateTime(subscription.cancelledAt),
       cancellationReason: subscription.cancellationReason || undefined,
     };
   }
@@ -315,7 +315,7 @@ export class AdminBillingCycleService {
       data: {
         subscriptionId: subscription.id,
         subscriptionCode: subscription.subscriptionCode || subscription.id,
-        cancelledAt: subscription.cancelledAt.toISOString(),
+        cancelledAt: this.formatDateTime(subscription.cancelledAt) || new Date().toISOString(),
         effectiveEndDate: effectiveEndDate.toISOString().split('T')[0],
         autoRenew: subscription.autoRenew,
         creditAmount: createCredit ? creditAmount : undefined,
@@ -358,10 +358,10 @@ export class AdminBillingCycleService {
       newBillingCycle: h.newBillingCycle || undefined,
       oldAmount: h.oldAmount ? Number(h.oldAmount) : undefined,
       newAmount: h.newAmount ? Number(h.newAmount) : undefined,
-      periodStart: h.periodStart?.toISOString().split('T')[0] || undefined,
-      periodEnd: h.periodEnd?.toISOString().split('T')[0] || undefined,
+      periodStart: this.formatDate(h.periodStart) !== 'N/A' ? this.formatDate(h.periodStart) : undefined,
+      periodEnd: this.formatDate(h.periodEnd) !== 'N/A' ? this.formatDate(h.periodEnd) : undefined,
       invoiceNo: h.invoice?.invoiceNo || undefined,
-      createdAt: h.createdAt.toISOString(),
+      createdAt: this.formatDateTime(h.createdAt) || new Date().toISOString(),
       createdBy: h.createdBy || undefined,
     }));
 
@@ -370,7 +370,7 @@ export class AdminBillingCycleService {
       hotelName: subscription.tenant?.name || 'N/A',
       currentPlan: subscription.plan?.name || 'No Plan',
       billingCycle: subscription.billingCycle || 'monthly',
-      nextBillingDate: subscription.nextBillingDate?.toISOString().split('T')[0] || subscription.endDate?.toISOString().split('T')[0] || 'N/A',
+      nextBillingDate: this.formatDate(subscription.nextBillingDate) || this.formatDate(subscription.endDate) || 'N/A',
       history: historyItems,
       total: historyItems.length,
     };
@@ -501,5 +501,37 @@ export class AdminBillingCycleService {
   private async createBillingHistory(data: Partial<BillingHistory>): Promise<void> {
     const history = this.billingHistoryRepository.create(data);
     await this.billingHistoryRepository.save(history);
+  }
+
+  /**
+   * Helper: Format date to YYYY-MM-DD
+   */
+  private formatDate(date: Date | string | null | undefined): string {
+    if (!date) return 'N/A';
+
+    try {
+      if (typeof date === 'string') {
+        return date.split('T')[0];
+      }
+      return date.toISOString().split('T')[0];
+    } catch {
+      return 'N/A';
+    }
+  }
+
+  /**
+   * Helper: Format datetime to ISO string
+   */
+  private formatDateTime(date: Date | string | null | undefined): string | undefined {
+    if (!date) return undefined;
+
+    try {
+      if (typeof date === 'string') {
+        return date;
+      }
+      return date.toISOString();
+    } catch {
+      return undefined;
+    }
   }
 }

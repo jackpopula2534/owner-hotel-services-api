@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { SubscriptionFeature } from '../subscription-features/entities/subscription-feature.entity';
 import { SubscriptionFeatureLogs, FeatureLogAction } from '../subscription-features/entities/subscription-feature-log.entity';
 import { Subscription } from '../subscriptions/entities/subscription.entity';
@@ -34,6 +34,7 @@ export class AdminSubscriptionFeaturesService {
     private featuresRepository: Repository<Feature>,
     @InjectRepository(Invoice)
     private invoicesRepository: Repository<Invoice>,
+    private dataSource: DataSource,
   ) {}
 
   /**
@@ -68,7 +69,8 @@ export class AdminSubscriptionFeaturesService {
     const planPrice = Number(subscription.plan?.priceMonthly || 0);
 
     return {
-      subscriptionId: subscription.subscriptionCode || subscriptionId,
+      subscriptionUuid: subscription.id,
+      subscriptionCode: subscription.subscriptionCode || `SUB-${subscription.id.slice(0, 3).toUpperCase()}`,
       hotelName: subscription.tenant?.name || 'N/A',
       planName: subscription.plan?.name || 'No Plan',
       planPrice,
@@ -230,7 +232,7 @@ export class AdminSubscriptionFeaturesService {
 
   /**
    * POST /api/v1/admin/subscription-features
-   * Add a new add-on to a subscription
+   * Add a new add-on to a subscription (with transaction rollback on error)
    */
   async addFeature(
     dto: AddSubscriptionFeatureDto,
@@ -267,71 +269,92 @@ export class AdminSubscriptionFeaturesService {
     const price = dto.price !== undefined ? dto.price : Number(feature.priceMonthly);
     const quantity = dto.quantity || 1;
 
-    // Create the subscription feature
-    const subscriptionFeature = this.subscriptionFeaturesRepository.create({
-      subscriptionId: subscription.id,
-      featureId: dto.featureId,
-      quantity,
-      price,
-      isActive: true,
-    });
-
-    await this.subscriptionFeaturesRepository.save(subscriptionFeature);
-
     // Calculate prorated amount for partial month
     let proratedAmount = 0;
     if (dto.effectiveDate) {
       proratedAmount = this.calculateProration(subscription, price, dto.effectiveDate);
     }
 
-    // Create invoice if requested
-    let invoiceNo: string | undefined;
-    const createInvoice = dto.createInvoice !== false; // Default to true
+    // Use transaction to ensure rollback on error
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-    if (createInvoice && proratedAmount > 0) {
-      const invoice = await this.createAddonInvoice(
-        subscription,
-        feature,
-        proratedAmount,
-        'Add-on proration',
-      );
-      invoiceNo = invoice.invoiceNo;
-    }
-
-    // Log the addition
-    await this.createLog({
-      subscriptionFeatureId: subscriptionFeature.id,
-      subscriptionId: subscription.id,
-      featureId: dto.featureId,
-      featureName: feature.name,
-      action: FeatureLogAction.ADDED,
-      oldPrice: null,
-      newPrice: price,
-      oldQuantity: null,
-      newQuantity: quantity,
-      proratedAmount,
-      reason: `Added via Admin Panel`,
-      effectiveDate: dto.effectiveDate ? new Date(dto.effectiveDate) : new Date(),
-      createdBy: adminId,
-    });
-
-    this.logger.log(
-      `Added feature ${feature.name} to subscription ${subscription.subscriptionCode || subscription.id}`,
-    );
-
-    return {
-      success: true,
-      message: 'Add-on added successfully',
-      data: {
-        id: subscriptionFeature.id,
-        featureName: feature.name,
-        price,
+    try {
+      // Create the subscription feature
+      const subscriptionFeature = queryRunner.manager.create(SubscriptionFeature, {
+        subscriptionId: subscription.id,
+        featureId: dto.featureId,
         quantity,
-        invoiceCreated: !!invoiceNo,
-        invoiceNo,
+        price,
+        isActive: true,
+      });
+
+      await queryRunner.manager.save(subscriptionFeature);
+
+      // Create invoice if requested
+      let invoiceNo: string | undefined;
+      const createInvoice = dto.createInvoice !== false; // Default to true
+
+      if (createInvoice && proratedAmount > 0) {
+        const invoice = await this.createAddonInvoiceWithTransaction(
+          queryRunner,
+          subscription,
+          feature,
+          proratedAmount,
+          'Add-on proration',
+        );
+        invoiceNo = invoice.invoiceNo;
+      }
+
+      // Log the addition
+      const log = queryRunner.manager.create(SubscriptionFeatureLogs, {
+        subscriptionFeatureId: subscriptionFeature.id,
+        subscriptionId: subscription.id,
+        featureId: dto.featureId,
+        featureName: feature.name,
+        action: FeatureLogAction.ADDED,
+        oldPrice: null,
+        newPrice: price,
+        oldQuantity: null,
+        newQuantity: quantity,
         proratedAmount,
-      },
-    };
+        reason: `Added via Admin Panel`,
+        effectiveDate: dto.effectiveDate ? new Date(dto.effectiveDate) : new Date(),
+        createdBy: adminId,
+      });
+
+      await queryRunner.manager.save(log);
+
+      // Commit transaction
+      await queryRunner.commitTransaction();
+
+      this.logger.log(
+        `Added feature ${feature.name} to subscription ${subscription.subscriptionCode || subscription.id}`,
+      );
+
+      return {
+        success: true,
+        message: 'Add-on added successfully',
+        data: {
+          id: subscriptionFeature.id,
+          featureName: feature.name,
+          price,
+          quantity,
+          invoiceCreated: !!invoiceNo,
+          invoiceNo,
+          proratedAmount,
+        },
+      };
+    } catch (error) {
+      // Rollback transaction on error
+      await queryRunner.rollbackTransaction();
+      this.logger.error(`Failed to add feature: ${error.message}`, error.stack);
+      throw error;
+    } finally {
+      // Release query runner
+      await queryRunner.release();
+    }
   }
 
   /**
@@ -462,9 +485,39 @@ export class AdminSubscriptionFeaturesService {
     });
 
     await this.invoicesRepository.save(invoice);
-    
+
     this.logger.log(`Created invoice ${invoiceNo} for add-on: ${feature.name}, amount: ${amount}`);
-    
+
+    return invoice;
+  }
+
+  /**
+   * Helper: Create invoice for add-on with transaction
+   */
+  private async createAddonInvoiceWithTransaction(
+    queryRunner: any,
+    subscription: Subscription,
+    feature: Feature,
+    amount: number,
+    description: string,
+  ): Promise<Invoice> {
+    const invoiceNo = `INV-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
+    const dueDate = new Date();
+    dueDate.setDate(dueDate.getDate() + 15);
+
+    const invoice = queryRunner.manager.create(Invoice, {
+      tenantId: subscription.tenantId,
+      subscriptionId: subscription.id,
+      invoiceNo,
+      amount,
+      status: InvoiceStatus.PENDING,
+      dueDate,
+    });
+
+    await queryRunner.manager.save(invoice);
+
+    this.logger.log(`Created invoice ${invoiceNo} for add-on: ${feature.name}, amount: ${amount}`);
+
     return invoice;
   }
 }

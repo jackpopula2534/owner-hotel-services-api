@@ -1,0 +1,1430 @@
+{
+	"info": {
+		"_postman_id": "admin-panel-api-collection",
+		"name": "StaySync Admin Panel API",
+		"description": "Complete API collection for StaySync Admin Panel - Platform Admin Management",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "admin-panel"
+	},
+	"item": [
+		{
+			"name": "1. Authentication",
+			"item": [
+				{
+					"name": "Login as Platform Admin",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    pm.environment.set('accessToken', response.accessToken);",
+									"    pm.environment.set('userId', response.user.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"platform.admin@staysync.io\",\n  \"password\": \"admin123\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/login",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"auth",
+								"login"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "2. Hotels Management",
+			"item": [
+				{
+					"name": "Get All Hotels",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/hotels?page=1&limit=10&status=active&search=",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"hotels"
+							],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "limit",
+									"value": "10"
+								},
+								{
+									"key": "status",
+									"value": "active",
+									"description": "active, trial, expired, suspended"
+								},
+								{
+									"key": "search",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Hotels Summary",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/hotels/summary",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"hotels",
+								"summary"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Hotel Detail",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/hotels/:hotelId",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"hotels",
+								":hotelId"
+							],
+							"variable": [
+								{
+									"key": "hotelId",
+									"value": "uuid-here"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Hotel Status",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"status\": \"suspended\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/admin/hotels/:hotelId/status",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"hotels",
+								":hotelId",
+								"status"
+							],
+							"variable": [
+								{
+									"key": "hotelId",
+									"value": "uuid-here"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "3. Invoices Management",
+			"item": [
+				{
+					"name": "Get All Invoices",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/invoices?page=1&limit=10&status=pending&search=",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"invoices"
+							],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "limit",
+									"value": "10"
+								},
+								{
+									"key": "status",
+									"value": "pending",
+									"description": "pending, paid, rejected, voided"
+								},
+								{
+									"key": "search",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Invoices Summary",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/invoices/summary",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"invoices",
+								"summary"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Approve/Reject Invoice",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"status\": \"approved\",\n  \"reason\": \"\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/admin/invoices/:invoiceId/status",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"invoices",
+								":invoiceId",
+								"status"
+							],
+							"variable": [
+								{
+									"key": "invoiceId",
+									"value": "uuid-here"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "4. Subscriptions Management",
+			"item": [
+				{
+					"name": "Get All Subscriptions",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/subscriptions?page=1&limit=10&status=active&search=",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"subscriptions"
+							],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "limit",
+									"value": "10"
+								},
+								{
+									"key": "status",
+									"value": "active",
+									"description": "all, active, trial, pending, expired"
+								},
+								{
+									"key": "search",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Subscriptions Summary",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/subscriptions/summary",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"subscriptions",
+								"summary"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Subscription Detail",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/subscriptions/:subscriptionId",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"subscriptions",
+								":subscriptionId"
+							],
+							"variable": [
+								{
+									"key": "subscriptionId",
+									"value": "uuid-or-SUB-001"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Subscription Status",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"status\": \"active\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/admin/subscriptions/:subscriptionId/status",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"subscriptions",
+								":subscriptionId",
+								"status"
+							],
+							"variable": [
+								{
+									"key": "subscriptionId",
+									"value": "uuid-here"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "5. Subscription Features (Add-ons)",
+			"item": [
+				{
+					"name": "Get Subscription Add-ons",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/subscription-features/:subscriptionId",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"subscription-features",
+								":subscriptionId"
+							],
+							"variable": [
+								{
+									"key": "subscriptionId",
+									"value": "uuid-or-SUB-001",
+									"description": "Accepts both UUID and SUB-xxx format"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Add New Add-on",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"subscriptionId\": \"SUB-001\",\n  \"featureId\": \"feature-uuid\",\n  \"quantity\": 1,\n  \"price\": 990,\n  \"effectiveDate\": \"2024-02-01\",\n  \"createInvoice\": true\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/admin/subscription-features",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"subscription-features"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Add-on",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"quantity\": 5,\n  \"price\": 1490,\n  \"reason\": \"Customer requested upgrade\",\n  \"effectiveDate\": \"2024-02-01\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/admin/subscription-features/:addonId",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"subscription-features",
+								":addonId"
+							],
+							"variable": [
+								{
+									"key": "addonId",
+									"value": "addon-uuid"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Remove Add-on",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"reason\": \"Customer requested cancellation\",\n  \"effectiveDate\": \"2024-02-01\",\n  \"createCredit\": true\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/admin/subscription-features/:addonId/remove",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"subscription-features",
+								":addonId",
+								"remove"
+							],
+							"variable": [
+								{
+									"key": "addonId",
+									"value": "addon-uuid"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Add-on Change Logs",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/subscription-features/:subscriptionId/logs",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"subscription-features",
+								":subscriptionId",
+								"logs"
+							],
+							"variable": [
+								{
+									"key": "subscriptionId",
+									"value": "uuid-or-SUB-001"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "6. Invoice Adjustments",
+			"item": [
+				{
+					"name": "Get Invoice with Line Items",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/invoices/:invoiceId/items",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"invoices",
+								":invoiceId",
+								"items"
+							],
+							"variable": [
+								{
+									"key": "invoiceId",
+									"value": "uuid-here"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Adjust Invoice (Discount/Credit/Surcharge)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"type\": \"discount\",\n  \"amount\": 500,\n  \"reason\": \"Customer loyalty discount\",\n  \"notes\": \"10% discount for 1 year customer\",\n  \"generateCreditMemo\": true\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/admin/invoices/:invoiceId/adjust",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"invoices",
+								":invoiceId",
+								"adjust"
+							],
+							"variable": [
+								{
+									"key": "invoiceId",
+									"value": "uuid-here"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Void Invoice",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"reason\": \"Customer cancelled subscription\",\n  \"createCredit\": true,\n  \"notes\": \"Full refund processed\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/admin/invoices/:invoiceId/void",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"invoices",
+								":invoiceId",
+								"void"
+							],
+							"variable": [
+								{
+									"key": "invoiceId",
+									"value": "uuid-here"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Invoice Line Item",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"quantity\": 2,\n  \"unitPrice\": 4990,\n  \"description\": \"Professional Plan - Monthly (Updated)\",\n  \"reason\": \"Customer upgraded quantity\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/admin/invoice-items/:itemId",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"invoice-items",
+								":itemId"
+							],
+							"variable": [
+								{
+									"key": "itemId",
+									"value": "item-uuid"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Invoice Adjustment History",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/invoices/:invoiceId/adjustments",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"invoices",
+								":invoiceId",
+								"adjustments"
+							],
+							"variable": [
+								{
+									"key": "invoiceId",
+									"value": "uuid-here"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "7. Billing Cycle Management",
+			"item": [
+				{
+					"name": "Get Billing Info",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/subscriptions/:subscriptionId/billing-info",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"subscriptions",
+								":subscriptionId",
+								"billing-info"
+							],
+							"variable": [
+								{
+									"key": "subscriptionId",
+									"value": "uuid-or-SUB-001"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Billing History",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/subscriptions/:subscriptionId/billing-history",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"subscriptions",
+								":subscriptionId",
+								"billing-history"
+							],
+							"variable": [
+								{
+									"key": "subscriptionId",
+									"value": "uuid-or-SUB-001"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Billing Cycle",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"billingCycle\": \"yearly\",\n  \"effectiveDate\": \"2024-03-01\",\n  \"applyProration\": true,\n  \"reason\": \"Customer requested yearly billing for discount\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/admin/subscriptions/:subscriptionId/billing-cycle",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"subscriptions",
+								":subscriptionId",
+								"billing-cycle"
+							],
+							"variable": [
+								{
+									"key": "subscriptionId",
+									"value": "uuid-here"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Renew Subscription",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"periodMonths\": 6,\n  \"customPrice\": 25000,\n  \"createInvoice\": true,\n  \"notes\": \"Special 6-month renewal\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/admin/subscriptions/:subscriptionId/renew",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"subscriptions",
+								":subscriptionId",
+								"renew"
+							],
+							"variable": [
+								{
+									"key": "subscriptionId",
+									"value": "uuid-here"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Cancel Renewal",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"reason\": \"Customer requested cancellation\",\n  \"cancelImmediately\": false,\n  \"createCredit\": true\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/admin/subscriptions/:subscriptionId/cancel-renewal",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"subscriptions",
+								":subscriptionId",
+								"cancel-renewal"
+							],
+							"variable": [
+								{
+									"key": "subscriptionId",
+									"value": "uuid-here"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "8. Refund & Credit System",
+			"item": [
+				{
+					"name": "Get Refunds Summary",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/refunds/summary",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"refunds",
+								"summary"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get All Refunds",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/refunds?status=pending",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"refunds"
+							],
+							"query": [
+								{
+									"key": "status",
+									"value": "pending",
+									"description": "pending, approved, rejected, completed"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Create Refund",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"amount\": 1000,\n  \"reason\": \"Customer requested refund\",\n  \"method\": \"credit\",\n  \"notes\": \"Processed as account credit\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/admin/payments/:paymentId/refund",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"payments",
+								":paymentId",
+								"refund"
+							],
+							"variable": [
+								{
+									"key": "paymentId",
+									"value": "payment-uuid"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Approve/Reject Refund",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"action\": \"approved\",\n  \"notes\": \"Verified and approved\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/admin/refunds/:refundId/process",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"refunds",
+								":refundId",
+								"process"
+							],
+							"variable": [
+								{
+									"key": "refundId",
+									"value": "refund-uuid"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Tenant Credits",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/tenants/:tenantId/credits",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"tenants",
+								":tenantId",
+								"credits"
+							],
+							"variable": [
+								{
+									"key": "tenantId",
+									"value": "tenant-uuid"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Add Credit to Tenant",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"amount\": 500,\n  \"type\": \"manual\",\n  \"description\": \"Courtesy credit for service issue\",\n  \"expiresAt\": \"2024-12-31\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/admin/tenants/:tenantId/credits",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"tenants",
+								":tenantId",
+								"credits"
+							],
+							"variable": [
+								{
+									"key": "tenantId",
+									"value": "tenant-uuid"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Apply Credit to Invoice",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"useOldestFirst\": true\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/admin/invoices/:invoiceId/apply-credit",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"invoices",
+								":invoiceId",
+								"apply-credit"
+							],
+							"variable": [
+								{
+									"key": "invoiceId",
+									"value": "invoice-uuid"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "9. Plans Management",
+			"item": [
+				{
+					"name": "Get All Plans",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/plans",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"plans"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Plan by ID",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/plans/:planId",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"plans",
+								":planId"
+							],
+							"variable": [
+								{
+									"key": "planId",
+									"value": "plan-uuid"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Create New Plan",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"code\": \"S\",\n  \"name\": \"Small Plan\",\n  \"priceMonthly\": 1490,\n  \"maxRooms\": 20,\n  \"maxUsers\": 3,\n  \"isActive\": true\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/admin/plans",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"plans"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Plan",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Small Plan (Updated)\",\n  \"priceMonthly\": 1690,\n  \"maxRooms\": 25,\n  \"maxUsers\": 5\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/admin/plans/:planId",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"plans",
+								":planId"
+							],
+							"variable": [
+								{
+									"key": "planId",
+									"value": "plan-uuid"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Plan",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/plans/:planId",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"plans",
+								":planId"
+							],
+							"variable": [
+								{
+									"key": "planId",
+									"value": "plan-uuid"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:3000/api/v1",
+			"type": "string"
+		},
+		{
+			"key": "accessToken",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "userId",
+			"value": "",
+			"type": "string"
+		}
+	]
+}

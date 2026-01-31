@@ -69,7 +69,10 @@ export class UpdateInvoiceStatusDto {
 // ============ Response DTOs ============
 
 export class AdminInvoiceListItemDto {
-  @ApiProperty({ example: 'INV-2024-045' })
+  @ApiProperty({ example: 'uuid', description: 'Primary key UUID for updates' })
+  id: string;
+
+  @ApiProperty({ example: 'INV-2024-045', description: 'Display invoice number' })
   invoiceNumber: string;
 
   @ApiProperty({ example: 'โรงแรมสุขใจ' })
@@ -120,7 +123,10 @@ export class AdminInvoicesSummaryDto {
 }
 
 export class AdminInvoiceDetailDto {
-  @ApiProperty({ example: 'INV-2024-045' })
+  @ApiProperty({ example: 'uuid', description: 'Primary key UUID for updates' })
+  id: string;
+
+  @ApiProperty({ example: 'INV-2024-045', description: 'Display invoice number' })
   invoiceNumber: string;
 
   @ApiProperty({ example: 'โรงแรมสุขใจ' })

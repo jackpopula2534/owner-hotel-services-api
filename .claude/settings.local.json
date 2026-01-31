@@ -3,7 +3,9 @@
     "allow": [
       "Bash(npm run build:*)",
       "Bash(npm run db:refresh:*)",
-      "Bash(mysql:*)"
+      "Bash(mysql:*)",
+      "Bash(pkill:*)",
+      "Bash(npm run start:dev:*)"
     ]
   }
 }

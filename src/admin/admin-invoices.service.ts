@@ -92,6 +92,7 @@ export class AdminInvoicesService {
           addOnsCount > 0 ? `${planName} +${addOnsCount} add-ons` : planName;
 
         return {
+          id: invoice.id,
           invoiceNumber: invoice.invoiceNo,
           hotelName: invoice.tenant?.name || 'N/A',
           ownerEmail: owner?.email || 'N/A',
@@ -174,6 +175,7 @@ export class AdminInvoicesService {
       )[0];
 
     return {
+      id: invoice.id,
       invoiceNumber: invoice.invoiceNo,
       hotelName: invoice.tenant?.name || 'N/A',
       ownerEmail: owner?.email || 'N/A',

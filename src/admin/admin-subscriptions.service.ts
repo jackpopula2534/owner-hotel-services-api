@@ -112,7 +112,8 @@ export class AdminSubscriptionsService {
       const previousPlanName = sub.previousPlan?.name || undefined;
 
       return {
-        id: sub.subscriptionCode || `SUB-${sub.id.slice(0, 3).toUpperCase()}`,
+        id: sub.id,
+        subscriptionCode: sub.subscriptionCode || `SUB-${sub.id.slice(0, 3).toUpperCase()}`,
         hotelName: sub.tenant?.name || 'N/A',
         plan: sub.plan?.name || 'No Plan',
         previousPlan: previousPlanName,
@@ -277,7 +278,8 @@ export class AdminSubscriptionsService {
       )[0];
 
     return {
-      id: subscription.subscriptionCode || id,
+      id: subscription.id,
+      subscriptionCode: subscription.subscriptionCode || `SUB-${subscription.id.slice(0, 3).toUpperCase()}`,
       hotelName: subscription.tenant?.name || 'N/A',
       hotelEmail: owner?.email || 'N/A',
       plan: subscription.plan?.name || 'No Plan',

@@ -2,9 +2,35 @@
 
 > เอกสารสำหรับทีม Frontend ใช้ในการพัฒนาหน้า Admin Panel
 
-**Base URL:** `http://localhost:3000/api/v1`  
-**Authentication:** Bearer Token (JWT)  
+**Base URL:** `http://localhost:3000/api/v1`
+**Authentication:** Bearer Token (JWT)
 **Admin Login:** `platform.admin@staysync.io` / `admin123`
+
+---
+
+## 🔑 สำคัญ: การใช้ Primary Key
+
+**ทุก API ที่แสดงรายการข้อมูล (List endpoints) จะส่ง `id` (UUID) เป็น Primary Key เพื่อใช้ในการอัปเดทข้อมูล**
+
+- **Subscriptions API**:
+  - ใช้ `id` (UUID) สำหรับ PATCH/DELETE operations
+  - ใช้ `subscriptionCode` (SUB-001) สำหรับแสดงผล
+
+- **Invoices API**:
+  - ใช้ `id` (UUID) สำหรับ PATCH/DELETE operations
+  - ใช้ `invoiceNumber` (INV-2024-045) สำหรับแสดงผล
+
+- **Hotels API**:
+  - ใช้ `id` (UUID) สำหรับ PATCH operations
+
+- **Subscription Features API**:
+  - ใช้ `subscriptionUuid` (UUID) สำหรับระบุ subscription
+  - ใช้ `subscriptionCode` (SUB-001) สำหรับแสดงผล
+  - ใช้ addon `id` (UUID) สำหรับ PATCH/DELETE addon
+
+- **Invoice Adjustments API**:
+  - ใช้ invoice `id` (UUID) สำหรับ PATCH/VOID operations
+  - ใช้ item `id` (UUID) สำหรับ PATCH line items
 
 ---
 
@@ -182,6 +208,8 @@ GET /api/v1/admin/invoices?page=1&limit=10&status=pending
 }
 ```
 
+> **⚠️ IMPORTANT:** ใช้ `id` (UUID) สำหรับการอัปเดทข้อมูล และใช้ `invoiceNumber` สำหรับแสดงผล
+
 ### 3.2 สรุปใบแจ้งหนี้
 
 ```http
@@ -225,7 +253,8 @@ GET /api/v1/admin/subscriptions?page=1&limit=10&status=active
 {
   "data": [
     {
-      "id": "SUB-001",
+      "id": "uuid",
+      "subscriptionCode": "SUB-001",
       "hotelName": "โรงแรมสุขใจ",
       "plan": "Professional",
       "previousPlan": "Starter",
@@ -247,6 +276,8 @@ GET /api/v1/admin/subscriptions?page=1&limit=10&status=active
   "limit": 10
 }
 ```
+
+> **⚠️ IMPORTANT:** ใช้ `id` (UUID) สำหรับการอัปเดทข้อมูล และใช้ `subscriptionCode` สำหรับแสดงผล
 
 ### 4.2 สรุป Subscriptions
 
@@ -281,7 +312,8 @@ GET /api/v1/admin/subscription-features/{subscriptionId}
 **Response:**
 ```json
 {
-  "subscriptionId": "SUB-001",
+  "subscriptionUuid": "uuid",
+  "subscriptionCode": "SUB-001",
   "hotelName": "โรงแรมสุขใจ",
   "planName": "Professional",
   "planPrice": 4990,
@@ -384,6 +416,7 @@ GET /api/v1/admin/invoices/{id}/items
 **Response:**
 ```json
 {
+  "id": "uuid",
   "invoiceNo": "INV-2024-045",
   "hotelName": "โรงแรมสุขใจ",
   "status": "pending",
@@ -404,6 +437,8 @@ GET /api/v1/admin/invoices/{id}/items
   "dueDate": "2024-02-15"
 }
 ```
+
+> **⚠️ IMPORTANT:** ใช้ `id` (UUID) สำหรับการอัปเดท invoice และ item `id` สำหรับอัปเดท line items
 
 ### 6.2 ปรับยอด Invoice (Discount/Credit/Surcharge)
 

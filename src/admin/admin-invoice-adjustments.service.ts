@@ -389,6 +389,7 @@ export class AdminInvoiceAdjustmentsService {
     const totalAdjustments = currentAmount - originalAmount;
 
     return {
+      id: invoice.id,
       invoiceNo: invoice.invoiceNo,
       hotelName: invoice.tenant?.name || 'N/A',
       status: invoice.status,

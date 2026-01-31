@@ -21,6 +21,10 @@ export class PlansService {
     return this.plansRepository.find({
       where: { isActive: true },
       relations: ['planFeatures', 'planFeatures.feature'],
+      order: {
+        displayOrder: 'ASC',
+        priceMonthly: 'ASC',
+      },
     });
   }
 

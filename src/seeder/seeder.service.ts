@@ -57,35 +57,77 @@ export class SeederService {
 
   /**
    * 1️⃣ Seed Plans (Starter, Professional, Enterprise)
-   * ราคาตาม UI: Starter=฿0(Trial)/฿990, Professional=฿4,990, Enterprise=฿9,990
+   * ราคาและข้อมูลตาม UI Sales Page
    */
   private async seedPlans(): Promise<void> {
-    this.logger.log('📦 Seeding Plans...');
+    this.logger.log('📦 Seeding Plans for Sales Page...');
 
     const plans = [
       {
         code: 'S',
         name: 'Starter',
-        priceMonthly: 0,  // Free for trial
+        priceMonthly: 1990,
+        yearlyDiscountPercent: 10, // ส่วนลด 10%
+        // priceYearly จะถูกคำนวณอัตโนมัติ: 1990 * 12 * 0.9 = 21,492
         maxRooms: 20,
         maxUsers: 3,
         isActive: true,
+        // Sales Page fields
+        description: 'เริ่มต้นใช้งานได้ทันที พร้อมทดลองใช้ฟรี 14 วัน',
+        displayOrder: 1,
+        isPopular: false,
+        badge: null,
+        highlightColor: null,
+        features: JSON.stringify([
+          'รองรับ 20 ห้อง',
+          'ผู้ใช้งาน 3 คน',
+          'ระบบจองครบครัน',
+        ]),
+        buttonText: 'เริ่มใช้งาน',
       },
       {
         code: 'M',
         name: 'Professional',
         priceMonthly: 4990,
+        yearlyDiscountPercent: 15, // ส่วนลด 15% (ยอดนิยม)
+        // priceYearly จะถูกคำนวณอัตโนมัติ: 4990 * 12 * 0.85 = 50,898
         maxRooms: 50,
-        maxUsers: 5,
+        maxUsers: 10,
         isActive: true,
+        // Sales Page fields
+        description: 'เหมาะสำหรับโรงแรมขนาดกลาง พร้อมฟีเจอร์ครบครัน',
+        displayOrder: 2,
+        isPopular: true,
+        badge: 'ยอดนิยม',
+        highlightColor: '#8B5CF6',
+        features: JSON.stringify([
+          'รองรับ 50 ห้อง',
+          'ผู้ใช้งาน 10 คน',
+          'ระบบจองครบครัน',
+        ]),
+        buttonText: 'เริ่มใช้งาน',
       },
       {
         code: 'L',
         name: 'Enterprise',
         priceMonthly: 9990,
-        maxRooms: 100,
-        maxUsers: 10,
+        yearlyDiscountPercent: 20, // ส่วนลด 20% (สูงสุด)
+        // priceYearly จะถูกคำนวณอัตโนมัติ: 9990 * 12 * 0.8 = 95,904
+        maxRooms: 200,
+        maxUsers: 50,
         isActive: true,
+        // Sales Page fields
+        description: 'สำหรับองค์กรขนาดใหญ่ พร้อม dedicated support',
+        displayOrder: 3,
+        isPopular: false,
+        badge: null,
+        highlightColor: null,
+        features: JSON.stringify([
+          'รองรับ 200 ห้อง',
+          'ผู้ใช้งาน 50 คน',
+          'ระบบจองครบครัน',
+        ]),
+        buttonText: 'เริ่มใช้งาน',
       },
     ];
 
@@ -95,7 +137,7 @@ export class SeederService {
         await this.plansService.create(planData);
         this.logger.log(`  ✓ Created plan: ${planData.code} - ${planData.name} (฿${planData.priceMonthly}/mo)`);
       } else {
-        // Update existing plan prices
+        // Update existing plan with Sales Page data
         await this.plansService.update(existing.id, planData);
         this.logger.log(`  ⊙ Updated plan: ${planData.code} - ${planData.name}`);
       }

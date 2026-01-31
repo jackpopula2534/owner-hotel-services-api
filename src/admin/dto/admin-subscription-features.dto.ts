@@ -121,8 +121,11 @@ export class SubscriptionFeatureItemDto {
 }
 
 export class SubscriptionFeaturesListDto {
-  @ApiProperty({ example: 'SUB-001' })
-  subscriptionId: string;
+  @ApiProperty({ example: 'uuid', description: 'Subscription UUID for updates' })
+  subscriptionUuid: string;
+
+  @ApiProperty({ example: 'SUB-001', description: 'Subscription code for display' })
+  subscriptionCode: string;
 
   @ApiProperty({ example: 'โรงแรมสุขใจ' })
   hotelName: string;

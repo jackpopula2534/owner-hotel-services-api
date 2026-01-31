@@ -92,8 +92,11 @@ export class SubscriptionAddonItemDto {
 }
 
 export class AdminSubscriptionListItemDto {
-  @ApiProperty({ example: 'SUB-001' })
+  @ApiProperty({ example: 'uuid', description: 'Primary key UUID for updates' })
   id: string;
+
+  @ApiProperty({ example: 'SUB-001', description: 'Display subscription code' })
+  subscriptionCode: string;
 
   @ApiProperty({ example: 'โรงแรมสุขใจ' })
   hotelName: string;
@@ -166,8 +169,11 @@ export class SubscriptionAddonDto {
 }
 
 export class AdminSubscriptionDetailDto {
-  @ApiProperty({ example: 'SUB-001' })
+  @ApiProperty({ example: 'uuid', description: 'Primary key UUID for updates' })
   id: string;
+
+  @ApiProperty({ example: 'SUB-001', description: 'Display subscription code' })
+  subscriptionCode: string;
 
   @ApiProperty({ example: 'โรงแรมสุขใจ' })
   hotelName: string;
