@@ -16,19 +16,30 @@ export class AuthController {
 
   @Post('register')
   @Public()
-  @Throttle({ default: { limit: 5, ttl: 60 } }) // max 5 registrations per 60s per IP
-  @ApiOperation({ summary: 'Register a new user' })
+  @Throttle({ default: { limit: 5, ttl: 60 } })
+  @ApiOperation({ summary: 'Register a new user (hotel owner/staff)' })
   @ApiResponse({ status: 201, description: 'User successfully registered' })
   @ApiResponse({ status: 400, description: 'Bad request' })
   async register(@Body() registerDto: RegisterDto) {
     return this.authService.register(registerDto);
   }
 
+  @Post('admin/login')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60 } })
+  @ApiOperation({ summary: 'Login as platform admin (Admin table only)' })
+  @ApiResponse({ status: 200, description: 'Admin successfully logged in' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async loginAdmin(@Body() loginDto: LoginDto) {
+    return this.authService.loginAdmin(loginDto);
+  }
+
   @Post('login')
   @Public()
   @HttpCode(HttpStatus.OK)
-  @Throttle({ default: { limit: 10, ttl: 60 } }) // max 10 login attempts per 60s per IP
-  @ApiOperation({ summary: 'Login user' })
+  @Throttle({ default: { limit: 10, ttl: 60 } })
+  @ApiOperation({ summary: 'Login as hotel user (User table - tenant_admin, manager, staff, etc.)' })
   @ApiResponse({ status: 200, description: 'User successfully logged in' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async login(@Body() loginDto: LoginDto) {
@@ -38,7 +49,7 @@ export class AuthController {
   @Post('refresh')
   @Public()
   @HttpCode(HttpStatus.OK)
-  @Throttle({ default: { limit: 30, ttl: 60 } }) // refresh can be a bit higher
+  @Throttle({ default: { limit: 30, ttl: 60 } })
   @ApiOperation({ summary: 'Refresh access token' })
   @ApiResponse({ status: 200, description: 'Token refreshed successfully' })
   @ApiResponse({ status: 401, description: 'Invalid or expired refresh token' })

@@ -7,11 +7,12 @@ import { UpdateRestaurantDto } from './dto/update-restaurant.dto';
 export class RestaurantService {
   constructor(private prisma: PrismaService) {}
 
-  async findAll(query: any) {
+  async findAll(query: any, tenantId?: string) {
     const { page = 1, limit = 10, search } = query;
     const skip = (page - 1) * limit;
 
     const where: any = {};
+    if (tenantId != null) where.tenantId = tenantId;
     if (search) {
       where.OR = [
         { name: { contains: search } },
@@ -38,9 +39,12 @@ export class RestaurantService {
     };
   }
 
-  async findOne(id: string) {
-    const restaurant = await this.prisma.restaurant.findUnique({
-      where: { id },
+  async findOne(id: string, tenantId?: string) {
+    const where: any = { id };
+    if (tenantId != null) where.tenantId = tenantId;
+
+    const restaurant = await this.prisma.restaurant.findFirst({
+      where,
     });
 
     if (!restaurant) {
@@ -50,14 +54,16 @@ export class RestaurantService {
     return restaurant;
   }
 
-  async create(createRestaurantDto: CreateRestaurantDto) {
+  async create(createRestaurantDto: CreateRestaurantDto, tenantId?: string) {
+    const data: any = { ...createRestaurantDto };
+    if (tenantId != null) data.tenantId = tenantId;
     return this.prisma.restaurant.create({
-      data: createRestaurantDto,
+      data,
     });
   }
 
-  async update(id: string, updateRestaurantDto: UpdateRestaurantDto) {
-    await this.findOne(id); // Check if exists
+  async update(id: string, updateRestaurantDto: UpdateRestaurantDto, tenantId?: string) {
+    await this.findOne(id, tenantId);
 
     return this.prisma.restaurant.update({
       where: { id },
@@ -65,8 +71,8 @@ export class RestaurantService {
     });
   }
 
-  async remove(id: string) {
-    await this.findOne(id); // Check if exists
+  async remove(id: string, tenantId?: string) {
+    await this.findOne(id, tenantId);
 
     return this.prisma.restaurant.delete({
       where: { id },

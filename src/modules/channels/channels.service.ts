@@ -7,11 +7,12 @@ import { UpdateChannelDto } from './dto/update-channel.dto';
 export class ChannelsService {
   constructor(private prisma: PrismaService) {}
 
-  async findAll(query: any) {
+  async findAll(query: any, tenantId?: string) {
     const { page = 1, limit = 10, type, isActive, search } = query;
     const skip = (page - 1) * limit;
 
     const where: any = {};
+    if (tenantId != null) where.tenantId = tenantId;
     if (type) where.type = type;
     if (isActive !== undefined) where.isActive = isActive === 'true';
     if (search) {
@@ -45,9 +46,12 @@ export class ChannelsService {
     };
   }
 
-  async findOne(id: string) {
-    const channel = await this.prisma.channel.findUnique({
-      where: { id },
+  async findOne(id: string, tenantId?: string) {
+    const where: any = { id };
+    if (tenantId != null) where.tenantId = tenantId;
+
+    const channel = await this.prisma.channel.findFirst({
+      where,
       include: {
         bookings: {
           include: {
@@ -66,10 +70,10 @@ export class ChannelsService {
     return channel;
   }
 
-  async create(createChannelDto: CreateChannelDto) {
-    // Check if channel code already exists
-    const existingChannel = await this.prisma.channel.findUnique({
-      where: { code: createChannelDto.code },
+  async create(createChannelDto: CreateChannelDto, tenantId?: string) {
+    const scope: any = tenantId != null ? { tenantId } : {};
+    const existingChannel = await this.prisma.channel.findFirst({
+      where: { ...scope, code: createChannelDto.code },
     });
 
     if (existingChannel) {
@@ -78,20 +82,21 @@ export class ChannelsService {
       );
     }
 
+    const data: any = { ...createChannelDto };
+    if (tenantId != null) data.tenantId = tenantId;
     return this.prisma.channel.create({
-      data: createChannelDto,
+      data,
     });
   }
 
-  async update(id: string, updateChannelDto: UpdateChannelDto) {
-    await this.findOne(id); // Check if exists
+  async update(id: string, updateChannelDto: UpdateChannelDto, tenantId?: string) {
+    await this.findOne(id, tenantId);
 
-    // If updating code, check for duplicates
     if (updateChannelDto.code) {
-      const existingChannel = await this.prisma.channel.findUnique({
-        where: { code: updateChannelDto.code },
+      const scope: any = tenantId != null ? { tenantId } : {};
+      const existingChannel = await this.prisma.channel.findFirst({
+        where: { ...scope, code: updateChannelDto.code },
       });
-
       if (existingChannel && existingChannel.id !== id) {
         throw new BadRequestException(
           `Channel with code ${updateChannelDto.code} already exists`,
@@ -105,10 +110,9 @@ export class ChannelsService {
     });
   }
 
-  async remove(id: string) {
-    await this.findOne(id); // Check if exists
+  async remove(id: string, tenantId?: string) {
+    await this.findOne(id, tenantId);
 
-    // Check if channel has bookings
     const bookingsCount = await this.prisma.booking.count({
       where: { channelId: id },
     });
@@ -124,8 +128,8 @@ export class ChannelsService {
     });
   }
 
-  async sync(id: string) {
-    const channel = await this.findOne(id);
+  async sync(id: string, tenantId?: string) {
+    const channel = await this.findOne(id, tenantId);
 
     if (!channel.syncEnabled) {
       throw new BadRequestException('Channel sync is not enabled');
@@ -145,8 +149,8 @@ export class ChannelsService {
     };
   }
 
-  async toggleActive(id: string) {
-    const channel = await this.findOne(id);
+  async toggleActive(id: string, tenantId?: string) {
+    const channel = await this.findOne(id, tenantId);
 
     return this.prisma.channel.update({
       where: { id },

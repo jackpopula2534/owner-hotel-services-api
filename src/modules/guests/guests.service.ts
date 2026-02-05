@@ -5,19 +5,23 @@ import { PrismaService } from '../../prisma/prisma.service';
 export class GuestsService {
   constructor(private prisma: PrismaService) {}
 
-  async findAll(query: any) {
+  private buildWhere(tenantId: string | undefined, search?: string) {
+    const where: any = {};
+    if (tenantId != null) where.tenantId = tenantId;
+    if (search) {
+      where.OR = [
+        { firstName: { contains: search } },
+        { lastName: { contains: search } },
+        { email: { contains: search } },
+      ];
+    }
+    return where;
+  }
+
+  async findAll(query: any, tenantId?: string) {
     const { page = 1, limit = 10, search } = query;
     const skip = (page - 1) * limit;
-
-    const where = search
-      ? {
-          OR: [
-            { firstName: { contains: search } },
-            { lastName: { contains: search } },
-            { email: { contains: search } },
-          ],
-        }
-      : {};
+    const where = this.buildWhere(tenantId, search);
 
     const [data, total] = await Promise.all([
       this.prisma.guest.findMany({
@@ -37,9 +41,12 @@ export class GuestsService {
     };
   }
 
-  async findOne(id: string) {
-    const guest = await this.prisma.guest.findUnique({
-      where: { id },
+  async findOne(id: string, tenantId?: string) {
+    const where: any = { id };
+    if (tenantId != null) where.tenantId = tenantId;
+
+    const guest = await this.prisma.guest.findFirst({
+      where,
       include: { bookings: true },
     });
 
@@ -50,23 +57,26 @@ export class GuestsService {
     return guest;
   }
 
-  async create(createGuestDto: any) {
+  async create(createGuestDto: any, tenantId?: string) {
+    const data: any = { ...createGuestDto };
+    if (tenantId != null) data.tenantId = tenantId;
     return this.prisma.guest.create({
-      data: createGuestDto,
+      data,
     });
   }
 
-  async update(id: string, updateGuestDto: any) {
-    await this.findOne(id); // Check if exists
+  async update(id: string, updateGuestDto: any, tenantId?: string) {
+    await this.findOne(id, tenantId);
 
+    const data: any = { ...updateGuestDto };
     return this.prisma.guest.update({
       where: { id },
-      data: updateGuestDto,
+      data,
     });
   }
 
-  async remove(id: string) {
-    await this.findOne(id); // Check if exists
+  async remove(id: string, tenantId?: string) {
+    await this.findOne(id, tenantId);
 
     return this.prisma.guest.delete({
       where: { id },

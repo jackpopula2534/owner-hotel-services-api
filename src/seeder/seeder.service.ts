@@ -9,13 +9,13 @@ import { InvoicesService } from '../invoices/invoices.service';
 import { PaymentsService } from '../payments/payments.service';
 import { SubscriptionFeaturesService } from '../subscription-features/subscription-features.service';
 import { FeatureType } from '../features/entities/feature.entity';
-import { AdminRole } from '../admins/entities/admin.entity';
 import { TenantStatus } from '../tenants/entities/tenant.entity';
 import { SubscriptionStatus } from '../subscriptions/entities/subscription.entity';
 import { InvoiceStatus } from '../invoices/entities/invoice.entity';
 import { PaymentMethod, PaymentStatus } from '../payments/entities/payment.entity';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
+import { v4 as uuidv4 } from 'uuid';
 
 @Injectable()
 export class SeederService {
@@ -47,6 +47,7 @@ export class SeederService {
       await this.seedAdmins();
       await this.seedUsers();
       await this.seedAdminPanelTestData();
+      await this.seedHotelStaff();
 
       this.logger.log('✅ Database seeding completed successfully!');
     } catch (error) {
@@ -318,26 +319,39 @@ export class SeederService {
 
     const admins = [
       {
-        name: 'Super Admin',
+        id: uuidv4(),
+        firstName: 'Super',
+        lastName: 'Admin',
         email: 'admin@hotelservices.com',
-        role: AdminRole.SUPER,
+        role: 'platform_admin',
+        password: 'Admin@123',
       },
       {
-        name: 'Finance Admin',
+        id: uuidv4(),
+        firstName: 'Finance',
+        lastName: 'Admin',
         email: 'finance@hotelservices.com',
-        role: AdminRole.FINANCE,
+        role: 'platform_admin',
+        password: 'Finance@123',
       },
       {
-        name: 'Support Admin',
+        id: uuidv4(),
+        firstName: 'Support',
+        lastName: 'Admin',
         email: 'support@hotelservices.com',
-        role: AdminRole.SUPPORT,
+        role: 'platform_admin',
+        password: 'Support@123',
       },
     ];
 
     for (const adminData of admins) {
       const existing = await this.adminsService.findByEmail(adminData.email);
       if (!existing) {
-        await this.adminsService.create(adminData);
+        const hashedPassword = await bcrypt.hash(adminData.password, 10);
+        await this.adminsService.create({
+          ...adminData,
+          password: hashedPassword,
+        });
         this.logger.log(`  ✓ Created admin: ${adminData.email} (${adminData.role})`);
       } else {
         this.logger.log(`  ⊙ Admin already exists: ${adminData.email}`);
@@ -346,19 +360,21 @@ export class SeederService {
   }
 
   /**
-   * 5️⃣ Seed Test Users (สำหรับทดสอบ login)
+   * 5️⃣ Seed Test Users (User table → login ผ่าน /login)
+   * - Platform admins ที่ใช้งานผ่าน dashboard
+   * - Hotel staff ต่างๆ ของแต่ละโรงแรม
    */
   private async seedUsers(): Promise<void> {
-    this.logger.log('👥 Seeding Test Users...');
+    this.logger.log('👥 Seeding Test Users (User table)...');
 
-    const testUsers = [
+    // Platform admins → User table (login ผ่าน /login เท่านั้น)
+    const platformAdmins = [
       {
         email: 'platform.admin@staysync.io',
         password: 'admin123',
         firstName: 'Platform',
         lastName: 'Admin',
         role: 'platform_admin',
-        status: 'active',
       },
       {
         email: 'platform.admin@test.co',
@@ -366,37 +382,30 @@ export class SeederService {
         firstName: 'Platform',
         lastName: 'Admin',
         role: 'platform_admin',
-        status: 'active',
       },
     ];
 
-    for (const userData of testUsers) {
+    for (const userData of platformAdmins) {
       try {
-        const existing = await this.prisma.$queryRaw`
-          SELECT id FROM users WHERE email = ${userData.email} LIMIT 1
-        `;
+        const existing = await this.prisma.user.findUnique({
+          where: { email: userData.email },
+        });
 
-        if (Array.isArray(existing) && existing.length === 0) {
+        if (!existing) {
           const hashedPassword = await bcrypt.hash(userData.password, 10);
-
-          await this.prisma.$executeRaw`
-            INSERT INTO users (id, email, password, firstName, lastName, role, status, createdAt, updatedAt)
-            VALUES (
-              UUID(),
-              ${userData.email},
-              ${hashedPassword},
-              ${userData.firstName},
-              ${userData.lastName},
-              ${userData.role},
-              ${userData.status},
-              NOW(),
-              NOW()
-            )
-          `;
-
-          this.logger.log(`  ✓ Created user: ${userData.email} (${userData.role})`);
+          await this.prisma.user.create({
+            data: {
+              email: userData.email,
+              password: hashedPassword,
+              firstName: userData.firstName,
+              lastName: userData.lastName,
+              role: userData.role,
+              status: 'active',
+            },
+          });
+          this.logger.log(`  ✓ Created platform admin (User table): ${userData.email}`);
         } else {
-          this.logger.log(`  ⊙ User already exists: ${userData.email}`);
+          this.logger.log(`  ⊙ Platform admin already exists: ${userData.email}`);
         }
       } catch (error) {
         this.logger.warn(`  ⚠️  Could not create user ${userData.email}:`, error.message);
@@ -726,9 +735,144 @@ export class SeederService {
     this.logger.log(`  - MRR: ฿${mrr.toLocaleString()}`);
     
     this.logger.log('');
-    this.logger.log('🔑 Test Login Credentials:');
-    this.logger.log('  Platform Admin: platform.admin@staysync.io / admin123');
+  }
+
+  /**
+   * 7️⃣ Seed Hotel Staff (User table → login ผ่าน /login)
+   * สร้างพนักงานตำแหน่งต่างๆ ให้แต่ละโรงแรม
+   */
+  private async seedHotelStaff(): Promise<void> {
+    this.logger.log('👷 Seeding Hotel Staff (User table)...');
+
+    // ดึง tenant ทั้งหมดที่มีอยู่
+    const allTenants = await this.tenantsService.findAll();
+
+    if (allTenants.length === 0) {
+      this.logger.warn('  ⚠️ No tenants found, skipping hotel staff seeding');
+      return;
+    }
+
+    // Staff templates สำหรับแต่ละโรงแรม
+    const staffTemplates = [
+      { role: 'manager', position: 'General Manager', department: 'Management', firstNameTh: 'วิชัย', lastNameTh: 'บริหารดี', firstNameEn: 'Michael', lastNameEn: 'Manager' },
+      { role: 'receptionist', position: 'Front Desk Agent', department: 'Front Office', firstNameTh: 'สุนิสา', lastNameTh: 'ต้อนรับดี', firstNameEn: 'Sarah', lastNameEn: 'Reception' },
+      { role: 'receptionist', position: 'Night Auditor', department: 'Front Office', firstNameTh: 'ปรีชา', lastNameTh: 'กลางคืน', firstNameEn: 'Paul', lastNameEn: 'Night' },
+      { role: 'housekeeper', position: 'Head Housekeeper', department: 'Housekeeping', firstNameTh: 'มาลี', lastNameTh: 'สะอาดใส', firstNameEn: 'Maria', lastNameEn: 'Clean' },
+      { role: 'housekeeper', position: 'Room Attendant', department: 'Housekeeping', firstNameTh: 'สมศรี', lastNameTh: 'ห้องสวย', firstNameEn: 'Linda', lastNameEn: 'Room' },
+      { role: 'chef', position: 'Head Chef', department: 'Kitchen', firstNameTh: 'ธนกฤต', lastNameTh: 'ครัวอร่อย', firstNameEn: 'Gordon', lastNameEn: 'Kitchen' },
+      { role: 'waiter', position: 'F&B Server', department: 'Restaurant', firstNameTh: 'นภาพร', lastNameTh: 'เสิร์ฟดี', firstNameEn: 'Anna', lastNameEn: 'Service' },
+      { role: 'maintenance', position: 'Chief Engineer', department: 'Engineering', firstNameTh: 'ช่างชัย', lastNameTh: 'ซ่อมเก่ง', firstNameEn: 'John', lastNameEn: 'Fix' },
+      { role: 'accountant', position: 'Hotel Accountant', department: 'Finance', firstNameTh: 'กัลยา', lastNameTh: 'บัญชีดี', firstNameEn: 'Karen', lastNameEn: 'Finance' },
+      { role: 'security', position: 'Security Officer', department: 'Security', firstNameTh: 'สมชาย', lastNameTh: 'ปลอดภัย', firstNameEn: 'David', lastNameEn: 'Guard' },
+    ];
+
+    const defaultPassword = 'Staff@123';
+    const hashedPassword = await bcrypt.hash(defaultPassword, 10);
+    let staffCount = 0;
+
+    for (const tenant of allTenants) {
+      const tenantSlug = tenant.name
+        .toLowerCase()
+        .replace(/[^a-z0-9ก-๙]/g, '')
+        .substring(0, 10);
+
+      this.logger.log(`  🏨 ${tenant.name}:`);
+
+      for (let i = 0; i < staffTemplates.length; i++) {
+        const tpl = staffTemplates[i];
+        const isThaiHotel = /[ก-๙]/.test(tenant.name);
+        const firstName = isThaiHotel ? tpl.firstNameTh : tpl.firstNameEn;
+        const lastName = isThaiHotel ? tpl.lastNameTh : tpl.lastNameEn;
+        const emailPrefix = `${tpl.role}${i > 0 ? i : ''}`;
+        const email = `${emailPrefix}.${tenantSlug}@hotel.test`;
+
+        try {
+          const existingUser = await this.prisma.$queryRaw`
+            SELECT id FROM users WHERE email = ${email} LIMIT 1
+          `;
+
+          if (Array.isArray(existingUser) && existingUser.length === 0) {
+            const userId = uuidv4();
+            await this.prisma.$executeRaw`
+              INSERT INTO users (id, email, password, firstName, lastName, role, status, tenantId, createdAt, updatedAt)
+              VALUES (
+                ${userId},
+                ${email},
+                ${hashedPassword},
+                ${firstName},
+                ${lastName},
+                ${tpl.role},
+                'active',
+                ${tenant.id},
+                NOW(),
+                NOW()
+              )
+            `;
+
+            // สร้าง Employee record ด้วย
+            try {
+              const empCode = `EMP-${String(staffCount + 1).padStart(4, '0')}`;
+              await this.prisma.$executeRaw`
+                INSERT INTO employees (id, tenantId, firstName, lastName, email, employeeCode, department, position, startDate, createdAt, updatedAt)
+                VALUES (
+                  UUID(),
+                  ${tenant.id},
+                  ${firstName},
+                  ${lastName},
+                  ${email},
+                  ${empCode},
+                  ${tpl.department},
+                  ${tpl.position},
+                  '2024-01-01',
+                  NOW(),
+                  NOW()
+                )
+              `;
+            } catch {
+              // employee อาจมีอยู่แล้ว
+            }
+
+            staffCount++;
+          }
+        } catch (error) {
+          this.logger.warn(`    ⚠️  Could not create staff ${email}: ${error.message}`);
+        }
+      }
+
+      this.logger.log(`    ✓ Staff created for ${tenant.name}`);
+    }
+
     this.logger.log('');
+    this.logger.log(`  Total staff created: ${staffCount}`);
+    this.logger.log('');
+    this.logger.log('══════════════════════════════════════════════════════');
+    this.logger.log('🔑 Test Login Credentials:');
+    this.logger.log('──────────────────────────────────────────────────────');
+    this.logger.log('');
+    this.logger.log('  📌 Admin Login → POST /api/v1/auth/admin/login');
+    this.logger.log('  ─────────────────────────────────────────────');
+    this.logger.log('  admin@hotelservices.com    / Admin@123     (Super Admin)');
+    this.logger.log('  finance@hotelservices.com  / Finance@123   (Finance)');
+    this.logger.log('  support@hotelservices.com  / Support@123   (Support)');
+    this.logger.log('');
+    this.logger.log('  📌 User Login → POST /api/v1/auth/login');
+    this.logger.log('  ─────────────────────────────────────────────');
+    this.logger.log('  platform.admin@staysync.io / admin123      (Platform Admin)');
+    this.logger.log('  platform.admin@test.co     / Admin@123     (Platform Admin)');
+    this.logger.log('  somchai@email.com          / password123   (Hotel Owner - โรงแรมสุขใจ)');
+    this.logger.log('  mountain@email.com         / password123   (Hotel Owner - Mountain View)');
+    this.logger.log('  seaside@email.com          / password123   (Hotel Owner - บ้านพักริมทะเล)');
+    this.logger.log('  garden@email.com           / password123   (Hotel Owner - Garden Resort)');
+    this.logger.log(`  manager*.hotel.test        / Staff@123     (Hotel Manager)`);
+    this.logger.log(`  receptionist*.hotel.test   / Staff@123     (Front Desk)`);
+    this.logger.log(`  housekeeper*.hotel.test    / Staff@123     (Housekeeping)`);
+    this.logger.log(`  chef*.hotel.test           / Staff@123     (Chef)`);
+    this.logger.log(`  waiter*.hotel.test         / Staff@123     (F&B)`);
+    this.logger.log(`  maintenance*.hotel.test    / Staff@123     (Engineering)`);
+    this.logger.log(`  accountant*.hotel.test     / Staff@123     (Finance)`);
+    this.logger.log(`  security*.hotel.test       / Staff@123     (Security)`);
+    this.logger.log('');
+    this.logger.log('══════════════════════════════════════════════════════');
   }
 
   /**

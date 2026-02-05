@@ -3,13 +3,19 @@ import { AdminRole } from '../entities/admin.entity';
 
 export class CreateAdminDto {
   @IsString()
-  name: string;
+  firstName: string;
+
+  @IsString()
+  lastName: string;
 
   @IsEmail()
   email: string;
 
-  @IsEnum(AdminRole)
-  role: AdminRole;
+  @IsString()
+  password: string;
+
+  @IsString()
+  role: string;
 }
 
 

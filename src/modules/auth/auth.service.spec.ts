@@ -27,6 +27,9 @@ describe('AuthService', () => {
       findUnique: jest.fn(),
       create: jest.fn(),
     },
+    admin: {
+      findUnique: jest.fn(),
+    },
     refreshToken: {
       findUnique: jest.fn(),
       create: jest.fn(),
@@ -95,6 +98,7 @@ describe('AuthService', () => {
         firstName: registerDto.firstName,
         lastName: registerDto.lastName,
         role: 'user',
+        tenantId: null,
         createdAt: new Date(),
       };
 
@@ -127,20 +131,96 @@ describe('AuthService', () => {
     });
   });
 
-  describe('login', () => {
+  describe('loginAdmin', () => {
     const loginDto: LoginDto = {
-      email: 'test@example.com',
-      password: 'password123',
+      email: 'admin@hotelservices.com',
+      password: 'Admin@123',
     };
 
-    it('should login user successfully', async () => {
-      const mockUser = {
+    it('should login admin successfully (Admin table)', async () => {
+      const mockAdmin = {
         id: '1',
         email: loginDto.email,
         password: 'hashedPassword',
-        firstName: 'Test',
-        lastName: 'User',
-        role: 'user',
+        firstName: 'Super',
+        lastName: 'Admin',
+        role: 'platform_admin',
+        status: 'active',
+      };
+
+      mockPrismaService.admin.findUnique.mockResolvedValue(mockAdmin);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+      mockJwtService.sign.mockReturnValue('access-token');
+      mockPrismaService.refreshToken.create.mockResolvedValue({
+        id: '1',
+        token: 'refresh-token',
+      });
+
+      const result = await service.loginAdmin(loginDto);
+
+      expect(result).toHaveProperty('accessToken');
+      expect(result).toHaveProperty('refreshToken');
+      expect(result).toHaveProperty('user');
+      expect(result.user.isPlatformAdmin).toBe(true);
+      expect(mockPrismaService.admin.findUnique).toHaveBeenCalledWith({
+        where: { email: loginDto.email },
+      });
+    });
+
+    it('should throw UnauthorizedException if admin not found', async () => {
+      mockPrismaService.admin.findUnique.mockResolvedValue(null);
+
+      await expect(service.loginAdmin(loginDto)).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+
+    it('should throw UnauthorizedException if admin is inactive', async () => {
+      mockPrismaService.admin.findUnique.mockResolvedValue({
+        id: '1',
+        email: loginDto.email,
+        password: 'hashedPassword',
+        role: 'platform_admin',
+        status: 'suspended',
+      });
+
+      await expect(service.loginAdmin(loginDto)).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+
+    it('should throw UnauthorizedException if password is invalid', async () => {
+      mockPrismaService.admin.findUnique.mockResolvedValue({
+        id: '1',
+        email: loginDto.email,
+        password: 'hashedPassword',
+        role: 'platform_admin',
+        status: 'active',
+      });
+      (bcrypt.compare as jest.Mock).mockResolvedValue(false);
+
+      await expect(service.loginAdmin(loginDto)).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+  });
+
+  describe('login', () => {
+    const loginDto: LoginDto = {
+      email: 'somchai@email.com',
+      password: 'password123',
+    };
+
+    it('should login user successfully (User table)', async () => {
+      const mockUser = {
+        id: '2',
+        email: loginDto.email,
+        password: 'hashedPassword',
+        firstName: 'สมชาย',
+        lastName: 'ใจดี',
+        role: 'tenant_admin',
+        tenantId: 'tenant-1',
+        status: 'active',
       };
 
       mockPrismaService.user.findUnique.mockResolvedValue(mockUser);
@@ -156,6 +236,11 @@ describe('AuthService', () => {
       expect(result).toHaveProperty('accessToken');
       expect(result).toHaveProperty('refreshToken');
       expect(result).toHaveProperty('user');
+      expect(result.user.isPlatformAdmin).toBe(false);
+      expect(result.user.role).toBe('tenant_admin');
+      expect(mockPrismaService.user.findUnique).toHaveBeenCalledWith({
+        where: { email: loginDto.email },
+      });
     });
 
     it('should throw UnauthorizedException if user not found', async () => {
@@ -166,11 +251,27 @@ describe('AuthService', () => {
       );
     });
 
-    it('should throw UnauthorizedException if password is invalid', async () => {
-      const mockUser = {
-        id: '1',
+    it('should throw UnauthorizedException if user is inactive', async () => {
+      mockPrismaService.user.findUnique.mockResolvedValue({
+        id: '2',
         email: loginDto.email,
         password: 'hashedPassword',
+        role: 'tenant_admin',
+        status: 'suspended',
+      });
+
+      await expect(service.login(loginDto)).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+
+    it('should throw UnauthorizedException if password is invalid', async () => {
+      const mockUser = {
+        id: '2',
+        email: loginDto.email,
+        password: 'hashedPassword',
+        role: 'tenant_admin',
+        status: 'active',
       };
 
       mockPrismaService.user.findUnique.mockResolvedValue(mockUser);
@@ -192,11 +293,14 @@ describe('AuthService', () => {
         id: '1',
         token: refreshTokenDto.refreshToken,
         userId: '1',
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
+        adminId: null,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        revokedAt: null,
         user: {
           id: '1',
           email: 'test@example.com',
           role: 'user',
+          tenantId: null,
         },
       };
 
@@ -233,13 +337,34 @@ describe('AuthService', () => {
         id: '1',
         token: refreshTokenDto.refreshToken,
         userId: '1',
-        expiresAt: new Date(Date.now() - 1000), // Expired
+        adminId: null,
+        expiresAt: new Date(Date.now() - 1000),
+        revokedAt: null,
       };
 
       mockPrismaService.refreshToken.findUnique.mockResolvedValue(
         mockTokenRecord,
       );
       mockPrismaService.refreshToken.delete.mockResolvedValue(mockTokenRecord);
+
+      await expect(service.refreshToken(refreshTokenDto)).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+
+    it('should throw UnauthorizedException if token is revoked', async () => {
+      const mockTokenRecord = {
+        id: '1',
+        token: refreshTokenDto.refreshToken,
+        userId: '1',
+        adminId: null,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        revokedAt: new Date(),
+      };
+
+      mockPrismaService.refreshToken.findUnique.mockResolvedValue(
+        mockTokenRecord,
+      );
 
       await expect(service.refreshToken(refreshTokenDto)).rejects.toThrow(
         UnauthorizedException,
@@ -259,7 +384,10 @@ describe('AuthService', () => {
       expect(mockPrismaService.refreshToken.updateMany).toHaveBeenCalledWith({
         where: {
           token: refreshToken,
-          userId,
+          OR: [
+            { userId },
+            { adminId: userId },
+          ],
         },
         data: {
           revokedAt: expect.any(Date),
@@ -276,7 +404,10 @@ describe('AuthService', () => {
 
       expect(mockPrismaService.refreshToken.updateMany).toHaveBeenCalledWith({
         where: {
-          userId,
+          OR: [
+            { userId },
+            { adminId: userId },
+          ],
           revokedAt: null,
         },
         data: {
@@ -286,4 +417,3 @@ describe('AuthService', () => {
     });
   });
 });
-

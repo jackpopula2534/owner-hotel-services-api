@@ -7,17 +7,16 @@ import { UpdateReviewDto } from './dto/update-review.dto';
 export class ReviewsService {
   constructor(private prisma: PrismaService) {}
 
-  async findAll(query: any) {
+  async findAll(query: any, tenantId?: string) {
     const { page = 1, limit = 10, rating, bookingId, search } = query;
     const skip = (page - 1) * limit;
 
     const where: any = {};
+    if (tenantId != null) where.tenantId = tenantId;
     if (rating) where.rating = parseInt(rating);
     if (bookingId) where.bookingId = bookingId;
     if (search) {
-      where.OR = [
-        { comment: { contains: search } },
-      ];
+      where.OR = [{ comment: { contains: search } }];
     }
 
     const [data, total] = await Promise.all([
@@ -46,9 +45,12 @@ export class ReviewsService {
     };
   }
 
-  async findOne(id: string) {
-    const review = await this.prisma.review.findUnique({
-      where: { id },
+  async findOne(id: string, tenantId?: string) {
+    const where: any = { id };
+    if (tenantId != null) where.tenantId = tenantId;
+
+    const review = await this.prisma.review.findFirst({
+      where,
       include: {
         booking: {
           include: {
@@ -66,9 +68,12 @@ export class ReviewsService {
     return review;
   }
 
-  async findByBookingId(bookingId: string) {
-    const review = await this.prisma.review.findUnique({
-      where: { bookingId },
+  async findByBookingId(bookingId: string, tenantId?: string) {
+    const where: any = { bookingId };
+    if (tenantId != null) where.tenantId = tenantId;
+
+    const review = await this.prisma.review.findFirst({
+      where,
       include: {
         booking: {
           include: {
@@ -86,11 +91,12 @@ export class ReviewsService {
     return review;
   }
 
-  async create(createReviewDto: CreateReviewDto) {
-    // If bookingId is provided, check if booking exists and if review already exists
+  async create(createReviewDto: CreateReviewDto, tenantId?: string) {
     if (createReviewDto.bookingId) {
-      const booking = await this.prisma.booking.findUnique({
-        where: { id: createReviewDto.bookingId },
+      const bookingWhere: any = { id: createReviewDto.bookingId };
+      if (tenantId != null) bookingWhere.tenantId = tenantId;
+      const booking = await this.prisma.booking.findFirst({
+        where: bookingWhere,
       });
 
       if (!booking) {
@@ -99,8 +105,10 @@ export class ReviewsService {
         );
       }
 
-      const existingReview = await this.prisma.review.findUnique({
-        where: { bookingId: createReviewDto.bookingId },
+      const existingWhere: any = { bookingId: createReviewDto.bookingId };
+      if (tenantId != null) existingWhere.tenantId = tenantId;
+      const existingReview = await this.prisma.review.findFirst({
+        where: existingWhere,
       });
 
       if (existingReview) {
@@ -110,13 +118,15 @@ export class ReviewsService {
       }
     }
 
+    const data: any = { ...createReviewDto };
+    if (tenantId != null) data.tenantId = tenantId;
     return this.prisma.review.create({
-      data: createReviewDto,
+      data,
     });
   }
 
-  async update(id: string, updateReviewDto: UpdateReviewDto) {
-    await this.findOne(id); // Check if exists
+  async update(id: string, updateReviewDto: UpdateReviewDto, tenantId?: string) {
+    await this.findOne(id, tenantId);
 
     return this.prisma.review.update({
       where: { id },
@@ -124,21 +134,24 @@ export class ReviewsService {
     });
   }
 
-  async remove(id: string) {
-    await this.findOne(id); // Check if exists
+  async remove(id: string, tenantId?: string) {
+    await this.findOne(id, tenantId);
 
     return this.prisma.review.delete({
       where: { id },
     });
   }
 
-  async getStats() {
+  async getStats(tenantId?: string) {
+    const where: any = tenantId != null ? { tenantId } : {};
     const [total, averageRating, ratingDistribution] = await Promise.all([
-      this.prisma.review.count(),
+      this.prisma.review.count({ where }),
       this.prisma.review.aggregate({
+        where,
         _avg: { rating: true },
       }),
       this.prisma.review.groupBy({
+        where,
         by: ['rating'],
         _count: { rating: true },
       }),
@@ -162,19 +175,21 @@ export class ReviewsService {
     };
   }
 
-  async generateQRCode(bookingId: string) {
-    // Check if booking exists
-    const booking = await this.prisma.booking.findUnique({
-      where: { id: bookingId },
+  async generateQRCode(bookingId: string, tenantId?: string) {
+    const bookingWhere: any = { id: bookingId };
+    if (tenantId != null) bookingWhere.tenantId = tenantId;
+    const booking = await this.prisma.booking.findFirst({
+      where: bookingWhere,
     });
 
     if (!booking) {
       throw new NotFoundException(`Booking with ID ${bookingId} not found`);
     }
 
-    // Check if review already exists
-    const existingReview = await this.prisma.review.findUnique({
-      where: { bookingId },
+    const existingWhere: any = { bookingId };
+    if (tenantId != null) existingWhere.tenantId = tenantId;
+    const existingReview = await this.prisma.review.findFirst({
+      where: existingWhere,
     });
 
     if (existingReview) {
@@ -183,8 +198,6 @@ export class ReviewsService {
       );
     }
 
-    // Generate a unique code for the review
-    // In production, you might want to use a more secure method
     const reviewCode = `REV-${bookingId.substring(0, 8).toUpperCase()}-${Date.now().toString(36).toUpperCase()}`;
 
     return {
@@ -195,21 +208,21 @@ export class ReviewsService {
     };
   }
 
-  async findByQRCode(code: string) {
-    // Extract booking ID from code (format: REV-{bookingId}-{timestamp})
+  async findByQRCode(code: string, tenantId?: string) {
     const parts = code.split('-');
     if (parts.length < 2) {
       throw new BadRequestException('Invalid QR code format');
     }
 
-    // Try to find review by booking ID pattern
-    // This is a simplified implementation - you might want to store QR codes in database
-    const reviews = await this.prisma.review.findMany({
-      where: {
-        bookingId: {
-          startsWith: parts[1],
-        },
+    const where: any = {
+      bookingId: {
+        startsWith: parts[1],
       },
+    };
+    if (tenantId != null) where.tenantId = tenantId;
+
+    const reviews = await this.prisma.review.findMany({
+      where,
       include: {
         booking: {
           include: {

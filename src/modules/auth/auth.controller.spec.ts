@@ -11,6 +11,7 @@ describe('AuthController', () => {
 
   const mockAuthService = {
     register: jest.fn(),
+    loginAdmin: jest.fn(),
     login: jest.fn(),
     refreshToken: jest.fn(),
     logout: jest.fn(),
@@ -67,11 +68,11 @@ describe('AuthController', () => {
     });
   });
 
-  describe('login', () => {
-    it('should login user', async () => {
+  describe('admin/login', () => {
+    it('should login admin via Admin table', async () => {
       const loginDto: LoginDto = {
-        email: 'test@example.com',
-        password: 'password123',
+        email: 'admin@hotelservices.com',
+        password: 'Admin@123',
       };
 
       const mockResult = {
@@ -80,9 +81,39 @@ describe('AuthController', () => {
         user: {
           id: '1',
           email: loginDto.email,
-          firstName: 'Test',
-          lastName: 'User',
-          role: 'user',
+          firstName: 'Super',
+          lastName: 'Admin',
+          role: 'platform_admin',
+          isPlatformAdmin: true,
+        },
+      };
+
+      mockAuthService.loginAdmin.mockResolvedValue(mockResult);
+
+      const result = await controller.loginAdmin(loginDto);
+
+      expect(authService.loginAdmin).toHaveBeenCalledWith(loginDto);
+      expect(result).toEqual(mockResult);
+    });
+  });
+
+  describe('login', () => {
+    it('should login user via User table', async () => {
+      const loginDto: LoginDto = {
+        email: 'somchai@email.com',
+        password: 'password123',
+      };
+
+      const mockResult = {
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+        user: {
+          id: '2',
+          email: loginDto.email,
+          firstName: 'สมชาย',
+          lastName: 'ใจดี',
+          role: 'tenant_admin',
+          isPlatformAdmin: false,
         },
       };
 
@@ -132,9 +163,3 @@ describe('AuthController', () => {
     });
   });
 });
-
-
-
-
-
-

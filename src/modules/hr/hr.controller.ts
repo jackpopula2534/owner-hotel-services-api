@@ -17,6 +17,7 @@ import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @ApiTags('hr')
 @ApiBearerAuth('JWT-auth')
@@ -29,8 +30,8 @@ export class HrController {
   @ApiOperation({ summary: 'Get all employees' })
   @ApiResponse({ status: 200, description: 'List of employees' })
   @Roles('admin', 'manager')
-  async findAll(@Query() query: any) {
-    return this.hrService.findAll(query);
+  async findAll(@Query() query: any, @CurrentUser() user: { tenantId?: string }) {
+    return this.hrService.findAll(query, user?.tenantId);
   }
 
   @Get(':id')
@@ -38,16 +39,19 @@ export class HrController {
   @ApiResponse({ status: 200, description: 'Employee details' })
   @ApiResponse({ status: 404, description: 'Employee not found' })
   @Roles('admin', 'manager')
-  async findOne(@Param('id') id: string) {
-    return this.hrService.findOne(id);
+  async findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
+    return this.hrService.findOne(id, user?.tenantId);
   }
 
   @Post()
   @ApiOperation({ summary: 'Create a new employee' })
   @ApiResponse({ status: 201, description: 'Employee created successfully' })
   @Roles('admin')
-  async create(@Body() createEmployeeDto: CreateEmployeeDto) {
-    return this.hrService.create(createEmployeeDto);
+  async create(
+    @Body() createEmployeeDto: CreateEmployeeDto,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    return this.hrService.create(createEmployeeDto, user?.tenantId);
   }
 
   @Patch(':id')
@@ -57,16 +61,17 @@ export class HrController {
   async update(
     @Param('id') id: string,
     @Body() updateEmployeeDto: UpdateEmployeeDto,
+    @CurrentUser() user: { tenantId?: string },
   ) {
-    return this.hrService.update(id, updateEmployeeDto);
+    return this.hrService.update(id, updateEmployeeDto, user?.tenantId);
   }
 
   @Delete(':id')
   @ApiOperation({ summary: 'Delete employee' })
   @ApiResponse({ status: 200, description: 'Employee deleted successfully' })
   @Roles('admin')
-  async remove(@Param('id') id: string) {
-    return this.hrService.remove(id);
+  async remove(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
+    return this.hrService.remove(id, user?.tenantId);
   }
 }
 

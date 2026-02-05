@@ -45,7 +45,7 @@ import { Admin } from '../admins/entities/admin.entity';
           PaymentRefund,
           Admin,
         ],
-        synchronize: configService.get('NODE_ENV') === 'development',
+        synchronize: false,
         logging: configService.get('NODE_ENV') === 'development' 
           ? ['error', 'warn', 'schema'] 
           : false,

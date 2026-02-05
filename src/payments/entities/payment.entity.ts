@@ -56,7 +56,7 @@ export class Payment {
   @Column({ name: 'refunded_amount', type: 'decimal', precision: 10, scale: 2, default: 0 })
   refundedAmount: number;
 
-  @Column({ name: 'approved_by', nullable: true })
+  @Column({ name: 'approved_by', length: 191, nullable: true })
   approvedBy: string; // admin_id
 
   @Column({ name: 'approved_at', type: 'timestamp', nullable: true })
@@ -68,10 +68,6 @@ export class Payment {
   @ManyToOne(() => Invoice, (invoice) => invoice.payments)
   @JoinColumn({ name: 'invoice_id' })
   invoice: Invoice;
-
-  @ManyToOne(() => Admin, { nullable: true })
-  @JoinColumn({ name: 'approved_by' })
-  approver: Admin;
 }
 
 

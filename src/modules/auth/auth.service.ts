@@ -45,23 +45,72 @@ export class AuthService {
         firstName: true,
         lastName: true,
         role: true,
+        tenantId: true,
         createdAt: true,
       },
     });
 
-    // Generate tokens
-    const tokens = await this.generateTokens(user.id, user.email, user.role);
+    // Generate tokens (include tenantId for multi-tenant PMS)
+    const tokens = await this.generateTokens(
+      user.id,
+      user.email,
+      user.role,
+      user.tenantId ?? undefined,
+    );
 
     return {
       ...tokens,
-      user,
+      user: {
+        ...user,
+        tenantId: user.tenantId ?? undefined,
+      },
+    };
+  }
+
+  async loginAdmin(loginDto: LoginDto) {
+    const { email, password } = loginDto;
+
+    const admin = await this.prisma.admin.findUnique({
+      where: { email },
+    });
+
+    if (!admin) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    if (admin.status !== 'active') {
+      throw new UnauthorizedException('Admin account is suspended or inactive');
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, admin.password);
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    const tokens = await this.generateTokens(
+      admin.id,
+      admin.email,
+      admin.role,
+      undefined,
+      'admin'
+    );
+
+    return {
+      ...tokens,
+      user: {
+        id: admin.id,
+        email: admin.email,
+        firstName: admin.firstName,
+        lastName: admin.lastName,
+        role: admin.role,
+        isPlatformAdmin: true,
+      },
     };
   }
 
   async login(loginDto: LoginDto) {
     const { email, password } = loginDto;
 
-    // Find user
     const user = await this.prisma.user.findUnique({
       where: { email },
     });
@@ -70,15 +119,22 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    // Verify password
-    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (user.status !== 'active') {
+      throw new UnauthorizedException('User account is suspended or inactive');
+    }
 
+    const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    // Generate tokens
-    const tokens = await this.generateTokens(user.id, user.email, user.role);
+    const tokens = await this.generateTokens(
+      user.id,
+      user.email,
+      user.role,
+      user.tenantId ?? undefined,
+      'user'
+    );
 
     return {
       ...tokens,
@@ -88,6 +144,8 @@ export class AuthService {
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role,
+        tenantId: user.tenantId ?? undefined,
+        isPlatformAdmin: false,
       },
     };
   }
@@ -98,7 +156,10 @@ export class AuthService {
     // Find refresh token in database
     const tokenRecord = await this.prisma.refreshToken.findUnique({
       where: { token: refreshToken },
-      include: { user: true },
+      include: { 
+        user: true,
+        admin: true,
+      },
     });
 
     if (!tokenRecord) {
@@ -119,11 +180,21 @@ export class AuthService {
       throw new UnauthorizedException('Refresh token has been revoked');
     }
 
+    const account = tokenRecord.admin || tokenRecord.user;
+    if (!account) {
+      throw new UnauthorizedException('Account not found');
+    }
+
+    const userType = tokenRecord.adminId ? 'admin' : 'user';
+    const tenantId = (tokenRecord.user as any)?.tenantId ?? undefined;
+
     // Generate new tokens
     const tokens = await this.generateTokens(
-      tokenRecord.user.id,
-      tokenRecord.user.email,
-      tokenRecord.user.role,
+      account.id,
+      account.email,
+      account.role,
+      tenantId,
+      userType
     );
 
     // Revoke old refresh token
@@ -135,23 +206,29 @@ export class AuthService {
     return tokens;
   }
 
-  async logout(userId: string, refreshToken?: string) {
+  async logout(userIdOrAdminId: string, refreshToken?: string) {
     if (refreshToken) {
       // Revoke specific refresh token
       await this.prisma.refreshToken.updateMany({
         where: {
           token: refreshToken,
-          userId,
+          OR: [
+            { userId: userIdOrAdminId },
+            { adminId: userIdOrAdminId }
+          ]
         },
         data: {
           revokedAt: new Date(),
         },
       });
     } else {
-      // Revoke all refresh tokens for user
+      // Revoke all refresh tokens for user/admin
       await this.prisma.refreshToken.updateMany({
         where: {
-          userId,
+          OR: [
+            { userId: userIdOrAdminId },
+            { adminId: userIdOrAdminId }
+          ],
           revokedAt: null,
         },
         data: {
@@ -161,8 +238,20 @@ export class AuthService {
     }
   }
 
-  private async generateTokens(userId: string, email: string, role: string) {
-    const payload = { sub: userId, email, role };
+  private async generateTokens(
+    id: string,
+    email: string,
+    role: string,
+    tenantId?: string,
+    userType: 'admin' | 'user' = 'user'
+  ) {
+    const payload = { 
+      sub: id, 
+      email, 
+      role, 
+      tenantId: tenantId ?? null,
+      isPlatformAdmin: userType === 'admin'
+    };
 
     // Generate access token (short-lived)
     const accessToken = this.jwtService.sign(payload, {
@@ -175,13 +264,28 @@ export class AuthService {
     expiresAt.setDate(expiresAt.getDate() + 7); // 7 days
 
     // Store refresh token in database
-    await this.prisma.refreshToken.create({
-      data: {
-        token: refreshToken,
-        userId,
-        expiresAt,
-      },
-    });
+    try {
+      await this.prisma.refreshToken.create({
+        data: {
+          token: refreshToken,
+          userId: userType === 'user' ? id : null,
+          adminId: userType === 'admin' ? id : null,
+          expiresAt,
+        },
+      });
+    } catch (error) {
+      console.error('Error creating refresh token:', error);
+      
+      // Check for missing column error (Prisma error P2025 or similar message)
+      if (error.message?.includes('column') && error.message?.includes('does not exist')) {
+        throw new Error(
+          'Database schema mismatch: The "adminId" column is missing in "refresh_tokens" table. ' +
+          'Please run "npm run db:refresh" to synchronize the database.'
+        );
+      }
+      
+      throw new BadRequestException('Could not create session. Please try again later.');
+    }
 
     return {
       accessToken,

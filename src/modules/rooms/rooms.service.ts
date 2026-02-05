@@ -7,11 +7,12 @@ import { UpdateRoomDto } from './dto/update-room.dto';
 export class RoomsService {
   constructor(private prisma: PrismaService) {}
 
-  async findAll(query: any) {
+  async findAll(query: any, tenantId?: string) {
     const { page = 1, limit = 10, status, type, floor, search } = query;
     const skip = (page - 1) * limit;
 
     const where: any = {};
+    if (tenantId != null) where.tenantId = tenantId;
     if (status) where.status = status;
     if (type) where.type = type;
     if (floor) where.floor = parseInt(floor);
@@ -47,9 +48,12 @@ export class RoomsService {
     };
   }
 
-  async findOne(id: string) {
-    const room = await this.prisma.room.findUnique({
-      where: { id },
+  async findOne(id: string, tenantId?: string) {
+    const where: any = { id };
+    if (tenantId != null) where.tenantId = tenantId;
+
+    const room = await this.prisma.room.findFirst({
+      where,
       include: {
         bookings: {
           include: {
@@ -67,10 +71,10 @@ export class RoomsService {
     return room;
   }
 
-  async create(createRoomDto: CreateRoomDto) {
-    // Check if room number already exists
-    const existingRoom = await this.prisma.room.findUnique({
-      where: { number: createRoomDto.number },
+  async create(createRoomDto: CreateRoomDto, tenantId?: string) {
+    const scope: any = tenantId != null ? { tenantId } : {};
+    const existingRoom = await this.prisma.room.findFirst({
+      where: { ...scope, number: createRoomDto.number },
     });
 
     if (existingRoom) {
@@ -79,20 +83,21 @@ export class RoomsService {
       );
     }
 
+    const data: any = { ...createRoomDto };
+    if (tenantId != null) data.tenantId = tenantId;
     return this.prisma.room.create({
-      data: createRoomDto,
+      data,
     });
   }
 
-  async update(id: string, updateRoomDto: UpdateRoomDto) {
-    await this.findOne(id); // Check if exists
+  async update(id: string, updateRoomDto: UpdateRoomDto, tenantId?: string) {
+    await this.findOne(id, tenantId);
 
-    // If updating number, check for duplicates
     if (updateRoomDto.number) {
-      const existingRoom = await this.prisma.room.findUnique({
-        where: { number: updateRoomDto.number },
+      const scope: any = tenantId != null ? { tenantId } : {};
+      const existingRoom = await this.prisma.room.findFirst({
+        where: { ...scope, number: updateRoomDto.number },
       });
-
       if (existingRoom && existingRoom.id !== id) {
         throw new BadRequestException(
           `Room with number ${updateRoomDto.number} already exists`,
@@ -106,10 +111,9 @@ export class RoomsService {
     });
   }
 
-  async remove(id: string) {
-    await this.findOne(id); // Check if exists
+  async remove(id: string, tenantId?: string) {
+    await this.findOne(id, tenantId);
 
-    // Check if room has active bookings
     const activeBookings = await this.prisma.booking.findFirst({
       where: {
         roomId: id,
@@ -128,8 +132,8 @@ export class RoomsService {
     });
   }
 
-  async updateStatus(id: string, status: string) {
-    await this.findOne(id);
+  async updateStatus(id: string, status: string, tenantId?: string) {
+    await this.findOne(id, tenantId);
 
     return this.prisma.room.update({
       where: { id },
@@ -137,32 +141,30 @@ export class RoomsService {
     });
   }
 
-  async getAvailableRooms(checkIn: string, checkOut: string) {
+  async getAvailableRooms(checkIn: string, checkOut: string, tenantId?: string) {
     const checkInDate = new Date(checkIn);
     const checkOutDate = new Date(checkOut);
 
-    // Find rooms with conflicting bookings
+    const bookingWhere: any = {
+      status: { in: ['confirmed', 'checked-in'] },
+      OR: [
+        { checkIn: { lte: checkOutDate }, checkOut: { gte: checkInDate } },
+      ],
+    };
+    if (tenantId != null) bookingWhere.tenantId = tenantId;
+
     const conflictingBookings = await this.prisma.booking.findMany({
-      where: {
-        status: { in: ['confirmed', 'checked-in'] },
-        OR: [
-          {
-            checkIn: { lte: checkOutDate },
-            checkOut: { gte: checkInDate },
-          },
-        ],
-      },
+      where: bookingWhere,
       select: { roomId: true },
     });
 
     const occupiedRoomIds = conflictingBookings.map((b) => b.roomId);
+    const roomWhere: any = { status: 'available' };
+    if (tenantId != null) roomWhere.tenantId = tenantId;
+    if (occupiedRoomIds.length > 0) roomWhere.id = { notIn: occupiedRoomIds };
 
-    // Get available rooms
     const availableRooms = await this.prisma.room.findMany({
-      where: {
-        id: { notIn: occupiedRoomIds },
-        status: 'available',
-      },
+      where: roomWhere,
       orderBy: { number: 'asc' },
     });
 

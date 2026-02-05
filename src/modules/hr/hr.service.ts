@@ -7,11 +7,12 @@ import { UpdateEmployeeDto } from './dto/update-employee.dto';
 export class HrService {
   constructor(private prisma: PrismaService) {}
 
-  async findAll(query: any) {
+  async findAll(query: any, tenantId?: string) {
     const { page = 1, limit = 10, department, position, search } = query;
     const skip = (page - 1) * limit;
 
     const where: any = {};
+    if (tenantId != null) where.tenantId = tenantId;
     if (department) where.department = department;
     if (position) where.position = position;
     if (search) {
@@ -41,9 +42,12 @@ export class HrService {
     };
   }
 
-  async findOne(id: string) {
-    const employee = await this.prisma.employee.findUnique({
-      where: { id },
+  async findOne(id: string, tenantId?: string) {
+    const where: any = { id };
+    if (tenantId != null) where.tenantId = tenantId;
+
+    const employee = await this.prisma.employee.findFirst({
+      where,
     });
 
     if (!employee) {
@@ -53,14 +57,16 @@ export class HrService {
     return employee;
   }
 
-  async create(createEmployeeDto: CreateEmployeeDto) {
+  async create(createEmployeeDto: CreateEmployeeDto, tenantId?: string) {
+    const data: any = { ...createEmployeeDto };
+    if (tenantId != null) data.tenantId = tenantId;
     return this.prisma.employee.create({
-      data: createEmployeeDto,
+      data,
     });
   }
 
-  async update(id: string, updateEmployeeDto: UpdateEmployeeDto) {
-    await this.findOne(id); // Check if exists
+  async update(id: string, updateEmployeeDto: UpdateEmployeeDto, tenantId?: string) {
+    await this.findOne(id, tenantId);
 
     return this.prisma.employee.update({
       where: { id },
@@ -68,8 +74,8 @@ export class HrService {
     });
   }
 
-  async remove(id: string) {
-    await this.findOne(id); // Check if exists
+  async remove(id: string, tenantId?: string) {
+    await this.findOne(id, tenantId);
 
     return this.prisma.employee.delete({
       where: { id },

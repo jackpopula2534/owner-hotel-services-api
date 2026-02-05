@@ -1,8 +1,11 @@
 import {
   Entity,
   PrimaryGeneratedColumn,
+  PrimaryColumn,
   Column,
   OneToMany,
+  CreateDateColumn,
+  UpdateDateColumn,
 } from 'typeorm';
 import { Payment } from '../../payments/entities/payment.entity';
 
@@ -11,26 +14,41 @@ export enum AdminRole {
   FINANCE = 'finance',
   SUPPORT = 'support',
 }
-
 @Entity('admins')
 export class Admin {
-  @PrimaryGeneratedColumn('uuid')
+  @PrimaryColumn({ type: 'char', length: 36 })
   id: string;
 
-  @Column()
-  name: string;
+  @Column({ nullable: true })
+  firstName: string;
+
+  @Column({ nullable: true })
+  lastName: string;
 
   @Column({ unique: true })
   email: string;
 
+  @Column({ select: false }) // Hide password by default
+  password: string;
+
   @Column({
-    type: 'enum',
-    enum: AdminRole,
+    type: 'varchar',
+    default: 'platform_admin',
   })
-  role: AdminRole;
+  role: string;
 
-  @OneToMany(() => Payment, (payment) => payment.approver)
-  approvedPayments: Payment[];
+  @Column({ default: 'active' })
+  status: string;
+
+  @Column({ nullable: true })
+  lastLoginAt: Date;
+
+  @Column({ nullable: true })
+  lastLoginIp: string;
+
+  @CreateDateColumn()
+  createdAt: Date;
+
+  @UpdateDateColumn()
+  updatedAt: Date;
 }
-
-
