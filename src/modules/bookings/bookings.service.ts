@@ -6,7 +6,9 @@ export class BookingsService {
   constructor(private prisma: PrismaService) {}
 
   async findAll(query: any, tenantId?: string) {
-    const { page = 1, limit = 10, status, guestId, roomId } = query;
+    const page = parseInt(query.page) || 1;
+    const limit = parseInt(query.limit) || 10;
+    const { status, guestId, roomId } = query;
     const skip = (page - 1) * limit;
 
     const where: any = {};
@@ -19,7 +21,7 @@ export class BookingsService {
       this.prisma.booking.findMany({
         where,
         skip,
-        take: parseInt(limit),
+        take: limit,
         include: {
           guest: true,
           room: true,
@@ -32,8 +34,8 @@ export class BookingsService {
     return {
       data,
       total,
-      page: parseInt(page),
-      limit: parseInt(limit),
+      page,
+      limit,
     };
   }
 

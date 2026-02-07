@@ -1,3 +1,6 @@
+import { IsOptional, IsString, IsEnum, IsInt, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+
 /**
  * Hotel List Response DTO
  * ข้อมูลสำหรับแสดงรายการโรงแรมในหน้า "จัดการโรงแรม"
@@ -139,40 +142,60 @@ export class HotelListQueryDto {
   /**
    * Search query (ค้นหาชื่อโรงแรม)
    */
+  @IsOptional()
+  @IsString()
   search?: string;
 
   /**
    * Filter by status
    */
+  @IsOptional()
+  @IsEnum(['all', 'trial', 'active', 'suspended', 'expired'])
   status?: 'all' | 'trial' | 'active' | 'suspended' | 'expired';
 
   /**
    * Filter by province
    */
+  @IsOptional()
+  @IsString()
   province?: string;
 
   /**
    * Filter by plan code
    */
+  @IsOptional()
+  @IsString()
   planCode?: string;
 
   /**
    * Page number
    */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
   page?: number;
 
   /**
    * Items per page
    */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
   limit?: number;
 
   /**
    * Sort by field
    */
+  @IsOptional()
+  @IsString()
   sortBy?: 'name' | 'createdAt' | 'roomCount' | 'status';
 
   /**
    * Sort order
    */
+  @IsOptional()
+  @IsString()
   sortOrder?: 'asc' | 'desc';
 }

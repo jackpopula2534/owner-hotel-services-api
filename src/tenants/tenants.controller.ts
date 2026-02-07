@@ -7,7 +7,12 @@ import {
   Param,
   Delete,
   Query,
+  UseGuards,
 } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
 import { TenantsService } from './tenants.service';
 import { HotelDetailService } from './hotel-detail.service';
 import { HotelManagementService } from './hotel-management.service';
@@ -16,7 +21,10 @@ import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { CreateHotelDto } from './dto/create-hotel.dto';
 import { HotelListQueryDto } from './dto/hotel-list-response.dto';
 
-@Controller('tenants')
+@ApiTags('tenants')
+@ApiBearerAuth('JWT-auth')
+@Controller({ path: 'tenants', version: '1' })
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class TenantsController {
   constructor(
     private readonly tenantsService: TenantsService,
@@ -31,6 +39,7 @@ export class TenantsController {
    * ใช้เมื่อกดปุ่ม "+ เพิ่มโรงแรมใหม่"
    */
   @Post('hotels')
+  @Roles('platform_admin')
   createHotel(@Body() createHotelDto: CreateHotelDto) {
     return this.hotelManagementService.createHotel(createHotelDto);
   }
@@ -40,6 +49,7 @@ export class TenantsController {
    * รองรับ search, filter, pagination
    */
   @Get('hotels')
+  @Roles('platform_admin', 'tenant_admin', 'manager', 'receptionist', 'staff', 'user')
   getHotelList(@Query() query: HotelListQueryDto) {
     return this.hotelManagementService.getHotelList(query);
   }
@@ -50,6 +60,7 @@ export class TenantsController {
    * รวมข้อมูล: status, subscription, plan, features, invoices, alerts, permissions
    */
   @Get('hotels/:id')
+  @Roles('platform_admin', 'tenant_admin')
   getHotelDetail(@Param('id') id: string) {
     return this.hotelDetailService.getHotelDetail(id);
   }

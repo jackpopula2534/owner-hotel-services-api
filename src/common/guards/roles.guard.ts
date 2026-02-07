@@ -36,10 +36,18 @@ export class RolesGuard implements CanActivate {
     const user = request.user as { role?: UserRole };
 
     if (!user || !user.role) {
+      console.log('❌ RolesGuard: No user or role in request');
       return false;
     }
 
-    return requiredRoles.includes(user.role);
+    const hasRole = requiredRoles.includes(user.role);
+    if (!hasRole) {
+      console.log(`❌ RolesGuard: Role mismatch. User role: "${user.role}", Required one of: [${requiredRoles.join(', ')}]`);
+    } else {
+      console.log(`✅ RolesGuard: Role authorized. User role: "${user.role}"`);
+    }
+
+    return hasRole;
   }
 }
 

@@ -19,7 +19,9 @@ export class GuestsService {
   }
 
   async findAll(query: any, tenantId?: string) {
-    const { page = 1, limit = 10, search } = query;
+    const page = parseInt(query.page) || 1;
+    const limit = parseInt(query.limit) || 10;
+    const search = query.search;
     const skip = (page - 1) * limit;
     const where = this.buildWhere(tenantId, search);
 
@@ -27,7 +29,7 @@ export class GuestsService {
       this.prisma.guest.findMany({
         where,
         skip,
-        take: parseInt(limit),
+        take: limit,
         orderBy: { createdAt: 'desc' },
       }),
       this.prisma.guest.count({ where }),
@@ -36,8 +38,8 @@ export class GuestsService {
     return {
       data,
       total,
-      page: parseInt(page),
-      limit: parseInt(limit),
+      page,
+      limit,
     };
   }
 

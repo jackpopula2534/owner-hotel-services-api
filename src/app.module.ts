@@ -31,6 +31,11 @@ import { SubscriptionManagementModule } from './subscription-management/subscrip
 import { AdminPanelModule } from './admin-panel/admin-panel.module';
 import { AdminModule } from './admin/admin.module';
 import { SeederModule } from './seeder/seeder.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { ContactModule } from './contact/contact.module';
+import { AnalyticsModule } from './analytics/analytics.module';
+import { LoyaltyModule } from './loyalty/loyalty.module';
+import { PromotionsModule } from './promotions/promotions.module';
 
 @Module({
   imports: [
@@ -65,6 +70,11 @@ import { SeederModule } from './seeder/seeder.module';
     AdminPanelModule,
     AdminModule,
     SeederModule,
+    NotificationsModule,
+    ContactModule,
+    AnalyticsModule,
+    LoyaltyModule,
+    PromotionsModule,
     ThrottlerModule.forRoot([
       {
         ttl: 60, // 60 seconds window

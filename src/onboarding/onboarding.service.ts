@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
 import { TenantsService } from '../tenants/tenants.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { PlansService } from '../plans/plans.service';
@@ -16,6 +17,7 @@ export interface OnboardingResult {
 @Injectable()
 export class OnboardingService {
   constructor(
+    private prisma: PrismaService,
     private tenantsService: TenantsService,
     private subscriptionsService: SubscriptionsService,
     private plansService: PlansService,
@@ -114,8 +116,49 @@ export class OnboardingService {
       isTrial,
       daysRemaining,
       trialEndsAt,
-      canAccessPMS,
+      canAccessPMS: canAccessPMS,
     };
+  }
+
+  async getProgress(tenantId: string) {
+    const steps = await this.prisma.onboardingStep.findMany({
+      where: { tenantId },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    // If no steps, initialize them
+    if (steps.length === 0) {
+      const defaultSteps = [
+        { stepKey: 'setup_profile', title: 'ตั้งค่าข้อมูลโรงแรม' },
+        { stepKey: 'create_room', title: 'สร้างห้องพักห้องแรก' },
+        { stepKey: 'first_booking', title: 'เปิดการจองครั้งแรก' },
+        { stepKey: 'setup_payment', title: 'ตั้งค่าการชำระเงิน' },
+      ];
+
+      const createdSteps = await Promise.all(
+        defaultSteps.map((s) =>
+          this.prisma.onboardingStep.create({
+            data: {
+              tenantId,
+              stepKey: s.stepKey,
+            },
+          }),
+        ),
+      );
+      return createdSteps;
+    }
+
+    return steps;
+  }
+
+  async updateStep(tenantId: string, id: string, isCompleted: boolean) {
+    return this.prisma.onboardingStep.update({
+      where: { id },
+      data: {
+        isCompleted,
+        completedAt: isCompleted ? new Date() : null,
+      },
+    });
   }
 }
 

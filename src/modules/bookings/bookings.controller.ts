@@ -15,21 +15,21 @@ export class BookingsController {
 
   @Get()
   @ApiOperation({ summary: 'Get all bookings' })
-  @Roles('admin', 'manager')
+  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
   async findAll(@Query() query: any, @CurrentUser() user: { tenantId?: string }) {
     return this.bookingsService.findAll(query, user?.tenantId);
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get booking by ID' })
-  @Roles('admin', 'manager')
+  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
   async findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.bookingsService.findOne(id, user?.tenantId);
   }
 
   @Post()
   @ApiOperation({ summary: 'Create a new booking' })
-  @Roles('admin', 'manager')
+  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
   async create(
     @Body() createBookingDto: any,
     @CurrentUser() user: { tenantId?: string },
@@ -39,7 +39,7 @@ export class BookingsController {
 
   @Put(':id')
   @ApiOperation({ summary: 'Update booking' })
-  @Roles('admin', 'manager')
+  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
   async update(
     @Param('id') id: string,
     @Body() updateBookingDto: any,
@@ -50,7 +50,7 @@ export class BookingsController {
 
   @Delete(':id')
   @ApiOperation({ summary: 'Cancel booking' })
-  @Roles('admin', 'manager')
+  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
   async remove(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.bookingsService.remove(id, user?.tenantId);
   }

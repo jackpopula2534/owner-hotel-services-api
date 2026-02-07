@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -10,121 +7,123 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// User model for authentication
 model User {
-  id         String   @id @default(uuid())
-  email      String   @unique
-  password   String
-  firstName  String?
-  lastName   String?
-  role       String   @default("user")
-  tenantId   String?
-  employeeId String?
-  status     String   @default("active")
-  phone      String?
-  language   String?
-  timezone   String?
-  lastLoginAt DateTime?
-  lastLoginIp String?
-  authProvider String  @default("local")
-  metadata   String?  @db.Text
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id            String         @id @default(uuid())
+  email         String         @unique
+  password      String
+  firstName     String?
+  lastName      String?
+  role          String         @default("user")
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  authProvider  String         @default("local")
+  employeeId    String?
+  language      String?
+  lastLoginAt   DateTime?
+  lastLoginIp   String?
+  metadata      String?        @db.Text
+  phone         String?
+  status        String         @default("active")
+  tenantId      String?
+  timezone      String?
   refreshTokens RefreshToken[]
+  notifications Notification[]
+
   @@map("users")
 }
 
-// Admin model for Platform Administrators
 model Admin {
-  id         String   @id @default(uuid())
-  email      String   @unique
-  password   String
-  firstName  String?
-  lastName   String?
-  role       String   @default("platform_admin")
-  status     String   @default("active")
-  lastLoginAt DateTime?
-  lastLoginIp String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id            String         @id @default(uuid()) @db.Char(36)
+  firstName     String?        @db.VarChar(255)
+  lastName      String?        @db.VarChar(255)
+  email         String         @unique(map: "IDX_051db7d37d478a69a7432df147") @db.VarChar(255)
+  password      String         @db.VarChar(255)
+  role          String         @default("platform_admin") @db.VarChar(255)
+  status        String         @default("active") @db.VarChar(255)
+  lastLoginAt   DateTime?      @db.DateTime(0)
+  lastLoginIp   String?        @db.VarChar(255)
+  createdAt     DateTime       @default(now()) @db.DateTime(6)
+  updatedAt     DateTime       @default(now()) @updatedAt @db.DateTime(6)
   refreshTokens RefreshToken[]
+
   @@map("admins")
 }
 
-// RefreshToken model
 model RefreshToken {
-  id        String   @id @default(uuid())
-  token     String   @unique
+  id        String    @id @default(uuid())
+  token     String    @unique
   userId    String?
-  adminId   String?
   expiresAt DateTime
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
   revokedAt DateTime?
-  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  admin     Admin?   @relation(fields: [adminId], references: [id], onDelete: Cascade)
-  @@map("refresh_tokens")
+  adminId   String?   @db.Char(36)
+  admin     Admin?    @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  user      User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@index([token])
   @@index([userId])
   @@index([adminId])
+  @@map("refresh_tokens")
 }
 
-// Guest model
 model Guest {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   tenantId  String?
   firstName String
   lastName  String
   email     String?
   phone     String?
   address   String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  bookings Booking[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  bookings  Booking[]
+
   @@index([tenantId])
   @@map("guests")
 }
 
-// Room model
 model Room {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   tenantId    String?
-  number      String
+  number      String    @unique
   type        String
   floor       Int?
-  price       Decimal  @db.Decimal(10, 2)
-  status      String   @default("available")
+  price       Decimal   @db.Decimal(10, 2)
+  status      String    @default("available")
   description String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  bookings Booking[]
-  @@unique([tenantId, number])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  bookings    Booking[]
+
   @@index([tenantId])
   @@map("rooms")
 }
 
-// Booking model
 model Booking {
-  id          String   @id @default(uuid())
-  tenantId    String?
-  guestId     String
-  roomId      String
-  channelId   String?
-  checkIn     DateTime
-  checkOut    DateTime
-  status      String   @default("pending")
-  totalPrice  Decimal  @db.Decimal(10, 2)
-  notes       String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  guest   Guest    @relation(fields: [guestId], references: [id], onDelete: Cascade)
-  room    Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  channel Channel? @relation(fields: [channelId], references: [id], onDelete: SetNull)
-  review  Review?
+  id         String   @id @default(uuid())
+  tenantId   String?
+  guestId    String
+  roomId     String
+  checkIn    DateTime
+  checkOut   DateTime
+  status     String   @default("pending")
+  totalPrice Decimal  @db.Decimal(10, 2)
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  channelId  String?
+  channel    Channel? @relation(fields: [channelId], references: [id])
+  guest      Guest    @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  room       Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  review     Review?
+
   @@index([tenantId])
+  @@index([channelId], map: "bookings_channelId_fkey")
+  @@index([guestId], map: "bookings_guestId_fkey")
+  @@index([roomId], map: "bookings_roomId_fkey")
   @@map("bookings")
 }
 
-// Review model
 model Review {
   id        String   @id @default(uuid())
   tenantId  String?
@@ -133,63 +132,590 @@ model Review {
   comment   String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  booking Booking? @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  booking   Booking? @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
   @@index([tenantId])
   @@map("reviews")
 }
 
-// Restaurant model
 model Restaurant {
   id          String   @id @default(uuid())
   tenantId    String?
   name        String
-  code        String
+  code        String   @unique
   description String?
   location    String?
   capacity    Int?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-  @@unique([tenantId, code])
+
   @@index([tenantId])
   @@map("restaurants")
 }
 
-// Employee model
 model Employee {
-  id           String   @id @default(uuid())
+  id           String    @id @default(uuid())
   tenantId     String?
   firstName    String
   lastName     String
-  email        String
-  employeeCode String?
+  email        String    @unique
+  employeeCode String?   @unique
   department   String?
   position     String?
   startDate    DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  @@unique([tenantId, email])
-  @@unique([tenantId, employeeCode])
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
   @@index([tenantId])
   @@map("employees")
 }
 
-// Channel model
 model Channel {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   tenantId    String?
   name        String
-  code        String
+  code        String    @unique
   type        String
   apiKey      String?
   apiSecret   String?
-  isActive    Boolean  @default(true)
-  syncEnabled Boolean  @default(false)
+  isActive    Boolean   @default(true)
+  syncEnabled Boolean   @default(false)
   lastSyncAt  DateTime?
-  settings    String?  @db.Text
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  bookings Booking[]
-  @@unique([tenantId, code])
+  settings    String?   @db.Text
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  bookings    Booking[]
+
   @@index([tenantId])
   @@map("channels")
+}
+
+model billing_history {
+  id                String                    @id @db.VarChar(36)
+  subscription_id   String                    @db.VarChar(255)
+  invoice_id        String?                   @db.VarChar(255)
+  eventType         billing_history_eventType
+  description       String?                   @db.Text
+  old_plan_id       String?                   @db.VarChar(255)
+  new_plan_id       String?                   @db.VarChar(255)
+  old_billing_cycle String?                   @db.VarChar(255)
+  new_billing_cycle String?                   @db.VarChar(255)
+  old_amount        Decimal?                  @db.Decimal(10, 2)
+  new_amount        Decimal?                  @db.Decimal(10, 2)
+  period_start      DateTime?                 @db.Date
+  period_end        DateTime?                 @db.Date
+  created_by        String?                   @db.VarChar(255)
+  metadata          Json?
+  created_at        DateTime                  @default(now()) @db.DateTime(6)
+  subscriptions     subscriptions             @relation(fields: [subscription_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "FK_cf2c4c1d8fe13560a70057b4a0b")
+  invoices          invoices?                 @relation(fields: [invoice_id], references: [id], onUpdate: NoAction, map: "FK_d2fa43bf88ec3bced0c93c90036")
+
+  @@index([subscription_id], map: "FK_cf2c4c1d8fe13560a70057b4a0b")
+  @@index([invoice_id], map: "FK_d2fa43bf88ec3bced0c93c90036")
+}
+
+model features {
+  id                    String                  @id @db.VarChar(36)
+  code                  String                  @unique(map: "IDX_c0e1f5d0ba8027c186705d752b") @db.VarChar(255)
+  name                  String                  @db.VarChar(255)
+  description           String?                 @db.Text
+  type                  features_type
+  price_monthly         Decimal                 @default(0.00) @db.Decimal(10, 2)
+  is_active             Int                     @default(1) @db.TinyInt
+  plan_features         plan_features[]
+  subscription_features subscription_features[]
+}
+
+model invoice_adjustments {
+  id                   String                   @id @db.VarChar(36)
+  invoice_id           String                   @db.VarChar(255)
+  type                 invoice_adjustments_type
+  amount               Decimal                  @db.Decimal(10, 2)
+  original_amount      Decimal                  @db.Decimal(10, 2)
+  new_amount           Decimal                  @db.Decimal(10, 2)
+  reason               String?                  @db.Text
+  notes                String?                  @db.Text
+  adjustment_reference String?                  @db.VarChar(255)
+  created_by           String?                  @db.VarChar(255)
+  created_at           DateTime                 @default(now()) @db.DateTime(6)
+  invoices             invoices                 @relation(fields: [invoice_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "FK_7404e72e5be63d0d41859bf4f1d")
+
+  @@index([invoice_id], map: "FK_7404e72e5be63d0d41859bf4f1d")
+}
+
+model invoice_items {
+  id              String             @id @db.VarChar(36)
+  invoice_id      String             @db.VarChar(255)
+  type            invoice_items_type
+  ref_id          String?            @db.VarChar(255)
+  description     String             @db.VarChar(255)
+  quantity        Int                @default(1)
+  unit_price      Decimal            @db.Decimal(10, 2)
+  amount          Decimal            @db.Decimal(10, 2)
+  original_amount Decimal?           @db.Decimal(10, 2)
+  is_adjusted     Int                @default(0) @db.TinyInt
+  created_at      DateTime           @default(now()) @db.DateTime(6)
+  updated_at      DateTime           @default(now()) @db.DateTime(6)
+  invoices        invoices           @relation(fields: [invoice_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "FK_dc991d555664682cfe892eea2c1")
+
+  @@index([invoice_id], map: "FK_dc991d555664682cfe892eea2c1")
+}
+
+model invoices {
+  id                  String                @id @db.VarChar(36)
+  tenant_id           String                @db.VarChar(255)
+  subscription_id     String?               @db.VarChar(255)
+  invoice_no          String                @unique(map: "IDX_37669c562a2525929927d9d691") @db.VarChar(255)
+  amount              Decimal               @db.Decimal(10, 2)
+  original_amount     Decimal?              @db.Decimal(10, 2)
+  adjusted_amount     Decimal?              @db.Decimal(10, 2)
+  status              invoices_status       @default(pending)
+  due_date            DateTime              @db.Date
+  voided_at           DateTime?             @db.Timestamp(0)
+  voided_reason       String?               @db.Text
+  notes               String?               @db.Text
+  created_at          DateTime              @default(now()) @db.DateTime(6)
+  updated_at          DateTime              @default(now()) @db.DateTime(6)
+  billing_history     billing_history[]
+  invoice_adjustments invoice_adjustments[]
+  invoice_items       invoice_items[]
+  tenants             tenants               @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "FK_440f531f452dcc4389d201b9d4b")
+  subscriptions       subscriptions?        @relation(fields: [subscription_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "FK_5152c0aa0f851d9b95972b442e0")
+  payments            payments[]
+
+  @@index([tenant_id], map: "FK_440f531f452dcc4389d201b9d4b")
+  @@index([subscription_id], map: "FK_5152c0aa0f851d9b95972b442e0")
+}
+
+model payment_refunds {
+  id              String                 @id @db.VarChar(36)
+  payment_id      String                 @db.VarChar(255)
+  refund_no       String                 @unique(map: "IDX_35175cde68c765c82603c2ad4e") @db.VarChar(255)
+  amount          Decimal                @db.Decimal(10, 2)
+  status          payment_refunds_status @default(pending)
+  method          payment_refunds_method @default(original_method)
+  reason          String                 @db.Text
+  notes           String?                @db.Text
+  bank_account    String?                @db.VarChar(255)
+  bank_name       String?                @db.VarChar(255)
+  account_holder  String?                @db.VarChar(255)
+  credit_id       String?                @db.VarChar(255)
+  processed_at    DateTime?              @db.Timestamp(0)
+  processed_by    String?                @db.VarChar(255)
+  rejected_reason String?                @db.Text
+  created_by      String?                @db.VarChar(255)
+  created_at      DateTime               @default(now()) @db.DateTime(6)
+  payments        payments               @relation(fields: [payment_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "FK_a10d6c1918989353b79932a2bad")
+
+  @@index([payment_id], map: "FK_a10d6c1918989353b79932a2bad")
+}
+
+model payments {
+  id              String            @id @db.VarChar(36)
+  payment_no      String?           @unique(map: "IDX_8aaa54db3d9827cba0999b7fb2") @db.VarChar(255)
+  invoice_id      String            @db.VarChar(255)
+  amount          Decimal?          @db.Decimal(10, 2)
+  method          payments_method
+  slip_url        String?           @db.Text
+  status          payments_status   @default(pending)
+  refunded_amount Decimal           @default(0.00) @db.Decimal(10, 2)
+  approved_by     String?
+  approved_at     DateTime?         @db.Timestamp(0)
+  created_at      DateTime          @default(now()) @db.DateTime(6)
+  payment_refunds payment_refunds[]
+  invoices        invoices          @relation(fields: [invoice_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "FK_563a5e248518c623eebd987d43e")
+
+  @@index([invoice_id], map: "FK_563a5e248518c623eebd987d43e")
+}
+
+model plan_features {
+  id         String   @id @db.VarChar(36)
+  plan_id    String   @db.VarChar(255)
+  feature_id String   @db.VarChar(255)
+  features   features @relation(fields: [feature_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "FK_27e866bdf4c6f2cf5854b7d0e57")
+  plans      plans    @relation(fields: [plan_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "FK_b51952483b18fa15334d714a838")
+
+  @@index([feature_id], map: "FK_27e866bdf4c6f2cf5854b7d0e57")
+  @@index([plan_id], map: "FK_b51952483b18fa15334d714a838")
+}
+
+model plans {
+  id                                                  String          @id @db.VarChar(36)
+  code                                                String          @unique(map: "IDX_95f7ef3fc4c31a3545b4d825dd") @db.VarChar(255)
+  name                                                String          @db.VarChar(255)
+  price_monthly                                       Decimal         @db.Decimal(10, 2)
+  price_yearly                                        Decimal?        @db.Decimal(10, 2)
+  yearly_discount_percent                             Int             @default(0)
+  max_rooms                                           Int
+  max_users                                           Int
+  is_active                                           Int             @default(1) @db.TinyInt
+  description                                         String?         @db.Text
+  display_order                                       Int             @default(0)
+  is_popular                                          Int             @default(0) @db.TinyInt
+  badge                                               String?         @db.Text
+  highlight_color                                     String?         @db.VarChar(50)
+  features                                            String?         @db.Text
+  button_text                                         String?         @default("เริ่มใช้งาน") @db.VarChar(100)
+  plan_features                                       plan_features[]
+  subscriptions_subscriptions_previous_plan_idToplans subscriptions[] @relation("subscriptions_previous_plan_idToplans")
+  subscriptions_subscriptions_plan_idToplans          subscriptions[] @relation("subscriptions_plan_idToplans")
+}
+
+model subscription_feature_logs {
+  id                      String                           @id @db.VarChar(36)
+  subscription_feature_id String?                          @db.VarChar(255)
+  subscription_id         String                           @db.VarChar(255)
+  feature_id              String                           @db.VarChar(255)
+  feature_name            String                           @db.VarChar(255)
+  action                  subscription_feature_logs_action
+  old_price               Decimal?                         @db.Decimal(10, 2)
+  new_price               Decimal?                         @db.Decimal(10, 2)
+  old_quantity            Int?
+  new_quantity            Int?
+  prorated_amount         Decimal?                         @db.Decimal(10, 2)
+  credit_amount           Decimal?                         @db.Decimal(10, 2)
+  reason                  String?                          @db.Text
+  effective_date          DateTime?                        @db.Date
+  created_by              String?                          @db.VarChar(255)
+  created_at              DateTime                         @default(now()) @db.DateTime(6)
+  subscription_features   subscription_features?           @relation(fields: [subscription_feature_id], references: [id], onUpdate: NoAction, map: "FK_490409e983f4d310ad3da4d8470")
+
+  @@index([subscription_feature_id], map: "FK_490409e983f4d310ad3da4d8470")
+}
+
+model subscription_features {
+  id                        String                      @id @db.VarChar(36)
+  subscription_id           String                      @db.VarChar(255)
+  feature_id                String                      @db.VarChar(255)
+  quantity                  Int?                        @default(1)
+  price                     Decimal                     @db.Decimal(10, 2)
+  is_active                 Int                         @default(1) @db.TinyInt
+  created_at                DateTime                    @default(now()) @db.DateTime(6)
+  updated_at                DateTime                    @default(now()) @db.DateTime(6)
+  subscription_feature_logs subscription_feature_logs[]
+  features                  features                    @relation(fields: [feature_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "FK_2fecc17c6205a70dea764511dc5")
+  subscriptions             subscriptions               @relation(fields: [subscription_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "FK_ea26424925db0d7a2429a8b948e")
+
+  @@index([feature_id], map: "FK_2fecc17c6205a70dea764511dc5")
+  @@index([subscription_id], map: "FK_ea26424925db0d7a2429a8b948e")
+}
+
+model subscriptions {
+  id                                          String                      @id @db.VarChar(36)
+  subscription_code                           String?                     @unique(map: "IDX_616df085ddc496ef3609383682") @db.VarChar(255)
+  tenant_id                                   String                      @db.VarChar(255)
+  plan_id                                     String                      @db.VarChar(255)
+  previous_plan_id                            String?                     @db.VarChar(255)
+  status                                      subscriptions_status        @default(trial)
+  billing_cycle                               subscriptions_billing_cycle @default(monthly)
+  start_date                                  DateTime                    @db.Date
+  end_date                                    DateTime                    @db.Date
+  next_billing_date                           DateTime?                   @db.Date
+  billing_anchor_date                         DateTime?                   @db.Date
+  auto_renew                                  Int                         @default(1) @db.TinyInt
+  cancelled_at                                DateTime?                   @db.Timestamp(0)
+  cancellation_reason                         String?                     @db.Text
+  renewed_count                               Int                         @default(0)
+  last_renewed_at                             DateTime?                   @db.Timestamp(0)
+  created_at                                  DateTime                    @default(now()) @db.DateTime(6)
+  updated_at                                  DateTime                    @default(now()) @db.DateTime(6)
+  billing_history                             billing_history[]
+  invoices                                    invoices[]
+  subscription_features                       subscription_features[]
+  plans_subscriptions_previous_plan_idToplans plans?                      @relation("subscriptions_previous_plan_idToplans", fields: [previous_plan_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "FK_dfc0332dc3b8edf0e5b0e4d503f")
+  plans_subscriptions_plan_idToplans          plans                       @relation("subscriptions_plan_idToplans", fields: [plan_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "FK_e45fca5d912c3a2fab512ac25dc")
+  tenants                                     tenants                     @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "FK_f6ac03431c311ccb8bbd7d3af18")
+
+  @@index([previous_plan_id], map: "FK_dfc0332dc3b8edf0e5b0e4d503f")
+  @@index([plan_id], map: "FK_e45fca5d912c3a2fab512ac25dc")
+  @@index([tenant_id], map: "FK_f6ac03431c311ccb8bbd7d3af18")
+}
+
+model tenant_credits {
+  id               String                @id @db.VarChar(36)
+  tenant_id        String                @db.VarChar(255)
+  type             tenant_credits_type   @default(manual)
+  status           tenant_credits_status @default(available)
+  original_amount  Decimal               @db.Decimal(10, 2)
+  remaining_amount Decimal               @db.Decimal(10, 2)
+  description      String?               @db.Text
+  reference_type   String?               @db.VarChar(255)
+  reference_id     String?               @db.VarChar(255)
+  expires_at       DateTime?             @db.Timestamp(0)
+  used_at          DateTime?             @db.Timestamp(0)
+  created_by       String?               @db.VarChar(255)
+  created_at       DateTime              @default(now()) @db.DateTime(6)
+  tenants          tenants               @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "FK_1c75d0789feee398e6cd35df720")
+
+  @@index([tenant_id], map: "FK_1c75d0789feee398e6cd35df720")
+}
+
+model tenants {
+  id             String           @id @db.VarChar(36)
+  name           String           @db.VarChar(255)
+  room_count     Int              @default(0)
+  status         tenants_status   @default(trial)
+  trial_ends_at  DateTime?        @db.Timestamp(0)
+  created_at     DateTime         @default(now()) @db.DateTime(6)
+  updated_at     DateTime         @default(now()) @db.DateTime(6)
+  invoices       invoices[]
+  subscriptions  subscriptions[]
+  tenant_credits tenant_credits[]
+}
+
+enum invoice_adjustments_type {
+  discount
+  credit
+  surcharge
+  proration
+  void
+  refund
+}
+
+enum invoice_items_type {
+  plan
+  feature
+  adjustment
+}
+
+enum tenant_credits_type {
+  manual
+  refund
+  proration
+  promotion
+  cancellation
+}
+
+enum billing_history_eventType {
+  created
+  renewed
+  upgraded
+  downgraded
+  cycle_changed
+  cancelled
+  reactivated
+  expired
+}
+
+enum tenant_credits_status {
+  available
+  used
+  expired
+  cancelled
+}
+
+enum tenants_status {
+  trial
+  active
+  suspended
+  expired
+}
+
+enum features_type {
+  toggle
+  limit
+  module
+}
+
+enum payment_refunds_status {
+  pending
+  approved
+  rejected
+  completed
+}
+
+enum payments_method {
+  transfer
+  qr
+  cash
+}
+
+enum payment_refunds_method {
+  original_method
+  bank_transfer
+  credit
+}
+
+enum subscription_feature_logs_action {
+  added
+  updated
+  removed
+}
+
+enum subscriptions_status {
+  trial
+  pending
+  active
+  expired
+  cancelled
+}
+
+enum payments_status {
+  pending
+  approved
+  rejected
+  refunded
+  partially_refunded
+}
+
+enum subscriptions_billing_cycle {
+  monthly
+  yearly
+}
+
+enum invoices_status {
+  pending
+  paid
+  rejected
+  voided
+}
+
+// Notification model
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String?
+  tenantId  String?
+  title     String
+  message   String
+  type      String   @default("info") // info, success, warning, error
+  category  String?  // booking, trial, payment, system
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now()) @db.DateTime(6)
+  updatedAt DateTime @default(now()) @updatedAt @db.DateTime(6)
+
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+  @@index([tenantId])
+  @@map("notifications")
+}
+
+// AnalyticsEvent model
+model AnalyticsEvent {
+  id        String   @id @default(uuid())
+  userId    String?
+  tenantId  String?
+  eventName String
+  metadata  Json?
+  createdAt DateTime @default(now()) @db.DateTime(6)
+
+  @@index([userId])
+  @@index([tenantId])
+  @@map("analytics_events")
+}
+
+// FeatureFlag model
+model FeatureFlag {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(false)
+  rules       Json?    // e.g., { "tenantIds": ["..."], "percentage": 50 }
+  createdAt   DateTime @default(now()) @db.DateTime(6)
+  updatedAt   DateTime @default(now()) @updatedAt @db.DateTime(6)
+
+  @@map("feature_flags")
+}
+
+// ContactDemo model
+model ContactDemo {
+  id        String   @id @default(uuid())
+  name      String
+  email     String
+  phoneNumber String?
+  demoDate  DateTime
+  demoType  String   // online, onsite
+  status    String   @default("pending") // pending, confirmed, cancelled, completed
+  notes     String?  @db.Text
+  createdAt DateTime @default(now()) @db.DateTime(6)
+  updatedAt DateTime @default(now()) @updatedAt @db.DateTime(6)
+
+  @@map("contact_demos")
+}
+
+// ContactMessage model
+model ContactMessage {
+  id        String   @id @default(uuid())
+  name      String
+  email     String
+  subject   String?
+  message   String   @db.Text
+  status    String   @default("unread") // unread, read, replied
+  createdAt DateTime @default(now()) @db.DateTime(6)
+  updatedAt DateTime @default(now()) @updatedAt @db.DateTime(6)
+
+  @@map("contact_messages")
+}
+
+// OnboardingStep model
+model OnboardingStep {
+  id          String   @id @default(uuid())
+  tenantId    String
+  stepKey     String   // e.g., 'create_room', 'setup_profile', 'first_booking'
+  isCompleted Boolean  @default(false)
+  completedAt DateTime?
+  createdAt   DateTime @default(now()) @db.DateTime(6)
+  updatedAt   DateTime @default(now()) @updatedAt @db.DateTime(6)
+
+  @@unique([tenantId, stepKey])
+  @@index([tenantId])
+  @@map("onboarding_steps")
+}
+
+// LoyaltyPoint model
+model LoyaltyPoint {
+  id        String   @id @default(uuid())
+  tenantId  String   @unique
+  points    Int      @default(0)
+  tier      String   @default("standard") // standard, silver, gold, platinum
+  updatedAt DateTime @default(now()) @updatedAt @db.DateTime(6)
+
+  @@index([tenantId])
+  @@map("loyalty_points")
+}
+
+// Referral model
+model Referral {
+  id          String   @id @default(uuid())
+  referrerId  String?  // userId who referred
+  tenantId    String?  // tenantId who referred
+  email       String   // email of invited person
+  status      String   @default("pending") // pending, joined, rewarded
+  rewardPoints Int     @default(0)
+  createdAt   DateTime @default(now()) @db.DateTime(6)
+  updatedAt   DateTime @default(now()) @updatedAt @db.DateTime(6)
+
+  @@index([referrerId])
+  @@map("referrals")
+}
+
+// Promotion model
+model Promotion {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  imageUrl    String?
+  targetSegment String? // e.g., 'new_user', 'active_user', 'churn_risk'
+  isActive    Boolean  @default(true)
+  startDate   DateTime?
+  endDate     DateTime?
+  createdAt   DateTime @default(now()) @db.DateTime(6)
+  updatedAt   DateTime @default(now()) @updatedAt @db.DateTime(6)
+
+  @@map("promotions")
+}
+
+// Coupon model
+model Coupon {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  description String?
+  discountType String  // percentage, fixed_amount
+  discountValue Decimal @db.Decimal(10, 2)
+  minPurchase  Decimal? @db.Decimal(10, 2)
+  isActive    Boolean  @default(true)
+  expiresAt   DateTime?
+  createdAt   DateTime @default(now()) @db.DateTime(6)
+  updatedAt   DateTime @default(now()) @updatedAt @db.DateTime(6)
+
+  @@map("coupons")
 }

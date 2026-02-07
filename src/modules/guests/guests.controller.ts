@@ -15,28 +15,28 @@ export class GuestsController {
 
   @Get()
   @ApiOperation({ summary: 'Get all guests' })
-  @Roles('admin', 'manager')
+  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
   async findAll(@Query() query: any, @CurrentUser() user: { tenantId?: string }) {
     return this.guestsService.findAll(query, user?.tenantId);
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get guest by ID' })
-  @Roles('admin', 'manager')
+  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
   async findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.guestsService.findOne(id, user?.tenantId);
   }
 
   @Post()
   @ApiOperation({ summary: 'Create a new guest' })
-  @Roles('admin', 'manager')
+  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
   async create(@Body() createGuestDto: any, @CurrentUser() user: { tenantId?: string }) {
     return this.guestsService.create(createGuestDto, user?.tenantId);
   }
 
   @Put(':id')
   @ApiOperation({ summary: 'Update guest' })
-  @Roles('admin', 'manager')
+  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
   async update(
     @Param('id') id: string,
     @Body() updateGuestDto: any,
@@ -47,7 +47,7 @@ export class GuestsController {
 
   @Delete(':id')
   @ApiOperation({ summary: 'Delete guest' })
-  @Roles('admin')
+  @Roles('admin', 'tenant_admin', 'platform_admin')
   async remove(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.guestsService.remove(id, user?.tenantId);
   }
