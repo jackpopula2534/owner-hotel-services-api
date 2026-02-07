@@ -29,7 +29,7 @@ export class RestaurantController {
   @Get()
   @ApiOperation({ summary: 'Get all restaurants' })
   @ApiResponse({ status: 200, description: 'List of restaurants' })
-  @Roles('admin', 'manager')
+  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
   async findAll(@Query() query: any, @CurrentUser() user: { tenantId?: string }) {
     return this.restaurantService.findAll(query, user?.tenantId);
   }
@@ -38,7 +38,7 @@ export class RestaurantController {
   @ApiOperation({ summary: 'Get restaurant by ID' })
   @ApiResponse({ status: 200, description: 'Restaurant details' })
   @ApiResponse({ status: 404, description: 'Restaurant not found' })
-  @Roles('admin', 'manager')
+  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
   async findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.restaurantService.findOne(id, user?.tenantId);
   }
@@ -46,7 +46,7 @@ export class RestaurantController {
   @Post()
   @ApiOperation({ summary: 'Create a new restaurant' })
   @ApiResponse({ status: 201, description: 'Restaurant created successfully' })
-  @Roles('admin')
+  @Roles('admin', 'manager', 'tenant_admin', 'platform_admin')
   async create(
     @Body() createRestaurantDto: CreateRestaurantDto,
     @CurrentUser() user: { tenantId?: string },
@@ -57,7 +57,7 @@ export class RestaurantController {
   @Patch(':id')
   @ApiOperation({ summary: 'Update restaurant' })
   @ApiResponse({ status: 200, description: 'Restaurant updated successfully' })
-  @Roles('admin')
+  @Roles('admin', 'manager', 'tenant_admin', 'platform_admin')
   async update(
     @Param('id') id: string,
     @Body() updateRestaurantDto: UpdateRestaurantDto,
@@ -69,7 +69,7 @@ export class RestaurantController {
   @Delete(':id')
   @ApiOperation({ summary: 'Delete restaurant' })
   @ApiResponse({ status: 200, description: 'Restaurant deleted successfully' })
-  @Roles('admin')
+  @Roles('admin', 'tenant_admin', 'platform_admin')
   async remove(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.restaurantService.remove(id, user?.tenantId);
   }

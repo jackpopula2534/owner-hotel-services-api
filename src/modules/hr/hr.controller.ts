@@ -29,7 +29,7 @@ export class HrController {
   @Get()
   @ApiOperation({ summary: 'Get all employees' })
   @ApiResponse({ status: 200, description: 'List of employees' })
-  @Roles('admin', 'manager')
+  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
   async findAll(@Query() query: any, @CurrentUser() user: { tenantId?: string }) {
     return this.hrService.findAll(query, user?.tenantId);
   }
@@ -38,7 +38,7 @@ export class HrController {
   @ApiOperation({ summary: 'Get employee by ID' })
   @ApiResponse({ status: 200, description: 'Employee details' })
   @ApiResponse({ status: 404, description: 'Employee not found' })
-  @Roles('admin', 'manager')
+  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
   async findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.hrService.findOne(id, user?.tenantId);
   }
@@ -46,7 +46,7 @@ export class HrController {
   @Post()
   @ApiOperation({ summary: 'Create a new employee' })
   @ApiResponse({ status: 201, description: 'Employee created successfully' })
-  @Roles('admin')
+  @Roles('admin', 'manager', 'tenant_admin', 'platform_admin')
   async create(
     @Body() createEmployeeDto: CreateEmployeeDto,
     @CurrentUser() user: { tenantId?: string },
@@ -57,7 +57,7 @@ export class HrController {
   @Patch(':id')
   @ApiOperation({ summary: 'Update employee' })
   @ApiResponse({ status: 200, description: 'Employee updated successfully' })
-  @Roles('admin')
+  @Roles('admin', 'manager', 'tenant_admin', 'platform_admin')
   async update(
     @Param('id') id: string,
     @Body() updateEmployeeDto: UpdateEmployeeDto,
@@ -69,7 +69,7 @@ export class HrController {
   @Delete(':id')
   @ApiOperation({ summary: 'Delete employee' })
   @ApiResponse({ status: 200, description: 'Employee deleted successfully' })
-  @Roles('admin')
+  @Roles('admin', 'tenant_admin', 'platform_admin')
   async remove(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.hrService.remove(id, user?.tenantId);
   }

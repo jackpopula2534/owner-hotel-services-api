@@ -60,7 +60,7 @@ export class TenantsController {
    * รวมข้อมูล: status, subscription, plan, features, invoices, alerts, permissions
    */
   @Get('hotels/:id')
-  @Roles('platform_admin', 'tenant_admin')
+  @Roles('platform_admin', 'tenant_admin', 'manager', 'receptionist', 'staff', 'user')
   getHotelDetail(@Param('id') id: string) {
     return this.hotelDetailService.getHotelDetail(id);
   }
