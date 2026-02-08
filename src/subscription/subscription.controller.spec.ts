@@ -35,7 +35,7 @@ describe('SubscriptionController', () => {
 
   describe('getRenewalStatus', () => {
     it('should return renewal status with subscription details', async () => {
-      const mockUser = { id: 'user-1', tenantId: 'tenant-1' };
+      const mockUser = { userId: 'user-1', tenantId: 'tenant-1' };
       const mockSubscription = {
         id: 'sub-1',
         tenantId: 'tenant-1',
@@ -58,7 +58,7 @@ describe('SubscriptionController', () => {
     });
 
     it('should return inactive status when no subscription', async () => {
-      const mockUser = { id: 'user-1', tenantId: 'tenant-1' };
+      const mockUser = { userId: 'user-1', tenantId: 'tenant-1' };
 
       mockSubscriptionsService.findByTenantId.mockResolvedValue(null);
 

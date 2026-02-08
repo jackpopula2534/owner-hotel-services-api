@@ -11,23 +11,23 @@ export class AnalyticsController {
 
   @Post('event')
   async trackEvent(
-    @CurrentUser() user: any,
+    @CurrentUser() user: { userId: string; tenantId: string },
     @Body() createAnalyticsEventDto: CreateAnalyticsEventDto,
   ) {
     return this.analyticsService.trackEvent(
-      user.id,
+      user.userId,
       user.tenantId,
       createAnalyticsEventDto,
     );
   }
 
   @Get('summary')
-  async getSummary(@CurrentUser() user: any) {
+  async getSummary(@CurrentUser() user: { tenantId: string }) {
     return this.analyticsService.getSummary(user.tenantId);
   }
 
   @Get('feature-flag/:name')
-  async getFeatureFlag(@Param('name') name: string, @CurrentUser() user: any) {
+  async getFeatureFlag(@Param('name') name: string, @CurrentUser() user: { tenantId: string }) {
     return this.analyticsService.getFeatureFlag(name, user.tenantId);
   }
 }

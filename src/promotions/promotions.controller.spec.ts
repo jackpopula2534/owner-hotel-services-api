@@ -37,7 +37,7 @@ describe('PromotionsController', () => {
 
   describe('getActivePromotions', () => {
     it('should return active promotions for user segment', async () => {
-      const mockUser = { id: 'user-1', tenantId: 'tenant-1', segment: 'new_user' };
+      const mockUser = { userId: 'user-1', tenantId: 'tenant-1', segment: 'new_user' };
       const mockPromotions = [
         {
           id: '1',
@@ -58,7 +58,7 @@ describe('PromotionsController', () => {
     });
 
     it('should use segment from query parameter', async () => {
-      const mockUser = { id: 'user-1', tenantId: 'tenant-1', segment: 'standard' };
+      const mockUser = { userId: 'user-1', tenantId: 'tenant-1', segment: 'standard' };
       const mockPromotions = [];
 
       mockPromotionsService.getActivePromotions.mockResolvedValue(mockPromotions);

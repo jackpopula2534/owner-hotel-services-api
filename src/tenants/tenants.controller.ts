@@ -39,7 +39,7 @@ export class TenantsController {
    * ใช้เมื่อกดปุ่ม "+ เพิ่มโรงแรมใหม่"
    */
   @Post('hotels')
-  @Roles('platform_admin')
+  @Roles('platform_admin', 'tenant_admin', 'manager', 'receptionist', 'staff', 'user')
   createHotel(@Body() createHotelDto: CreateHotelDto) {
     return this.hotelManagementService.createHotel(createHotelDto);
   }
@@ -68,11 +68,13 @@ export class TenantsController {
   // ===== LEGACY ENDPOINTS =====
 
   @Post()
+  @Roles('platform_admin')
   create(@Body() createTenantDto: CreateTenantDto) {
     return this.tenantsService.create(createTenantDto);
   }
 
   @Get()
+  @Roles('platform_admin', 'tenant_admin', 'manager', 'receptionist', 'staff', 'user')
   findAll() {
     return this.tenantsService.findAll();
   }
@@ -81,21 +83,25 @@ export class TenantsController {
    * @deprecated Use GET /tenants/hotels/:id instead
    */
   @Get(':id/detail')
+  @Roles('platform_admin', 'tenant_admin', 'manager', 'receptionist', 'staff', 'user')
   getHotelDetailLegacy(@Param('id') id: string) {
     return this.hotelDetailService.getHotelDetail(id);
   }
 
   @Get(':id')
+  @Roles('platform_admin', 'tenant_admin', 'manager', 'receptionist', 'staff', 'user')
   findOne(@Param('id') id: string) {
     return this.tenantsService.findOne(id);
   }
 
   @Patch(':id')
+  @Roles('platform_admin', 'tenant_admin')
   update(@Param('id') id: string, @Body() updateTenantDto: UpdateTenantDto) {
     return this.tenantsService.update(id, updateTenantDto);
   }
 
   @Delete(':id')
+  @Roles('platform_admin')
   remove(@Param('id') id: string) {
     return this.tenantsService.remove(id);
   }

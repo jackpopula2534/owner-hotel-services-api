@@ -20,22 +20,22 @@ export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}
 
   @Get()
-  async findAll(@CurrentUser() user: any, @Query() query: NotificationQueryDto) {
-    return this.notificationsService.findAll(user.id, query);
+  async findAll(@CurrentUser() user: { userId: string }, @Query() query: NotificationQueryDto) {
+    return this.notificationsService.findAll(user.userId, query);
   }
 
   @Patch(':id/read')
-  async markAsRead(@Param('id') id: string, @CurrentUser() user: any) {
-    return this.notificationsService.markAsRead(id, user.id);
+  async markAsRead(@Param('id') id: string, @CurrentUser() user: { userId: string }) {
+    return this.notificationsService.markAsRead(id, user.userId);
   }
 
   @Patch('read-all')
-  async markAllAsRead(@CurrentUser() user: any) {
-    return this.notificationsService.markAllAsRead(user.id);
+  async markAllAsRead(@CurrentUser() user: { userId: string }) {
+    return this.notificationsService.markAllAsRead(user.userId);
   }
 
   @Delete(':id')
-  async remove(@Param('id') id: string, @CurrentUser() user: any) {
-    return this.notificationsService.remove(id, user.id);
+  async remove(@Param('id') id: string, @CurrentUser() user: { userId: string }) {
+    return this.notificationsService.remove(id, user.userId);
   }
 }

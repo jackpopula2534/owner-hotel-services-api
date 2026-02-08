@@ -29,7 +29,7 @@ export class RoomsController {
   @Get()
   @ApiOperation({ summary: 'Get all rooms' })
   @ApiResponse({ status: 200, description: 'List of rooms' })
-  @Roles('admin', 'manager')
+  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
   async findAll(@Query() query: any, @CurrentUser() user: { tenantId?: string }) {
     return this.roomsService.findAll(query, user?.tenantId);
   }
@@ -37,7 +37,7 @@ export class RoomsController {
   @Get('available')
   @ApiOperation({ summary: 'Get available rooms for date range' })
   @ApiResponse({ status: 200, description: 'List of available rooms' })
-  @Roles('admin', 'manager')
+  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
   async getAvailableRooms(
     @Query('checkIn') checkIn: string,
     @Query('checkOut') checkOut: string,
@@ -50,7 +50,7 @@ export class RoomsController {
   @ApiOperation({ summary: 'Get room by ID' })
   @ApiResponse({ status: 200, description: 'Room details' })
   @ApiResponse({ status: 404, description: 'Room not found' })
-  @Roles('admin', 'manager')
+  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
   async findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.roomsService.findOne(id, user?.tenantId);
   }
@@ -58,7 +58,7 @@ export class RoomsController {
   @Post()
   @ApiOperation({ summary: 'Create a new room' })
   @ApiResponse({ status: 201, description: 'Room created successfully' })
-  @Roles('admin')
+  @Roles('admin', 'manager', 'tenant_admin', 'platform_admin')
   async create(
     @Body() createRoomDto: CreateRoomDto,
     @CurrentUser() user: { tenantId?: string },
@@ -69,7 +69,7 @@ export class RoomsController {
   @Patch(':id')
   @ApiOperation({ summary: 'Update room' })
   @ApiResponse({ status: 200, description: 'Room updated successfully' })
-  @Roles('admin')
+  @Roles('admin', 'manager', 'tenant_admin', 'platform_admin')
   async update(
     @Param('id') id: string,
     @Body() updateRoomDto: UpdateRoomDto,
@@ -81,7 +81,7 @@ export class RoomsController {
   @Patch(':id/status')
   @ApiOperation({ summary: 'Update room status' })
   @ApiResponse({ status: 200, description: 'Room status updated' })
-  @Roles('admin', 'manager')
+  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
   async updateStatus(
     @Param('id') id: string,
     @Body('status') status: string,
@@ -93,7 +93,7 @@ export class RoomsController {
   @Delete(':id')
   @ApiOperation({ summary: 'Delete room' })
   @ApiResponse({ status: 200, description: 'Room deleted successfully' })
-  @Roles('admin')
+  @Roles('admin', 'tenant_admin', 'platform_admin')
   async remove(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.roomsService.remove(id, user?.tenantId);
   }

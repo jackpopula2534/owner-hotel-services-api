@@ -38,7 +38,7 @@ describe('AnalyticsController', () => {
 
   describe('trackEvent', () => {
     it('should track analytics event', async () => {
-      const mockUser = { id: 'user-1', tenantId: 'tenant-1' };
+      const mockUser = { userId: 'user-1', tenantId: 'tenant-1' };
       const dto: CreateAnalyticsEventDto = {
         eventName: 'page_view',
         metadata: { page: '/dashboard' },
@@ -63,7 +63,7 @@ describe('AnalyticsController', () => {
 
   describe('getSummary', () => {
     it('should return analytics summary', async () => {
-      const mockUser = { id: 'user-1', tenantId: 'tenant-1' };
+      const mockUser = { userId: 'user-1', tenantId: 'tenant-1' };
       const mockSummary = {
         timeSaved: 120,
         bookingsGrowth: 15,
@@ -87,7 +87,7 @@ describe('AnalyticsController', () => {
 
   describe('getFeatureFlag', () => {
     it('should return feature flag status', async () => {
-      const mockUser = { id: 'user-1', tenantId: 'tenant-1' };
+      const mockUser = { userId: 'user-1', tenantId: 'tenant-1' };
       const mockFlag = { isActive: true };
 
       mockAnalyticsService.getFeatureFlag.mockResolvedValue(mockFlag);

@@ -11,8 +11,15 @@ export class NotificationsService {
   ) {}
 
   async findAll(userId: string, query: NotificationQueryDto) {
-    const page = parseInt(query.page || '1');
-    const limit = parseInt(query.limit || '10');
+    if (!userId) {
+      return {
+        items: [],
+        meta: { total: 0, page: 1, limit: 10, totalPages: 0 },
+      };
+    }
+
+    const page = Math.max(1, parseInt(query.page || '1') || 1);
+    const limit = Math.max(1, parseInt(query.limit || '10') || 10);
     const skip = (page - 1) * limit;
 
     const where: any = { userId };

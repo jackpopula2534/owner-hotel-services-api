@@ -37,7 +37,7 @@ describe('LoyaltyController', () => {
 
   describe('getPoints', () => {
     it('should return loyalty points', async () => {
-      const mockUser = { id: 'user-1', tenantId: 'tenant-1' };
+      const mockUser = { userId: 'user-1', tenantId: 'tenant-1' };
       const mockPoints = {
         tenantId: 'tenant-1',
         points: 500,
@@ -55,7 +55,7 @@ describe('LoyaltyController', () => {
 
   describe('inviteReferral', () => {
     it('should create referral invitation', async () => {
-      const mockUser = { id: 'user-1', tenantId: 'tenant-1' };
+      const mockUser = { userId: 'user-1', tenantId: 'tenant-1' };
       const dto: InviteReferralDto = {
         email: 'friend@example.com',
       };

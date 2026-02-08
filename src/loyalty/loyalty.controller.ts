@@ -10,12 +10,15 @@ export class LoyaltyController {
   constructor(private readonly loyaltyService: LoyaltyService) {}
 
   @Get('loyalty/points')
-  async getPoints(@CurrentUser() user: any) {
+  async getPoints(@CurrentUser() user: { tenantId: string }) {
     return this.loyaltyService.getPoints(user.tenantId);
   }
 
   @Post('referral/invite')
-  async inviteReferral(@CurrentUser() user: any, @Body() data: InviteReferralDto) {
-    return this.loyaltyService.inviteReferral(user.id, user.tenantId, data);
+  async inviteReferral(
+    @CurrentUser() user: { userId: string; tenantId: string },
+    @Body() data: InviteReferralDto,
+  ) {
+    return this.loyaltyService.inviteReferral(user.userId, user.tenantId, data);
   }
 }

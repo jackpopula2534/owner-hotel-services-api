@@ -99,7 +99,7 @@ describe('OnboardingController', () => {
 
   describe('getProgress', () => {
     it('should return onboarding progress for authenticated user', async () => {
-      const mockUser = { id: 'user-1', tenantId: 'tenant-1' };
+      const mockUser = { userId: 'user-1', tenantId: 'tenant-1' };
       const mockSteps = [
         { id: '1', stepKey: 'setup_profile', isCompleted: true },
         { id: '2', stepKey: 'create_room', isCompleted: false },
@@ -116,7 +116,7 @@ describe('OnboardingController', () => {
 
   describe('updateStep', () => {
     it('should update onboarding step', async () => {
-      const mockUser = { id: 'user-1', tenantId: 'tenant-1' };
+      const mockUser = { userId: 'user-1', tenantId: 'tenant-1' };
       const mockUpdatedStep = {
         id: '1',
         stepKey: 'setup_profile',

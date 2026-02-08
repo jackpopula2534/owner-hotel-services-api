@@ -49,7 +49,7 @@ describe('NotificationsController', () => {
 
   describe('findAll', () => {
     it('should return paginated notifications', async () => {
-      const mockUser = { id: 'user-1', tenantId: 'tenant-1' };
+      const mockUser = { userId: 'user-1', tenantId: 'tenant-1' };
       const query: NotificationQueryDto = { page: '1', limit: '10' };
       const mockResult = {
         items: [mockNotification],
@@ -67,7 +67,7 @@ describe('NotificationsController', () => {
 
   describe('markAsRead', () => {
     it('should mark notification as read', async () => {
-      const mockUser = { id: 'user-1' };
+      const mockUser = { userId: 'user-1' };
       const updatedNotification = { ...mockNotification, isRead: true };
 
       mockNotificationsService.markAsRead.mockResolvedValue(updatedNotification);
@@ -81,7 +81,7 @@ describe('NotificationsController', () => {
 
   describe('markAllAsRead', () => {
     it('should mark all notifications as read', async () => {
-      const mockUser = { id: 'user-1' };
+      const mockUser = { userId: 'user-1' };
       const mockResult = { count: 5 };
 
       mockNotificationsService.markAllAsRead.mockResolvedValue(mockResult);
@@ -95,7 +95,7 @@ describe('NotificationsController', () => {
 
   describe('remove', () => {
     it('should delete notification', async () => {
-      const mockUser = { id: 'user-1' };
+      const mockUser = { userId: 'user-1' };
 
       mockNotificationsService.remove.mockResolvedValue(mockNotification);
 

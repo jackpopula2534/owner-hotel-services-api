@@ -34,19 +34,23 @@ export class HotelManagementService {
    * สร้างโรงแรมใหม่ (เพิ่มโรงแรมใหม่)
    */
   async createHotel(dto: CreateHotelDto): Promise<CreateHotelResponseDto> {
+    // 0. Handle roomCount mapping and planCode default
+    const effectivePlanCode = dto.planCode || 'M'; // Default to Professional for internal creation
+    const effectiveRoomCount = dto.roomCount || dto.rooms || 1;
+
     // 1. ตรวจสอบ Plan
     const plan = await this.plansRepository.findOne({
-      where: { code: dto.planCode, isActive: true },
+      where: { code: effectivePlanCode, isActive: true },
     });
 
     if (!plan) {
-      throw new BadRequestException(`Plan with code "${dto.planCode}" not found or inactive`);
+      throw new BadRequestException(`Plan with code "${effectivePlanCode}" not found or inactive`);
     }
 
     // 2. ตรวจสอบจำนวนห้อง
-    if (dto.roomCount > plan.maxRooms) {
+    if (effectiveRoomCount > plan.maxRooms) {
       throw new BadRequestException(
-        `Room count (${dto.roomCount}) exceeds plan limit (${plan.maxRooms} rooms for Plan ${plan.code})`,
+        `Room count (${effectiveRoomCount}) exceeds plan limit (${plan.maxRooms} rooms for Plan ${plan.code})`,
       );
     }
 
@@ -58,7 +62,20 @@ export class HotelManagementService {
     // 4. สร้าง Tenant (Hotel)
     const tenant = this.tenantsRepository.create({
       name: dto.name,
-      roomCount: dto.roomCount,
+      nameEn: dto.nameEn,
+      propertyType: dto.propertyType,
+      location: dto.location,
+      roomCount: effectiveRoomCount,
+      website: dto.website,
+      description: dto.description,
+      customerName: dto.customerName,
+      taxId: dto.taxId,
+      email: dto.email,
+      phone: dto.phone,
+      address: dto.address,
+      district: dto.district,
+      province: dto.province,
+      postalCode: dto.postalCode,
       status: TenantStatus.TRIAL,
       trialEndsAt,
     });

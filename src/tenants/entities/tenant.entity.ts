@@ -28,6 +28,45 @@ export class Tenant {
   @Column({ name: 'room_count', default: 0 })
   roomCount: number;
 
+  @Column({ name: 'name_en', nullable: true })
+  nameEn: string;
+
+  @Column({ name: 'property_type', nullable: true })
+  propertyType: string;
+
+  @Column({ nullable: true })
+  location: string;
+
+  @Column({ nullable: true })
+  website: string;
+
+  @Column({ type: 'text', nullable: true })
+  description: string;
+
+  @Column({ name: 'customer_name', nullable: true })
+  customerName: string;
+
+  @Column({ name: 'tax_id', nullable: true })
+  taxId: string;
+
+  @Column({ nullable: true })
+  email: string;
+
+  @Column({ nullable: true })
+  phone: string;
+
+  @Column({ type: 'text', nullable: true })
+  address: string;
+
+  @Column({ nullable: true })
+  district: string;
+
+  @Column({ nullable: true })
+  province: string;
+
+  @Column({ name: 'postal_code', nullable: true })
+  postalCode: string;
+
   @Column({
     type: 'enum',
     enum: TenantStatus,

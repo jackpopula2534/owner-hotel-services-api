@@ -22,11 +22,13 @@ export enum BillingCycle {
  * DTO สำหรับสร้างโรงแรมใหม่ (เพิ่มโรงแรมใหม่)
  * ใช้ในหน้า Admin Panel เมื่อกดปุ่ม "+ เพิ่มโรงแรมใหม่"
  */
+import { Type } from 'class-transformer';
+
 export class CreateHotelDto {
   // === ข้อมูลพื้นฐาน ===
 
   /**
-   * ชื่อโรงแรม
+   * ชื่อโรงแรม (Thai)
    * @example "โรงแรมตัวอย่าง 1"
    */
   @IsString()
@@ -34,13 +36,48 @@ export class CreateHotelDto {
   name: string;
 
   /**
+   * ชื่อโรงแรม (English)
+   * @example "Example Hotel 1"
+   */
+  @IsString()
+  @IsOptional()
+  @MaxLength(255)
+  nameEn?: string;
+
+  /**
+   * ประเภทที่พัก
+   * @example "hotel", "resort", "villa"
+   */
+  @IsString()
+  @IsOptional()
+  propertyType?: string;
+
+  /**
+   * สถานที่ตั้ง / ทำเล
+   */
+  @IsString()
+  @IsOptional()
+  location?: string;
+
+  /**
+   * จำนวนห้องพัก (Legacy/Alternative field from frontend)
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  rooms?: number;
+
+  /**
    * จำนวนห้องพัก
    * @example 50
    */
+  @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(9999)
-  roomCount: number;
+  roomCount?: number;
 
   // === ข้อมูลลูกค้า/บริษัท ===
 
@@ -49,8 +86,9 @@ export class CreateHotelDto {
    * @example "บริษัท ABC จำกัด"
    */
   @IsString()
+  @IsOptional()
   @MaxLength(255)
-  customerName: string;
+  customerName?: string;
 
   /**
    * เลขประจำตัวผู้เสียภาษี (ถ้ามี)
@@ -79,6 +117,14 @@ export class CreateHotelDto {
   @IsOptional()
   @MaxLength(20)
   phone?: string;
+
+  /**
+   * เว็บไซต์
+   */
+  @IsString()
+  @IsOptional()
+  @MaxLength(255)
+  website?: string;
 
   // === ที่อยู่ ===
 
@@ -118,6 +164,16 @@ export class CreateHotelDto {
   @MaxLength(10)
   postalCode?: string;
 
+  // === รายละเอียด ===
+
+  /**
+   * รายละเอียด / คำอธิบาย
+   */
+  @IsString()
+  @IsOptional()
+  @MaxLength(2000)
+  description?: string;
+
   // === แพ็คเกจและการชำระเงิน ===
 
   /**
@@ -125,7 +181,8 @@ export class CreateHotelDto {
    * @example "M"
    */
   @IsString()
-  planCode: string;
+  @IsOptional()
+  planCode?: string = 'S';
 
   /**
    * รอบการชำระเงิน
@@ -133,6 +190,7 @@ export class CreateHotelDto {
    */
   @IsEnum(BillingCycle)
   @IsOptional()
+  @IsString()
   billingCycle?: BillingCycle = BillingCycle.MONTHLY;
 
   // === หมายเหตุ ===
