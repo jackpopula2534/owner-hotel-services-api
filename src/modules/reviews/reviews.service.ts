@@ -13,6 +13,16 @@ export class ReviewsService {
     const { rating, bookingId, search } = query;
     const skip = (page - 1) * limit;
 
+    // ถ้าไม่มี tenantId (user ใหม่ยังไม่มีโรงแรม) ให้ return empty data
+    if (!tenantId) {
+      return {
+        data: [],
+        total: 0,
+        page,
+        limit,
+      };
+    }
+
     const where: any = {};
     if (tenantId != null) where.tenantId = tenantId;
     if (rating) where.rating = parseInt(rating);

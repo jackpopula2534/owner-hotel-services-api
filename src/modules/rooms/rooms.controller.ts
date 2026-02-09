@@ -42,8 +42,9 @@ export class RoomsController {
     @Query('checkIn') checkIn: string,
     @Query('checkOut') checkOut: string,
     @CurrentUser() user: { tenantId?: string },
+    @Query('propertyId') propertyId?: string,
   ) {
-    return this.roomsService.getAvailableRooms(checkIn, checkOut, user?.tenantId);
+    return this.roomsService.getAvailableRooms(checkIn, checkOut, propertyId, user?.tenantId);
   }
 
   @Get(':id')

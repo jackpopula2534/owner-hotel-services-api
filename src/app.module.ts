@@ -9,8 +9,10 @@ import { AuthModule } from './modules/auth/auth.module';
 import { GuestsModule } from './modules/guests/guests.module';
 import { BookingsModule } from './modules/bookings/bookings.module';
 import { RoomsModule } from './modules/rooms/rooms.module';
+import { PropertiesModule } from './modules/properties/properties.module';
 import { RestaurantModule } from './modules/restaurant/restaurant.module';
 import { HrModule } from './modules/hr/hr.module';
+import { UsersModule } from './modules/users/users.module';
 import { ChannelsModule } from './modules/channels/channels.module';
 import { ReviewsModule } from './modules/reviews/reviews.module';
 import { TenantsModule } from './tenants/tenants.module';
@@ -47,8 +49,10 @@ import { PromotionsModule } from './promotions/promotions.module';
     GuestsModule,
     BookingsModule,
     RoomsModule,
+    PropertiesModule,
     RestaurantModule,
     HrModule,
+    UsersModule,
     ChannelsModule,
     ReviewsModule,
     DatabaseModule,

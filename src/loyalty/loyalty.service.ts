@@ -7,6 +7,17 @@ export class LoyaltyService {
   constructor(private prisma: PrismaService) {}
 
   async getPoints(tenantId: string) {
+    // If no tenantId, return default loyalty info
+    if (!tenantId) {
+      return {
+        id: null,
+        tenantId: null,
+        points: 0,
+        tier: 'standard',
+        updatedAt: new Date(),
+      };
+    }
+
     let loyalty = await this.prisma.loyaltyPoint.findUnique({
       where: { tenantId },
     });

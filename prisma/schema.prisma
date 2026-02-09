@@ -8,7 +8,7 @@ datasource db {
 }
 
 model User {
-  id            String         @id @default(uuid())
+  id            String         @id @default(uuid()) 
   email         String         @unique
   password      String
   firstName     String?
@@ -33,15 +33,15 @@ model User {
 }
 
 model Admin {
-  id            String         @id @default(uuid())
-  firstName     String?        @db.VarChar(255)
-  lastName      String?        @db.VarChar(255)
-  email         String         @unique(map: "IDX_051db7d37d478a69a7432df147") @db.VarChar(255)
-  password      String         @db.VarChar(255)
-  role          String         @default("platform_admin") @db.VarChar(255)
-  status        String         @default("active") @db.VarChar(255)
+  id            String         @id @default(uuid()) 
+  firstName     String?        
+  lastName      String?        
+  email         String         @unique(map: "IDX_051db7d37d478a69a7432df147") 
+  password      String         
+  role          String         @default("platform_admin") 
+  status        String         @default("active") 
   lastLoginAt   DateTime?      @db.DateTime(0)
-  lastLoginIp   String?        @db.VarChar(255)
+  lastLoginIp   String?        
   createdAt     DateTime       @default(now()) @db.DateTime(6)
   updatedAt     DateTime       @default(now()) @updatedAt @db.DateTime(6)
   refreshTokens RefreshToken[]
@@ -50,13 +50,13 @@ model Admin {
 }
 
 model RefreshToken {
-  id        String    @id @default(uuid())
+  id        String    @id @default(uuid()) 
   token     String    @unique
-  userId    String?
+  userId    String?   
   expiresAt DateTime
   createdAt DateTime  @default(now())
   revokedAt DateTime?
-  adminId   String?
+  adminId   String?   
   admin     Admin?    @relation(fields: [adminId], references: [id], onDelete: Cascade)
   user      User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -67,25 +67,56 @@ model RefreshToken {
 }
 
 model Guest {
-  id        String    @id @default(uuid())
-  tenantId  String?
-  firstName String
-  lastName  String
-  email     String?
-  phone     String?
-  address   String?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  bookings  Booking[]
+  id             String    @id @default(uuid())
+  tenantId       String?
+  firstName      String
+  lastName       String
+  email          String?
+  phone          String?
+  nationalId     String?
+  passportNumber String?
+  dateOfBirth    String?
+  nationality    String?
+  address        String?
+  city           String?
+  country        String?
+  postalCode     String?
+  isVip          Boolean   @default(false)
+  vipLevel       String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  bookings       Booking[]
 
   @@index([tenantId])
   @@map("guests")
 }
 
+model Property {
+  id          String    @id @default(uuid())
+  tenantId    String
+  name        String
+  code        String
+  location    String?
+  description String?   @db.Text
+  phone       String?
+  email       String?
+  isDefault   Boolean   @default(false)
+  status      String    @default("active")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  rooms       Room[]
+  bookings    Booking[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("properties")
+}
+
 model Room {
   id          String    @id @default(uuid())
   tenantId    String?
-  number      String    @unique
+  propertyId  String
+  number      String
   type        String
   floor       Int?
   price       Decimal   @db.Decimal(10, 2)
@@ -93,31 +124,41 @@ model Room {
   description String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+  property    Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   bookings    Booking[]
 
+  @@unique([propertyId, number])
   @@index([tenantId])
+  @@index([propertyId])
   @@map("rooms")
 }
 
 model Booking {
-  id         String   @id @default(uuid())
-  tenantId   String?
-  guestId    String
-  roomId     String
-  checkIn    DateTime
-  checkOut   DateTime
-  status     String   @default("pending")
-  totalPrice Decimal  @db.Decimal(10, 2)
-  notes      String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  channelId  String?
-  channel    Channel? @relation(fields: [channelId], references: [id])
-  guest      Guest    @relation(fields: [guestId], references: [id], onDelete: Cascade)
-  room       Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  review     Review?
+  id              String    @id @default(uuid())
+  tenantId        String?
+  propertyId      String
+  guestId         String?
+  roomId          String
+  guestFirstName  String
+  guestLastName   String
+  guestEmail      String?
+  guestPhone      String?
+  checkIn         DateTime
+  checkOut        DateTime
+  status          String    @default("pending")
+  totalPrice      Decimal   @db.Decimal(10, 2)
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  channelId       String?
+  channel         Channel?  @relation(fields: [channelId], references: [id])
+  guest           Guest?    @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  room            Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  property        Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  review          Review?
 
   @@index([tenantId])
+  @@index([propertyId])
   @@index([channelId], map: "bookings_channelId_fkey")
   @@index([guestId], map: "bookings_guestId_fkey")
   @@index([roomId], map: "bookings_roomId_fkey")
@@ -192,19 +233,19 @@ model Channel {
 
 model billing_history {
   id                String                    @id @db.VarChar(36)
-  subscription_id   String                    @db.VarChar(255)
-  invoice_id        String?                   @db.VarChar(255)
+  subscription_id   String                    
+  invoice_id        String?                   
   eventType         billing_history_eventType
   description       String?                   @db.Text
-  old_plan_id       String?                   @db.VarChar(255)
-  new_plan_id       String?                   @db.VarChar(255)
-  old_billing_cycle String?                   @db.VarChar(255)
-  new_billing_cycle String?                   @db.VarChar(255)
+  old_plan_id       String?                   
+  new_plan_id       String?                   
+  old_billing_cycle String?                   
+  new_billing_cycle String?                   
   old_amount        Decimal?                  @db.Decimal(10, 2)
   new_amount        Decimal?                  @db.Decimal(10, 2)
   period_start      DateTime?                 @db.Date
   period_end        DateTime?                 @db.Date
-  created_by        String?                   @db.VarChar(255)
+  created_by        String?                   
   metadata          Json?
   created_at        DateTime                  @default(now()) @db.DateTime(6)
   subscriptions     subscriptions             @relation(fields: [subscription_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "FK_cf2c4c1d8fe13560a70057b4a0b")
@@ -216,8 +257,8 @@ model billing_history {
 
 model features {
   id                    String                  @id @db.VarChar(36)
-  code                  String                  @unique(map: "IDX_c0e1f5d0ba8027c186705d752b") @db.VarChar(255)
-  name                  String                  @db.VarChar(255)
+  code                  String                  @unique(map: "IDX_c0e1f5d0ba8027c186705d752b") 
+  name                  String                  
   description           String?                 @db.Text
   type                  features_type
   price_monthly         Decimal                 @default(0.00) @db.Decimal(10, 2)
@@ -228,15 +269,15 @@ model features {
 
 model invoice_adjustments {
   id                   String                   @id @db.VarChar(36)
-  invoice_id           String                   @db.VarChar(255)
+  invoice_id           String                   
   type                 invoice_adjustments_type
   amount               Decimal                  @db.Decimal(10, 2)
   original_amount      Decimal                  @db.Decimal(10, 2)
   new_amount           Decimal                  @db.Decimal(10, 2)
   reason               String?                  @db.Text
   notes                String?                  @db.Text
-  adjustment_reference String?                  @db.VarChar(255)
-  created_by           String?                  @db.VarChar(255)
+  adjustment_reference String?                  
+  created_by           String?                  
   created_at           DateTime                 @default(now()) @db.DateTime(6)
   invoices             invoices                 @relation(fields: [invoice_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "FK_7404e72e5be63d0d41859bf4f1d")
 
@@ -245,10 +286,10 @@ model invoice_adjustments {
 
 model invoice_items {
   id              String             @id @db.VarChar(36)
-  invoice_id      String             @db.VarChar(255)
+  invoice_id      String             
   type            invoice_items_type
-  ref_id          String?            @db.VarChar(255)
-  description     String             @db.VarChar(255)
+  ref_id          String?            
+  description     String             
   quantity        Int                @default(1)
   unit_price      Decimal            @db.Decimal(10, 2)
   amount          Decimal            @db.Decimal(10, 2)
@@ -263,9 +304,9 @@ model invoice_items {
 
 model invoices {
   id                  String                @id @db.VarChar(36)
-  tenant_id           String                @db.VarChar(255)
-  subscription_id     String?               @db.VarChar(255)
-  invoice_no          String                @unique(map: "IDX_37669c562a2525929927d9d691") @db.VarChar(255)
+  tenant_id           String                
+  subscription_id     String?               
+  invoice_no          String                @unique(map: "IDX_37669c562a2525929927d9d691") 
   amount              Decimal               @db.Decimal(10, 2)
   original_amount     Decimal?              @db.Decimal(10, 2)
   adjusted_amount     Decimal?              @db.Decimal(10, 2)
@@ -289,21 +330,21 @@ model invoices {
 
 model payment_refunds {
   id              String                 @id @db.VarChar(36)
-  payment_id      String                 @db.VarChar(255)
-  refund_no       String                 @unique(map: "IDX_35175cde68c765c82603c2ad4e") @db.VarChar(255)
+  payment_id      String                 
+  refund_no       String                 @unique(map: "IDX_35175cde68c765c82603c2ad4e") 
   amount          Decimal                @db.Decimal(10, 2)
   status          payment_refunds_status @default(pending)
   method          payment_refunds_method @default(original_method)
   reason          String                 @db.Text
   notes           String?                @db.Text
-  bank_account    String?                @db.VarChar(255)
-  bank_name       String?                @db.VarChar(255)
-  account_holder  String?                @db.VarChar(255)
-  credit_id       String?                @db.VarChar(255)
+  bank_account    String?                
+  bank_name       String?                
+  account_holder  String?                
+  credit_id       String?                
   processed_at    DateTime?              @db.Timestamp(0)
-  processed_by    String?                @db.VarChar(255)
+  processed_by    String?                
   rejected_reason String?                @db.Text
-  created_by      String?                @db.VarChar(255)
+  created_by      String?                
   created_at      DateTime               @default(now()) @db.DateTime(6)
   payments        payments               @relation(fields: [payment_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "FK_a10d6c1918989353b79932a2bad")
 
@@ -312,8 +353,8 @@ model payment_refunds {
 
 model payments {
   id              String            @id @db.VarChar(36)
-  payment_no      String?           @unique(map: "IDX_8aaa54db3d9827cba0999b7fb2") @db.VarChar(255)
-  invoice_id      String            @db.VarChar(255)
+  payment_no      String?           @unique(map: "IDX_8aaa54db3d9827cba0999b7fb2") 
+  invoice_id      String            
   amount          Decimal?          @db.Decimal(10, 2)
   method          payments_method
   slip_url        String?           @db.Text
@@ -330,8 +371,8 @@ model payments {
 
 model plan_features {
   id         String   @id @db.VarChar(36)
-  plan_id    String   @db.VarChar(255)
-  feature_id String   @db.VarChar(255)
+  plan_id    String   
+  feature_id String   
   features   features @relation(fields: [feature_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "FK_27e866bdf4c6f2cf5854b7d0e57")
   plans      plans    @relation(fields: [plan_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "FK_b51952483b18fa15334d714a838")
 
@@ -341,13 +382,14 @@ model plan_features {
 
 model plans {
   id                                                  String          @id @db.VarChar(36)
-  code                                                String          @unique(map: "IDX_95f7ef3fc4c31a3545b4d825dd") @db.VarChar(255)
-  name                                                String          @db.VarChar(255)
+  code                                                String          @unique(map: "IDX_95f7ef3fc4c31a3545b4d825dd") 
+  name                                                String          
   price_monthly                                       Decimal         @db.Decimal(10, 2)
   price_yearly                                        Decimal?        @db.Decimal(10, 2)
   yearly_discount_percent                             Int             @default(0)
   max_rooms                                           Int
   max_users                                           Int
+  max_properties                                      Int             @default(1)
   is_active                                           Int             @default(1) @db.TinyInt
   description                                         String?         @db.Text
   display_order                                       Int             @default(0)
@@ -363,10 +405,10 @@ model plans {
 
 model subscription_feature_logs {
   id                      String                           @id @db.VarChar(36)
-  subscription_feature_id String?                          @db.VarChar(255)
-  subscription_id         String                           @db.VarChar(255)
-  feature_id              String                           @db.VarChar(255)
-  feature_name            String                           @db.VarChar(255)
+  subscription_feature_id String?                          
+  subscription_id         String                           
+  feature_id              String                           
+  feature_name            String                           
   action                  subscription_feature_logs_action
   old_price               Decimal?                         @db.Decimal(10, 2)
   new_price               Decimal?                         @db.Decimal(10, 2)
@@ -376,7 +418,7 @@ model subscription_feature_logs {
   credit_amount           Decimal?                         @db.Decimal(10, 2)
   reason                  String?                          @db.Text
   effective_date          DateTime?                        @db.Date
-  created_by              String?                          @db.VarChar(255)
+  created_by              String?                          
   created_at              DateTime                         @default(now()) @db.DateTime(6)
   subscription_features   subscription_features?           @relation(fields: [subscription_feature_id], references: [id], onUpdate: NoAction, map: "FK_490409e983f4d310ad3da4d8470")
 
@@ -385,8 +427,8 @@ model subscription_feature_logs {
 
 model subscription_features {
   id                        String                      @id @db.VarChar(36)
-  subscription_id           String                      @db.VarChar(255)
-  feature_id                String                      @db.VarChar(255)
+  subscription_id           String                      
+  feature_id                String                      
   quantity                  Int?                        @default(1)
   price                     Decimal                     @db.Decimal(10, 2)
   is_active                 Int                         @default(1) @db.TinyInt
@@ -402,10 +444,10 @@ model subscription_features {
 
 model subscriptions {
   id                                          String                      @id @db.VarChar(36)
-  subscription_code                           String?                     @unique(map: "IDX_616df085ddc496ef3609383682") @db.VarChar(255)
-  tenant_id                                   String                      @db.VarChar(255)
-  plan_id                                     String                      @db.VarChar(255)
-  previous_plan_id                            String?                     @db.VarChar(255)
+  subscription_code                           String?                     @unique(map: "IDX_616df085ddc496ef3609383682") 
+  tenant_id                                   String                      
+  plan_id                                     String                      
+  previous_plan_id                            String?                     
   status                                      subscriptions_status        @default(trial)
   billing_cycle                               subscriptions_billing_cycle @default(monthly)
   start_date                                  DateTime                    @db.Date
@@ -433,17 +475,17 @@ model subscriptions {
 
 model tenant_credits {
   id               String                @id @db.VarChar(36)
-  tenant_id        String                @db.VarChar(255)
+  tenant_id        String                
   type             tenant_credits_type   @default(manual)
   status           tenant_credits_status @default(available)
   original_amount  Decimal               @db.Decimal(10, 2)
   remaining_amount Decimal               @db.Decimal(10, 2)
   description      String?               @db.Text
-  reference_type   String?               @db.VarChar(255)
-  reference_id     String?               @db.VarChar(255)
+  reference_type   String?               
+  reference_id     String?               
   expires_at       DateTime?             @db.Timestamp(0)
   used_at          DateTime?             @db.Timestamp(0)
-  created_by       String?               @db.VarChar(255)
+  created_by       String?               
   created_at       DateTime              @default(now()) @db.DateTime(6)
   tenants          tenants               @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "FK_1c75d0789feee398e6cd35df720")
 
@@ -452,21 +494,21 @@ model tenant_credits {
 
 model tenants {
   id             String           @id @db.VarChar(36)
-  name           String           @db.VarChar(255)
+  name           String           
   room_count     Int              @default(0)
-  name_en        String?          @db.VarChar(255)
-  property_type  String?          @db.VarChar(255)
-  location       String?          @db.VarChar(255)
-  website        String?          @db.VarChar(255)
+  name_en        String?          
+  property_type  String?          
+  location       String?          
+  website        String?          
   description    String?          @db.Text
-  customer_name  String?          @db.VarChar(255)
-  tax_id         String?          @db.VarChar(255)
-  email          String?          @db.VarChar(255)
-  phone          String?          @db.VarChar(255)
+  customer_name  String?          
+  tax_id         String?          
+  email          String?          
+  phone          String?          
   address        String?          @db.Text
-  district       String?          @db.VarChar(255)
-  province       String?          @db.VarChar(255)
-  postal_code    String?          @db.VarChar(255)
+  district       String?          
+  province       String?          
+  postal_code    String?          
   status         tenants_status   @default(trial)
   trial_ends_at  DateTime?        @db.Timestamp(0)
   created_at     DateTime         @default(now()) @db.DateTime(6)
@@ -474,6 +516,146 @@ model tenants {
   invoices       invoices[]
   subscriptions  subscriptions[]
   tenant_credits tenant_credits[]
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String?
+  tenantId  String?
+  title     String
+  message   String
+  type      String   @default("info")
+  category  String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now()) @db.DateTime(6)
+  updatedAt DateTime @default(now()) @updatedAt @db.DateTime(6)
+
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+  @@index([tenantId])
+  @@map("notifications")
+}
+
+model AnalyticsEvent {
+  id        String   @id @default(uuid())
+  userId    String?
+  tenantId  String?
+  eventName String
+  metadata  Json?
+  createdAt DateTime @default(now()) @db.DateTime(6)
+
+  @@index([userId])
+  @@index([tenantId])
+  @@map("analytics_events")
+}
+
+model FeatureFlag {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(false)
+  rules       Json?
+  createdAt   DateTime @default(now()) @db.DateTime(6)
+  updatedAt   DateTime @default(now()) @updatedAt @db.DateTime(6)
+
+  @@map("feature_flags")
+}
+
+model ContactDemo {
+  id          String   @id @default(uuid())
+  name        String
+  email       String
+  phoneNumber String?
+  demoDate    DateTime
+  demoType    String
+  status      String   @default("pending")
+  notes       String?  @db.Text
+  createdAt   DateTime @default(now()) @db.DateTime(6)
+  updatedAt   DateTime @default(now()) @updatedAt @db.DateTime(6)
+
+  @@map("contact_demos")
+}
+
+model ContactMessage {
+  id        String   @id @default(uuid())
+  name      String
+  email     String
+  subject   String?
+  message   String   @db.Text
+  status    String   @default("unread")
+  createdAt DateTime @default(now()) @db.DateTime(6)
+  updatedAt DateTime @default(now()) @updatedAt @db.DateTime(6)
+
+  @@map("contact_messages")
+}
+
+model OnboardingStep {
+  id          String    @id @default(uuid())
+  tenantId    String
+  stepKey     String
+  isCompleted Boolean   @default(false)
+  completedAt DateTime?
+  createdAt   DateTime  @default(now()) @db.DateTime(6)
+  updatedAt   DateTime  @default(now()) @updatedAt @db.DateTime(6)
+
+  @@unique([tenantId, stepKey])
+  @@index([tenantId])
+  @@map("onboarding_steps")
+}
+
+model LoyaltyPoint {
+  id        String   @id @default(uuid())
+  tenantId  String   @unique
+  points    Int      @default(0)
+  tier      String   @default("standard")
+  updatedAt DateTime @default(now()) @updatedAt @db.DateTime(6)
+
+  @@index([tenantId])
+  @@map("loyalty_points")
+}
+
+model Referral {
+  id           String   @id @default(uuid())
+  referrerId   String?
+  tenantId     String?
+  email        String
+  status       String   @default("pending")
+  rewardPoints Int      @default(0)
+  createdAt    DateTime @default(now()) @db.DateTime(6)
+  updatedAt    DateTime @default(now()) @updatedAt @db.DateTime(6)
+
+  @@index([referrerId])
+  @@map("referrals")
+}
+
+model Promotion {
+  id            String    @id @default(uuid())
+  title         String
+  description   String?
+  imageUrl      String?
+  targetSegment String?
+  isActive      Boolean   @default(true)
+  startDate     DateTime?
+  endDate       DateTime?
+  createdAt     DateTime  @default(now()) @db.DateTime(6)
+  updatedAt     DateTime  @default(now()) @updatedAt @db.DateTime(6)
+
+  @@map("promotions")
+}
+
+model Coupon {
+  id            String    @id @default(uuid())
+  code          String    @unique
+  description   String?
+  discountType  String
+  discountValue Decimal   @db.Decimal(10, 2)
+  minPurchase   Decimal?  @db.Decimal(10, 2)
+  isActive      Boolean   @default(true)
+  expiresAt     DateTime?
+  createdAt     DateTime  @default(now()) @db.DateTime(6)
+  updatedAt     DateTime  @default(now()) @updatedAt @db.DateTime(6)
+
+  @@map("coupons")
 }
 
 enum invoice_adjustments_type {
@@ -581,154 +763,4 @@ enum invoices_status {
   paid
   rejected
   voided
-}
-
-// Notification model
-model Notification {
-  id        String   @id @default(uuid())
-  userId    String?
-  tenantId  String?
-  title     String
-  message   String
-  type      String   @default("info") // info, success, warning, error
-  category  String?  // booking, trial, payment, system
-  isRead    Boolean  @default(false)
-  createdAt DateTime @default(now()) @db.DateTime(6)
-  updatedAt DateTime @default(now()) @updatedAt @db.DateTime(6)
-
-  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  @@index([userId])
-  @@index([tenantId])
-  @@map("notifications")
-}
-
-// AnalyticsEvent model
-model AnalyticsEvent {
-  id        String   @id @default(uuid())
-  userId    String?
-  tenantId  String?
-  eventName String
-  metadata  Json?
-  createdAt DateTime @default(now()) @db.DateTime(6)
-
-  @@index([userId])
-  @@index([tenantId])
-  @@map("analytics_events")
-}
-
-// FeatureFlag model
-model FeatureFlag {
-  id          String   @id @default(uuid())
-  name        String   @unique
-  description String?
-  isActive    Boolean  @default(false)
-  rules       Json?    // e.g., { "tenantIds": ["..."], "percentage": 50 }
-  createdAt   DateTime @default(now()) @db.DateTime(6)
-  updatedAt   DateTime @default(now()) @updatedAt @db.DateTime(6)
-
-  @@map("feature_flags")
-}
-
-// ContactDemo model
-model ContactDemo {
-  id        String   @id @default(uuid())
-  name      String
-  email     String
-  phoneNumber String?
-  demoDate  DateTime
-  demoType  String   // online, onsite
-  status    String   @default("pending") // pending, confirmed, cancelled, completed
-  notes     String?  @db.Text
-  createdAt DateTime @default(now()) @db.DateTime(6)
-  updatedAt DateTime @default(now()) @updatedAt @db.DateTime(6)
-
-  @@map("contact_demos")
-}
-
-// ContactMessage model
-model ContactMessage {
-  id        String   @id @default(uuid())
-  name      String
-  email     String
-  subject   String?
-  message   String   @db.Text
-  status    String   @default("unread") // unread, read, replied
-  createdAt DateTime @default(now()) @db.DateTime(6)
-  updatedAt DateTime @default(now()) @updatedAt @db.DateTime(6)
-
-  @@map("contact_messages")
-}
-
-// OnboardingStep model
-model OnboardingStep {
-  id          String   @id @default(uuid())
-  tenantId    String
-  stepKey     String   // e.g., 'create_room', 'setup_profile', 'first_booking'
-  isCompleted Boolean  @default(false)
-  completedAt DateTime?
-  createdAt   DateTime @default(now()) @db.DateTime(6)
-  updatedAt   DateTime @default(now()) @updatedAt @db.DateTime(6)
-
-  @@unique([tenantId, stepKey])
-  @@index([tenantId])
-  @@map("onboarding_steps")
-}
-
-// LoyaltyPoint model
-model LoyaltyPoint {
-  id        String   @id @default(uuid())
-  tenantId  String   @unique
-  points    Int      @default(0)
-  tier      String   @default("standard") // standard, silver, gold, platinum
-  updatedAt DateTime @default(now()) @updatedAt @db.DateTime(6)
-
-  @@index([tenantId])
-  @@map("loyalty_points")
-}
-
-// Referral model
-model Referral {
-  id          String   @id @default(uuid())
-  referrerId  String?  // userId who referred
-  tenantId    String?  // tenantId who referred
-  email       String   // email of invited person
-  status      String   @default("pending") // pending, joined, rewarded
-  rewardPoints Int     @default(0)
-  createdAt   DateTime @default(now()) @db.DateTime(6)
-  updatedAt   DateTime @default(now()) @updatedAt @db.DateTime(6)
-
-  @@index([referrerId])
-  @@map("referrals")
-}
-
-// Promotion model
-model Promotion {
-  id          String   @id @default(uuid())
-  title       String
-  description String?
-  imageUrl    String?
-  targetSegment String? // e.g., 'new_user', 'active_user', 'churn_risk'
-  isActive    Boolean  @default(true)
-  startDate   DateTime?
-  endDate     DateTime?
-  createdAt   DateTime @default(now()) @db.DateTime(6)
-  updatedAt   DateTime @default(now()) @updatedAt @db.DateTime(6)
-
-  @@map("promotions")
-}
-
-// Coupon model
-model Coupon {
-  id          String   @id @default(uuid())
-  code        String   @unique
-  description String?
-  discountType String  // percentage, fixed_amount
-  discountValue Decimal @db.Decimal(10, 2)
-  minPurchase  Decimal? @db.Decimal(10, 2)
-  isActive    Boolean  @default(true)
-  expiresAt   DateTime?
-  createdAt   DateTime @default(now()) @db.DateTime(6)
-  updatedAt   DateTime @default(now()) @updatedAt @db.DateTime(6)
-
-  @@map("coupons")
 }

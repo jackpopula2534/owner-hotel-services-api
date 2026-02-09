@@ -1,0 +1,269 @@
+{
+    "info": {
+        "_postman_id": "staysync-management-api",
+        "name": "StaySync Management API",
+        "description": "API Collection for Guest, Booking, and Room Management",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+        {
+            "name": "Guest Management",
+            "item": [
+                {
+                    "name": "Get Guests",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{jwt_token}}",
+                                "type": "text"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/v1/guests?page=1&limit=10&search=John",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "v1",
+                                "guests"
+                            ],
+                            "query": [
+                                {
+                                    "key": "page",
+                                    "value": "1"
+                                },
+                                {
+                                    "key": "limit",
+                                    "value": "10"
+                                },
+                                {
+                                    "key": "search",
+                                    "value": "John"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get Guest Detail",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{jwt_token}}",
+                                "type": "text"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/v1/guests/:id",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "v1",
+                                "guests",
+                                ":id"
+                            ],
+                            "variable": [
+                                {
+                                    "key": "id",
+                                    "value": "guest_id"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Create Guest",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{jwt_token}}",
+                                "type": "text"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"firstName\": \"วิชัย\",\n  \"lastName\": \"สุขสันต์\",\n  \"email\": \"vichai@example.com\",\n  \"phone\": \"0814935097\",\n  \"nationalId\": \"8237559668527\",\n  \"passportNumber\": \"\",\n  \"dateOfBirth\": \"2006-09-17\",\n  \"nationality\": \"ไทย\",\n  \"address\": \"795/44 ถนนสุขุมวิท\",\n  \"city\": \"กรุงเทพฯ\",\n  \"country\": \"ไทย\",\n  \"postalCode\": \"82995\",\n  \"isVip\": false,\n  \"vipLevel\": \"\"\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/v1/guests",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "v1",
+                                "guests"
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Booking Management",
+            "item": [
+                {
+                    "name": "Get Bookings",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{jwt_token}}",
+                                "type": "text"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/v1/bookings?search=Somchai",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "v1",
+                                "bookings"
+                            ],
+                            "query": [
+                                {
+                                    "key": "search",
+                                    "value": "Somchai"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Create Booking",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{jwt_token}}",
+                                "type": "text"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"guestId\": \"guest_id\",\n  \"roomId\": \"room_id\",\n  \"checkIn\": \"2024-03-20T14:00:00Z\",\n  \"checkOut\": \"2024-03-22T12:00:00Z\",\n  \"status\": \"confirmed\",\n  \"notes\": \"Late arrival\"\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/v1/bookings",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "v1",
+                                "bookings"
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Room Management",
+            "item": [
+                {
+                    "name": "Get Available Rooms",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{jwt_token}}",
+                                "type": "text"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/v1/rooms/available?checkIn=2024-03-20&checkOut=2024-03-22",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "v1",
+                                "rooms",
+                                "available"
+                            ],
+                            "query": [
+                                {
+                                    "key": "checkIn",
+                                    "value": "2024-03-20"
+                                },
+                                {
+                                    "key": "checkOut",
+                                    "value": "2024-03-22"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Update Room Status",
+                    "request": {
+                        "method": "PATCH",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{jwt_token}}",
+                                "type": "text"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"status\": \"out_of_order\"\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/v1/rooms/:id/status",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "v1",
+                                "rooms",
+                                ":id",
+                                "status"
+                            ],
+                            "variable": [
+                                {
+                                    "key": "id",
+                                    "value": "room_id"
+                                }
+                            ]
+                        }
+                    }
+                }
+            ]
+        }
+    ],
+    "variable": [
+        {
+            "key": "base_url",
+            "value": "http://localhost:3000/api"
+        },
+        {
+            "key": "jwt_token",
+            "value": "your_token_here"
+        }
+    ]
+}

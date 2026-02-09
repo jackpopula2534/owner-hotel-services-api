@@ -1,17 +1,15 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CreateEmployeeDto } from './dto/create-employee.dto';
-import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { Prisma } from '@prisma/client';
 
 @Injectable()
-export class HrService {
+export class UsersService {
   constructor(private prisma: PrismaService) {}
 
   async findAll(query: any, tenantId?: string) {
     const page = parseInt(query.page) || 1;
     const limit = parseInt(query.limit) || 10;
-    const { department, position, search } = query;
+    const { role, status, search } = query;
     const skip = (page - 1) * limit;
 
     // ถ้าไม่มี tenantId (user ใหม่ยังไม่มีโรงแรม) ให้ return empty data
@@ -26,26 +24,37 @@ export class HrService {
 
     const where: any = {};
     if (tenantId != null) where.tenantId = tenantId;
-    if (department) where.department = department;
-    if (position) where.position = position;
+    if (role) where.role = role;
+    if (status) where.status = status;
     if (search) {
       where.OR = [
         { firstName: { contains: search } },
         { lastName: { contains: search } },
         { email: { contains: search } },
-        { employeeCode: { contains: search } },
       ];
     }
 
     try {
       const [data, total] = await Promise.all([
-        this.prisma.employee.findMany({
+        this.prisma.user.findMany({
           where,
           skip,
           take: limit,
           orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+            role: true,
+            status: true,
+            tenantId: true,
+            createdAt: true,
+            updatedAt: true,
+            // ไม่ส่ง password ออกไป
+          },
         }),
-        this.prisma.employee.count({ where }),
+        this.prisma.user.count({ where }),
       ]);
 
       return {
@@ -55,7 +64,7 @@ export class HrService {
         limit,
       };
     } catch (error) {
-      // ถ้าเกิด database error (table/column ไม่มี) ให้ส่ง empty data สำหรับผู้ใช้ใหม่
+      // ถ้าเกิด database error ให้ส่ง empty data
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === 'P2021' || error.code === 'P2022') {
           return {
@@ -74,40 +83,56 @@ export class HrService {
     const where: any = { id };
     if (tenantId != null) where.tenantId = tenantId;
 
-    const employee = await this.prisma.employee.findFirst({
+    const user = await this.prisma.user.findFirst({
       where,
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        status: true,
+        tenantId: true,
+        createdAt: true,
+        updatedAt: true,
+      },
     });
 
-    if (!employee) {
-      throw new NotFoundException(`Employee with ID ${id} not found`);
+    if (!user) {
+      throw new NotFoundException(`User with ID ${id} not found`);
     }
 
-    return employee;
+    return user;
   }
 
-  async create(createEmployeeDto: CreateEmployeeDto, tenantId?: string) {
-    const data: any = { ...createEmployeeDto };
-    if (tenantId != null) data.tenantId = tenantId;
-    return this.prisma.employee.create({
-      data,
-    });
-  }
-
-  async update(id: string, updateEmployeeDto: UpdateEmployeeDto, tenantId?: string) {
+  async update(id: string, updateUserDto: any, tenantId?: string) {
     await this.findOne(id, tenantId);
 
-    return this.prisma.employee.update({
+    // ไม่ให้อัพเดท password ผ่าน endpoint นี้ (ใช้ password reset แทน)
+    const { password, ...safeData } = updateUserDto;
+
+    return this.prisma.user.update({
       where: { id },
-      data: updateEmployeeDto,
+      data: safeData,
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        status: true,
+        tenantId: true,
+        createdAt: true,
+        updatedAt: true,
+      },
     });
   }
 
   async remove(id: string, tenantId?: string) {
     await this.findOne(id, tenantId);
 
-    return this.prisma.employee.delete({
+    return this.prisma.user.delete({
       where: { id },
     });
   }
 }
-

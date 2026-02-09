@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateNotificationDto, NotificationQueryDto } from './dto/notification.dto';
 import { NotificationsGateway } from './notifications.gateway';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class NotificationsService {
@@ -23,30 +24,43 @@ export class NotificationsService {
     const skip = (page - 1) * limit;
 
     const where: any = { userId };
-    
+
     if (query.isRead !== undefined) {
       where.isRead = query.isRead === 'true';
     }
 
-    const [items, total] = await Promise.all([
-      this.prisma.notification.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { createdAt: 'desc' },
-      }),
-      this.prisma.notification.count({ where }),
-    ]);
+    try {
+      const [items, total] = await Promise.all([
+        this.prisma.notification.findMany({
+          where,
+          skip,
+          take: limit,
+          orderBy: { createdAt: 'desc' },
+        }),
+        this.prisma.notification.count({ where }),
+      ]);
 
-    return {
-      items,
-      meta: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-      },
-    };
+      return {
+        items,
+        meta: {
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit),
+        },
+      };
+    } catch (error) {
+      // ถ้าเกิด database error (table ไม่มี) ให้ส่ง empty data สำหรับผู้ใช้ใหม่
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        if (error.code === 'P2021' || error.code === 'P2022') {
+          return {
+            items: [],
+            meta: { total: 0, page, limit, totalPages: 0 },
+          };
+        }
+      }
+      throw error;
+    }
   }
 
   async create(data: CreateNotificationDto) {

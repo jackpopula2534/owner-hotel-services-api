@@ -11,6 +11,16 @@ export class ChannelsService {
     const { page = 1, limit = 10, type, isActive, search } = query;
     const skip = (page - 1) * limit;
 
+    // ถ้าไม่มี tenantId (user ใหม่ยังไม่มีโรงแรม) ให้ return empty data
+    if (!tenantId) {
+      return {
+        data: [],
+        total: 0,
+        page: parseInt(page),
+        limit: parseInt(limit),
+      };
+    }
+
     const where: any = {};
     if (tenantId != null) where.tenantId = tenantId;
     if (type) where.type = type;

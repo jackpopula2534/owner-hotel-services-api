@@ -1,7 +1,12 @@
-import { IsString, IsNotEmpty, IsOptional, IsInt, IsNumber, IsEnum } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsInt, IsNumber, IsEnum, IsUUID } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateRoomDto {
+  @ApiProperty({ example: 'uuid-of-property' })
+  @IsUUID()
+  @IsNotEmpty()
+  propertyId: string;
+
   @ApiProperty({ example: '101' })
   @IsString()
   @IsNotEmpty()

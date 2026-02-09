@@ -121,6 +121,16 @@ export class OnboardingService {
   }
 
   async getProgress(tenantId: string) {
+    // If no tenantId, return default steps without saving to database
+    if (!tenantId) {
+      return [
+        { id: null, stepKey: 'setup_profile', title: 'ตั้งค่าข้อมูลโรงแรม', isCompleted: false },
+        { id: null, stepKey: 'create_room', title: 'สร้างห้องพักห้องแรก', isCompleted: false },
+        { id: null, stepKey: 'first_booking', title: 'เปิดการจองครั้งแรก', isCompleted: false },
+        { id: null, stepKey: 'setup_payment', title: 'ตั้งค่าการชำระเงิน', isCompleted: false },
+      ];
+    }
+
     const steps = await this.prisma.onboardingStep.findMany({
       where: { tenantId },
       orderBy: { createdAt: 'asc' },

@@ -2,19 +2,30 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateRoomDto } from './dto/create-room.dto';
 import { UpdateRoomDto } from './dto/update-room.dto';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class RoomsService {
   constructor(private prisma: PrismaService) {}
 
   async findAll(query: any, tenantId?: string) {
+    // ถ้าไม่มี tenantId (ผู้ใช้ใหม่) ให้ส่ง empty array กลับไป
+    if (!tenantId) {
+      return {
+        data: [],
+        total: 0,
+        page: 1,
+        limit: parseInt(query.limit) || 10,
+      };
+    }
+
     const page = parseInt(query.page) || 1;
     const limit = parseInt(query.limit) || 10;
-    const { status, type, floor, search } = query;
+    const { propertyId, status, type, floor, search } = query;
     const skip = (page - 1) * limit;
 
-    const where: any = {};
-    if (tenantId != null) where.tenantId = tenantId;
+    const where: any = { tenantId };
+    if (propertyId) where.propertyId = propertyId;
     if (status) where.status = status;
     if (type) where.type = type;
     if (floor) where.floor = parseInt(floor);
@@ -25,38 +36,58 @@ export class RoomsService {
       ];
     }
 
-    const [data, total] = await Promise.all([
-      this.prisma.room.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { createdAt: 'desc' },
-        include: {
-          bookings: {
-            where: {
-              status: { in: ['confirmed', 'checked-in'] },
+    try {
+      const [data, total] = await Promise.all([
+        this.prisma.room.findMany({
+          where,
+          skip,
+          take: limit,
+          orderBy: { createdAt: 'desc' },
+          include: {
+            property: true,
+            bookings: {
+              where: {
+                status: { in: ['confirmed', 'checked-in'] },
+              },
             },
           },
-        },
-      }),
-      this.prisma.room.count({ where }),
-    ]);
+        }),
+        this.prisma.room.count({ where }),
+      ]);
 
-    return {
-      data,
-      total,
-      page,
-      limit,
-    };
+      return {
+        data,
+        total,
+        page,
+        limit,
+      };
+    } catch (error) {
+      // ถ้าเกิด database error (เช่น table ไม่มี) ให้ส่ง empty array
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        if (error.code === 'P2021' || error.code === 'P2022') {
+          return {
+            data: [],
+            total: 0,
+            page,
+            limit,
+          };
+        }
+      }
+      throw error;
+    }
   }
 
   async findOne(id: string, tenantId?: string) {
-    const where: any = { id };
-    if (tenantId != null) where.tenantId = tenantId;
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
+    const where: any = { id, tenantId };
 
     const room = await this.prisma.room.findFirst({
       where,
       include: {
+        property: true,
         bookings: {
           include: {
             guest: true,
@@ -74,35 +105,56 @@ export class RoomsService {
   }
 
   async create(createRoomDto: CreateRoomDto, tenantId?: string) {
-    const scope: any = tenantId != null ? { tenantId } : {};
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
+    // Verify property exists and belongs to tenant
+    const propertyWhere: any = { id: createRoomDto.propertyId, tenantId };
+
+    const property = await this.prisma.property.findFirst({
+      where: propertyWhere,
+    });
+
+    if (!property) {
+      throw new NotFoundException('Property not found');
+    }
+
+    // Check for duplicate room number within property
     const existingRoom = await this.prisma.room.findFirst({
-      where: { ...scope, number: createRoomDto.number },
+      where: {
+        propertyId: createRoomDto.propertyId,
+        number: createRoomDto.number,
+      },
     });
 
     if (existingRoom) {
       throw new BadRequestException(
-        `Room with number ${createRoomDto.number} already exists`,
+        `Room with number ${createRoomDto.number} already exists in this property`,
       );
     }
 
-    const data: any = { ...createRoomDto };
-    if (tenantId != null) data.tenantId = tenantId;
+    const data: any = { ...createRoomDto, tenantId };
     return this.prisma.room.create({
       data,
+      include: { property: true },
     });
   }
 
   async update(id: string, updateRoomDto: UpdateRoomDto, tenantId?: string) {
-    await this.findOne(id, tenantId);
+    const room = await this.findOne(id, tenantId);
 
     if (updateRoomDto.number) {
-      const scope: any = tenantId != null ? { tenantId } : {};
       const existingRoom = await this.prisma.room.findFirst({
-        where: { ...scope, number: updateRoomDto.number },
+        where: {
+          propertyId: room.propertyId,
+          number: updateRoomDto.number,
+          id: { not: id },
+        },
       });
-      if (existingRoom && existingRoom.id !== id) {
+      if (existingRoom) {
         throw new BadRequestException(
-          `Room with number ${updateRoomDto.number} already exists`,
+          `Room with number ${updateRoomDto.number} already exists in this property`,
         );
       }
     }
@@ -110,6 +162,7 @@ export class RoomsService {
     return this.prisma.room.update({
       where: { id },
       data: updateRoomDto,
+      include: { property: true },
     });
   }
 
@@ -143,34 +196,51 @@ export class RoomsService {
     });
   }
 
-  async getAvailableRooms(checkIn: string, checkOut: string, tenantId?: string) {
-    const checkInDate = new Date(checkIn);
-    const checkOutDate = new Date(checkOut);
+  async getAvailableRooms(checkIn: string, checkOut: string, propertyId?: string, tenantId?: string) {
+    // ถ้าไม่มี tenantId (ผู้ใช้ใหม่) ให้ส่ง empty array กลับไป
+    if (!tenantId) {
+      return [];
+    }
 
-    const bookingWhere: any = {
-      status: { in: ['confirmed', 'checked-in'] },
-      OR: [
-        { checkIn: { lte: checkOutDate }, checkOut: { gte: checkInDate } },
-      ],
-    };
-    if (tenantId != null) bookingWhere.tenantId = tenantId;
+    try {
+      const checkInDate = new Date(checkIn);
+      const checkOutDate = new Date(checkOut);
 
-    const conflictingBookings = await this.prisma.booking.findMany({
-      where: bookingWhere,
-      select: { roomId: true },
-    });
+      const bookingWhere: any = {
+        tenantId,
+        status: { in: ['confirmed', 'checked-in'] },
+        OR: [
+          { checkIn: { lte: checkOutDate }, checkOut: { gte: checkInDate } },
+        ],
+      };
+      if (propertyId) bookingWhere.propertyId = propertyId;
 
-    const occupiedRoomIds = conflictingBookings.map((b) => b.roomId);
-    const roomWhere: any = { status: 'available' };
-    if (tenantId != null) roomWhere.tenantId = tenantId;
-    if (occupiedRoomIds.length > 0) roomWhere.id = { notIn: occupiedRoomIds };
+      const conflictingBookings = await this.prisma.booking.findMany({
+        where: bookingWhere,
+        select: { roomId: true },
+      });
 
-    const availableRooms = await this.prisma.room.findMany({
-      where: roomWhere,
-      orderBy: { number: 'asc' },
-    });
+      const occupiedRoomIds = conflictingBookings.map((b) => b.roomId);
+      const roomWhere: any = { tenantId, status: 'available' };
+      if (propertyId) roomWhere.propertyId = propertyId;
+      if (occupiedRoomIds.length > 0) roomWhere.id = { notIn: occupiedRoomIds };
 
-    return availableRooms;
+      const availableRooms = await this.prisma.room.findMany({
+        where: roomWhere,
+        include: { property: true },
+        orderBy: { number: 'asc' },
+      });
+
+      return availableRooms;
+    } catch (error) {
+      // ถ้าเกิด database error ให้ส่ง empty array
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        if (error.code === 'P2021' || error.code === 'P2022') {
+          return [];
+        }
+      }
+      throw error;
+    }
   }
 }
 

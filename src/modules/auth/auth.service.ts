@@ -31,13 +31,14 @@ export class AuthService {
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Create user
+    // Create user with tenant_admin role (they're registering as hotel owner)
     const user = await this.prisma.user.create({
       data: {
         email,
         password: hashedPassword,
         firstName,
         lastName,
+        role: 'tenant_admin', // New users are tenant admins (hotel owners)
       },
       select: {
         id: true,

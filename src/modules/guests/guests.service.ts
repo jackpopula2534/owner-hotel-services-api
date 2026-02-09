@@ -1,13 +1,12 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
 export class GuestsService {
   constructor(private prisma: PrismaService) {}
 
-  private buildWhere(tenantId: string | undefined, search?: string) {
-    const where: any = {};
-    if (tenantId != null) where.tenantId = tenantId;
+  private buildWhere(tenantId: string, search?: string) {
+    const where: any = { tenantId };
     if (search) {
       where.OR = [
         { firstName: { contains: search } },
@@ -19,6 +18,10 @@ export class GuestsService {
   }
 
   async findAll(query: any, tenantId?: string) {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
     const page = parseInt(query.page) || 1;
     const limit = parseInt(query.limit) || 10;
     const search = query.search;
@@ -44,8 +47,11 @@ export class GuestsService {
   }
 
   async findOne(id: string, tenantId?: string) {
-    const where: any = { id };
-    if (tenantId != null) where.tenantId = tenantId;
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
+    const where: any = { id, tenantId };
 
     const guest = await this.prisma.guest.findFirst({
       where,
@@ -60,8 +66,11 @@ export class GuestsService {
   }
 
   async create(createGuestDto: any, tenantId?: string) {
-    const data: any = { ...createGuestDto };
-    if (tenantId != null) data.tenantId = tenantId;
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
+    const data: any = { ...createGuestDto, tenantId };
     return this.prisma.guest.create({
       data,
     });

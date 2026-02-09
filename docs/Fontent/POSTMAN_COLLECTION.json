@@ -21,11 +21,12 @@
                             }
                         ],
                         "url": {
-                            "raw": "{{base_url}}/notifications?page=1&limit=10",
+                            "raw": "{{base_url}}/v1/notifications?page=1&limit=10",
                             "host": [
                                 "{{base_url}}"
                             ],
                             "path": [
+                                "v1",
                                 "notifications"
                             ],
                             "query": [
@@ -39,8 +40,7 @@
                                 }
                             ]
                         }
-                    },
-                    "response": []
+                    }
                 },
                 {
                     "name": "Mark as Read",
@@ -54,11 +54,12 @@
                             }
                         ],
                         "url": {
-                            "raw": "{{base_url}}/notifications/:id/read",
+                            "raw": "{{base_url}}/v1/notifications/:id/read",
                             "host": [
                                 "{{base_url}}"
                             ],
                             "path": [
+                                "v1",
                                 "notifications",
                                 ":id",
                                 "read"
@@ -66,12 +67,11 @@
                             "variable": [
                                 {
                                     "key": "id",
-                                    "value": "notification_id_here"
+                                    "value": "notification_id"
                                 }
                             ]
                         }
-                    },
-                    "response": []
+                    }
                 },
                 {
                     "name": "Mark All as Read",
@@ -85,47 +85,17 @@
                             }
                         ],
                         "url": {
-                            "raw": "{{base_url}}/notifications/read-all",
+                            "raw": "{{base_url}}/v1/notifications/read-all",
                             "host": [
                                 "{{base_url}}"
                             ],
                             "path": [
+                                "v1",
                                 "notifications",
                                 "read-all"
                             ]
                         }
-                    },
-                    "response": []
-                },
-                {
-                    "name": "Delete Notification",
-                    "request": {
-                        "method": "DELETE",
-                        "header": [
-                            {
-                                "key": "Authorization",
-                                "value": "Bearer {{jwt_token}}",
-                                "type": "text"
-                            }
-                        ],
-                        "url": {
-                            "raw": "{{base_url}}/notifications/:id",
-                            "host": [
-                                "{{base_url}}"
-                            ],
-                            "path": [
-                                "notifications",
-                                ":id"
-                            ],
-                            "variable": [
-                                {
-                                    "key": "id",
-                                    "value": "notification_id_here"
-                                }
-                            ]
-                        }
-                    },
-                    "response": []
+                    }
                 }
             ]
         },
@@ -147,44 +117,17 @@
                             }
                         },
                         "url": {
-                            "raw": "{{base_url}}/contact/demo",
+                            "raw": "{{base_url}}/v1/contact/demo",
                             "host": [
                                 "{{base_url}}"
                             ],
                             "path": [
+                                "v1",
                                 "contact",
                                 "demo"
                             ]
                         }
-                    },
-                    "response": []
-                },
-                {
-                    "name": "Send Message",
-                    "request": {
-                        "method": "POST",
-                        "header": [],
-                        "body": {
-                            "mode": "raw",
-                            "raw": "{\n  \"name\": \"Jane Smith\",\n  \"email\": \"jane@example.com\",\n  \"subject\": \"Pricing Inquiry\",\n  \"message\": \"I'd like to know more about the Enterprise plan.\"\n}",
-                            "options": {
-                                "raw": {
-                                    "language": "json"
-                                }
-                            }
-                        },
-                        "url": {
-                            "raw": "{{base_url}}/contact/message",
-                            "host": [
-                                "{{base_url}}"
-                            ],
-                            "path": [
-                                "contact",
-                                "message"
-                            ]
-                        }
-                    },
-                    "response": []
+                    }
                 }
             ]
         },
@@ -203,96 +146,23 @@
                             }
                         ],
                         "url": {
-                            "raw": "{{base_url}}/onboarding/progress",
+                            "raw": "{{base_url}}/v1/onboarding/progress",
                             "host": [
                                 "{{base_url}}"
                             ],
                             "path": [
+                                "v1",
                                 "onboarding",
                                 "progress"
                             ]
                         }
-                    },
-                    "response": []
-                },
-                {
-                    "name": "Update Step",
-                    "request": {
-                        "method": "PATCH",
-                        "header": [
-                            {
-                                "key": "Authorization",
-                                "value": "Bearer {{jwt_token}}",
-                                "type": "text"
-                            }
-                        ],
-                        "body": {
-                            "mode": "raw",
-                            "raw": "{\n  \"isCompleted\": true\n}",
-                            "options": {
-                                "raw": {
-                                    "language": "json"
-                                }
-                            }
-                        },
-                        "url": {
-                            "raw": "{{base_url}}/onboarding/step/:id",
-                            "host": [
-                                "{{base_url}}"
-                            ],
-                            "path": [
-                                "onboarding",
-                                "step",
-                                ":id"
-                            ],
-                            "variable": [
-                                {
-                                    "key": "id",
-                                    "value": "step_id_here"
-                                }
-                            ]
-                        }
-                    },
-                    "response": []
+                    }
                 }
             ]
         },
         {
             "name": "Analytics",
             "item": [
-                {
-                    "name": "Track Event",
-                    "request": {
-                        "method": "POST",
-                        "header": [
-                            {
-                                "key": "Authorization",
-                                "value": "Bearer {{jwt_token}}",
-                                "type": "text"
-                            }
-                        ],
-                        "body": {
-                            "mode": "raw",
-                            "raw": "{\n  \"eventName\": \"dashboard_view\",\n  \"metadata\": {\n    \"source\": \"login_redirect\"\n  }\n}",
-                            "options": {
-                                "raw": {
-                                    "language": "json"
-                                }
-                            }
-                        },
-                        "url": {
-                            "raw": "{{base_url}}/analytics/event",
-                            "host": [
-                                "{{base_url}}"
-                            ],
-                            "path": [
-                                "analytics",
-                                "event"
-                            ]
-                        }
-                    },
-                    "response": []
-                },
                 {
                     "name": "Get Summary",
                     "request": {
@@ -305,134 +175,17 @@
                             }
                         ],
                         "url": {
-                            "raw": "{{base_url}}/analytics/summary",
+                            "raw": "{{base_url}}/v1/analytics/summary",
                             "host": [
                                 "{{base_url}}"
                             ],
                             "path": [
+                                "v1",
                                 "analytics",
                                 "summary"
                             ]
                         }
-                    },
-                    "response": []
-                },
-                {
-                    "name": "Get Feature Flag",
-                    "request": {
-                        "method": "GET",
-                        "header": [
-                            {
-                                "key": "Authorization",
-                                "value": "Bearer {{jwt_token}}",
-                                "type": "text"
-                            }
-                        ],
-                        "url": {
-                            "raw": "{{base_url}}/analytics/feature-flag/:name",
-                            "host": [
-                                "{{base_url}}"
-                            ],
-                            "path": [
-                                "analytics",
-                                "feature-flag",
-                                ":name"
-                            ],
-                            "variable": [
-                                {
-                                    "key": "name",
-                                    "value": "experimental-ui"
-                                }
-                            ]
-                        }
-                    },
-                    "response": []
-                }
-            ]
-        },
-        {
-            "name": "Subscription & Loyalty",
-            "item": [
-                {
-                    "name": "Get Renewal Status",
-                    "request": {
-                        "method": "GET",
-                        "header": [
-                            {
-                                "key": "Authorization",
-                                "value": "Bearer {{jwt_token}}",
-                                "type": "text"
-                            }
-                        ],
-                        "url": {
-                            "raw": "{{base_url}}/subscription/renewal-status",
-                            "host": [
-                                "{{base_url}}"
-                            ],
-                            "path": [
-                                "subscription",
-                                "renewal-status"
-                            ]
-                        }
-                    },
-                    "response": []
-                },
-                {
-                    "name": "Get Loyalty Points",
-                    "request": {
-                        "method": "GET",
-                        "header": [
-                            {
-                                "key": "Authorization",
-                                "value": "Bearer {{jwt_token}}",
-                                "type": "text"
-                            }
-                        ],
-                        "url": {
-                            "raw": "{{base_url}}/loyalty/points",
-                            "host": [
-                                "{{base_url}}"
-                            ],
-                            "path": [
-                                "loyalty",
-                                "points"
-                            ]
-                        }
-                    },
-                    "response": []
-                },
-                {
-                    "name": "Invite Referral",
-                    "request": {
-                        "method": "POST",
-                        "header": [
-                            {
-                                "key": "Authorization",
-                                "value": "Bearer {{jwt_token}}",
-                                "type": "text"
-                            }
-                        ],
-                        "body": {
-                            "mode": "raw",
-                            "raw": "{\n  \"email\": \"friend@example.com\"\n}",
-                            "options": {
-                                "raw": {
-                                    "language": "json"
-                                }
-                            }
-                        },
-                        "url": {
-                            "raw": "{{base_url}}/referral/invite",
-                            "host": [
-                                "{{base_url}}"
-                            ],
-                            "path": [
-                                "referral",
-                                "invite"
-                            ]
-                        }
-                    },
-                    "response": []
+                    }
                 }
             ]
         },
@@ -451,56 +204,129 @@
                             }
                         ],
                         "url": {
-                            "raw": "{{base_url}}/promotions/active?segment=new_user",
+                            "raw": "{{base_url}}/v1/promotions/active",
                             "host": [
                                 "{{base_url}}"
                             ],
                             "path": [
+                                "v1",
                                 "promotions",
                                 "active"
-                            ],
-                            "query": [
-                                {
-                                    "key": "segment",
-                                    "value": "new_user"
-                                }
                             ]
                         }
-                    },
-                    "response": []
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Management (New)",
+            "item": [
+                {
+                    "name": "Guests",
+                    "item": [
+                        {
+                            "name": "Get Guests",
+                            "request": {
+                                "method": "GET",
+                                "header": [
+                                    {
+                                        "key": "Authorization",
+                                        "value": "Bearer {{jwt_token}}",
+                                        "type": "text"
+                                    }
+                                ],
+                                "url": {
+                                    "raw": "{{base_url}}/v1/guests?search=John",
+                                    "host": [
+                                        "{{base_url}}"
+                                    ],
+                                    "path": [
+                                        "v1",
+                                        "guests"
+                                    ],
+                                    "query": [
+                                        {
+                                            "key": "search",
+                                            "value": "John"
+                                        }
+                                    ]
+                                }
+                            }
+                        }
+                    ]
                 },
                 {
-                    "name": "Apply Coupon",
-                    "request": {
-                        "method": "POST",
-                        "header": [
-                            {
-                                "key": "Authorization",
-                                "value": "Bearer {{jwt_token}}",
-                                "type": "text"
-                            }
-                        ],
-                        "body": {
-                            "mode": "raw",
-                            "raw": "{\n  \"code\": \"WELCOME30\"\n}",
-                            "options": {
-                                "raw": {
-                                    "language": "json"
+                    "name": "Bookings",
+                    "item": [
+                        {
+                            "name": "Get Bookings",
+                            "request": {
+                                "method": "GET",
+                                "header": [
+                                    {
+                                        "key": "Authorization",
+                                        "value": "Bearer {{jwt_token}}",
+                                        "type": "text"
+                                    }
+                                ],
+                                "url": {
+                                    "raw": "{{base_url}}/v1/bookings?search=Somchai",
+                                    "host": [
+                                        "{{base_url}}"
+                                    ],
+                                    "path": [
+                                        "v1",
+                                        "bookings"
+                                    ],
+                                    "query": [
+                                        {
+                                            "key": "search",
+                                            "value": "Somchai"
+                                        }
+                                    ]
                                 }
                             }
-                        },
-                        "url": {
-                            "raw": "{{base_url}}/promotions/apply-coupon",
-                            "host": [
-                                "{{base_url}}"
-                            ],
-                            "path": [
-                                "promotions",
-                                "apply-coupon"
-                            ]
                         }
-                    },
-                    "response": []
+                    ]
+                },
+                {
+                    "name": "Rooms",
+                    "item": [
+                        {
+                            "name": "Get Available Rooms",
+                            "request": {
+                                "method": "GET",
+                                "header": [
+                                    {
+                                        "key": "Authorization",
+                                        "value": "Bearer {{jwt_token}}",
+                                        "type": "text"
+                                    }
+                                ],
+                                "url": {
+                                    "raw": "{{base_url}}/v1/rooms/available?checkIn=2024-03-20&checkOut=2024-03-22",
+                                    "host": [
+                                        "{{base_url}}"
+                                    ],
+                                    "path": [
+                                        "v1",
+                                        "rooms",
+                                        "available"
+                                    ],
+                                    "query": [
+                                        {
+                                            "key": "checkIn",
+                                            "value": "2024-03-20"
+                                        },
+                                        {
+                                            "key": "checkOut",
+                                            "value": "2024-03-22"
+                                        }
+                                    ]
+                                }
+                            }
+                        }
+                    ]
                 }
             ]
         }

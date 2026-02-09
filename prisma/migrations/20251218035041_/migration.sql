@@ -16,6 +16,7 @@ ALTER TABLE `users` ADD COLUMN `authProvider` VARCHAR(191) NOT NULL DEFAULT 'loc
 -- CreateTable
 CREATE TABLE `restaurants` (
     `id` VARCHAR(191) NOT NULL,
+    `tenantId` VARCHAR(191) NULL,
     `name` VARCHAR(191) NOT NULL,
     `code` VARCHAR(191) NOT NULL,
     `description` VARCHAR(191) NULL,
@@ -31,6 +32,7 @@ CREATE TABLE `restaurants` (
 -- CreateTable
 CREATE TABLE `employees` (
     `id` VARCHAR(191) NOT NULL,
+    `tenantId` VARCHAR(191) NULL,
     `firstName` VARCHAR(191) NOT NULL,
     `lastName` VARCHAR(191) NOT NULL,
     `email` VARCHAR(191) NOT NULL,
@@ -49,6 +51,7 @@ CREATE TABLE `employees` (
 -- CreateTable
 CREATE TABLE `channels` (
     `id` VARCHAR(191) NOT NULL,
+    `tenantId` VARCHAR(191) NULL,
     `name` VARCHAR(191) NOT NULL,
     `code` VARCHAR(191) NOT NULL,
     `type` VARCHAR(191) NOT NULL,

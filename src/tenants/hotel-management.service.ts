@@ -14,6 +14,9 @@ import {
   HotelFilterOptionsDto,
   HotelListStatusBadge,
 } from './dto/hotel-list-response.dto';
+import { PrismaService } from '../prisma/prisma.service';
+import * as bcrypt from 'bcrypt';
+import { randomBytes } from 'crypto';
 
 @Injectable()
 export class HotelManagementService {
@@ -26,6 +29,7 @@ export class HotelManagementService {
     private invoicesRepository: Repository<Invoice>,
     @InjectRepository(Plan)
     private plansRepository: Repository<Plan>,
+    private prisma: PrismaService,
   ) {}
 
   // ===== CREATE HOTEL =====
@@ -97,7 +101,36 @@ export class HotelManagementService {
 
     const savedSubscription = await this.subscriptionsRepository.save(subscription);
 
-    // 6. Return formatted response
+    // 6. สร้าง User admin (tenant_admin) สำหรับโรงแรมนี้
+    const defaultPassword = randomBytes(16).toString('hex'); // สร้าง password แบบสุ่ม
+    const hashedPassword = await bcrypt.hash(defaultPassword, 10);
+
+    try {
+      await this.prisma.user.create({
+        data: {
+          email: dto.email,
+          password: hashedPassword,
+          firstName: dto.customerName?.split(' ')[0] || 'Admin',
+          lastName: dto.customerName?.split(' ').slice(1).join(' ') || '',
+          role: 'tenant_admin',
+          tenantId: savedTenant.id,
+          status: 'active',
+        },
+      });
+      // TODO: ส่ง password reset link ทางอีเมลไปให้ user
+    } catch (error) {
+      // ถ้า user มีอยู่แล้ว (email ซ้ำ) ให้ update tenantId
+      if (error.code === 'P2002') {
+        await this.prisma.user.updateMany({
+          where: { email: dto.email },
+          data: { tenantId: savedTenant.id },
+        });
+      } else {
+        console.error('Failed to create tenant admin user:', error);
+      }
+    }
+
+    // 7. Return formatted response
     return {
       success: true,
       message: `Hotel "${dto.name}" created successfully with ${trialDays}-day trial`,
@@ -131,8 +164,10 @@ export class HotelManagementService {
 
   /**
    * ดึงรายการโรงแรมทั้งหมด (สำหรับหน้าจัดการโรงแรม)
+   * @param query - Query parameters for filtering, pagination, and sorting
+   * @param tenantId - Optional: Filter to only show this tenant's data (for non-platform-admin users)
    */
-  async getHotelList(query: HotelListQueryDto = {}): Promise<HotelListResponseDto> {
+  async getHotelList(query: HotelListQueryDto = {}, tenantId?: string): Promise<HotelListResponseDto> {
     const {
       search,
       status = 'all',
@@ -147,6 +182,11 @@ export class HotelManagementService {
       .createQueryBuilder('tenant')
       .leftJoinAndSelect('tenant.subscription', 'subscription')
       .leftJoinAndSelect('subscription.plan', 'plan');
+
+    // Tenant filter (for non-platform-admin users, show only their tenant)
+    if (tenantId) {
+      queryBuilder.andWhere('tenant.id = :tenantId', { tenantId });
+    }
 
     // Search filter
     if (search) {
@@ -179,10 +219,10 @@ export class HotelManagementService {
     const hotels: HotelListItemDto[] = tenants.map(tenant => this.mapTenantToListItem(tenant));
 
     // Get summary stats
-    const summary = await this.getSummaryStats();
+    const summary = await this.getSummaryStats(tenantId);
 
     // Get filter options
-    const filterOptions = await this.getFilterOptions();
+    const filterOptions = await this.getFilterOptions(tenantId);
 
     // Calculate pagination
     const totalPages = Math.ceil(totalItems / limit);
@@ -298,13 +338,15 @@ export class HotelManagementService {
     return statusMap[status];
   }
 
-  private async getSummaryStats(): Promise<HotelSummaryStatsDto> {
+  private async getSummaryStats(tenantId?: string): Promise<HotelSummaryStatsDto> {
+    const whereBase = tenantId ? { id: tenantId } : {};
+    
     const [total, active, trial, suspended, expired] = await Promise.all([
-      this.tenantsRepository.count(),
-      this.tenantsRepository.count({ where: { status: TenantStatus.ACTIVE } }),
-      this.tenantsRepository.count({ where: { status: TenantStatus.TRIAL } }),
-      this.tenantsRepository.count({ where: { status: TenantStatus.SUSPENDED } }),
-      this.tenantsRepository.count({ where: { status: TenantStatus.EXPIRED } }),
+      this.tenantsRepository.count({ where: whereBase }),
+      this.tenantsRepository.count({ where: { ...whereBase, status: TenantStatus.ACTIVE } }),
+      this.tenantsRepository.count({ where: { ...whereBase, status: TenantStatus.TRIAL } }),
+      this.tenantsRepository.count({ where: { ...whereBase, status: TenantStatus.SUSPENDED } }),
+      this.tenantsRepository.count({ where: { ...whereBase, status: TenantStatus.EXPIRED } }),
     ]);
 
     return {
@@ -319,14 +361,19 @@ export class HotelManagementService {
     };
   }
 
-  private async getFilterOptions(): Promise<HotelFilterOptionsDto> {
+  private async getFilterOptions(tenantId?: string): Promise<HotelFilterOptionsDto> {
     // Get status counts
-    const statusCounts = await this.tenantsRepository
+    const queryBuilder = this.tenantsRepository
       .createQueryBuilder('tenant')
       .select('tenant.status', 'status')
       .addSelect('COUNT(*)', 'count')
-      .groupBy('tenant.status')
-      .getRawMany();
+      .groupBy('tenant.status');
+
+    if (tenantId) {
+      queryBuilder.andWhere('tenant.id = :tenantId', { tenantId });
+    }
+
+    const statusCounts = await queryBuilder.getRawMany();
 
     const statusMap: Record<string, { label: string; labelTh: string }> = {
       trial: { label: 'Trial', labelTh: 'ทดลองใช้' },
