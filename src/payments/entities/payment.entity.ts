@@ -68,6 +68,10 @@ export class Payment {
   @ManyToOne(() => Invoice, (invoice) => invoice.payments)
   @JoinColumn({ name: 'invoice_id' })
   invoice: Invoice;
+
+  @ManyToOne(() => Admin)
+  @JoinColumn({ name: 'approved_by' })
+  approver: Admin;
 }
 
 

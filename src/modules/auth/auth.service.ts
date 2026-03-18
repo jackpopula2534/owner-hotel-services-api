@@ -239,6 +239,67 @@ export class AuthService {
     }
   }
 
+
+  async forgotPassword(email: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user) {
+      // Don't reveal if user exists for security
+      return { message: 'If an account with that email exists, a reset link has been sent.' };
+    }
+
+    // Generate token
+    const token = randomBytes(32).toString('hex');
+    const expiresAt = new Date();
+    expiresAt.setHours(expiresAt.getHours() + 1); // 1 hour expiry
+
+    // Save to database
+    await this.prisma.password_resets.create({
+      data: {
+        email,
+        token,
+        expiresAt,
+      },
+    });
+
+    // TODO: Send email with reset link
+    // For now, we return the token for testing/dev purposes
+    console.log(`Password reset token for ${email}: ${token}`);
+
+    return { 
+      message: 'If an account with that email exists, a reset link has been sent.',
+      token: process.env.NODE_ENV === 'development' ? token : undefined, // Only return token in dev
+    };
+  }
+
+  async resetPassword(token: string, newPassword: string) {
+    const resetRecord = await this.prisma.password_resets.findUnique({
+      where: { token },
+    });
+
+    if (!resetRecord || resetRecord.expiresAt < new Date()) {
+      throw new BadRequestException('Invalid or expired reset token');
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Update user password
+    await this.prisma.user.update({
+      where: { email: resetRecord.email },
+      data: { password: hashedPassword },
+    });
+
+    // Delete the used token
+    await this.prisma.password_resets.delete({
+      where: { id: resetRecord.id },
+    });
+
+    return { message: 'Password has been reset successfully' };
+  }
+
   private async generateTokens(
     id: string,
     email: string,

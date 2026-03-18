@@ -8,7 +8,7 @@ datasource db {
 }
 
 model User {
-  id            String         @id @default(uuid()) 
+  id            String         @id @default(uuid()) @db.VarChar(36) 
   email         String         @unique
   password      String
   firstName     String?
@@ -33,7 +33,7 @@ model User {
 }
 
 model Admin {
-  id            String         @id @default(uuid()) 
+  id            String         @id @default(uuid()) @db.VarChar(36) 
   firstName     String?        
   lastName      String?        
   email         String         @unique(map: "IDX_051db7d37d478a69a7432df147") 
@@ -50,13 +50,13 @@ model Admin {
 }
 
 model RefreshToken {
-  id        String    @id @default(uuid()) 
+  id        String    @id @default(uuid()) @db.VarChar(36) 
   token     String    @unique
-  userId    String?   
+  userId    String?   @db.VarChar(36)
   expiresAt DateTime
   createdAt DateTime  @default(now())
   revokedAt DateTime?
-  adminId   String?   
+  adminId   String?   @db.VarChar(36)
   admin     Admin?    @relation(fields: [adminId], references: [id], onDelete: Cascade)
   user      User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -64,6 +64,17 @@ model RefreshToken {
   @@index([userId])
   @@index([adminId])
   @@map("refresh_tokens")
+}
+
+model password_resets {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  email     String
+  token     String   @unique
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([email])
+  @@map("password_resets")
 }
 
 model Guest {

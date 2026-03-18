@@ -11,8 +11,8 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total Tasks** | 146 |
-| **Completed** | 122 |
+| **Total Tasks** | 147 |
+| **Completed** | 123 |
 | **In Progress** | 3 |
 | **Progress** | 84% |
 
@@ -388,6 +388,7 @@
 | 12.1.8 | Update reviews.service.ts error handling | ✅ Done | `modules/reviews/reviews.service.ts` | Added null tenantId check |
 | 12.1.9 | Update restaurant.service.ts error handling | ✅ Done | `modules/restaurant/restaurant.service.ts` | Added null tenantId check |
 | 12.1.10 | Update channels.service.ts error handling | ✅ Done | `modules/channels/channels.service.ts` | Added null tenantId check |
+| 12.1.11 | Update guests.service.ts error handling | ✅ Done | `modules/guests/guests.service.ts` | Return empty data (200) for findAll + Prisma error handling |
 
 ### 12.2 Tenant Admin Auto-Creation
 | # | Task | Status | File | Notes |
@@ -456,7 +457,7 @@ Separate system users (login accounts) from HR employees. The Users API manages 
 
 | Date | Changes | Files Modified |
 |------|---------|----------------|
-| 2026-02-10 | Phase 12 Complete - Error Handling + Tenant Admin Auto-Creation + Users API + Null TenantId Fix | `src/common/filters/all-exceptions.filter.ts`, `src/modules/rooms/rooms.service.ts`, `src/modules/bookings/bookings.service.ts`, `src/modules/hr/hr.service.ts`, `src/modules/users/users.service.ts`, `src/modules/reviews/reviews.service.ts`, `src/modules/restaurant/restaurant.service.ts`, `src/modules/channels/channels.service.ts`, `src/notifications/notifications.service.ts`, `src/promotions/promotions.service.ts`, `src/tenants/hotel-management.service.ts`, `src/modules/users/users.controller.ts`, `src/modules/users/users.module.ts`, `src/app.module.ts` |
+| 2026-02-10 | Phase 12 Complete - Error Handling + Tenant Admin Auto-Creation + Users API + Null TenantId Fix | `src/common/filters/all-exceptions.filter.ts`, `src/modules/rooms/rooms.service.ts`, `src/modules/bookings/bookings.service.ts`, `src/modules/guests/guests.service.ts`, `src/modules/hr/hr.service.ts`, `src/modules/users/users.service.ts`, `src/modules/reviews/reviews.service.ts`, `src/modules/restaurant/restaurant.service.ts`, `src/modules/channels/channels.service.ts`, `src/notifications/notifications.service.ts`, `src/promotions/promotions.service.ts`, `src/tenants/hotel-management.service.ts`, `src/modules/users/users.controller.ts`, `src/modules/users/users.module.ts`, `src/app.module.ts` |
 | 2026-02-08 | Phase 11 Complete - Multi-Property Backend + Limits & Add-ons | `prisma/schema.prisma`, `src/modules/properties/`, `src/modules/rooms/`, `src/modules/bookings/`, `docs/*` |
 | 2026-02-07 | Phase 8.4-8.6 Complete - Promotions, Analytics, Subscription hooks + TrialBadge/UpgradeModal/PromoBanner integration | `lib/hooks/usePromotions.ts`, `lib/hooks/useAnalytics.ts`, `lib/hooks/useSubscription.ts`, `components/saas/PromoBanner.tsx`, `components/saas/TrialBadge.tsx`, `components/saas/UpgradeModal.tsx`, `lib/hooks/index.ts` |
 | 2026-02-07 | Phase 8.1-8.3 Complete - API Client endpoints + Custom hooks + Component integration | `lib/api/client.ts`, `lib/hooks/useNotifications.ts`, `lib/hooks/useContact.ts`, `lib/hooks/useOnboardingProgress.ts`, `components/ui/NotificationPanel.tsx`, `components/contact/ContactForm.tsx`, `components/contact/DemoBooking.tsx`, `components/onboarding/OnboardingChecklist.tsx` |

@@ -117,7 +117,21 @@ export class HotelManagementService {
           status: 'active',
         },
       });
-      // TODO: ส่ง password reset link ทางอีเมลไปให้ user
+      // Generate password reset token
+      const resetToken = randomBytes(32).toString('hex');
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 7); // 7 days for initial setup
+
+      await this.prisma.password_resets.create({
+        data: {
+          email: dto.email,
+          token: resetToken,
+          expiresAt,
+        },
+      });
+
+      console.log(`Initial setup: generated reset token for ${dto.email}: ${resetToken}`);
+      // TODO: Send email with reset link containing this token
     } catch (error) {
       // ถ้า user มีอยู่แล้ว (email ซ้ำ) ให้ update tenantId
       if (error.code === 'P2002') {

@@ -43,6 +43,11 @@ export class RolesGuard implements CanActivate {
     const hasRole = requiredRoles.includes(user.role);
     if (!hasRole) {
       console.log(`❌ RolesGuard: Role mismatch. User role: "${user.role}", Required one of: [${requiredRoles.join(', ')}]`);
+      // Throw explicit exception to help client debugging
+      const { ForbiddenException } = require('@nestjs/common');
+      throw new ForbiddenException(
+        `Access denied. You have role "${user.role}", but this resource requires one of: [${requiredRoles.join(', ')}]`
+      );
     } else {
       console.log(`✅ RolesGuard: Role authorized. User role: "${user.role}"`);
     }
