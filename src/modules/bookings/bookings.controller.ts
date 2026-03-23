@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { BookingsService } from './bookings.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -28,6 +29,7 @@ export class BookingsController {
   }
 
   @Post()
+  @Throttle({ default: { limit: 20, ttl: 60 } })
   @ApiOperation({ summary: 'Create a new booking' })
   @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
   async create(
@@ -38,6 +40,7 @@ export class BookingsController {
   }
 
   @Put(':id')
+  @Throttle({ default: { limit: 20, ttl: 60 } })
   @ApiOperation({ summary: 'Update booking' })
   @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
   async update(
@@ -63,6 +66,7 @@ export class BookingsController {
   }
 
   @Delete(':id')
+  @Throttle({ default: { limit: 10, ttl: 60 } })
   @ApiOperation({ summary: 'Cancel booking' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'receptionist')
   async remove(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
