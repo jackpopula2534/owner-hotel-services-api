@@ -64,22 +64,22 @@ export class PlansController {
 
       // Map add-on features
       const addOnFeatures: PublicPlanFeatureDto[] =
-        plan.planFeatures?.map((pf) => ({
-          code: pf.feature?.code || '',
-          name: pf.feature?.name || '',
-          priceMonthly: Number(pf.feature?.priceMonthly || 0),
+        plan.plan_features?.map((pf) => ({
+          code: pf.features?.code || '',
+          name: pf.features?.name || '',
+          priceMonthly: Number(pf.features?.price_monthly || 0),
         })) || [];
 
       // Calculate yearly pricing
-      const priceMonthly = Number(plan.priceMonthly || 0);
-      const yearlyDiscountPercent = plan.yearlyDiscountPercent || 0;
+      const priceMonthly = Number(plan.price_monthly || 0);
+      const yearlyDiscountPercent = plan.yearly_discount_percent || 0;
 
       let priceYearly: number | undefined;
       let yearlySavings: number | undefined;
 
-      if (plan.priceYearly) {
+      if (plan.price_yearly) {
         // Use explicit yearly price if provided
-        priceYearly = Number(plan.priceYearly);
+        priceYearly = Number(plan.price_yearly);
       } else if (yearlyDiscountPercent > 0) {
         // Calculate from discount percentage
         const monthlyTotal = priceMonthly * 12;
@@ -101,14 +101,14 @@ export class PlansController {
         priceYearly,
         yearlyDiscountPercent: yearlyDiscountPercent > 0 ? yearlyDiscountPercent : undefined,
         yearlySavings: yearlySavings && yearlySavings > 0 ? Math.round(yearlySavings) : undefined,
-        maxRooms: plan.maxRooms,
-        maxUsers: plan.maxUsers,
-        displayOrder: plan.displayOrder,
-        isPopular: plan.isPopular,
+        maxRooms: plan.max_rooms,
+        maxUsers: plan.max_users,
+        displayOrder: plan.display_order,
+        isPopular: Boolean(plan.is_popular),
         badge: plan.badge,
-        highlightColor: plan.highlightColor,
+        highlightColor: plan.highlight_color,
         features: featuresArray,
-        buttonText: plan.buttonText || 'เริ่มใช้งาน',
+        buttonText: plan.button_text || 'เริ่มใช้งาน',
         addOnFeatures:
           addOnFeatures.length > 0 ? addOnFeatures : undefined,
       };
@@ -157,21 +157,21 @@ export class PlansController {
 
     // Map add-on features
     const addOnFeatures: PublicPlanFeatureDto[] =
-      plan.planFeatures?.map((pf) => ({
-        code: pf.feature?.code || '',
-        name: pf.feature?.name || '',
-        priceMonthly: Number(pf.feature?.priceMonthly || 0),
+      plan.plan_features?.map((pf) => ({
+        code: pf.features?.code || '',
+        name: pf.features?.name || '',
+        priceMonthly: Number(pf.features?.price_monthly || 0),
       })) || [];
 
     // Calculate yearly pricing
-    const priceMonthly = Number(plan.priceMonthly || 0);
-    const yearlyDiscountPercent = plan.yearlyDiscountPercent || 0;
+    const priceMonthly = Number(plan.price_monthly || 0);
+    const yearlyDiscountPercent = plan.yearly_discount_percent || 0;
 
     let priceYearly: number | undefined;
     let yearlySavings: number | undefined;
 
-    if (plan.priceYearly) {
-      priceYearly = Number(plan.priceYearly);
+    if (plan.price_yearly) {
+      priceYearly = Number(plan.price_yearly);
     } else if (yearlyDiscountPercent > 0) {
       const monthlyTotal = priceMonthly * 12;
       priceYearly = Math.round(
@@ -192,14 +192,14 @@ export class PlansController {
       priceYearly,
       yearlyDiscountPercent: yearlyDiscountPercent > 0 ? yearlyDiscountPercent : undefined,
       yearlySavings: yearlySavings && yearlySavings > 0 ? Math.round(yearlySavings) : undefined,
-      maxRooms: plan.maxRooms,
-      maxUsers: plan.maxUsers,
-      displayOrder: plan.displayOrder,
-      isPopular: plan.isPopular,
+      maxRooms: plan.max_rooms,
+      maxUsers: plan.max_users,
+      displayOrder: plan.display_order,
+      isPopular: Boolean(plan.is_popular),
       badge: plan.badge,
-      highlightColor: plan.highlightColor,
+      highlightColor: plan.highlight_color,
       features: featuresArray,
-      buttonText: plan.buttonText || 'เริ่มใช้งาน',
+      buttonText: plan.button_text || 'เริ่มใช้งาน',
       addOnFeatures: addOnFeatures.length > 0 ? addOnFeatures : undefined,
     };
   }

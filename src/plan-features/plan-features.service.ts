@@ -1,36 +1,35 @@
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { PlanFeature } from './entities/plan-feature.entity';
+import { PrismaService } from '../prisma/prisma.service';
 import { CreatePlanFeatureDto } from './dto/create-plan-feature.dto';
 
 @Injectable()
 export class PlanFeaturesService {
-  constructor(
-    @InjectRepository(PlanFeature)
-    private planFeaturesRepository: Repository<PlanFeature>,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-  create(createPlanFeatureDto: CreatePlanFeatureDto): Promise<PlanFeature> {
-    const planFeature = this.planFeaturesRepository.create(createPlanFeatureDto);
-    return this.planFeaturesRepository.save(planFeature);
-  }
-
-  findAll(): Promise<PlanFeature[]> {
-    return this.planFeaturesRepository.find({
-      relations: ['plan', 'feature'],
+  create(createPlanFeatureDto: CreatePlanFeatureDto) {
+    return this.prisma.plan_features.create({
+      data: createPlanFeatureDto as any,
+      include: { plans: true, features: true },
     });
   }
 
-  findByPlanId(planId: string): Promise<PlanFeature[]> {
-    return this.planFeaturesRepository.find({
-      where: { planId },
-      relations: ['feature'],
+  findAll() {
+    return this.prisma.plan_features.findMany({
+      include: { plans: true, features: true },
     });
   }
 
-  remove(id: string): Promise<void> {
-    return this.planFeaturesRepository.delete(id).then(() => undefined);
+  findByPlanId(planId: string) {
+    return this.prisma.plan_features.findMany({
+      where: { plan_id: planId },
+      include: { features: true },
+    });
+  }
+
+  remove(id: string) {
+    return this.prisma.plan_features.delete({
+      where: { id },
+    });
   }
 }
 

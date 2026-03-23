@@ -23,7 +23,7 @@ export class SubscriptionGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
-    const tenantId = request.headers['x-tenant-id'] || request.user?.tenantId;
+    const tenantId = request.headers['x-tenant-id'] || request.user?.tenant_id;
 
     if (!tenantId) {
       throw new ForbiddenException('Tenant ID is required');
@@ -65,7 +65,7 @@ export class SubscriptionGuard implements CanActivate {
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const endDate = new Date(subscription.endDate);
+    const endDate = new Date(subscription.end_date);
     endDate.setHours(0, 0, 0, 0);
 
     // ถ้าหมดอายุ

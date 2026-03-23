@@ -94,7 +94,7 @@ export class FeatureAccessService {
     // 5. ตรวจสอบวันที่ (today <= end_date)
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const endDate = new Date(subscription.endDate);
+    const endDate = new Date(subscription.end_date);
     endDate.setHours(0, 0, 0, 0);
 
     if (endDate < today) {
@@ -115,7 +115,7 @@ export class FeatureAccessService {
       };
     }
 
-    if (!feature.isActive) {
+    if (!feature.is_active) {
       return {
         hasAccess: false,
         reason: 'Feature is not active',
@@ -151,9 +151,9 @@ export class FeatureAccessService {
     featureCode: string,
   ): Promise<boolean> {
     // ตรวจสอบ plan features (ฟีเจอร์ที่แถมมากับ plan)
-    if (subscription.plan?.planFeatures) {
-      const planFeature = subscription.plan.planFeatures.find(
-        (pf: any) => pf.feature?.code === featureCode,
+    if (subscription.plans_subscriptions_plan_idToplans?.plan_features) {
+      const planFeature = subscription.plans_subscriptions_plan_idToplans.plan_features.find(
+        (pf: any) => pf.features?.code === featureCode,
       );
       if (planFeature) {
         return true;
@@ -161,9 +161,9 @@ export class FeatureAccessService {
     }
 
     // ตรวจสอบ subscription features (ฟีเจอร์ที่ซื้อเพิ่ม)
-    if (subscription.subscriptionFeatures) {
-      const subscriptionFeature = subscription.subscriptionFeatures.find(
-        (sf: any) => sf.feature?.code === featureCode,
+    if (subscription.subscription_features) {
+      const subscriptionFeature = subscription.subscription_features.find(
+        (sf: any) => sf.features?.code === featureCode,
       );
       if (subscriptionFeature) {
         return true;
@@ -216,9 +216,9 @@ export class FeatureAccessService {
     }
 
     const planFeatures =
-      subscription.plan?.planFeatures?.map((pf: any) => pf.feature) || [];
+      subscription.plans_subscriptions_plan_idToplans?.plan_features?.map((pf: any) => pf.features) || [];
     const subscriptionFeatures =
-      subscription.subscriptionFeatures?.map((sf: any) => sf.feature) || [];
+      subscription.subscription_features?.map((sf: any) => sf.features) || [];
 
     // รวม features ทั้งหมด (ไม่ซ้ำ)
     const allFeaturesMap = new Map();
@@ -262,7 +262,7 @@ export class FeatureAccessService {
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const endDate = new Date(subscription.endDate);
+    const endDate = new Date(subscription.end_date);
     endDate.setHours(0, 0, 0, 0);
 
     const isActive =
@@ -274,9 +274,9 @@ export class FeatureAccessService {
       subscription: {
         id: subscription.id,
         status: subscription.status,
-        startDate: subscription.startDate,
-        endDate: subscription.endDate,
-        plan: subscription.plan,
+        startDate: subscription.start_date,
+        endDate: subscription.end_date,
+        plan: subscription.plans_subscriptions_plan_idToplans,
       },
       tenant: {
         id: tenant.id,

@@ -1,36 +1,35 @@
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { SubscriptionFeature } from './entities/subscription-feature.entity';
+import { PrismaService } from '../prisma/prisma.service';
 import { CreateSubscriptionFeatureDto } from './dto/create-subscription-feature.dto';
 
 @Injectable()
 export class SubscriptionFeaturesService {
-  constructor(
-    @InjectRepository(SubscriptionFeature)
-    private subscriptionFeaturesRepository: Repository<SubscriptionFeature>,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-  create(createSubscriptionFeatureDto: CreateSubscriptionFeatureDto): Promise<SubscriptionFeature> {
-    const subscriptionFeature = this.subscriptionFeaturesRepository.create(createSubscriptionFeatureDto);
-    return this.subscriptionFeaturesRepository.save(subscriptionFeature);
-  }
-
-  findAll(): Promise<SubscriptionFeature[]> {
-    return this.subscriptionFeaturesRepository.find({
-      relations: ['subscription', 'feature'],
+  create(createSubscriptionFeatureDto: CreateSubscriptionFeatureDto) {
+    return this.prisma.subscription_features.create({
+      data: createSubscriptionFeatureDto as any,
+      include: { subscriptions: true, features: true },
     });
   }
 
-  findBySubscriptionId(subscriptionId: string): Promise<SubscriptionFeature[]> {
-    return this.subscriptionFeaturesRepository.find({
-      where: { subscriptionId },
-      relations: ['feature'],
+  findAll() {
+    return this.prisma.subscription_features.findMany({
+      include: { subscriptions: true, features: true },
     });
   }
 
-  remove(id: string): Promise<void> {
-    return this.subscriptionFeaturesRepository.delete(id).then(() => undefined);
+  findBySubscriptionId(subscriptionId: string) {
+    return this.prisma.subscription_features.findMany({
+      where: { subscription_id: subscriptionId },
+      include: { features: true },
+    });
+  }
+
+  remove(id: string) {
+    return this.prisma.subscription_features.delete({
+      where: { id },
+    });
   }
 }
 

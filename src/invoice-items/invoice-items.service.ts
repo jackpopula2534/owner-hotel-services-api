@@ -1,35 +1,34 @@
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { InvoiceItem } from './entities/invoice-item.entity';
+import { PrismaService } from '../prisma/prisma.service';
 import { CreateInvoiceItemDto } from './dto/create-invoice-item.dto';
 
 @Injectable()
 export class InvoiceItemsService {
-  constructor(
-    @InjectRepository(InvoiceItem)
-    private invoiceItemsRepository: Repository<InvoiceItem>,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-  create(createInvoiceItemDto: CreateInvoiceItemDto): Promise<InvoiceItem> {
-    const invoiceItem = this.invoiceItemsRepository.create(createInvoiceItemDto);
-    return this.invoiceItemsRepository.save(invoiceItem);
-  }
-
-  findAll(): Promise<InvoiceItem[]> {
-    return this.invoiceItemsRepository.find({
-      relations: ['invoice'],
+  create(createInvoiceItemDto: CreateInvoiceItemDto) {
+    return this.prisma.invoice_items.create({
+      data: createInvoiceItemDto as any,
+      include: { invoices: true },
     });
   }
 
-  findByInvoiceId(invoiceId: string): Promise<InvoiceItem[]> {
-    return this.invoiceItemsRepository.find({
-      where: { invoiceId },
+  findAll() {
+    return this.prisma.invoice_items.findMany({
+      include: { invoices: true },
     });
   }
 
-  remove(id: string): Promise<void> {
-    return this.invoiceItemsRepository.delete(id).then(() => undefined);
+  findByInvoiceId(invoiceId: string) {
+    return this.prisma.invoice_items.findMany({
+      where: { invoice_id: invoiceId },
+    });
+  }
+
+  remove(id: string) {
+    return this.prisma.invoice_items.delete({
+      where: { id },
+    });
   }
 }
 

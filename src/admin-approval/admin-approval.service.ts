@@ -47,7 +47,7 @@ export class AdminApprovalService {
     );
 
     // 3. Update invoice status
-    const invoice = await this.invoicesService.findOne(payment.invoiceId);
+    const invoice = await this.invoicesService.findOne(payment.invoice_id);
     if (!invoice) {
       throw new Error('Invoice not found');
     }
@@ -58,9 +58,9 @@ export class AdminApprovalService {
     });
 
     // 5. Activate subscription
-    if (invoice.subscriptionId) {
+    if (invoice.subscription_id) {
       const subscription = await this.subscriptionsService.findOne(
-        invoice.subscriptionId,
+        invoice.subscription_id,
       );
 
       if (subscription) {

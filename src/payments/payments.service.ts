@@ -1,78 +1,86 @@
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Payment, PaymentStatus } from './entities/payment.entity';
+import { PrismaService } from '../prisma/prisma.service';
+import { PaymentStatus } from './entities/payment.entity';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
 
 @Injectable()
 export class PaymentsService {
-  constructor(
-    @InjectRepository(Payment)
-    private paymentsRepository: Repository<Payment>,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-  create(createPaymentDto: CreatePaymentDto): Promise<Payment> {
-    const payment = this.paymentsRepository.create(createPaymentDto);
-    return this.paymentsRepository.save(payment);
-  }
-
-  findAll(): Promise<Payment[]> {
-    return this.paymentsRepository.find({
-      relations: ['invoice', 'approver'],
+  create(createPaymentDto: CreatePaymentDto) {
+    return this.prisma.payments.create({
+      data: createPaymentDto as any,
+      include: { invoices: true },
     });
   }
 
-  findOne(id: string): Promise<Payment> {
-    return this.paymentsRepository.findOne({
+  findAll() {
+    return this.prisma.payments.findMany({
+      include: { invoices: true },
+    });
+  }
+
+  findOne(id: string) {
+    return this.prisma.payments.findUnique({
       where: { id },
-      relations: ['invoice', 'approver'],
+      include: { invoices: true },
     });
   }
 
-  findByInvoiceId(invoiceId: string): Promise<Payment[]> {
-    return this.paymentsRepository.find({
-      where: { invoiceId },
-      relations: ['approver'],
-      order: { createdAt: 'DESC' },
+  findByInvoiceId(invoiceId: string) {
+    return this.prisma.payments.findMany({
+      where: { invoice_id: invoiceId },
+      orderBy: { created_at: 'desc' },
     });
   }
 
-  update(id: string, updatePaymentDto: UpdatePaymentDto): Promise<Payment> {
-    return this.paymentsRepository.save({
-      id,
-      ...updatePaymentDto,
+  update(id: string, updatePaymentDto: UpdatePaymentDto) {
+    return this.prisma.payments.update({
+      where: { id },
+      data: updatePaymentDto,
+      include: { invoices: true },
     });
   }
 
-  async approvePayment(id: string, adminId: string): Promise<Payment> {
+  async approvePayment(id: string, adminId: string) {
     const payment = await this.findOne(id);
     if (!payment) {
       throw new Error('Payment not found');
     }
 
-    payment.status = PaymentStatus.APPROVED;
-    payment.approvedBy = adminId;
-    payment.approvedAt = new Date();
-
-    return this.paymentsRepository.save(payment);
+    return this.prisma.payments.update({
+      where: { id },
+      data: {
+        status: PaymentStatus.APPROVED,
+        approved_by: adminId,
+        approved_at: new Date(),
+      },
+      include: { invoices: true },
+    });
   }
 
-  async rejectPayment(id: string, adminId: string): Promise<Payment> {
+  async rejectPayment(id: string, adminId: string) {
     const payment = await this.findOne(id);
     if (!payment) {
       throw new Error('Payment not found');
     }
 
-    payment.status = PaymentStatus.REJECTED;
-    payment.approvedBy = adminId;
-    payment.approvedAt = new Date();
-
-    return this.paymentsRepository.save(payment);
+    return this.prisma.payments.update({
+      where: { id },
+      data: {
+        status: PaymentStatus.REJECTED,
+        approved_by: adminId,
+        approved_at: new Date(),
+      },
+      include: { invoices: true },
+    });
   }
 
-  remove(id: string): Promise<void> {
-    return this.paymentsRepository.delete(id).then(() => undefined);
+  remove(id: string) {
+    return this.prisma.payments.delete({
+      where: { id },
+    });
   }
 }
 

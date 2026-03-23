@@ -44,15 +44,15 @@ export class SubscriptionManagementService {
 
     // คำนวณ prorate
     const proratedAmount = this.calculateProrate(
-      subscription.plan.priceMonthly,
-      newPlan.priceMonthly,
-      subscription.startDate,
-      subscription.endDate,
+      Number(subscription.plans_subscriptions_plan_idToplans.price_monthly),
+      Number(newPlan.price_monthly),
+      subscription.start_date,
+      subscription.end_date,
     );
 
     // สร้าง invoice สำหรับ upgrade
     const invoice = await this.invoicesService.create({
-      tenantId: subscription.tenantId,
+      tenantId: subscription.tenant_id,
       subscriptionId: subscription.id,
       invoiceNo: `UPG-${Date.now()}`,
       amount: proratedAmount,
@@ -95,17 +95,17 @@ export class SubscriptionManagementService {
     // เพิ่ม feature ทันที
     const subscriptionFeature =
       await this.subscriptionFeaturesService.create({
-        subscriptionId,
-        featureId,
-        price: feature.priceMonthly,
+        subscriptionId: subscriptionId,
+        featureId: featureId,
+        price: Number(feature.price_monthly),
       });
 
     // สร้าง invoice
     const invoice = await this.invoicesService.create({
-      tenantId: subscription.tenantId,
+      tenantId: subscription.tenant_id,
       subscriptionId: subscription.id,
       invoiceNo: `FEAT-${Date.now()}`,
-      amount: feature.priceMonthly,
+      amount: Number(feature.price_monthly),
       status: InvoiceStatus.PENDING,
       dueDate: new Date(),
     });
@@ -142,7 +142,7 @@ export class SubscriptionManagementService {
 
     return {
       subscription: await this.subscriptionsService.findOne(subscriptionId),
-      effectiveDate: subscription.endDate,
+      effectiveDate: subscription.end_date,
       message: 'Downgrade scheduled. Will take effect on subscription renewal.',
     };
   }

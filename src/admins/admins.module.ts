@@ -1,11 +1,10 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { PrismaModule } from '../prisma/prisma.module';
 import { AdminsService } from './admins.service';
 import { AdminsController } from './admins.controller';
-import { Admin } from './entities/admin.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Admin])],
+  imports: [PrismaModule],
   controllers: [AdminsController],
   providers: [AdminsService],
   exports: [AdminsService],

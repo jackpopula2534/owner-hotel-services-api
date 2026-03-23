@@ -108,7 +108,7 @@ export class OnboardingService {
     }
 
     const isTrial = tenant.status === TenantStatus.TRIAL;
-    const trialEndsAt = tenant.trialEndsAt;
+    const trialEndsAt = tenant.trial_ends_at;
 
     if (!trialEndsAt) {
       return {

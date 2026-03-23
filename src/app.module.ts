@@ -2,7 +2,6 @@ import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { ConfigModule } from '@nestjs/config';
-import { TypeOrmModule } from '@nestjs/typeorm';
 import { DatabaseModule } from './database/database.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -49,6 +48,7 @@ import { I18nModule } from './i18n/i18n.module';
 import { DatabaseOptimizationModule } from './database-optimization/database-optimization.module';
 import { MobileApiModule } from './mobile-api/mobile-api.module';
 import { PushNotificationsModule } from './push-notifications/push-notifications.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -101,6 +101,7 @@ import { PushNotificationsModule } from './push-notifications/push-notifications
     DatabaseOptimizationModule,
     MobileApiModule,
     PushNotificationsModule,
+    HealthModule,
     ThrottlerModule.forRoot([
       {
         ttl: 60, // 60 seconds window

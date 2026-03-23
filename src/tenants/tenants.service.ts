@@ -1,44 +1,51 @@
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Tenant } from './entities/tenant.entity';
+import { PrismaService } from '../prisma/prisma.service';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 
 @Injectable()
 export class TenantsService {
-  constructor(
-    @InjectRepository(Tenant)
-    private tenantsRepository: Repository<Tenant>,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-  create(createTenantDto: CreateTenantDto): Promise<Tenant> {
-    const tenant = this.tenantsRepository.create(createTenantDto);
-    return this.tenantsRepository.save(tenant);
-  }
-
-  findAll(): Promise<Tenant[]> {
-    return this.tenantsRepository.find({
-      relations: ['subscription', 'subscription.plan'],
+  create(createTenantDto: CreateTenantDto) {
+    return this.prisma.tenants.create({
+      data: createTenantDto as any,
+      include: { subscriptions: { include: { plans_subscriptions_plan_idToplans: true } } },
     });
   }
 
-  findOne(id: string): Promise<Tenant> {
-    return this.tenantsRepository.findOne({
+  findAll() {
+    return this.prisma.tenants.findMany({
+      include: { subscriptions: { include: { plans_subscriptions_plan_idToplans: true } } },
+    });
+  }
+
+  findOne(id: string) {
+    return this.prisma.tenants.findUnique({
       where: { id },
-      relations: ['subscription', 'subscription.plan', 'subscription.subscriptionFeatures', 'subscription.subscriptionFeatures.feature'],
+      include: {
+        subscriptions: {
+          include: {
+            plans_subscriptions_plan_idToplans: true,
+            subscription_features: { include: { features: true } }
+          }
+        }
+      },
     });
   }
 
-  update(id: string, updateTenantDto: UpdateTenantDto): Promise<Tenant> {
-    return this.tenantsRepository.save({
-      id,
-      ...updateTenantDto,
+  update(id: string, updateTenantDto: UpdateTenantDto) {
+    return this.prisma.tenants.update({
+      where: { id },
+      data: updateTenantDto,
+      include: { subscriptions: { include: { plans_subscriptions_plan_idToplans: true } } },
     });
   }
 
-  remove(id: string): Promise<void> {
-    return this.tenantsRepository.delete(id).then(() => undefined);
+  remove(id: string) {
+    return this.prisma.tenants.delete({
+      where: { id },
+    });
   }
 }
 

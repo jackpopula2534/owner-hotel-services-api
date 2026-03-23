@@ -1,45 +1,47 @@
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Feature } from './entities/feature.entity';
+import { PrismaService } from '../prisma/prisma.service';
 import { CreateFeatureDto } from './dto/create-feature.dto';
 import { UpdateFeatureDto } from './dto/update-feature.dto';
 
 @Injectable()
 export class FeaturesService {
-  constructor(
-    @InjectRepository(Feature)
-    private featuresRepository: Repository<Feature>,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-  create(createFeatureDto: CreateFeatureDto): Promise<Feature> {
-    const feature = this.featuresRepository.create(createFeatureDto);
-    return this.featuresRepository.save(feature);
-  }
-
-  findAll(): Promise<Feature[]> {
-    return this.featuresRepository.find({
-      where: { isActive: true },
+  create(createFeatureDto: CreateFeatureDto) {
+    return this.prisma.features.create({
+      data: createFeatureDto as any,
     });
   }
 
-  findOne(id: string): Promise<Feature> {
-    return this.featuresRepository.findOne({ where: { id } });
-  }
-
-  findByCode(code: string): Promise<Feature> {
-    return this.featuresRepository.findOne({ where: { code } });
-  }
-
-  update(id: string, updateFeatureDto: UpdateFeatureDto): Promise<Feature> {
-    return this.featuresRepository.save({
-      id,
-      ...updateFeatureDto,
+  findAll() {
+    return this.prisma.features.findMany({
+      where: { is_active: 1 },
     });
   }
 
-  remove(id: string): Promise<void> {
-    return this.featuresRepository.delete(id).then(() => undefined);
+  findOne(id: string) {
+    return this.prisma.features.findUnique({
+      where: { id },
+    });
+  }
+
+  findByCode(code: string) {
+    return this.prisma.features.findUnique({
+      where: { code },
+    });
+  }
+
+  update(id: string, updateFeatureDto: UpdateFeatureDto) {
+    return this.prisma.features.update({
+      where: { id },
+      data: updateFeatureDto,
+    });
+  }
+
+  remove(id: string) {
+    return this.prisma.features.delete({
+      where: { id },
+    });
   }
 }
 

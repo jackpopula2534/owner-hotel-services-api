@@ -10,14 +10,14 @@ export class SubscriptionController {
   @Get('renewal-status')
   @UseGuards(JwtAuthGuard)
   async getRenewalStatus(@CurrentUser() user: any) {
-    const subscription = await this.subscriptionsService.findByTenantId(user.tenantId);
-    
+    const subscription = await this.subscriptionsService.findByTenantId(user.tenant_id);
+
     // Logic to get payment history would go here
     // For now, return basic info and empty payment history
     return {
       status: subscription?.status || 'inactive',
-      endDate: subscription?.endDate || null,
-      autoRenew: (subscription as any)?.autoRenew || false,
+      endDate: subscription?.end_date || null,
+      autoRenew: (subscription as any)?.auto_renew || false,
       paymentHistory: [], // Would fetch from Invoices/Payments
     };
   }

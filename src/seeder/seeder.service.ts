@@ -47,6 +47,9 @@ export class SeederService {
       await this.seedAdmins();
       await this.seedUsers();
       await this.seedAdminPanelTestData();
+      await this.seedDemoGuests();
+      await this.seedDemoBookings();
+      await this.seedDemoReviews();
       await this.seedHotelStaff();
 
       this.logger.log('✅ Database seeding completed successfully!');
@@ -361,56 +364,13 @@ export class SeederService {
 
   /**
    * 5️⃣ Seed Test Users (User table → login ผ่าน /login)
-   * - Platform admins ที่ใช้งานผ่าน dashboard
-   * - Hotel staff ต่างๆ ของแต่ละโรงแรม
+   * ⚠️ User table ใช้สำหรับ subscription customers เท่านั้น
+   * Platform Admin ต้อง login ผ่าน /auth/admin/login (Admin table)
    */
   private async seedUsers(): Promise<void> {
     this.logger.log('👥 Seeding Test Users (User table)...');
-
-    // Platform admins → User table (login ผ่าน /login เท่านั้น)
-    const platformAdmins = [
-      {
-        email: 'platform.admin@staysync.io',
-        password: 'admin123',
-        firstName: 'Platform',
-        lastName: 'Admin',
-        role: 'platform_admin',
-      },
-      {
-        email: 'platform.admin@test.co',
-        password: 'Admin@123',
-        firstName: 'Platform',
-        lastName: 'Admin',
-        role: 'platform_admin',
-      },
-    ];
-
-    for (const userData of platformAdmins) {
-      try {
-        const existing = await this.prisma.user.findUnique({
-          where: { email: userData.email },
-        });
-
-        if (!existing) {
-          const hashedPassword = await bcrypt.hash(userData.password, 10);
-          await this.prisma.user.create({
-            data: {
-              email: userData.email,
-              password: hashedPassword,
-              firstName: userData.firstName,
-              lastName: userData.lastName,
-              role: userData.role,
-              status: 'active',
-            },
-          });
-          this.logger.log(`  ✓ Created platform admin (User table): ${userData.email}`);
-        } else {
-          this.logger.log(`  ⊙ Platform admin already exists: ${userData.email}`);
-        }
-      } catch (error) {
-        this.logger.warn(`  ⚠️  Could not create user ${userData.email}:`, error.message);
-      }
-    }
+    this.logger.log('  ℹ️  User table สำหรับ subscription customers เท่านั้น');
+    this.logger.log('  ℹ️  Platform Admin ใช้ Admin table → /auth/admin/login');
   }
 
   /**
@@ -620,12 +580,12 @@ export class SeederService {
           autoRenew: hotelData.status === TenantStatus.ACTIVE,
         });
 
-        const planPrice = Number(hotelData.plan.priceMonthly);
+        const planPrice = Number(hotelData.plan.price_monthly);
         const addonTotal = hotelData.addons.reduce((sum, a) => sum + a.price, 0);
         this.logger.log(`    ✓ Subscription: ${hotelData.plan.name} (฿${planPrice}) + Add-ons (฿${addonTotal})`);
 
         if (hotelData.previousPlan) {
-          const direction = Number(hotelData.plan.priceMonthly) > Number(hotelData.previousPlan.priceMonthly) ? '↗ Upgrade' : '↘ Downgrade';
+          const direction = Number(hotelData.plan.price_monthly) > Number(hotelData.previousPlan.price_monthly) ? '↗ Upgrade' : '↘ Downgrade';
           this.logger.log(`      ${direction} จาก ${hotelData.previousPlan.name}`);
         }
 
@@ -728,7 +688,7 @@ export class SeederService {
     // Calculate MRR
     const activeHotels = hotels.filter(h => h.subscriptionStatus === SubscriptionStatus.ACTIVE);
     const mrr = activeHotels.reduce((sum, h) => {
-      const planPrice = Number(h.plan.priceMonthly);
+      const planPrice = Number(h.plan.price_monthly);
       const addonTotal = h.addons.reduce((s, a) => s + a.price, 0);
       return sum + planPrice + addonTotal;
     }, 0);
@@ -738,7 +698,251 @@ export class SeederService {
   }
 
   /**
-   * 7️⃣ Seed Hotel Staff (User table → login ผ่าน /login)
+   * 7️⃣ Seed Demo Guests
+   * สร้างแขกตัวอย่าง (Thai + International names)
+   */
+  private async seedDemoGuests(): Promise<void> {
+    this.logger.log('👥 Seeding Demo Guests...');
+
+    // รายชื่อแขกตัวอย่าง (Thai + International)
+    const demoGuests = [
+      { firstName: 'สมชาย', lastName: 'ใจดี', email: 'somchai.jaidia@example.com', phone: '+66-8-1111-1111', nationality: 'Thailand' },
+      { firstName: 'สมหญิง', lastName: 'สวยงาม', email: 'somying.suyyam@example.com', phone: '+66-8-2222-2222', nationality: 'Thailand' },
+      { firstName: 'วิชัย', lastName: 'ประสพ', email: 'vichai.prasop@example.com', phone: '+66-8-3333-3333', nationality: 'Thailand' },
+      { firstName: 'นัฐญา', lastName: 'บัวบาน', email: 'nattaya.buaban@example.com', phone: '+66-8-4444-4444', nationality: 'Thailand' },
+      { firstName: 'ประเทศ', lastName: 'อยู่สุข', email: 'prashet.yousuk@example.com', phone: '+66-8-5555-5555', nationality: 'Thailand' },
+      { firstName: 'Michael', lastName: 'Johnson', email: 'michael.johnson@example.com', phone: '+1-213-555-1234', nationality: 'United States' },
+      { firstName: 'Emma', lastName: 'Smith', email: 'emma.smith@example.com', phone: '+44-20-7123-4567', nationality: 'United Kingdom' },
+      { firstName: 'Jean', lastName: 'Dubois', email: 'jean.dubois@example.com', phone: '+33-1-42-86-82-00', nationality: 'France' },
+      { firstName: 'Marco', lastName: 'Rossi', email: 'marco.rossi@example.com', phone: '+39-06-1234-5678', nationality: 'Italy' },
+      { firstName: 'Liu', lastName: 'Wei', email: 'liu.wei@example.com', phone: '+86-10-1234-5678', nationality: 'China' },
+    ];
+
+    let guestCount = 0;
+    for (const guestData of demoGuests) {
+      try {
+        const existingGuest = await this.prisma.$queryRaw`
+          SELECT id FROM guests WHERE email = ${guestData.email} LIMIT 1
+        `;
+
+        if (Array.isArray(existingGuest) && existingGuest.length === 0) {
+          await this.prisma.$executeRaw`
+            INSERT INTO guests (id, firstName, lastName, email, phone, nationality, createdAt, updatedAt)
+            VALUES (
+              UUID(),
+              ${guestData.firstName},
+              ${guestData.lastName},
+              ${guestData.email},
+              ${guestData.phone},
+              ${guestData.nationality},
+              NOW(),
+              NOW()
+            )
+          `;
+          guestCount++;
+        }
+      } catch (error) {
+        this.logger.warn(`    ⚠️  Could not create guest ${guestData.email}: ${error.message}`);
+      }
+    }
+
+    this.logger.log(`  ✓ Created ${guestCount} demo guests`);
+  }
+
+  /**
+   * 8️⃣ Seed Demo Bookings
+   * สร้างการจองตัวอย่าง (confirmed, checked-in, completed - past 30 days)
+   */
+  private async seedDemoBookings(): Promise<void> {
+    this.logger.log('📅 Seeding Demo Bookings...');
+
+    try {
+      // ดึง tenant ทั้งหมด
+      const allTenants = await this.tenantsService.findAll();
+      if (allTenants.length === 0) {
+        this.logger.warn('  ⚠️ No tenants found, skipping demo bookings');
+        return;
+      }
+
+      // ดึงแขกทั้งหมด
+      const allGuests: any[] = await this.prisma.$queryRaw`SELECT id, firstName, lastName FROM guests LIMIT 50`;
+      if (!Array.isArray(allGuests) || allGuests.length === 0) {
+        this.logger.warn('  ⚠️ No guests found, skipping demo bookings');
+        return;
+      }
+
+      let bookingCount = 0;
+      const today = new Date();
+
+      // สร้างการจองสำหรับแต่ละโรงแรม
+      for (const tenant of allTenants) {
+        // ดึงห้องของโรงแรมนี้
+        const rooms: any[] = await this.prisma.$queryRaw`
+          SELECT id, number, type, price FROM rooms WHERE propertyId = ${tenant.id} LIMIT 10
+        `;
+
+        if (!Array.isArray(rooms) || rooms.length === 0) {
+          // สร้างห้องตัวอย่างถ้าไม่มี
+          const roomTypes = ['Standard', 'Deluxe', 'Suite', 'Presidential'];
+          for (let i = 1; i <= 4; i++) {
+            const roomType = roomTypes[i - 1];
+            const basePrice = 1000 + (i * 500);
+
+            await this.prisma.$executeRaw`
+              INSERT INTO rooms (id, propertyId, number, type, floor, price, status, description, createdAt, updatedAt)
+              VALUES (
+                UUID(),
+                ${tenant.id},
+                ${String(100 + i)},
+                ${roomType},
+                ${1},
+                ${basePrice},
+                'available',
+                ${roomType + ' room'},
+                NOW(),
+                NOW()
+              )
+            `;
+          }
+
+          // ดึงห้องที่สร้างใหม่
+          const newRooms: any[] = await this.prisma.$queryRaw`
+            SELECT id, number, type, price FROM rooms WHERE propertyId = ${tenant.id} LIMIT 10
+          `;
+
+          if (Array.isArray(newRooms) && newRooms.length > 0) {
+            rooms.push(...newRooms);
+          }
+        }
+
+        // สร้าง 3-5 การจองต่อโรงแรม
+        const bookingsPerHotel = Math.floor(Math.random() * 3) + 3; // 3-5 bookings
+        for (let b = 0; b < bookingsPerHotel && rooms.length > 0; b++) {
+          const room = rooms[Math.floor(Math.random() * rooms.length)];
+          const guest = allGuests[Math.floor(Math.random() * allGuests.length)];
+
+          // สร้างวันที่จองหลาก ๆ (อดีต, ปัจจุบัน, อนาคต)
+          const daysOffset = Math.floor(Math.random() * 60) - 30; // -30 to +30 days
+          const checkInDate = new Date(today);
+          checkInDate.setDate(checkInDate.getDate() + daysOffset);
+
+          const checkOutDate = new Date(checkInDate);
+          checkOutDate.setDate(checkOutDate.getDate() + (Math.floor(Math.random() * 4) + 1)); // 1-4 nights
+
+          // กำหนด status ตามวันที่
+          let status = 'confirmed';
+          if (daysOffset < -2) status = 'completed'; // อดีตมากกว่า 2 วัน = completed
+          else if (daysOffset <= 1) status = 'checked_in'; // ใน 1 วัน = checked_in
+          else status = 'confirmed'; // อนาคต = confirmed
+
+          try {
+            await this.prisma.$executeRaw`
+              INSERT INTO bookings (
+                id, propertyId, roomId, guestId, guestFirstName, guestLastName,
+                guestEmail, guestPhone, checkIn, checkOut, status, notes, createdAt, updatedAt
+              )
+              VALUES (
+                UUID(),
+                ${tenant.id},
+                ${room.id},
+                ${guest.id},
+                ${guest.firstName},
+                ${guest.lastName},
+                ${guest.email || 'guest@example.com'},
+                ${guest.phone || '+66-8-0000-0000'},
+                ${checkInDate},
+                ${checkOutDate},
+                ${status},
+                'Demo booking created by seeder',
+                NOW(),
+                NOW()
+              )
+            `;
+            bookingCount++;
+          } catch (error) {
+            this.logger.warn(`    ⚠️  Could not create booking: ${error.message}`);
+          }
+        }
+      }
+
+      this.logger.log(`  ✓ Created ${bookingCount} demo bookings`);
+    } catch (error) {
+      this.logger.warn(`  ⚠️ Error seeding demo bookings: ${error.message}`);
+    }
+  }
+
+  /**
+   * 9️⃣ Seed Demo Reviews
+   * สร้างรีวิวตัวอย่าง (3-5 reviews with ratings)
+   */
+  private async seedDemoReviews(): Promise<void> {
+    this.logger.log('⭐ Seeding Demo Reviews...');
+
+    try {
+      // ดึง booking ที่เป็น completed
+      const completedBookings: any[] = await this.prisma.$queryRaw`
+        SELECT id, propertyId, guestId, guestFirstName, guestLastName
+        FROM bookings
+        WHERE status = 'completed'
+        LIMIT 50
+      `;
+
+      if (!Array.isArray(completedBookings) || completedBookings.length === 0) {
+        this.logger.warn('  ⚠️ No completed bookings found, skipping reviews');
+        return;
+      }
+
+      const reviewTexts = [
+        'Excellent service and cleanliness. The staff was very helpful and friendly.',
+        'Great location with modern facilities. Will definitely come back.',
+        'The room was spacious and comfortable. Breakfast was delicious.',
+        'Outstanding hospitality. The team made our stay memorable.',
+        'Perfect place for a weekend getaway. Highly recommended!',
+        'Beautiful property with attention to detail. Loved the decor.',
+        'Professional staff and great amenities. Value for money.',
+        'Wonderful experience from check-in to check-out.',
+        'The views from the room were breathtaking.',
+        'Impeccable cleanliness and excellent customer service.',
+      ];
+
+      const ratings = [5, 5, 4, 5, 5, 4, 5, 5, 5, 4];
+
+      let reviewCount = 0;
+      for (let i = 0; i < Math.min(5, completedBookings.length); i++) {
+        const booking = completedBookings[i];
+        try {
+          await this.prisma.$executeRaw`
+            INSERT INTO reviews (
+              id, propertyId, bookingId, guestId, guestName,
+              rating, title, review, createdAt, updatedAt
+            )
+            VALUES (
+              UUID(),
+              ${booking.propertyId},
+              ${booking.id},
+              ${booking.guestId},
+              ${booking.guestFirstName + ' ' + booking.guestLastName},
+              ${ratings[i % ratings.length]},
+              'Great experience',
+              ${reviewTexts[i % reviewTexts.length]},
+              NOW(),
+              NOW()
+            )
+          `;
+          reviewCount++;
+        } catch (error) {
+          this.logger.warn(`    ⚠️  Could not create review: ${error.message}`);
+        }
+      }
+
+      this.logger.log(`  ✓ Created ${reviewCount} demo reviews`);
+    } catch (error) {
+      this.logger.warn(`  ⚠️ Error seeding demo reviews: ${error.message}`);
+    }
+  }
+
+  /**
+   * 🔟 Seed Hotel Staff (User table → login ผ่าน /login)
    * สร้างพนักงานตำแหน่งต่างๆ ให้แต่ละโรงแรม
    */
   private async seedHotelStaff(): Promise<void> {
@@ -850,29 +1054,50 @@ export class SeederService {
     this.logger.log('🔑 Test Login Credentials:');
     this.logger.log('──────────────────────────────────────────────────────');
     this.logger.log('');
-    this.logger.log('  📌 Admin Login → POST /api/v1/auth/admin/login');
-    this.logger.log('  ─────────────────────────────────────────────');
+    this.logger.log('  📌 Platform Admin Login → POST /api/v1/auth/admin/login');
+    this.logger.log('  ─────────────────────────────────────────────────');
     this.logger.log('  admin@hotelservices.com    / Admin@123     (Super Admin)');
-    this.logger.log('  finance@hotelservices.com  / Finance@123   (Finance)');
-    this.logger.log('  support@hotelservices.com  / Support@123   (Support)');
+    this.logger.log('  finance@hotelservices.com  / Finance@123   (Finance Admin)');
+    this.logger.log('  support@hotelservices.com  / Support@123   (Support Admin)');
+    this.logger.log('  ⚠️  Admin ต้อง login ผ่าน /auth/admin/login เท่านั้น!');
     this.logger.log('');
-    this.logger.log('  📌 User Login → POST /api/v1/auth/login');
-    this.logger.log('  ─────────────────────────────────────────────');
-    this.logger.log('  platform.admin@staysync.io / admin123      (Platform Admin)');
-    this.logger.log('  platform.admin@test.co     / Admin@123     (Platform Admin)');
-    this.logger.log('  somchai@email.com          / password123   (Hotel Owner - โรงแรมสุขใจ)');
-    this.logger.log('  mountain@email.com         / password123   (Hotel Owner - Mountain View)');
-    this.logger.log('  seaside@email.com          / password123   (Hotel Owner - บ้านพักริมทะเล)');
-    this.logger.log('  garden@email.com           / password123   (Hotel Owner - Garden Resort)');
-    this.logger.log(`  manager*.hotel.test        / Staff@123     (Hotel Manager - Level 80)`);
+    this.logger.log('  📌 Hotel Owner/Staff Login → POST /api/v1/auth/login');
+    this.logger.log('  ─────────────────────────────────────────────────');
+    this.logger.log('  ⚠️  เฉพาะ subscription customers เท่านั้น (ห้าม admin roles)');
+    this.logger.log('');
+    this.logger.log('  🏨 Demo Hotel Owners:');
+    this.logger.log('  somchai@email.com          / password123   (โรงแรมสุขใจ)');
+    this.logger.log('  mountain@email.com         / password123   (Mountain View Resort)');
+    this.logger.log('  seaside@email.com          / password123   (บ้านพักริมทะเล)');
+    this.logger.log('  garden@email.com           / password123   (Garden Resort & Spa)');
+    this.logger.log('');
+    this.logger.log('  👷 Hotel Staff (by role):');
+    this.logger.log(`  manager*.hotel.test        / Staff@123     (General Manager - Level 80)`);
     this.logger.log(`  hr*.hotel.test             / Staff@123     (HR Manager - Level 70)`);
+    this.logger.log(`  chef*.hotel.test           / Staff@123     (Head Chef - Level 60)`);
     this.logger.log(`  receptionist*.hotel.test   / Staff@123     (Front Desk - Level 50)`);
-    this.logger.log(`  housekeeper*.hotel.test    / Staff@123     (Housekeeping - Level 40)`);
-    this.logger.log(`  chef*.hotel.test           / Staff@123     (Chef - Level 60)`);
-    this.logger.log(`  waiter*.hotel.test         / Staff@123     (F&B - Level 50)`);
-    this.logger.log(`  maintenance*.hotel.test    / Staff@123     (Engineering - Level 40)`);
-    this.logger.log(`  accountant*.hotel.test     / Staff@123     (Finance - Level 40)`);
-    this.logger.log(`  security*.hotel.test       / Staff@123     (Security - Level 40)`);
+    this.logger.log(`  waiter*.hotel.test         / Staff@123     (F&B Server - Level 50)`);
+    this.logger.log(`  housekeeper*.hotel.test    / Staff@123     (Housekeeper - Level 40)`);
+    this.logger.log(`  maintenance*.hotel.test    / Staff@123     (Engineer - Level 40)`);
+    this.logger.log(`  accountant*.hotel.test     / Staff@123     (Accountant - Level 40)`);
+    this.logger.log(`  security*.hotel.test       / Staff@123     (Security Officer - Level 40)`);
+    this.logger.log('');
+    this.logger.log('  👥 Demo Guests (for booking tests):');
+    this.logger.log('  somchai.jaidia@example.com (สมชาย ใจดี - Thailand)');
+    this.logger.log('  somying.suyyam@example.com (สมหญิง สวยงาม - Thailand)');
+    this.logger.log('  michael.johnson@example.com (Michael Johnson - United States)');
+    this.logger.log('  emma.smith@example.com (Emma Smith - United Kingdom)');
+    this.logger.log('  jean.dubois@example.com (Jean Dubois - France)');
+    this.logger.log('  ... and 5 more demo guests (Thai + International)');
+    this.logger.log('');
+    this.logger.log('  📊 Demo Data Summary:');
+    this.logger.log('  - Subscription Plans: 3 (Starter, Professional, Enterprise)');
+    this.logger.log('  - Features/Add-ons: 10 different modules');
+    this.logger.log('  - Sample Hotels: 6 with various statuses');
+    this.logger.log('  - Demo Guests: 10 (Thai + International names)');
+    this.logger.log('  - Sample Bookings: 15-30 (mix of confirmed, checked-in, completed)');
+    this.logger.log('  - Sample Reviews: 5 (4-5 star ratings)');
+    this.logger.log('  - Hotel Staff: ~100+ employees (11 per hotel)');
     this.logger.log('');
     this.logger.log('══════════════════════════════════════════════════════');
   }

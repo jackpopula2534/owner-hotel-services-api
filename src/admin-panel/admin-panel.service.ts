@@ -74,14 +74,14 @@ export class AdminPanelService {
     const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
 
     const thisMonthRevenue = paidInvoices
-      .filter((i) => new Date(i.createdAt) >= thisMonthStart)
+      .filter((i) => new Date(i.created_at) >= thisMonthStart)
       .reduce((sum, i) => sum + Number(i.amount), 0);
 
     const lastMonthRevenue = paidInvoices
       .filter(
         (i) =>
-          new Date(i.createdAt) >= lastMonthStart &&
-          new Date(i.createdAt) <= lastMonthEnd,
+          new Date(i.created_at) >= lastMonthStart &&
+          new Date(i.created_at) <= lastMonthEnd,
       )
       .reduce((sum, i) => sum + Number(i.amount), 0);
 
@@ -101,11 +101,11 @@ export class AdminPanelService {
     const subscriptions = await this.subscriptionsService.findAll();
     const featureUsage = features.map((feature) => {
       const usageCount = subscriptions.filter((sub) => {
-        const hasPlanFeature = sub.plan?.planFeatures?.some(
-          (pf) => pf.feature?.code === feature.code,
+        const hasPlanFeature = sub.plans_subscriptions_plan_idToplans?.plan_features?.some(
+          (pf) => pf.features?.code === feature.code,
         );
-        const hasSubscriptionFeature = sub.subscriptionFeatures?.some(
-          (sf) => sf.feature?.code === feature.code,
+        const hasSubscriptionFeature = sub.subscription_features?.some(
+          (sf) => sf.features?.code === feature.code,
         );
         return hasPlanFeature || hasSubscriptionFeature;
       }).length;
@@ -114,7 +114,7 @@ export class AdminPanelService {
         featureCode: feature.code,
         featureName: feature.name,
         usageCount,
-        revenue: usageCount * Number(feature.priceMonthly),
+        revenue: usageCount * Number(feature.price_monthly),
       };
     });
 
@@ -139,22 +139,22 @@ export class AdminPanelService {
 
     return tenants.map((tenant) => {
       const subscription = subscriptions.find(
-        (s) => s.tenantId === tenant.id,
+        (s) => s.tenant_id === tenant.id,
       );
 
       return {
         id: tenant.id,
         name: tenant.name,
-        roomCount: tenant.roomCount,
+        roomCount: tenant.room_count,
         status: tenant.status,
-        trialEndsAt: tenant.trialEndsAt,
+        trialEndsAt: tenant.trial_ends_at,
         subscription: subscription
           ? {
               id: subscription.id,
               status: subscription.status,
-              plan: subscription.plan,
-              startDate: subscription.startDate,
-              endDate: subscription.endDate,
+              plan: subscription.plans_subscriptions_plan_idToplans,
+              startDate: subscription.start_date,
+              endDate: subscription.end_date,
             }
           : null,
       };
@@ -172,25 +172,25 @@ export class AdminPanelService {
 
     const result = await Promise.all(
       pendingPayments.map(async (payment) => {
-        const invoice = await this.invoicesService.findOne(payment.invoiceId);
+        const invoice = await this.invoicesService.findOne(payment.invoice_id);
         const tenant = invoice
-          ? await this.tenantsService.findOne(invoice.tenantId)
+          ? await this.tenantsService.findOne(invoice.tenant_id)
           : null;
 
         return {
           payment: {
             id: payment.id,
             method: payment.method,
-            slipUrl: payment.slipUrl,
+            slipUrl: payment.slip_url,
             status: payment.status,
-            createdAt: payment.createdAt,
+            createdAt: payment.created_at,
           },
           invoice: invoice
             ? {
                 id: invoice.id,
-                invoiceNo: invoice.invoiceNo,
+                invoiceNo: invoice.invoice_no,
                 amount: invoice.amount,
-                dueDate: invoice.dueDate,
+                dueDate: invoice.due_date,
               }
             : null,
           hotel: tenant
