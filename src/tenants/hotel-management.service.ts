@@ -36,8 +36,13 @@ export class HotelManagementService {
 
   /**
    * สร้างโรงแรมใหม่ (เพิ่มโรงแรมใหม่)
+   * @param dto - Hotel creation data
+   * @param userContext - Optional: User context for tenant_admin creating their first hotel
    */
-  async createHotel(dto: CreateHotelDto): Promise<CreateHotelResponseDto> {
+  async createHotel(
+    dto: CreateHotelDto,
+    userContext?: { userId?: string; userEmail?: string },
+  ): Promise<CreateHotelResponseDto> {
     // 0. Handle roomCount mapping and planCode default
     const effectivePlanCode = dto.planCode || 'M'; // Default to Professional for internal creation
     const effectiveRoomCount = dto.roomCount || dto.rooms || 1;
@@ -101,46 +106,63 @@ export class HotelManagementService {
 
     const savedSubscription = await this.subscriptionsRepository.save(subscription);
 
-    // 6. สร้าง User admin (tenant_admin) สำหรับโรงแรมนี้
-    const defaultPassword = randomBytes(16).toString('hex'); // สร้าง password แบบสุ่ม
-    const hashedPassword = await bcrypt.hash(defaultPassword, 10);
+    // 6. Handle User admin (tenant_admin) สำหรับโรงแรมนี้
+    // Case 1: If userContext is provided (tenant_admin creating their first hotel), link existing user
+    // Case 2: Otherwise, create new admin user or update existing by email
 
-    try {
-      await this.prisma.user.create({
-        data: {
-          email: dto.email,
-          password: hashedPassword,
-          firstName: dto.customerName?.split(' ')[0] || 'Admin',
-          lastName: dto.customerName?.split(' ').slice(1).join(' ') || '',
-          role: 'tenant_admin',
-          tenantId: savedTenant.id,
-          status: 'active',
-        },
-      });
-      // Generate password reset token
-      const resetToken = randomBytes(32).toString('hex');
-      const expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + 7); // 7 days for initial setup
-
-      await this.prisma.password_resets.create({
-        data: {
-          email: dto.email,
-          token: resetToken,
-          expiresAt,
-        },
-      });
-
-      console.log(`Initial setup: generated reset token for ${dto.email}: ${resetToken}`);
-      // TODO: Send email with reset link containing this token
-    } catch (error) {
-      // ถ้า user มีอยู่แล้ว (email ซ้ำ) ให้ update tenantId
-      if (error.code === 'P2002') {
-        await this.prisma.user.updateMany({
-          where: { email: dto.email },
+    if (userContext?.userId) {
+      // tenant_admin สร้าง hotel แรก - link user ที่มีอยู่แล้วกับ tenant
+      try {
+        await this.prisma.user.update({
+          where: { id: userContext.userId },
           data: { tenantId: savedTenant.id },
         });
-      } else {
-        console.error('Failed to create tenant admin user:', error);
+        console.log(`Linked existing user ${userContext.userId} to tenant ${savedTenant.id}`);
+      } catch (error) {
+        console.error('Failed to link user to tenant:', error);
+      }
+    } else {
+      // Platform admin สร้าง hotel ให้ลูกค้า - สร้าง user ใหม่หรือ update email ที่มีอยู่
+      const defaultPassword = randomBytes(16).toString('hex');
+      const hashedPassword = await bcrypt.hash(defaultPassword, 10);
+
+      try {
+        await this.prisma.user.create({
+          data: {
+            email: dto.email,
+            password: hashedPassword,
+            firstName: dto.customerName?.split(' ')[0] || 'Admin',
+            lastName: dto.customerName?.split(' ').slice(1).join(' ') || '',
+            role: 'tenant_admin',
+            tenantId: savedTenant.id,
+            status: 'active',
+          },
+        });
+        // Generate password reset token
+        const resetToken = randomBytes(32).toString('hex');
+        const expiresAt = new Date();
+        expiresAt.setDate(expiresAt.getDate() + 7); // 7 days for initial setup
+
+        await this.prisma.password_resets.create({
+          data: {
+            email: dto.email,
+            token: resetToken,
+            expiresAt,
+          },
+        });
+
+        console.log(`Initial setup: generated reset token for ${dto.email}: ${resetToken}`);
+        // TODO: Send email with reset link containing this token
+      } catch (error) {
+        // ถ้า user มีอยู่แล้ว (email ซ้ำ) ให้ update tenantId
+        if (error.code === 'P2002') {
+          await this.prisma.user.updateMany({
+            where: { email: dto.email },
+            data: { tenantId: savedTenant.id },
+          });
+        } else {
+          console.error('Failed to create tenant admin user:', error);
+        }
       }
     }
 

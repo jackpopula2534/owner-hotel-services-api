@@ -38,6 +38,17 @@ import { ContactModule } from './contact/contact.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { LoyaltyModule } from './loyalty/loyalty.module';
 import { PromotionsModule } from './promotions/promotions.module';
+import { EmailModule } from './email/email.module';
+import { PromptPayModule } from './promptpay/promptpay.module';
+import { TwoFactorAuthModule } from './two-factor-auth/two-factor-auth.module';
+import { AuditLogModule } from './audit-log/audit-log.module';
+import { CacheModule } from './cache/cache.module';
+import { ReportsModule } from './modules/reports/reports.module';
+import { LineNotifyModule } from './line-notify/line-notify.module';
+import { I18nModule } from './i18n/i18n.module';
+import { DatabaseOptimizationModule } from './database-optimization/database-optimization.module';
+import { MobileApiModule } from './mobile-api/mobile-api.module';
+import { PushNotificationsModule } from './push-notifications/push-notifications.module';
 
 @Module({
   imports: [
@@ -79,6 +90,17 @@ import { PromotionsModule } from './promotions/promotions.module';
     AnalyticsModule,
     LoyaltyModule,
     PromotionsModule,
+    EmailModule,
+    PromptPayModule,
+    TwoFactorAuthModule,
+    AuditLogModule,
+    CacheModule,
+    ReportsModule,
+    LineNotifyModule,
+    I18nModule,
+    DatabaseOptimizationModule,
+    MobileApiModule,
+    PushNotificationsModule,
     ThrottlerModule.forRoot([
       {
         ttl: 60, // 60 seconds window

@@ -1,10 +1,16 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { EmailEventsService } from '../../email/email-events.service';
 import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class BookingsService {
-  constructor(private prisma: PrismaService) {}
+  private readonly logger = new Logger(BookingsService.name);
+
+  constructor(
+    private prisma: PrismaService,
+    private emailEventsService: EmailEventsService,
+  ) {}
 
   async findAll(query: any, tenantId?: string) {
     const page = parseInt(query.page) || 1;
@@ -186,7 +192,7 @@ export class BookingsService {
     };
     if (tenantId != null) data.tenantId = tenantId;
 
-    return this.prisma.booking.create({
+    const booking = await this.prisma.booking.create({
       data,
       include: {
         guest: true,
@@ -194,6 +200,13 @@ export class BookingsService {
         property: true,
       },
     });
+
+    // Send booking confirmation email (async, non-blocking)
+    this.emailEventsService.onBookingCreated(booking).catch((err) => {
+      this.logger.error(`Failed to send booking confirmation email: ${err.message}`);
+    });
+
+    return booking;
   }
 
   async update(id: string, updateBookingDto: any, tenantId?: string) {
@@ -210,13 +223,89 @@ export class BookingsService {
     });
   }
 
-  async remove(id: string, tenantId?: string) {
-    await this.findOne(id, tenantId);
+  async checkIn(id: string, tenantId?: string) {
+    const booking = await this.findOne(id, tenantId);
 
-    return this.prisma.booking.update({
+    if (booking.status === 'checked_in') {
+      throw new BadRequestException('Booking is already checked in');
+    }
+    if (booking.status === 'cancelled') {
+      throw new BadRequestException('Cannot check in a cancelled booking');
+    }
+    if (booking.status === 'checked_out') {
+      throw new BadRequestException('Booking is already checked out');
+    }
+
+    const updated = await this.prisma.booking.update({
+      where: { id },
+      data: {
+        status: 'checked_in',
+        actualCheckIn: new Date(),
+      },
+      include: { guest: true, room: true, property: true },
+    });
+
+    // Update room status to occupied
+    if (booking.roomId) {
+      await this.prisma.room.update({
+        where: { id: booking.roomId },
+        data: { status: 'occupied' },
+      }).catch(() => {});
+    }
+
+    return updated;
+  }
+
+  async checkOut(id: string, tenantId?: string) {
+    const booking = await this.findOne(id, tenantId);
+
+    if (booking.status !== 'checked_in') {
+      throw new BadRequestException('Booking must be checked in before check out');
+    }
+
+    const updated = await this.prisma.booking.update({
+      where: { id },
+      data: {
+        status: 'checked_out',
+        actualCheckOut: new Date(),
+      },
+      include: { guest: true, room: true, property: true },
+    });
+
+    // Update room status to cleaning
+    if (booking.roomId) {
+      await this.prisma.room.update({
+        where: { id: booking.roomId },
+        data: { status: 'cleaning' },
+      }).catch(() => {});
+    }
+
+    // Send checkout email (async, non-blocking)
+    this.emailEventsService.onBookingCancelled(updated).catch((err) => {
+      this.logger.error(`Failed to send checkout email: ${err.message}`);
+    });
+
+    return updated;
+  }
+
+  async remove(id: string, tenantId?: string) {
+    const booking = await this.findOne(id, tenantId);
+
+    const cancelledBooking = await this.prisma.booking.update({
       where: { id },
       data: { status: 'cancelled' },
+      include: {
+        property: true,
+        room: true,
+      },
     });
+
+    // Send cancellation email (async, non-blocking)
+    this.emailEventsService.onBookingCancelled(cancelledBooking).catch((err) => {
+      this.logger.error(`Failed to send cancellation email: ${err.message}`);
+    });
+
+    return cancelledBooking;
   }
 }
 

@@ -48,9 +48,23 @@ export class BookingsController {
     return this.bookingsService.update(id, updateBookingDto, user?.tenantId);
   }
 
+  @Post(':id/checkin')
+  @ApiOperation({ summary: 'Check-in booking' })
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'receptionist')
+  async checkIn(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
+    return this.bookingsService.checkIn(id, user?.tenantId);
+  }
+
+  @Post(':id/checkout')
+  @ApiOperation({ summary: 'Check-out booking' })
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'receptionist')
+  async checkOut(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
+    return this.bookingsService.checkOut(id, user?.tenantId);
+  }
+
   @Delete(':id')
   @ApiOperation({ summary: 'Cancel booking' })
-  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'receptionist')
   async remove(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.bookingsService.remove(id, user?.tenantId);
   }

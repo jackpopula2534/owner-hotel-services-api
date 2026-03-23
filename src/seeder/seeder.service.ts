@@ -755,6 +755,7 @@ export class SeederService {
     // Staff templates สำหรับแต่ละโรงแรม
     const staffTemplates = [
       { role: 'manager', position: 'General Manager', department: 'Management', firstNameTh: 'วิชัย', lastNameTh: 'บริหารดี', firstNameEn: 'Michael', lastNameEn: 'Manager' },
+      { role: 'hr', position: 'HR Manager', department: 'Human Resources', firstNameTh: 'พิมพ์ใจ', lastNameTh: 'ดูแลคน', firstNameEn: 'Helen', lastNameEn: 'Resources' },
       { role: 'receptionist', position: 'Front Desk Agent', department: 'Front Office', firstNameTh: 'สุนิสา', lastNameTh: 'ต้อนรับดี', firstNameEn: 'Sarah', lastNameEn: 'Reception' },
       { role: 'receptionist', position: 'Night Auditor', department: 'Front Office', firstNameTh: 'ปรีชา', lastNameTh: 'กลางคืน', firstNameEn: 'Paul', lastNameEn: 'Night' },
       { role: 'housekeeper', position: 'Head Housekeeper', department: 'Housekeeping', firstNameTh: 'มาลี', lastNameTh: 'สะอาดใส', firstNameEn: 'Maria', lastNameEn: 'Clean' },
@@ -863,14 +864,15 @@ export class SeederService {
     this.logger.log('  mountain@email.com         / password123   (Hotel Owner - Mountain View)');
     this.logger.log('  seaside@email.com          / password123   (Hotel Owner - บ้านพักริมทะเล)');
     this.logger.log('  garden@email.com           / password123   (Hotel Owner - Garden Resort)');
-    this.logger.log(`  manager*.hotel.test        / Staff@123     (Hotel Manager)`);
-    this.logger.log(`  receptionist*.hotel.test   / Staff@123     (Front Desk)`);
-    this.logger.log(`  housekeeper*.hotel.test    / Staff@123     (Housekeeping)`);
-    this.logger.log(`  chef*.hotel.test           / Staff@123     (Chef)`);
-    this.logger.log(`  waiter*.hotel.test         / Staff@123     (F&B)`);
-    this.logger.log(`  maintenance*.hotel.test    / Staff@123     (Engineering)`);
-    this.logger.log(`  accountant*.hotel.test     / Staff@123     (Finance)`);
-    this.logger.log(`  security*.hotel.test       / Staff@123     (Security)`);
+    this.logger.log(`  manager*.hotel.test        / Staff@123     (Hotel Manager - Level 80)`);
+    this.logger.log(`  hr*.hotel.test             / Staff@123     (HR Manager - Level 70)`);
+    this.logger.log(`  receptionist*.hotel.test   / Staff@123     (Front Desk - Level 50)`);
+    this.logger.log(`  housekeeper*.hotel.test    / Staff@123     (Housekeeping - Level 40)`);
+    this.logger.log(`  chef*.hotel.test           / Staff@123     (Chef - Level 60)`);
+    this.logger.log(`  waiter*.hotel.test         / Staff@123     (F&B - Level 50)`);
+    this.logger.log(`  maintenance*.hotel.test    / Staff@123     (Engineering - Level 40)`);
+    this.logger.log(`  accountant*.hotel.test     / Staff@123     (Finance - Level 40)`);
+    this.logger.log(`  security*.hotel.test       / Staff@123     (Security - Level 40)`);
     this.logger.log('');
     this.logger.log('══════════════════════════════════════════════════════');
   }

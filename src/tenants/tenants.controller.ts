@@ -37,13 +37,22 @@ export class TenantsController {
   // ===== HOTEL MANAGEMENT ENDPOINTS (Professional UX/UI) =====
 
   /**
-   * สร้างโรงแรมใหม่ (Platform Admin เท่านั้น - สร้าง Tenant ใหม่)
-   * ⚠️ User ธรรมดาควรใช้ POST /v1/properties แทน (สร้าง Property ภายใน Tenant)
+   * สร้างโรงแรมใหม่
+   * - Platform Admin: สร้าง Tenant ใหม่ให้ลูกค้าคนใดก็ได้
+   * - Tenant Admin (ที่ยังไม่มี tenantId): สร้าง Tenant แรกสำหรับตัวเอง (Trial Registration Flow)
    */
   @Post('hotels')
-  @Roles('platform_admin')
-  createHotel(@Body() createHotelDto: CreateHotelDto) {
-    return this.hotelManagementService.createHotel(createHotelDto);
+  @Roles('platform_admin', 'tenant_admin')
+  createHotel(
+    @Body() createHotelDto: CreateHotelDto,
+    @CurrentUser() user: { id?: string; tenantId?: string; role?: string; email?: string },
+  ) {
+    // For tenant_admin creating their first hotel, pass user info to link the hotel
+    const userContext = user?.role === 'tenant_admin' && !user?.tenantId
+      ? { userId: user.id, userEmail: user.email }
+      : undefined;
+
+    return this.hotelManagementService.createHotel(createHotelDto, userContext);
   }
 
   /**

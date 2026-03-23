@@ -65,6 +65,26 @@ export class OnboardingService {
       autoRenew: false,
     });
 
+    // 4. Auto-create default property from tenant data
+    const propertyCode =
+      (createTenantDto.name || 'PROP')
+        .substring(0, 3)
+        .toUpperCase()
+        .replace(/[^A-Z]/g, 'X') + Date.now().toString().slice(-4);
+
+    await this.prisma.property.create({
+      data: {
+        tenantId: tenant.id,
+        name: createTenantDto.name || 'โรงแรมหลัก',
+        code: propertyCode,
+        location: createTenantDto.address || null,
+        phone: createTenantDto.phone || null,
+        email: createTenantDto.email || null,
+        isDefault: true,
+        status: 'active',
+      },
+    });
+
     return {
       tenant,
       subscription,

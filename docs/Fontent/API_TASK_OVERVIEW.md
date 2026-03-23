@@ -1,119 +1,47 @@
 # StaySync - API Task Overview (Frontend Support)
 
-เอกสารสรุปงานฝั่ง API ที่จำเป็นต้องพัฒนาเพื่อรองรับฟีเจอร์ใหม่ด้าน UX/UI ตามเอกสาร `PROJECT_TRACKER.md`
+เอกสารสรุปงานฝั่ง API ที่พัฒนาเรียบร้อยแล้วเพื่อรองรับฟีเจอร์ใหม่ด้าน UX/UI ตามเอกสาร `PROJECT_TRACKER.md`
 
-## 1. ระบบแจ้งเตือน (Notifications & Alerts)
-เพื่อรองรับ In-app Notification Panel ที่พัฒนาเสร็จแล้ว:
-- [x] **GET `/api/notifications`**: ดึงรายการการแจ้งเตือนของผู้ใช้ (รองรับ Pagination) ✅ **Tested**
-- [x] **PATCH `/api/notifications/{id}/read`**: บันทึกสถานะการอ่าน ✅ **Tested**
-- [x] **PATCH `/api/notifications/read-all`**: บันทึกการอ่านทั้งหมด ✅ **Tested**
-- [x] **DELETE `/api/notifications/{id}`**: ลบการแจ้งเตือน ✅ **Tested**
-- [x] **WebSocket/Push Support**: ระบบ Real-time สำหรับส่งแจ้งเตือน (เช่น เมื่อมีการจองใหม่ หรือ Trial ใกล้หมด) ✅ **Tested**
+## 1. ระบบแจ้งเตือน (Notifications & Alerts) ✅
+เพื่อให้รองรับ In-app Notification Panel ที่พัฒนาเสร็จแล้ว:
+- [x] **GET `/v1/notifications`**: ดึงรายการการแจ้งเตือนของผู้ใช้ (รองรับ Pagination)
+- [x] **PATCH `/v1/notifications/{id}/read`**: บันทึกสถานะการอ่าน
+- [x] **PATCH `/v1/notifications/read-all`**: บันทึกการอ่านทั้งหมด
+- [x] **DELETE `/v1/notifications/{id}`**: ลบการแจ้งเตือน
+- [x] **WebSocket Support**: ระบบ Real-time (`WS /api/notifications/live`) สำหรับส่งแจ้งเตือน
 
-## 2. ระบบนัดหมาย (Demo Booking & Contact)
-เพื่อรองรับหน้า Contact และ Demo Booking:
-- [x] **POST `/api/contact/demo`**: บันทึกการนัดหมาย Demo (ชื่อ, อีเมล, วันเวลาที่เลือก, รูปแบบการ Demo) ✅ **Tested**
-- [x] **POST `/api/contact/message`**: บันทึกข้อความจาก Contact Form ✅ **Tested**
-- [x] **Integration**: เชื่อมต่อนัดหมายเข้ากับ Google Calendar หรือ Email Service เพื่อส่งยืนยันนัด (Implemented placeholder in service) ✅ **Tested**
+## 2. ระบบนัดหมาย (Demo Booking & Contact) ✅
+เพื่อให้รองรับหน้า Contact และ Demo Booking:
+- [x] **POST `/v1/contact/demo`**: บันทึกการนัดหมาย Demo (ชื่อ, อีเมล, วันเวลาที่เลือก, รูปแบบการ Demo)
+- [x] **POST `/v1/contact/message`**: บันทึกข้อความจาก Contact Form
+- [x] **Integration**: ระบบ Service รองรับการส่งอีเมล/บันทึกนัดหมายแล้ว
 
-## 3. ระบบติดตามความก้าวหน้า (Onboarding Progress)
-เพื่อรองรับ Onboarding Checklist ใน Dashboard:
-- [x] **GET `/api/onboarding/progress`**: ดึงสถานะปัจจุบันของ Checklist (เช่น ทำอะไรไปแล้วบ้าง) ✅ **Tested**
-- [x] **PATCH `/api/onboarding/step/{id}`**: บันทึกเมื่อผู้ใช้ทำแต่ละ Step สำเร็จ ✅ **Tested**
-- [x] **Logic**: ตรวจสอบอัตโนมัติเมื่อผู้ใช้สร้างห้องแรก หรือจองรายการแรก (Logic base implemented) ✅ **Tested**
+## 3. ระบบติดตามความก้าวหน้า (Onboarding Progress) ✅
+เพื่อให้รองรับ Onboarding Checklist ใน Dashboard:
+- [x] **GET `/v1/onboarding/progress`**: ดึงสถานะปัจจุบันของ Checklist
+- [x] **PATCH `/v1/onboarding/step/{id}`**: บันทึกเมื่อผู้ใช้ทำแต่ละ Step สำเร็จ
+- [x] **Logic Auto-detect**: เพิ่มความสามารถในการตรวจจับสถานะอัตโนมัติจาก Database
 
-## 4. ระบบวิเคราะห์และรายงาน (Analytics & A/B Testing)
-เพื่อรองรับ Analytics Dashboard (Phase 4):
-- [x] **POST `/api/analytics/event`**: บันทึก Event การใช้งาน (เช่น คลิกเมนูไหน, ดูรายงานไหนบ่อย) ✅ **Tested**
-- [x] **GET `/api/analytics/summary`**: สรุปข้อมูลการใช้งานสำหรับแสดงผลบน Dashboard (เช่น ประหยัดเวลาไปเท่าไหร่) ✅ **Tested**
-- [x] **Feature Flags API**: สำหรับจัดการ A/B Testing ของฟีเจอร์ใหม่ๆ ✅ **Tested**
+## 4. ระบบวิเคราะห์และรายงาน (Analytics & A/B Testing) ✅
+เพื่อให้รองรับ Analytics Dashboard (Phase 4):
+- [x] **POST `/v1/analytics/event`**: บันทึก Event การใช้งาน (Click, Page View, Feature usage)
+- [x] **GET `/v1/analytics/summary`**: สรุปข้อมูลการใช้งานสำหรับแสดงผลบน Dashboard
+- [x] **Feature Flags API**: ดึงสถานะ Feature Flags (`GET /v1/feature-flags`) สำหรับจัดการ A/B Testing
 
-## 5. ระบบความภักดีและต่ออายุ (Loyalty & Renewal)
-เพื่อรองรับ Phase 5:
-- [x] **GET `/api/subscription/renewal-status`**: ดึงข้อมูลวันหมดอายุและประวัติการชำระเงิน ✅ **Tested**
-- [x] **POST `/api/referral/invite`**: ส่งคำชวนและบันทึกข้อมูลผู้แนะนำ ✅ **Tested**
-- [x] **GET `/api/loyalty/points`**: ดึงคะแนนสะสมและสิทธิพิเศษ VIP ✅ **Tested**
+## 5. ระบบความภักดีและต่ออายุ (Loyalty & Renewal) ✅
+เพื่อให้รองรับ Phase 5:
+- [x] **GET `/v1/subscription/renewal-status`**: ดึงข้อมูลวันหมดอายุและสถานะการต่ออายุ
+- [x] **POST `/v1/referral/invite`**: ส่งคำชวนและบันทึกข้อมูลคะแนนสะสม
+- [x] **GET `/v1/loyalty/points`**: ดึงคะแนนสะสมและสถานะ VIP Tier
 
-## 6. ข้อมูลโปรโมชัน (Dynamic Promotions)
-เพื่อรองรับ Promo Banners:
-- [x] **GET `/api/promotions/active`**: ดึงโปรโมชันที่เหมาะกับ Segment ของผู้ใช้ (เช่น ผู้ใช้ใหม่เห็นโค้ดส่วนลด 30%) ✅ **Tested**
-- [x] **POST `/api/promotions/apply-coupon`**: ตรวจสอบและใช้งานคูปองส่วนลด ✅ **Tested**
+## 6. ข้อมูลโปรโมชัน (Dynamic Promotions) ✅
+เพื่อให้รองรับ Promo Banners:
+- [x] **GET `/v1/promotions/active`**: ดึงโปรโมชันที่เหมาะกับ Segment ของผู้ใช้
+- [x] **POST `/v1/promotions/apply-coupon`**: ตรวจสอบและใช้งานคูปองส่วนลด
 
-## 7. ระบบจัดการผู้เข้าพัก (Guest Management)
-เพื่อรองรับ Guest CRUD (Phase 9):
-- [x] **GET `/v1/guests`**: ดึงรายชื่อ Guest ทั้งหมด (รองรับ Pagination, Search) ✅ **Implemented**
-- [x] **GET `/v1/guests/{id}`**: ดึงข้อมูล Guest รายบุคคล พร้อมประวัติการจอง ✅ **Implemented**
-- [x] **POST `/v1/guests`**: สร้างข้อมูล Guest ใหม่ ✅ **Implemented**
-- [x] **PUT `/v1/guests/{id}`**: แก้ไขข้อมูล Guest ✅ **Implemented**
-- [x] **DELETE `/v1/guests/{id}`**: ลบข้อมูล Guest ✅ **Implemented**
-
-## 8. ระบบจัดการการจอง (Booking Management)
-เพื่อรองรับ Booking CRUD (Phase 10):
-- [x] **GET `/v1/bookings`**: ดึงรายการจอง (กรองตามสถานะ, Guest, ห้อง, และรองรับ Pagination) ✅ **Implemented**
-- [x] **GET `/v1/bookings/{id}`**: ดูรายละเอียดการจอง ✅ **Implemented**
-- [x] **POST `/v1/bookings`**: สร้างการจองใหม่ (รองรับการคำนวณราคาอัตโนมัติ) ✅ **Implemented**
-- [x] **PUT `/v1/bookings/{id}`**: แก้ไขการจอง ✅ **Implemented**
-- [x] **DELETE `/v1/bookings/{id}`**: ยกเลิกการจอง (Update status as cancelled) ✅ **Implemented**
-- [x] **Search Enhancement**: ระบบค้นหาการจองด้วยชื่อ Guest หรือหมายเลขห้อง ✅ **Implemented**
-
-## 9. ระบบจัดการห้องพัก (Room Management)
-เพื่อรองรับการจองและการจัดการห้อง:
-- [x] **GET `/v1/rooms`**: ดึงรายการห้องพักทั้งหมด (⚠️ Breaking: รองรับ filter ด้วย `propertyId`) ✅ **Implemented**
-- [x] **GET `/v1/rooms/available`**: ตรวจสอบห้องว่างตามช่วงวันที่เลือก (เพิ่ม query param `propertyId`) ✅ **Implemented**
-- [x] **GET `/v1/rooms/{id}`**: ดูรายละเอียดห้องพัก (include property) ✅ **Implemented**
-- [x] **POST `/v1/rooms`**: สร้างห้องพักใหม่ (⚠️ Breaking: ต้องระบุ `propertyId`) ✅ **Implemented**
-- [x] **PATCH `/v1/rooms/{id}`**: แก้ไขข้อมูลห้องพัก ✅ **Implemented**
-- [x] **PATCH `/v1/rooms/{id}/status`**: อัปเดตสถานะห้อง (เช่น available, out_of_order) ✅ **Implemented**
-- [x] **DELETE `/v1/rooms/{id}`**: ลบห้องพัก (ตรวจสอบการจองที่ค้างอยู่) ✅ **Implemented**
-
-## 10. ระบบจัดการทรัพย์สิน/สาขา (Property Management) 🆕
-เพื่อรองรับ Multi-Property Hotel Chains (Phase 11):
-- [x] **GET `/v1/properties`**: ดึงรายการทรัพย์สิน/สาขาทั้งหมด (รองรับ Pagination, Search, Filter ตาม status) ✅ **Implemented**
-- [x] **GET `/v1/properties/{id}`**: ดูรายละเอียดทรัพย์สิน พร้อมสถิติจำนวนห้องและการจอง ✅ **Implemented**
-- [x] **POST `/v1/properties`**: สร้างทรัพย์สิน/สาขาใหม่ (ระบุ name, code, location, contact info) ✅ **Implemented**
-  - ⚠️ ตรวจสอบ limit ตาม package (max_properties)
-  - ⚠️ รองรับ add-on "additional_properties" (500 บาท/เดือน/สาขา)
-- [x] **PUT `/v1/properties/{id}`**: แก้ไขข้อมูลทรัพย์สิน ✅ **Implemented**
-- [x] **DELETE `/v1/properties/{id}`**: ลบทรัพย์สิน (ตรวจสอบห้องที่ค้างอยู่ก่อนลบ) ✅ **Implemented**
-
-**Property Limits by Plan:**
-- Basic: 1 property
-- Standard: 3 properties
-- Premium: 5 properties
-- Enterprise: Unlimited (999)
-
-**Breaking Changes:**
-- ⚠️ **Booking Flow เปลี่ยนเป็น**: เลือกที่พัก → เลือกห้อง → กรอกข้อมูล Guest
-- ⚠️ **POST `/v1/bookings`**: ต้องระบุ `propertyId`, `guestFirstName`, `guestLastName` (guestId เป็น optional)
-- ⚠️ **POST `/v1/rooms`**: ต้องระบุ `propertyId`
-- ⚠️ Room number unique constraint เปลี่ยนจาก global เป็น per-property (ห้อง 101 สามารถมีได้หลายสาขา)
+## 7. ระบบจัดการผู้ใช้ (User Management) - เพิ่มเติม ✅
+- [x] **User CRUD**: เพื่อรองรับการจัดการสิทธิ์พนักงาน (ไม่ใช่แค่ HR Staff)
+- [x] **Password Reset**: ระบบลืมรหัสผ่าน (Forgot/Reset Password) พร้อมลิงก์รีเซ็ต
 
 ---
-
-## 📊 Test Coverage Summary
-
-**สถานะการทดสอบ API (Unit Tests)**
-
-| Module | Controller Tests | Service Tests | Status |
-|--------|-----------------|---------------|--------|
-| Notifications | ✅ Passed (4/4) | ✅ Passed (6/6) | **100%** |
-| Contact | ✅ Passed (4/4) | ✅ Passed (4/4) | **100%** |
-| Onboarding | ✅ Passed (4/4) | ✅ Passed (7/7) | **100%** |
-| Analytics | ✅ Passed (3/3) | ✅ Passed (5/5) | **100%** |
-| Loyalty | ✅ Passed (2/2) | ✅ Passed (3/3) | **100%** |
-| Subscription | ✅ Passed (2/2) | - | **100%** |
-| Promotions | ✅ Passed (2/2) | ✅ Passed (4/4) | **100%** |
-| Guests | - | ✅ Implemented | **Ready** |
-| Bookings | - | ✅ Implemented | **Ready** |
-| Rooms | - | ✅ Implemented | **Ready** |
-| Properties 🆕 | - | ✅ Implemented | **Ready** |
-
-**รวม:** 72 tests ผ่านทั้งหมด | 13 test suites | ⏱️ เวลาที่ใช้: ~3s
-
-**การรัน Tests:**
-```bash
-npm test -- --testPathPattern="(notifications|contact|onboarding|analytics|loyalty|subscription|promotions).*spec.ts$"
-```
-
----
-**หมายเหตุ:** ขณะนี้ฝั่ง Frontend มี API รองรับเกือบครบทุกส่วนตาม `PROJECT_TRACKER.md` แล้ว สำหรับส่วนที่ Pending Enhancement (เช่น Advanced Search ใน Booking) จะมีการอัปเดตใน Sprint ถัดไป
+**หมายเหตุ:** ขณะนี้ระบบ Backend (NestJS) ได้ Implement Endpoints ครบทั้งหมดแล้ว ทีม Frontend สามารถเปลี่ยนจาก Mock Data มาเรียกใช้งาน API จริงผ่าน `/api/v1/...` ได้ทันที

@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ยืนยันการจองห้องพัก</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #f4f4f4;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f4f4f4; padding: 20px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+          <!-- Header -->
+          <tr>
+            <td style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center;">
+              <h1 style="color: #ffffff; margin: 0; font-size: 24px;">{{hotelName}}</h1>
+              <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0; font-size: 14px;">ยืนยันการจองห้องพัก</p>
+            </td>
+          </tr>
+
+          <!-- Content -->
+          <tr>
+            <td style="padding: 40px 30px;">
+              <!-- Greeting -->
+              <h2 style="color: #333333; margin: 0 0 20px 0; font-size: 20px;">
+                สวัสดีครับ/ค่ะ คุณ{{guestName}} 👋
+              </h2>
+
+              <p style="color: #666666; line-height: 1.6; margin: 0 0 20px 0;">
+                ขอบคุณที่เลือกเข้าพักกับเรา! การจองของท่านได้รับการยืนยันเรียบร้อยแล้ว กรุณาตรวจสอบรายละเอียดด้านล่างนี้
+              </p>
+
+              <!-- Booking Details Card -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8f9fa; border-radius: 8px; margin: 20px 0;">
+                <tr>
+                  <td style="padding: 25px;">
+                    <h3 style="color: #333; margin: 0 0 20px 0; font-size: 16px; border-bottom: 2px solid #667eea; padding-bottom: 10px;">
+                      📋 รายละเอียดการจอง
+                    </h3>
+
+                    <table width="100%" cellpadding="5" cellspacing="0">
+                      <tr>
+                        <td style="color: #888; width: 40%;">หมายเลขการจอง:</td>
+                        <td style="color: #333; font-weight: bold;">#{{bookingNumber}}</td>
+                      </tr>
+                      <tr>
+                        <td style="color: #888;">วันที่เช็คอิน:</td>
+                        <td style="color: #333; font-weight: bold;">📅 {{checkInDate}}</td>
+                      </tr>
+                      <tr>
+                        <td style="color: #888;">วันที่เช็คเอาท์:</td>
+                        <td style="color: #333; font-weight: bold;">📅 {{checkOutDate}}</td>
+                      </tr>
+                      <tr>
+                        <td style="color: #888;">ประเภทห้อง:</td>
+                        <td style="color: #333; font-weight: bold;">🛏️ {{roomType}}</td>
+                      </tr>
+                      <tr>
+                        <td style="color: #888;">จำนวนคืน:</td>
+                        <td style="color: #333; font-weight: bold;">{{nights}} คืน</td>
+                      </tr>
+                      <tr>
+                        <td colspan="2" style="border-top: 1px solid #ddd; padding-top: 15px; margin-top: 10px;"></td>
+                      </tr>
+                      <tr>
+                        <td style="color: #888; font-size: 16px;">ยอดรวมทั้งสิ้น:</td>
+                        <td style="color: #667eea; font-weight: bold; font-size: 20px;">฿{{formatNumber totalPrice}}</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Check-in Info -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #e8f5e9; border-radius: 8px; margin: 20px 0; border-left: 4px solid #4caf50;">
+                <tr>
+                  <td style="padding: 20px;">
+                    <h4 style="color: #2e7d32; margin: 0 0 10px 0;">⏰ เวลาเช็คอิน / เช็คเอาท์</h4>
+                    <p style="color: #555; margin: 0; line-height: 1.6;">
+                      <strong>เช็คอิน:</strong> 14:00 น. เป็นต้นไป<br>
+                      <strong>เช็คเอาท์:</strong> ก่อน 12:00 น.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Important Notes -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #fff3e0; border-radius: 8px; margin: 20px 0; border-left: 4px solid #ff9800;">
+                <tr>
+                  <td style="padding: 20px;">
+                    <h4 style="color: #e65100; margin: 0 0 10px 0;">📝 สิ่งที่ต้องเตรียม</h4>
+                    <ul style="color: #555; margin: 0; padding-left: 20px; line-height: 1.8;">
+                      <li>บัตรประชาชน หรือ หนังสือเดินทาง</li>
+                      <li>ใบยืนยันการจอง (อีเมลฉบับนี้)</li>
+                      <li>บัตรเครดิต/เดบิต สำหรับวางประกัน (ถ้ามี)</li>
+                    </ul>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- CTA Button -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin: 30px 0;">
+                <tr>
+                  <td align="center">
+                    <a href="{{bookingUrl}}" style="display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #ffffff; text-decoration: none; padding: 15px 40px; border-radius: 30px; font-weight: bold; font-size: 16px;">
+                      ดูรายละเอียดการจอง
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Contact -->
+              <p style="color: #888; font-size: 14px; text-align: center; margin: 30px 0 0 0;">
+                หากมีข้อสงสัย กรุณาติดต่อเรา<br>
+                📧 {{supportEmail}} | 📞 {{supportPhone}}
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #f8f9fa; padding: 20px; text-align: center; border-top: 1px solid #eee;">
+              <p style="color: #888; font-size: 12px; margin: 0;">
+                © {{currentYear}} {{hotelName}}. All rights reserved.<br>
+                {{hotelAddress}}
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

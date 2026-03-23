@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ใบเสร็จรับเงิน</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #f4f4f4;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f4f4f4; padding: 20px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 8px; overflow: hidden;">
+          <tr>
+            <td style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center;">
+              <h1 style="color: #ffffff; margin: 0; font-size: 24px;">{{hotelName}}</h1>
+              <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0;">ใบเสร็จรับเงิน</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 40px 30px;">
+              <div style="text-align: center; margin-bottom: 30px;">
+                <div style="width: 60px; height: 60px; background-color: #4caf50; border-radius: 50%; display: inline-block; line-height: 60px;">
+                  <span style="color: white; font-size: 30px;">✓</span>
+                </div>
+                <h2 style="color: #4caf50; margin: 15px 0 5px 0;">ชำระเงินสำเร็จ</h2>
+              </div>
+              <p style="color: #666; text-align: center;">ขอบคุณสำหรับการชำระเงิน</p>
+              <table width="100%" style="background-color: #f8f9fa; border-radius: 8px; margin: 20px 0;">
+                <tr>
+                  <td style="padding: 25px;">
+                    <h3 style="color: #333; margin: 0 0 15px 0; border-bottom: 1px solid #ddd; padding-bottom: 10px;">รายละเอียดการชำระเงิน</h3>
+                    <table width="100%" cellpadding="5">
+                      <tr><td style="color: #888;">เลขที่ใบเสร็จ:</td><td style="color: #333; font-weight: bold;">{{receiptNumber}}</td></tr>
+                      <tr><td style="color: #888;">หมายเลขการจอง:</td><td style="color: #333;">#{{bookingNumber}}</td></tr>
+                      <tr><td style="color: #888;">วันที่ชำระ:</td><td style="color: #333;">{{paymentDate}}</td></tr>
+                      <tr><td style="color: #888;">วิธีการชำระ:</td><td style="color: #333;">{{paymentMethod}}</td></tr>
+                      <tr><td colspan="2" style="border-top: 1px solid #ddd; padding-top: 10px;"></td></tr>
+                      <tr><td style="color: #333; font-size: 16px; font-weight: bold;">ยอดชำระ:</td><td style="color: #667eea; font-weight: bold; font-size: 20px;">฿{{formatNumber amount}}</td></tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+              <p style="color: #888; font-size: 12px; text-align: center;">เก็บอีเมลนี้ไว้เป็นหลักฐานการชำระเงิน</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #f8f9fa; padding: 20px; text-align: center;">
+              <p style="color: #888; font-size: 12px; margin: 0;">© {{currentYear}} {{hotelName}}</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

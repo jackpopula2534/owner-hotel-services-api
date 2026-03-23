@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Booking Confirmation</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #f4f4f4;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f4f4f4; padding: 20px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+          <tr>
+            <td style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center;">
+              <h1 style="color: #ffffff; margin: 0; font-size: 24px;">{{hotelName}}</h1>
+              <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0; font-size: 14px;">Booking Confirmation</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 40px 30px;">
+              <h2 style="color: #333333; margin: 0 0 20px 0; font-size: 20px;">Hello {{guestName}}</h2>
+              <p style="color: #666666; line-height: 1.6; margin: 0 0 20px 0;">
+                Thank you for choosing us! Your booking has been confirmed.
+              </p>
+              <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8f9fa; border-radius: 8px; margin: 20px 0;">
+                <tr>
+                  <td style="padding: 25px;">
+                    <h3 style="color: #333; margin: 0 0 20px 0; font-size: 16px;">Booking Details</h3>
+                    <table width="100%" cellpadding="5" cellspacing="0">
+                      <tr><td style="color: #888; width: 40%;">Booking Number:</td><td style="color: #333; font-weight: bold;">#{{bookingNumber}}</td></tr>
+                      <tr><td style="color: #888;">Check-in:</td><td style="color: #333; font-weight: bold;">{{checkInDate}}</td></tr>
+                      <tr><td style="color: #888;">Check-out:</td><td style="color: #333; font-weight: bold;">{{checkOutDate}}</td></tr>
+                      <tr><td style="color: #888;">Room Type:</td><td style="color: #333; font-weight: bold;">{{roomType}}</td></tr>
+                      <tr><td style="color: #888; font-size: 16px;">Total:</td><td style="color: #667eea; font-weight: bold; font-size: 20px;">{{formatNumber totalPrice}}</td></tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+              <p style="color: #888; font-size: 14px; text-align: center;">Contact: {{supportEmail}}</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #f8f9fa; padding: 20px; text-align: center; border-top: 1px solid #eee;">
+              <p style="color: #888; font-size: 12px; margin: 0;">© {{currentYear}} {{hotelName}}</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

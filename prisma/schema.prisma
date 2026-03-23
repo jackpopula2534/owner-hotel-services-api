@@ -156,6 +156,8 @@ model Booking {
   guestPhone      String?
   checkIn         DateTime
   checkOut        DateTime
+  actualCheckIn   DateTime?
+  actualCheckOut  DateTime?
   status          String    @default("pending")
   totalPrice      Decimal   @db.Decimal(10, 2)
   notes           String?
@@ -774,4 +776,205 @@ enum invoices_status {
   paid
   rejected
   voided
+}
+
+// ==================== Email System ====================
+model EmailLog {
+  id          String      @id @default(uuid())
+  tenantId    String?
+  recipient   String
+  subject     String
+  template    String
+  status      EmailStatus @default(pending)
+  sentAt      DateTime?
+  deliveredAt DateTime?
+  openedAt    DateTime?
+  bouncedAt   DateTime?
+  errorMsg    String?     @db.Text
+  metadata    Json?
+  createdAt   DateTime    @default(now()) @db.DateTime(6)
+  updatedAt   DateTime    @default(now()) @updatedAt @db.DateTime(6)
+
+  @@index([tenantId])
+  @@index([recipient])
+  @@index([status])
+  @@map("email_logs")
+}
+
+model EmailPreference {
+  id                  String   @id @default(uuid())
+  tenantId            String?
+  guestId             String?
+  email               String
+  bookingConfirmation Boolean  @default(true)
+  checkInReminder     Boolean  @default(true)
+  checkOutReminder    Boolean  @default(true)
+  paymentReceipt      Boolean  @default(true)
+  promotionalEmails   Boolean  @default(false)
+  newsletter          Boolean  @default(false)
+  unsubscribedAt      DateTime?
+  createdAt           DateTime @default(now()) @db.DateTime(6)
+  updatedAt           DateTime @default(now()) @updatedAt @db.DateTime(6)
+
+  @@unique([email, tenantId])
+  @@index([tenantId])
+  @@index([guestId])
+  @@map("email_preferences")
+}
+
+enum EmailStatus {
+  pending
+  queued
+  sent
+  delivered
+  opened
+  bounced
+  failed
+}
+
+// ==================== Audit Logging ====================
+model AuditLog {
+  id           String   @id @default(uuid())
+  tenantId     String?
+  userId       String?
+  adminId      String?
+  action       String
+  resource     String
+  resourceId   String?
+  oldValues    Json?
+  newValues    Json?
+  ipAddress    String?
+  userAgent    String?
+  description  String?  @db.Text
+  createdAt    DateTime @default(now()) @db.DateTime(6)
+
+  @@index([tenantId])
+  @@index([userId])
+  @@index([adminId])
+  @@index([action])
+  @@index([resource])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ==================== 2FA Settings ====================
+model User2FASettings {
+  id          String    @id @default(uuid())
+  userId      String    @unique
+  secret      String
+  isEnabled   Boolean   @default(false)
+  backupCodes Json?
+  enabledAt   DateTime?
+  createdAt   DateTime  @default(now()) @db.DateTime(6)
+  updatedAt   DateTime  @default(now()) @updatedAt @db.DateTime(6)
+
+  @@map("user_2fa_settings")
+}
+
+// ==================== PromptPay Transactions ====================
+model PromptPayTransaction {
+  id              String                     @id @default(uuid())
+  tenantId        String?
+  bookingId       String?
+  invoiceId       String?
+  paymentId       String?
+  transactionRef  String                     @unique
+  amount          Decimal                    @db.Decimal(10, 2)
+  promptpayId     String
+  qrCodeData      String                     @db.Text
+  status          PromptPayTransactionStatus @default(pending)
+  expiresAt       DateTime
+  paidAt          DateTime?
+  verifiedAt      DateTime?
+  verificationRef String?
+  webhookData     Json?
+  errorMessage    String?                    @db.Text
+  createdAt       DateTime                   @default(now()) @db.DateTime(6)
+  updatedAt       DateTime                   @default(now()) @updatedAt @db.DateTime(6)
+
+  @@index([tenantId])
+  @@index([bookingId])
+  @@index([invoiceId])
+  @@index([transactionRef])
+  @@index([status])
+  @@map("promptpay_transactions")
+}
+
+enum PromptPayTransactionStatus {
+  pending
+  paid
+  verified
+  expired
+  failed
+  refunded
+}
+
+// ==================== Line Notify ====================
+model LineNotifyToken {
+  id            String   @id @default(uuid())
+  tenantId      String
+  userId        String
+  accessToken   String   @db.Text
+  targetName    String?
+  targetType    String?  // USER or GROUP
+  enabledEvents Json?    // Array of enabled event types
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now()) @db.DateTime(6)
+  updatedAt     DateTime @default(now()) @updatedAt @db.DateTime(6)
+
+  @@unique([tenantId, userId])
+  @@index([tenantId])
+  @@index([userId])
+  @@map("line_notify_tokens")
+}
+
+// ==================== Push Notifications ====================
+model PushNotificationDevice {
+  id           String   @id @default(uuid())
+  userId       String
+  tenantId     String?
+  deviceToken  String   @db.VarChar(512)
+  platform     String   // ios, android, web
+  deviceModel  String?
+  osVersion    String?
+  appVersion   String?
+  isActive     Boolean  @default(true)
+  lastActiveAt DateTime @default(now()) @db.DateTime(6)
+  createdAt    DateTime @default(now()) @db.DateTime(6)
+  updatedAt    DateTime @default(now()) @updatedAt @db.DateTime(6)
+
+  @@unique([userId, deviceToken])
+  @@index([userId])
+  @@index([tenantId])
+  @@map("push_notification_devices")
+}
+
+model PushNotificationPreference {
+  id                       String   @id @default(uuid())
+  userId                   String   @unique
+  bookingNotifications     Boolean  @default(true)
+  paymentNotifications     Boolean  @default(true)
+  reminderNotifications    Boolean  @default(true)
+  promotionalNotifications Boolean  @default(false)
+  systemNotifications      Boolean  @default(true)
+  createdAt                DateTime @default(now()) @db.DateTime(6)
+  updatedAt                DateTime @default(now()) @updatedAt @db.DateTime(6)
+
+  @@index([userId])
+  @@map("push_notification_preferences")
+}
+
+model PushNotificationLog {
+  id        String   @id @default(uuid())
+  userId    String
+  title     String
+  body      String   @db.Text
+  type      String
+  data      Json?
+  sentAt    DateTime @default(now()) @db.DateTime(6)
+  readAt    DateTime?
+
+  @@index([userId])
+  @@index([sentAt])
+  @@map("push_notification_logs")
 }

@@ -5,7 +5,8 @@
       "Bash(npm run db:refresh:*)",
       "Bash(mysql:*)",
       "Bash(pkill:*)",
-      "Bash(npm run start:dev:*)"
+      "Bash(npm run start:dev:*)",
+      "Bash(npx tsc:*)"
     ]
   }
 }

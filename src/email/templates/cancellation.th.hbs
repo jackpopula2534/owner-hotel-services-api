@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <title>ยกเลิกการจอง</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f4f4f4;">
+  <table width="100%" style="background-color: #f4f4f4; padding: 20px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" style="background-color: #ffffff; border-radius: 8px;">
+          <tr>
+            <td style="background: linear-gradient(135deg, #ff6b6b 0%, #ee5a5a 100%); padding: 30px; text-align: center;">
+              <h1 style="color: #ffffff; margin: 0;">{{hotelName}}</h1>
+              <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0;">ยืนยันการยกเลิกการจอง</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 40px 30px;">
+              <h2 style="color: #333;">สวัสดีครับ/ค่ะ คุณ{{guestName}}</h2>
+              <p style="color: #666; line-height: 1.6;">การจองของท่านได้ถูกยกเลิกเรียบร้อยแล้ว</p>
+              <table width="100%" style="background-color: #f8f9fa; border-radius: 8px; margin: 20px 0;">
+                <tr>
+                  <td style="padding: 25px;">
+                    <h3 style="color: #333; margin: 0 0 15px 0;">รายละเอียดการยกเลิก</h3>
+                    <table width="100%" cellpadding="5">
+                      <tr><td style="color: #888;">หมายเลขการจอง:</td><td style="color: #333; font-weight: bold;">#{{bookingNumber}}</td></tr>
+                      <tr><td style="color: #888;">วันที่ยกเลิก:</td><td style="color: #333;">{{cancellationDate}}</td></tr>
+                      {{#if refundAmount}}
+                      <tr><td style="color: #888;">จำนวนเงินคืน:</td><td style="color: #4caf50; font-weight: bold;">฿{{formatNumber refundAmount}}</td></tr>
+                      {{/if}}
+                    </table>
+                  </td>
+                </tr>
+              </table>
+              {{#if refundAmount}}
+              <p style="color: #666; font-size: 14px;">การคืนเงินจะดำเนินการภายใน 7-14 วันทำการ</p>
+              {{/if}}
+              <p style="color: #888; font-size: 14px; margin-top: 20px;">หวังว่าจะได้ต้อนรับท่านในโอกาสหน้า</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #f8f9fa; padding: 20px; text-align: center;">
+              <p style="color: #888; font-size: 12px;">© {{currentYear}} {{hotelName}}</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

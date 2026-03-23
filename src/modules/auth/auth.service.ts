@@ -1,7 +1,9 @@
-import { Injectable, UnauthorizedException, ConflictException, BadRequestException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ConflictException, BadRequestException, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
+import { EmailEventsService } from '../../email/email-events.service';
+import { OnboardingService } from '../../onboarding/onboarding.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
@@ -10,14 +12,18 @@ import { randomBytes } from 'crypto';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
     private configService: ConfigService,
+    private emailEventsService: EmailEventsService,
+    private onboardingService: OnboardingService,
   ) {}
 
   async register(registerDto: RegisterDto) {
-    const { email, password, firstName, lastName } = registerDto;
+    const { email, password, firstName, lastName, hotelName, hotelAddress, hotelPhone } = registerDto;
 
     // Check if user already exists
     const existingUser = await this.prisma.user.findUnique({
@@ -32,7 +38,7 @@ export class AuthService {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // Create user with tenant_admin role (they're registering as hotel owner)
-    const user = await this.prisma.user.create({
+    let user = await this.prisma.user.create({
       data: {
         email,
         password: hashedPassword,
@@ -51,6 +57,39 @@ export class AuthService {
       },
     });
 
+    // Auto-create Tenant + Trial Subscription (Step 2 & 3 of registration flow)
+    let onboardingResult = null;
+    const tenantName = hotelName || `${firstName}'s Hotel`;
+
+    try {
+      onboardingResult = await this.onboardingService.registerHotel(
+        {
+          name: tenantName,
+          address: hotelAddress,
+          phone: hotelPhone,
+          email: email,
+        },
+        14, // 14-day trial
+      );
+
+      // Link user to the newly created tenant
+      user = await this.prisma.user.update({
+        where: { id: user.id },
+        data: { tenantId: onboardingResult.tenant.id },
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          role: true,
+          tenantId: true,
+          createdAt: true,
+        },
+      });
+    } catch (err) {
+      this.logger.warn(`Onboarding failed for user ${user.id}: ${err.message}. User created without tenant.`);
+    }
+
     // Generate tokens (include tenantId for multi-tenant PMS)
     const tokens = await this.generateTokens(
       user.id,
@@ -59,12 +98,26 @@ export class AuthService {
       user.tenantId ?? undefined,
     );
 
+    // Send welcome email (async, non-blocking)
+    this.emailEventsService.onUserRegistered({
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+    }).catch((err) => {
+      this.logger.error(`Failed to send welcome email: ${err.message}`);
+    });
+
     return {
       ...tokens,
       user: {
         ...user,
         tenantId: user.tenantId ?? undefined,
       },
+      onboarding: onboardingResult ? {
+        tenantId: onboardingResult.tenant.id,
+        trialEndsAt: onboardingResult.trialEndsAt,
+        message: onboardingResult.message,
+      } : undefined,
     };
   }
 
@@ -264,11 +317,16 @@ export class AuthService {
       },
     });
 
-    // TODO: Send email with reset link
-    // For now, we return the token for testing/dev purposes
-    console.log(`Password reset token for ${email}: ${token}`);
+    // Send password reset email
+    this.emailEventsService.onPasswordResetRequested(
+      email,
+      token,
+      user.firstName || 'User',
+    ).catch((err) => {
+      this.logger.error(`Failed to send password reset email: ${err.message}`);
+    });
 
-    return { 
+    return {
       message: 'If an account with that email exists, a reset link has been sent.',
       token: process.env.NODE_ENV === 'development' ? token : undefined, // Only return token in dev
     };

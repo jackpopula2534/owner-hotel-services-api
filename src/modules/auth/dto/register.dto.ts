@@ -1,5 +1,5 @@
-import { IsEmail, IsNotEmpty, IsString, MinLength } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsEmail, IsNotEmpty, IsString, MinLength, IsOptional } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class RegisterDto {
   @ApiProperty({ example: 'John' })
@@ -22,6 +22,22 @@ export class RegisterDto {
   @IsNotEmpty()
   @MinLength(6)
   password: string;
+
+  // Step 2: Hotel Info (optional - for full onboarding flow)
+  @ApiPropertyOptional({ example: 'Grand Azure Hotel' })
+  @IsString()
+  @IsOptional()
+  hotelName?: string;
+
+  @ApiPropertyOptional({ example: '123 ถนนสุขุมวิท กรุงเทพฯ' })
+  @IsString()
+  @IsOptional()
+  hotelAddress?: string;
+
+  @ApiPropertyOptional({ example: '02-123-4567' })
+  @IsString()
+  @IsOptional()
+  hotelPhone?: string;
 }
 
 

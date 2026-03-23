@@ -2,10 +2,37 @@ import {
   CanActivate,
   ExecutionContext,
   Injectable,
+  ForbiddenException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ROLES_KEY, UserRole } from '../decorators/roles.decorator';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
+
+/**
+ * Role Hierarchy - Level System
+ * Higher level roles automatically inherit access to lower level endpoints
+ */
+const ROLE_LEVELS: Record<string, number> = {
+  platform_admin: 1000,
+  super_admin: 100,
+  admin: 90,
+  tenant_admin: 85,
+  manager: 80,
+  hr: 70,
+  chef: 60,
+  receptionist: 50,
+  waiter: 50,
+  housekeeper: 40,
+  maintenance: 40,
+  accountant: 40,
+  security: 40,
+  staff: 30,
+  user: 10,
+};
+
+function getRoleLevel(role: string): number {
+  return ROLE_LEVELS[role] ?? 0;
+}
 
 @Injectable()
 export class RolesGuard implements CanActivate {
@@ -36,26 +63,29 @@ export class RolesGuard implements CanActivate {
     const user = request.user as { role?: UserRole };
 
     if (!user || !user.role) {
-      console.log('❌ RolesGuard: No user or role in request');
       return false;
     }
 
-    const hasRole = requiredRoles.includes(user.role);
-    if (!hasRole) {
-      console.log(`❌ RolesGuard: Role mismatch. User role: "${user.role}", Required one of: [${requiredRoles.join(', ')}]`);
-      // Throw explicit exception to help client debugging
-      const { ForbiddenException } = require('@nestjs/common');
-      throw new ForbiddenException(
-        `Access denied. You have role "${user.role}", but this resource requires one of: [${requiredRoles.join(', ')}]`
-      );
-    } else {
-      console.log(`✅ RolesGuard: Role authorized. User role: "${user.role}"`);
+    // Check exact role match first
+    const hasExactRole = requiredRoles.includes(user.role);
+    if (hasExactRole) {
+      return true;
     }
 
-    return hasRole;
+    // Check hierarchy: user's level >= highest required role level
+    const userLevel = getRoleLevel(user.role);
+    const minRequiredLevel = Math.min(
+      ...requiredRoles.map((r) => getRoleLevel(r)),
+    );
+
+    const hasHierarchyAccess = userLevel >= minRequiredLevel;
+
+    if (!hasHierarchyAccess) {
+      throw new ForbiddenException(
+        `Access denied. You have role "${user.role}" (level ${userLevel}), but this resource requires one of: [${requiredRoles.join(', ')}]`,
+      );
+    }
+
+    return true;
   }
 }
-
-
-
-
