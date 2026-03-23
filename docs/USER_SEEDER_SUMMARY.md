@@ -64,25 +64,29 @@ curl -X POST http://localhost:9011/api/v1/auth/register \
 
 รัน `npm run seed` ที่ Backend เพื่อสร้าง Accounts เหล่านี้
 
-### Admin Accounts (Login ผ่าน POST /api/v1/auth/admin/login)
+> **สำคัญ:** ระบบแยก Login 2 ช่องทางอย่างชัดเจน
+> - **Platform Admin** → ใช้ `POST /api/v1/auth/admin/login` เท่านั้น (Admin table)
+> - **Subscription Customers** → ใช้ `POST /api/v1/auth/login` เท่านั้น (User table)
+> - Role `platform_admin`, `super_admin`, `admin` **ไม่สามารถ** login ผ่าน `/auth/login` ได้
 
-| Role | Email | Password |
-|------|-------|----------|
-| **Super Admin** | `admin@hotelservices.com` | `Admin@123` |
-| **Finance** | `finance@hotelservices.com` | `Finance@123` |
-| **Support** | `support@hotelservices.com` | `Support@123` |
+### Platform Admin Accounts (Login ผ่าน POST /api/v1/auth/admin/login เท่านั้น)
 
-### Hotel Owner Accounts (Login ผ่าน POST /api/v1/auth/login)
+| Role | Email | Password | Table |
+|------|-------|----------|-------|
+| **Platform Admin** | `admin@hotelservices.com` | `Admin@123` | Admin |
+| **Platform Admin** | `finance@hotelservices.com` | `Finance@123` | Admin |
+| **Platform Admin** | `support@hotelservices.com` | `Support@123` | Admin |
+
+### Hotel Owner Accounts - Subscription Customers (Login ผ่าน POST /api/v1/auth/login)
 
 | Role | Email | Password | โรงแรม |
 |------|-------|----------|--------|
-| **Platform Admin** | `platform.admin@staysync.io` | `admin123` | - |
 | **Tenant Admin** | `somchai@email.com` | `password123` | โรงแรมสุขใจ |
 | **Tenant Admin** | `mountain@email.com` | `password123` | Mountain View Resort |
 | **Tenant Admin** | `seaside@email.com` | `password123` | บ้านพักริมทะเล |
 | **Tenant Admin** | `garden@email.com` | `password123` | Garden Resort & Spa |
 
-### Hotel Staff Accounts (Login ผ่าน POST /api/v1/auth/login)
+### Hotel Staff Accounts - Subscription Customers (Login ผ่าน POST /api/v1/auth/login)
 
 | Role | Email Pattern | Password | Level |
 |------|--------------|----------|-------|
@@ -326,10 +330,20 @@ Level 10    ┌─────────────────┐  User (ผ
 
 ### รายละเอียดแต่ละ Role (Implemented in RolesGuard)
 
+#### Admin Roles (Admin Table → `/auth/admin/login` เท่านั้น)
+
 | Role | Level | คำอธิบาย | หน้าที่หลัก |
 |------|-------|----------|-------------|
 | `platform_admin` | 1000 | SaaS Platform Admin | จัดการทุกอย่างในระบบ, ดูแล Tenants ทั้งหมด |
+| `super_admin` | 100 | Super Admin (Legacy) | รองรับค่าเดิม (backward compatibility) |
 | `admin` | 90 | Legacy Admin | รองรับค่าเดิม (backward compatibility) |
+
+> **Admin roles ห้าม login ผ่าน `/auth/login`** - ต้องใช้ `/auth/admin/login` เท่านั้น
+
+#### Subscription Customer Roles (User Table → `/auth/login`)
+
+| Role | Level | คำอธิบาย | หน้าที่หลัก |
+|------|-------|----------|-------------|
 | `tenant_admin` | 85 | Hotel Owner | เจ้าของโรงแรม, จัดการพนักงาน, ดูรายงาน |
 | `manager` | 80 | Hotel Manager | ผู้จัดการ, Bookings, รายงาน |
 | `hr` | 70 | Human Resources | จัดการพนักงาน, Employee CRUD |
@@ -345,6 +359,7 @@ Level 10    ┌─────────────────┐  User (ผ
 
 > **Role Hierarchy**: Role ที่มี Level สูงกว่าจะสามารถเข้าถึง endpoint ของ Role ที่มี Level ต่ำกว่าได้อัตโนมัติ
 > เช่น `manager` (Level 80) สามารถเข้าถึง endpoint ที่ต้องการ `receptionist` (Level 50) ได้
+> **แต่** subscription customer roles ไม่สามารถเข้าถึง admin routes (`/admin/*`, `/admin-panel/*`) ได้
 
 ---
 

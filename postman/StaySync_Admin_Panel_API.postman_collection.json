@@ -37,15 +37,16 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"email\": \"platform.admin@staysync.io\",\n  \"password\": \"admin123\"\n}"
+							"raw": "{\n  \"email\": \"admin@hotelservices.com\",\n  \"password\": \"Admin@123\"\n}"
 						},
 						"url": {
-							"raw": "{{baseUrl}}/auth/login",
+							"raw": "{{baseUrl}}/auth/admin/login",
 							"host": [
 								"{{baseUrl}}"
 							],
 							"path": [
 								"auth",
+								"admin",
 								"login"
 							]
 						}

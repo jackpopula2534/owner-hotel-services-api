@@ -96,8 +96,8 @@
 | `baseUrl` | API Base URL | `http://localhost:3000/api/v1` |
 | `accessToken` | JWT Token (auto-saved after login) | - |
 | `userId` | User ID (auto-saved after login) | - |
-| `adminEmail` | Platform Admin Email | `platform.admin@staysync.io` |
-| `adminPassword` | Platform Admin Password | `admin123` |
+| `adminEmail` | Platform Admin Email | `admin@hotelservices.com` |
+| `adminPassword` | Platform Admin Password | `Admin@123` |
 
 ## 💡 Tips การใช้งาน
 

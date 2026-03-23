@@ -81,11 +81,12 @@ Features:
 
 ### 4. Test Users
 
-#### Platform Admin
+#### Platform Admin (Login ผ่าน `/auth/admin/login` เท่านั้น)
 ```
-Email: platform.admin@staysync.io
-Password: admin123
+Email: admin@hotelservices.com
+Password: Admin@123
 Role: platform_admin
+Table: Admin (ไม่ใช่ User table)
 ```
 
 ---
@@ -208,10 +209,10 @@ curl http://localhost:3000/api/v1/plans
 #### ทดสอบ Admin Plans API
 
 ```bash
-# 1. Login
-curl -X POST http://localhost:3000/api/v1/auth/login \
+# 1. Login (ต้องใช้ /auth/admin/login สำหรับ Platform Admin)
+curl -X POST http://localhost:3000/api/v1/auth/admin/login \
   -H "Content-Type: application/json" \
-  -d '{"email": "platform.admin@staysync.io", "password": "admin123"}'
+  -d '{"email": "admin@hotelservices.com", "password": "Admin@123"}'
 
 # 2. Copy accessToken จาก response
 

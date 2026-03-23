@@ -432,11 +432,12 @@ CREATE TABLE payment_refunds (
 
 ## 8. Test Credentials
 
-### Platform Admin Login
+### Platform Admin Login (ผ่าน `/auth/admin/login` เท่านั้น)
 
 ```
-Email: platform.admin@staysync.io
-Password: admin123
+Email: admin@hotelservices.com
+Password: Admin@123
+Endpoint: POST /api/v1/auth/admin/login
 ```
 
 ### Test Command

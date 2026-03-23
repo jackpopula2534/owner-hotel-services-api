@@ -162,6 +162,9 @@ export class AuthService {
     };
   }
 
+  // Roles ที่ห้ามเข้าผ่าน /auth/login (ต้องใช้ /auth/admin/login เท่านั้น)
+  private readonly ADMIN_ONLY_ROLES = ['platform_admin', 'super_admin', 'admin'];
+
   async login(loginDto: LoginDto) {
     const { email, password } = loginDto;
 
@@ -175,6 +178,13 @@ export class AuthService {
 
     if (user.status !== 'active') {
       throw new UnauthorizedException('User account is suspended or inactive');
+    }
+
+    // บล็อก admin-level roles จากการ login ผ่าน /auth/login
+    if (this.ADMIN_ONLY_ROLES.includes(user.role)) {
+      throw new UnauthorizedException(
+        'Admin accounts cannot login through this endpoint. Use /api/v1/auth/admin/login instead.',
+      );
     }
 
     const isPasswordValid = await bcrypt.compare(password, user.password);

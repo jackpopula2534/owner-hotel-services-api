@@ -281,6 +281,48 @@ describe('AuthService', () => {
         UnauthorizedException,
       );
     });
+
+    it('should block platform_admin from login via /auth/login', async () => {
+      mockPrismaService.user.findUnique.mockResolvedValue({
+        id: '3',
+        email: loginDto.email,
+        password: 'hashedPassword',
+        role: 'platform_admin',
+        status: 'active',
+      });
+
+      await expect(service.login(loginDto)).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+
+    it('should block super_admin from login via /auth/login', async () => {
+      mockPrismaService.user.findUnique.mockResolvedValue({
+        id: '4',
+        email: loginDto.email,
+        password: 'hashedPassword',
+        role: 'super_admin',
+        status: 'active',
+      });
+
+      await expect(service.login(loginDto)).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+
+    it('should block admin from login via /auth/login', async () => {
+      mockPrismaService.user.findUnique.mockResolvedValue({
+        id: '5',
+        email: loginDto.email,
+        password: 'hashedPassword',
+        role: 'admin',
+        status: 'active',
+      });
+
+      await expect(service.login(loginDto)).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
   });
 
   describe('refreshToken', () => {

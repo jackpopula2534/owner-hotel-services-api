@@ -4,7 +4,7 @@
 
 **Base URL:** `http://localhost:3000/api/v1`
 **Authentication:** Bearer Token (JWT)
-**Admin Login:** `platform.admin@staysync.io` / `admin123`
+**Admin Login:** `admin@hotelservices.com` / `Admin@123` (ผ่าน `/auth/admin/login` เท่านั้น)
 
 ---
 
@@ -54,12 +54,12 @@
 ### Login
 
 ```http
-POST /api/v1/auth/login
+POST /api/v1/auth/admin/login
 Content-Type: application/json
 
 {
-  "email": "platform.admin@staysync.io",
-  "password": "admin123"
+  "email": "admin@hotelservices.com",
+  "password": "Admin@123"
 }
 ```
 
@@ -69,8 +69,9 @@ Content-Type: application/json
   "accessToken": "eyJhbGciOiJIUzI1NiIs...",
   "user": {
     "id": "uuid",
-    "email": "platform.admin@staysync.io",
-    "role": "platform_admin"
+    "email": "admin@hotelservices.com",
+    "role": "platform_admin",
+    "isPlatformAdmin": true
   }
 }
 ```
@@ -843,9 +844,9 @@ postman/StaySync_Admin_Panel_API.postman_collection.json
 
 ## 🔑 Test Credentials
 
-| Role | Email | Password |
-|------|-------|----------|
-| Platform Admin | platform.admin@staysync.io | admin123 |
+| Role | Email | Password | Login Endpoint |
+|------|-------|----------|----------------|
+| Platform Admin | admin@hotelservices.com | Admin@123 | `/auth/admin/login` |
 
 ---
 

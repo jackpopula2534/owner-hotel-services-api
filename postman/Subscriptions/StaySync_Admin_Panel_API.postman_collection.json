@@ -24,7 +24,7 @@
     {
       "name": "🔐 Auth",
       "item": [
-        { "name": "Login (Platform Admin)", "event": [{ "listen": "test", "script": { "exec": ["var jsonData = pm.response.json();", "if (jsonData.accessToken) { pm.collectionVariables.set('access_token', jsonData.accessToken); }"], "type": "text/javascript" }}], "request": { "auth": { "type": "noauth" }, "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"email\": \"platform.admin@staysync.io\",\n  \"password\": \"admin123\"\n}" }, "url": { "raw": "{{base_url}}/auth/login", "host": ["{{base_url}}"], "path": ["auth", "login"] }}}
+        { "name": "Login (Platform Admin)", "event": [{ "listen": "test", "script": { "exec": ["var jsonData = pm.response.json();", "if (jsonData.accessToken) { pm.collectionVariables.set('access_token', jsonData.accessToken); }"], "type": "text/javascript" }}], "request": { "auth": { "type": "noauth" }, "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"email\": \"admin@hotelservices.com\",\n  \"password\": \"Admin@123\"\n}" }, "url": { "raw": "{{base_url}}/auth/admin/login", "host": ["{{base_url}}"], "path": ["auth", "admin", "login"] }}}
       ]
     },
     {
