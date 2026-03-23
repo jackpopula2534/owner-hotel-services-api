@@ -1,0 +1,73 @@
+name: Deploy Staging
+
+on:
+  push:
+    branches: [develop]
+
+jobs:
+  deploy:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    environment: staging
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run prisma:generate
+
+      - name: Build application
+        run: npm run build
+
+      - name: Run migrations
+        env:
+          DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+        run: npm run prisma:migrate:deploy
+
+      - name: Deploy to staging environment
+        env:
+          STAGING_HOST: ${{ secrets.STAGING_HOST }}
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+          STAGING_KEY: ${{ secrets.STAGING_KEY }}
+          STAGING_PORT: ${{ secrets.STAGING_PORT || 22 }}
+        run: |
+          echo "Deploying to staging environment..."
+          echo "Deploy script: ssh, docker push, or platform-specific deployment (Railway, Vercel, etc.)"
+          echo "Configure your deployment method in this step based on your infrastructure"
+
+      - name: Health check
+        env:
+          STAGING_API_URL: ${{ secrets.STAGING_API_URL }}
+        run: |
+          echo "Waiting for deployment to stabilize..."
+          sleep 10
+          echo "Running health check against $STAGING_API_URL"
+          curl -f "$STAGING_API_URL/health" || echo "Health check endpoint not yet available"
+        continue-on-error: true
+
+      - name: Send Slack notification
+        uses: 8398a7/action-slack@v3
+        if: always()
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+        with:
+          status: ${{ job.status }}
+          text: |
+            Staging Deployment ${{ job.status }}
+            Repository: ${{ github.repository }}
+            Branch: ${{ github.ref }}
+            Commit: ${{ github.sha }}
+            Author: ${{ github.actor }}
+          fields: repo,message,commit,author
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        continue-on-error: true

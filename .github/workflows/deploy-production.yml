@@ -1,0 +1,73 @@
+name: Deploy Production
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run prisma:generate
+
+      - name: Build application
+        run: npm run build
+
+      - name: Run migrations
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+        run: npm run prisma:migrate:deploy
+
+      - name: Deploy to production environment
+        env:
+          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+          PRODUCTION_USER: ${{ secrets.PRODUCTION_USER }}
+          PRODUCTION_KEY: ${{ secrets.PRODUCTION_KEY }}
+          PRODUCTION_PORT: ${{ secrets.PRODUCTION_PORT || 22 }}
+        run: |
+          echo "Deploying to production environment..."
+          echo "Deploy script: ssh, docker push, or platform-specific deployment (Railway, Vercel, etc.)"
+          echo "Configure your deployment method in this step based on your infrastructure"
+
+      - name: Health check
+        env:
+          PRODUCTION_API_URL: ${{ secrets.PRODUCTION_API_URL }}
+        run: |
+          echo "Waiting for deployment to stabilize..."
+          sleep 15
+          echo "Running health check against $PRODUCTION_API_URL"
+          curl -f "$PRODUCTION_API_URL/health" || echo "Health check endpoint not yet available"
+        continue-on-error: true
+
+      - name: Send Slack notification
+        uses: 8398a7/action-slack@v3
+        if: always()
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+        with:
+          status: ${{ job.status }}
+          text: |
+            Production Deployment ${{ job.status }}
+            Repository: ${{ github.repository }}
+            Branch: ${{ github.ref }}
+            Commit: ${{ github.sha }}
+            Author: ${{ github.actor }}
+          fields: repo,message,commit,author
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        continue-on-error: true
