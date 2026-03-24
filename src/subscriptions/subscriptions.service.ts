@@ -9,8 +9,26 @@ export class SubscriptionsService {
   constructor(private readonly prisma: PrismaService) {}
 
   create(createSubscriptionDto: CreateSubscriptionDto) {
+    const data: any = {
+      subscription_code: createSubscriptionDto.subscriptionCode,
+      tenant_id: createSubscriptionDto.tenantId,
+      plan_id: createSubscriptionDto.planId,
+      previous_plan_id: createSubscriptionDto.previousPlanId,
+      status: createSubscriptionDto.status,
+      start_date: createSubscriptionDto.startDate,
+      end_date: createSubscriptionDto.endDate,
+      auto_renew: createSubscriptionDto.autoRenew !== undefined ? (createSubscriptionDto.autoRenew ? 1 : 0) : 1,
+    };
+    
+    // Clean up undefined properties
+    Object.keys(data).forEach(key => {
+      if (data[key] === undefined) {
+        delete data[key];
+      }
+    });
+
     return this.prisma.subscriptions.create({
-      data: createSubscriptionDto as any,
+      data,
       include: { tenants: true, plans_subscriptions_plan_idToplans: true, subscription_features: { include: { features: true } } },
     });
   }

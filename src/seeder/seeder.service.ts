@@ -568,6 +568,18 @@ export class SeederService {
 
         this.logger.log(`  ✓ Created hotel: ${hotelData.code} - ${hotelData.name} (${hotelData.status})`);
 
+        //สร้าง Property record สอดรับกับ Prisma Schema
+        const property = await this.prisma.property.create({
+          data: {
+            tenantId: tenant.id,
+            name: hotelData.name,
+            code: hotelData.code.replace('-', ''),
+            status: 'active',
+            isDefault: true,
+          }
+        });
+        this.logger.log(`    ✓ Created Property: ${property.id}`);
+
         // สร้าง subscription with code and previousPlan
         const subscription = await this.subscriptionsService.create({
           subscriptionCode: hotelData.code,
@@ -579,46 +591,33 @@ export class SeederService {
           endDate: new Date(hotelData.endDate),
           autoRenew: hotelData.status === TenantStatus.ACTIVE,
         });
-
-        const planPrice = Number(hotelData.plan.price_monthly);
-        const addonTotal = hotelData.addons.reduce((sum, a) => sum + a.price, 0);
-        this.logger.log(`    ✓ Subscription: ${hotelData.plan.name} (฿${planPrice}) + Add-ons (฿${addonTotal})`);
-
-        if (hotelData.previousPlan) {
-          const direction = Number(hotelData.plan.price_monthly) > Number(hotelData.previousPlan.price_monthly) ? '↗ Upgrade' : '↘ Downgrade';
-          this.logger.log(`      ${direction} จาก ${hotelData.previousPlan.name}`);
-        }
-
-        // สร้าง owner user
+        
+        // ... (owner creation script remains same)
         const ownerData = hotelData.owner;
         const hashedPassword = await bcrypt.hash('password123', 10);
         
         try {
-          const existingOwner = await this.prisma.$queryRaw`
-            SELECT id FROM users WHERE email = ${ownerData.email} LIMIT 1
-          `;
+          const existingOwner = await this.prisma.user.findUnique({ where: { email: ownerData.email } });
 
-          if (Array.isArray(existingOwner) && existingOwner.length === 0) {
-            await this.prisma.$executeRaw`
-              INSERT INTO users (id, email, password, firstName, lastName, role, status, tenantId, createdAt, updatedAt)
-              VALUES (
-                UUID(),
-                ${ownerData.email},
-                ${hashedPassword},
-                ${ownerData.firstName},
-                ${ownerData.lastName},
-                'tenant_admin',
-                'active',
-                ${tenant.id},
-                NOW(),
-                NOW()
-              )
-            `;
+          if (!existingOwner) {
+            await this.prisma.user.create({
+              data: {
+                id: uuidv4(),
+                email: ownerData.email,
+                password: hashedPassword,
+                firstName: ownerData.firstName,
+                lastName: ownerData.lastName,
+                role: 'tenant_admin',
+                status: 'active',
+                tenantId: tenant.id,
+              }
+            });
             this.logger.log(`    ✓ Created owner: ${ownerData.firstName} ${ownerData.lastName}`);
           }
         } catch (error) {
           this.logger.warn(`    ⚠️  Could not create owner: ${error.message}`);
         }
+
 
         // สร้าง add-ons (subscription features)
         for (const addon of hotelData.addons) {
@@ -776,44 +775,48 @@ export class SeederService {
 
       // สร้างการจองสำหรับแต่ละโรงแรม
       for (const tenant of allTenants) {
-        // ดึงห้องของโรงแรมนี้
-        const rooms: any[] = await this.prisma.$queryRaw`
-          SELECT id, number, type, price FROM rooms WHERE propertyId = ${tenant.id} LIMIT 10
-        `;
+        // ดึง property สำหรับ tenant นี้ (Prisma)
+        const property = await this.prisma.property.findFirst({
+          where: { tenantId: tenant.id }
+        });
 
-        if (!Array.isArray(rooms) || rooms.length === 0) {
+        if (!property) {
+          this.logger.warn(`  ⚠️ No property found for tenant ${tenant.name}, skipping bookings`);
+          continue;
+        }
+
+        // ดึงห้องของโรงแรมนี้ โดยใช้ property.id ที่แท้จริง (ไม่ใช่ tenant.id)
+        const rooms: any[] = await this.prisma.room.findMany({
+          where: { propertyId: property.id },
+          take: 10
+        });
+
+        if (rooms.length === 0) {
           // สร้างห้องตัวอย่างถ้าไม่มี
           const roomTypes = ['Standard', 'Deluxe', 'Suite', 'Presidential'];
+          const newRooms = [];
           for (let i = 1; i <= 4; i++) {
             const roomType = roomTypes[i - 1];
             const basePrice = 1000 + (i * 500);
 
-            await this.prisma.$executeRaw`
-              INSERT INTO rooms (id, propertyId, number, type, floor, price, status, description, createdAt, updatedAt)
-              VALUES (
-                UUID(),
-                ${tenant.id},
-                ${String(100 + i)},
-                ${roomType},
-                ${1},
-                ${basePrice},
-                'available',
-                ${roomType + ' room'},
-                NOW(),
-                NOW()
-              )
-            `;
+            const r = await this.prisma.room.create({
+              data: {
+                id: uuidv4(),
+                propertyId: property.id,
+                number: String(100 + i),
+                type: roomType,
+                floor: 1,
+                price: basePrice,
+                status: 'available',
+                description: `${roomType} room created by seeder`,
+              }
+            });
+            newRooms.push(r);
+            bookingCount++;
           }
-
-          // ดึงห้องที่สร้างใหม่
-          const newRooms: any[] = await this.prisma.$queryRaw`
-            SELECT id, number, type, price FROM rooms WHERE propertyId = ${tenant.id} LIMIT 10
-          `;
-
-          if (Array.isArray(newRooms) && newRooms.length > 0) {
-            rooms.push(...newRooms);
-          }
+          rooms.push(...newRooms);
         }
+
 
         // สร้าง 3-5 การจองต่อโรงแรม
         const bookingsPerHotel = Math.floor(Math.random() * 3) + 3; // 3-5 bookings
@@ -835,29 +838,27 @@ export class SeederService {
           else if (daysOffset <= 1) status = 'checked_in'; // ใน 1 วัน = checked_in
           else status = 'confirmed'; // อนาคต = confirmed
 
+          const nights = Math.max(1, Math.ceil((checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24)));
+          const totalPrice = Number(room.price) * nights;
+
           try {
-            await this.prisma.$executeRaw`
-              INSERT INTO bookings (
-                id, propertyId, roomId, guestId, guestFirstName, guestLastName,
-                guestEmail, guestPhone, checkIn, checkOut, status, notes, createdAt, updatedAt
-              )
-              VALUES (
-                UUID(),
-                ${tenant.id},
-                ${room.id},
-                ${guest.id},
-                ${guest.firstName},
-                ${guest.lastName},
-                ${guest.email || 'guest@example.com'},
-                ${guest.phone || '+66-8-0000-0000'},
-                ${checkInDate},
-                ${checkOutDate},
-                ${status},
-                'Demo booking created by seeder',
-                NOW(),
-                NOW()
-              )
-            `;
+            await this.prisma.booking.create({
+              data: {
+                id: uuidv4(),
+                property: { connect: { id: property.id } },
+                room: { connect: { id: room.id } },
+                guest: { connect: { id: guest.id } },
+                guestFirstName: guest.firstName,
+                guestLastName: guest.lastName,
+                guestEmail: guest.email || 'guest@example.com',
+                guestPhone: guest.phone || '+66-8-0000-0000',
+                checkIn: checkInDate,
+                checkOut: checkOutDate,
+                status: status,
+                totalPrice: totalPrice,
+                notes: 'Demo booking created by seeder',
+              }
+            });
             bookingCount++;
           } catch (error) {
             this.logger.warn(`    ⚠️  Could not create booking: ${error.message}`);

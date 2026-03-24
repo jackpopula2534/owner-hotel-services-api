@@ -7,8 +7,20 @@ export class PlanFeaturesService {
   constructor(private readonly prisma: PrismaService) {}
 
   create(createPlanFeatureDto: CreatePlanFeatureDto) {
+    const data: any = {
+      plan_id: createPlanFeatureDto.planId,
+      feature_id: createPlanFeatureDto.featureId,
+    };
+
+    // Clean up undefined properties
+    Object.keys(data).forEach(key => {
+      if (data[key] === undefined) {
+        delete data[key];
+      }
+    });
+
     return this.prisma.plan_features.create({
-      data: createPlanFeatureDto as any,
+      data,
       include: { plans: true, features: true },
     });
   }

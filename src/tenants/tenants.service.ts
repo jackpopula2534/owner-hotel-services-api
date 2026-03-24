@@ -7,9 +7,36 @@ import { UpdateTenantDto } from './dto/update-tenant.dto';
 export class TenantsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  create(createTenantDto: CreateTenantDto) {
+  create(createTenantDto: CreateTenantDto & { trialEndsAt?: Date }) {
+    const data: any = {
+      name: createTenantDto.name,
+      status: createTenantDto.status,
+      room_count: createTenantDto.roomCount,
+      name_en: createTenantDto.nameEn,
+      property_type: createTenantDto.propertyType,
+      location: createTenantDto.location,
+      website: createTenantDto.website,
+      description: createTenantDto.description,
+      customer_name: createTenantDto.customerName,
+      tax_id: createTenantDto.taxId,
+      email: createTenantDto.email,
+      phone: createTenantDto.phone,
+      address: createTenantDto.address,
+      district: createTenantDto.district,
+      province: createTenantDto.province,
+      postal_code: createTenantDto.postalCode,
+      trial_ends_at: createTenantDto.trialEndsAt,
+    };
+    
+    // Clean up undefined properties
+    Object.keys(data).forEach(key => {
+      if (data[key] === undefined) {
+        delete data[key];
+      }
+    });
+
     return this.prisma.tenants.create({
-      data: createTenantDto as any,
+      data,
       include: { subscriptions: { include: { plans_subscriptions_plan_idToplans: true } } },
     });
   }

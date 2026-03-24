@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { SubscriptionFeature } from '../subscription-features/entities/subscription-feature.entity';
 import { SubscriptionFeatureLogs, FeatureLogAction } from '../subscription-features/entities/subscription-feature-log.entity';
@@ -34,6 +34,7 @@ export class AdminSubscriptionFeaturesService {
     private featuresRepository: Repository<Feature>,
     @InjectRepository(Invoice)
     private invoicesRepository: Repository<Invoice>,
+    @InjectDataSource()
     private dataSource: DataSource,
   ) {}
 

@@ -8,8 +8,24 @@ export class InvoicesService {
   constructor(private readonly prisma: PrismaService) {}
 
   create(createInvoiceDto: CreateInvoiceDto) {
+    const data: any = {
+      tenant_id: createInvoiceDto.tenantId,
+      subscription_id: createInvoiceDto.subscriptionId,
+      invoice_no: createInvoiceDto.invoiceNo,
+      amount: createInvoiceDto.amount,
+      status: createInvoiceDto.status,
+      due_date: createInvoiceDto.dueDate,
+    };
+
+    // Clean up undefined properties
+    Object.keys(data).forEach(key => {
+      if (data[key] === undefined) {
+        delete data[key];
+      }
+    });
+
     return this.prisma.invoices.create({
-      data: createInvoiceDto as any,
+      data,
       include: { tenants: true, subscriptions: true, invoice_items: true, payments: true },
     });
   }
@@ -36,9 +52,25 @@ export class InvoicesService {
   }
 
   update(id: string, updateInvoiceDto: UpdateInvoiceDto) {
+    const data: any = {
+      tenant_id: updateInvoiceDto.tenantId,
+      subscription_id: updateInvoiceDto.subscriptionId,
+      invoice_no: updateInvoiceDto.invoiceNo,
+      amount: updateInvoiceDto.amount,
+      status: updateInvoiceDto.status,
+      due_date: updateInvoiceDto.dueDate,
+    };
+
+    // Clean up undefined properties
+    Object.keys(data).forEach(key => {
+      if (data[key] === undefined) {
+        delete data[key];
+      }
+    });
+
     return this.prisma.invoices.update({
       where: { id },
-      data: updateInvoiceDto,
+      data,
       include: { tenants: true, subscriptions: true, invoice_items: true, payments: true },
     });
   }

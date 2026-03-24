@@ -1,3 +1,16 @@
+/**
+ * Global exception filter — catches every unhandled exception and converts it
+ * to the project-standard error envelope defined in api-design.md:
+ *
+ *   { "success": false, "error": { "code": "...", "message": "..." } }
+ *
+ * Additional debug fields (timestamp, path, requestId) are included to aid
+ * log correlation; they are never sensitive and are safe to expose.
+ *
+ * instanceof check order matters — always most-specific before most-general:
+ *   HttpException  >  Prisma known  >  Prisma validation
+ *   >  QueryFailedError  >  EntityNotFoundError  >  TypeORMError  >  Error
+ */
 import {
   ExceptionFilter,
   Catch,
@@ -8,97 +21,208 @@ import {
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
+import {
+  QueryFailedError,
+  EntityNotFoundError,
+  TypeORMError,
+} from 'typeorm';
+
+/** Shape matching api-design.md */
+interface ErrorBody {
+  success:    false;
+  error: {
+    code:    string;
+    message: string;
+  };
+  timestamp:  string;
+  path:       string;
+  requestId?: string;
+}
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name);
 
-  catch(exception: unknown, host: ArgumentsHost) {
-    const ctx = host.switchToHttp();
-    const response = ctx.getResponse<Response>();
-    const request = ctx.getRequest<Request>();
+  catch(exception: unknown, host: ArgumentsHost): void {
+    const ctx       = host.switchToHttp();
+    const response  = ctx.getResponse<Response>();
+    const request   = ctx.getRequest<Request>();
+    const requestId = (request as any)['requestId'] as string | undefined;
 
-    let status = HttpStatus.INTERNAL_SERVER_ERROR;
+    let status  = HttpStatus.INTERNAL_SERVER_ERROR;
+    let code    = 'INTERNAL_SERVER_ERROR';
     let message = 'Internal server error';
-    let error = 'Internal Server Error';
 
+    // ─── NestJS / HTTP ────────────────────────────────────────────────────
     if (exception instanceof HttpException) {
       status = exception.getStatus();
-      const exceptionResponse = exception.getResponse();
-      message =
-        typeof exceptionResponse === 'string'
-          ? exceptionResponse
-          : (exceptionResponse as any).message || exception.message;
-      error = (exceptionResponse as any).error || 'Http Exception';
-    } 
-    // Handle Prisma Errors
-    else if (exception instanceof Prisma.PrismaClientKnownRequestError) {
-      // สำหรับผู้ใช้ใหม่ที่ยังไม่มี table/column ให้ส่ง empty data แทน error
-      if (exception.code === 'P2021' || exception.code === 'P2022') {
-        this.logger.warn(`Database schema not ready (${exception.code}): returning empty data`);
+      const body = exception.getResponse();
 
-        // ส่ง empty data ตาม path
-        const emptyResponse: any = {
-          success: true,
-          statusCode: 200,
-          timestamp: new Date().toISOString(),
-          path: request.url,
-        };
-
-        // ตรวจสอบ path เพื่อส่ง format ที่เหมาะสม
-        if (request.url.includes('/notifications')) {
-          emptyResponse.items = [];
-          emptyResponse.meta = { total: 0, page: 1, limit: 10, totalPages: 0 };
-        } else if (request.url.includes('/promotions')) {
-          emptyResponse.data = [];
-        } else {
-          // default format for list endpoints
-          emptyResponse.data = [];
-          emptyResponse.total = 0;
-          emptyResponse.page = 1;
-          emptyResponse.limit = 10;
-        }
-
-        return response.status(200).json(emptyResponse);
+      if (typeof body === 'string') {
+        message = body;
+        code    = this.statusToCode(status);
+      } else {
+        const b = body as Record<string, any>;
+        message = Array.isArray(b.message) ? b.message.join(', ') : (b.message ?? exception.message);
+        code    = b.error
+          ? String(b.error).toUpperCase().replace(/\s+/g, '_')
+          : this.statusToCode(status);
       }
 
-      status = HttpStatus.BAD_REQUEST;
+    // ─── Prisma known errors ──────────────────────────────────────────────
+    } else if (exception instanceof Prisma.PrismaClientKnownRequestError) {
+      // Schema not yet migrated — return graceful empty payload (P2021/P2022)
+      if (exception.code === 'P2021' || exception.code === 'P2022') {
+        this.logger.warn(
+          `Database schema not ready (${exception.code}): returning empty data`,
+        );
+        const emptyPayload: Record<string, unknown> = {
+          success:   true,
+          data:      [],
+          meta:      { total: 0, page: 1, limit: 10, totalPages: 0 },
+          timestamp: new Date().toISOString(),
+          path:      request.url,
+        };
+        if (request.url.includes('/notifications')) {
+          emptyPayload.items = emptyPayload.data;
+          delete emptyPayload.data;
+        }
+        response.status(200).json(emptyPayload);
+        return;
+      }
+
+      status  = this.prismaStatus(exception.code);
+      code    = `PRISMA_${exception.code}`;
       message = this.getPrismaMessage(exception);
-      error = 'Database Error';
-      this.logger.error(`Prisma Error (${exception.code}): ${exception.message}`);
+      this.logger.error(
+        `Prisma ${exception.code}: ${exception.message}`,
+        undefined,
+        requestId,
+      );
+
+    // ─── Prisma validation ────────────────────────────────────────────────
     } else if (exception instanceof Prisma.PrismaClientValidationError) {
-      status = HttpStatus.BAD_REQUEST;
+      status  = HttpStatus.BAD_REQUEST;
+      code    = 'VALIDATION_ERROR';
       message = 'ข้อมูลไม่ถูกต้องตามโครงสร้างฐานข้อมูล (Database validation error)';
-      error = 'Validation Error';
-      this.logger.error(`Prisma Validation Error: ${exception.message}`);
+      this.logger.error(`Prisma validation: ${exception.message}`, undefined, requestId);
+
+    // ─── TypeORM query failed ─────────────────────────────────────────────
+    } else if (exception instanceof QueryFailedError) {
+      status  = this.typeOrmQueryStatus(exception);
+      code    = `DB_${(exception as any).code ?? 'QUERY_FAILED'}`;
+      message = this.getTypeOrmQueryMessage(exception);
+      this.logger.error(
+        `TypeORM QueryFailedError [(${(exception as any).code}]: ${exception.message}`,
+        undefined,
+        requestId,
+      );
+
+    // ─── TypeORM entity not found ─────────────────────────────────────────
+    } else if (exception instanceof EntityNotFoundError) {
+      status  = HttpStatus.NOT_FOUND;
+      code    = 'RECORD_NOT_FOUND';
+      message = 'ไม่พบข้อมูลที่ต้องการ (Record not found)';
+      this.logger.warn(`TypeORM EntityNotFound: ${exception.message}`, requestId);
+
+    // ─── TypeORM base (connection lost, etc.) ────────────────────────────
+    } else if (exception instanceof TypeORMError) {
+      status  = HttpStatus.INTERNAL_SERVER_ERROR;
+      code    = 'DATABASE_ERROR';
+      message = 'เกิดข้อผิดพลาดในการเชื่อมต่อฐานข้อมูล (Database error)';
+      this.logger.error(
+        `TypeORMError: ${(exception as Error).stack}`,
+        undefined,
+        requestId,
+      );
+
+    // ─── Generic / unknown ────────────────────────────────────────────────
     } else if (exception instanceof Error) {
       message = exception.message;
-      this.logger.error(`Unhandled Error: ${exception.stack}`);
+      this.logger.error(
+        `Unhandled Error: ${exception.stack}`,
+        undefined,
+        requestId,
+      );
     }
 
-    const errorResponse = {
-      success: false,
-      statusCode: status,
+    const body: ErrorBody = {
+      success:   false,
+      error:     { code, message },
       timestamp: new Date().toISOString(),
-      path: request.url,
-      message: message,
-      error: error,
+      path:      request.url,
+      ...(requestId ? { requestId } : {}),
     };
 
-    response.status(status).json(errorResponse);
+    response.status(status).json(body);
   }
 
-  private getPrismaMessage(exception: Prisma.PrismaClientKnownRequestError): string {
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
+  private statusToCode(status: number): string {
+    const map: Record<number, string> = {
+      400: 'BAD_REQUEST',
+      401: 'UNAUTHORIZED',
+      403: 'FORBIDDEN',
+      404: 'NOT_FOUND',
+      409: 'CONFLICT',
+      422: 'UNPROCESSABLE_ENTITY',
+      429: 'TOO_MANY_REQUESTS',
+      500: 'INTERNAL_SERVER_ERROR',
+      503: 'SERVICE_UNAVAILABLE',
+    };
+    return map[status] ?? `HTTP_${status}`;
+  }
+
+  private prismaStatus(code: string): number {
+    const map: Record<string, number> = {
+      P2002: HttpStatus.CONFLICT,          // unique constraint
+      P2025: HttpStatus.NOT_FOUND,         // record not found
+      P2003: HttpStatus.BAD_REQUEST,       // FK constraint
+      P2014: HttpStatus.BAD_REQUEST,       // relation violation
+    };
+    return map[code] ?? HttpStatus.BAD_REQUEST;
+  }
+
+  private getPrismaMessage(
+    exception: Prisma.PrismaClientKnownRequestError,
+  ): string {
     switch (exception.code) {
-      case 'P2002':
-        const target = (exception.meta?.target as string[])?.join(', ') || 'field';
-        return `ข้อมูลนี้สะสมอยู่ในระบบแล้ว (${target} already exists)`;
+      case 'P2002': {
+        const target =
+          (exception.meta?.target as string[])?.join(', ') || 'field';
+        return `ข้อมูลนี้มีอยู่ในระบบแล้ว (${target} already exists)`;
+      }
       case 'P2025':
         return 'ไม่พบข้อมูลที่ต้องการ (Record not found)';
       case 'P2003':
         return 'ไม่สามารถดำเนินการได้เนื่องจากสัมพันธ์กับข้อมูลอื่น (Foreign key constraint failed)';
       default:
         return `เกิดข้อผิดพลาดในการจัดการฐานข้อมูล (${exception.code})`;
+    }
+  }
+
+  private typeOrmQueryStatus(exception: QueryFailedError): number {
+    const code: string = (exception as any).code ?? '';
+    const conflictCodes = ['ER_DUP_ENTRY'];
+    const notFoundCodes = ['ER_NO_REFERENCED_ROW_2'];
+    if (conflictCodes.includes(code)) return HttpStatus.CONFLICT;
+    if (notFoundCodes.includes(code)) return HttpStatus.NOT_FOUND;
+    return HttpStatus.BAD_REQUEST;
+  }
+
+  private getTypeOrmQueryMessage(exception: QueryFailedError): string {
+    const code: string = (exception as any).code ?? '';
+    switch (code) {
+      case 'ER_DUP_ENTRY':
+        return 'ข้อมูลนี้มีอยู่ในระบบแล้ว (Duplicate entry)';
+      case 'ER_NO_REFERENCED_ROW_2':
+      case 'ER_ROW_IS_REFERENCED_2':
+        return 'ไม่สามารถดำเนินการได้เนื่องจากสัมพันธ์กับข้อมูลอื่น (Foreign key constraint failed)';
+      case 'ER_DATA_TOO_LONG':
+        return 'ข้อมูลยาวเกินกว่าที่กำหนด (Data too long for column)';
+      default:
+        return `เกิดข้อผิดพลาดในการ query ฐานข้อมูล (${code || 'unknown'})`;
     }
   }
 }

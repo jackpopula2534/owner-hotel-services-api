@@ -9,8 +9,22 @@ export class PaymentsService {
   constructor(private readonly prisma: PrismaService) {}
 
   create(createPaymentDto: CreatePaymentDto) {
+    const data: any = {
+      invoice_id: createPaymentDto.invoiceId,
+      method: createPaymentDto.method,
+      slip_url: createPaymentDto.slipUrl,
+      status: createPaymentDto.status,
+    };
+
+    // Clean up undefined properties
+    Object.keys(data).forEach(key => {
+      if (data[key] === undefined) {
+        delete data[key];
+      }
+    });
+
     return this.prisma.payments.create({
-      data: createPaymentDto as any,
+      data,
       include: { invoices: true },
     });
   }
@@ -36,9 +50,23 @@ export class PaymentsService {
   }
 
   update(id: string, updatePaymentDto: UpdatePaymentDto) {
+    const data: any = {
+      invoice_id: updatePaymentDto.invoiceId,
+      method: updatePaymentDto.method,
+      slip_url: updatePaymentDto.slipUrl,
+      status: updatePaymentDto.status,
+    };
+
+    // Clean up undefined properties
+    Object.keys(data).forEach(key => {
+      if (data[key] === undefined) {
+        delete data[key];
+      }
+    });
+
     return this.prisma.payments.update({
       where: { id },
-      data: updatePaymentDto,
+      data,
       include: { invoices: true },
     });
   }

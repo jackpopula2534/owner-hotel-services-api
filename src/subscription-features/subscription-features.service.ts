@@ -7,8 +7,21 @@ export class SubscriptionFeaturesService {
   constructor(private readonly prisma: PrismaService) {}
 
   create(createSubscriptionFeatureDto: CreateSubscriptionFeatureDto) {
+    const data: any = {
+      subscription_id: createSubscriptionFeatureDto.subscriptionId,
+      feature_id: createSubscriptionFeatureDto.featureId,
+      price: createSubscriptionFeatureDto.price,
+    };
+
+    // Clean up undefined properties
+    Object.keys(data).forEach(key => {
+      if (data[key] === undefined) {
+        delete data[key];
+      }
+    });
+
     return this.prisma.subscription_features.create({
-      data: createSubscriptionFeatureDto as any,
+      data,
       include: { subscriptions: true, features: true },
     });
   }

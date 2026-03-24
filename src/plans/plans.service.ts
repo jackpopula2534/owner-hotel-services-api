@@ -7,9 +7,35 @@ import { UpdatePlanDto } from './dto/update-plan.dto';
 export class PlansService {
   constructor(private readonly prisma: PrismaService) {}
 
-  create(createPlanDto: CreatePlanDto) {
+  create(createPlanDto: CreatePlanDto & { id?: string; displayOrder?: number; isPopular?: boolean; badge?: string; highlightColor?: string; features?: string; buttonText?: string; description?: string; yearlyDiscountPercent?: number }) {
+    const data: any = {
+      id: createPlanDto.id,
+      code: createPlanDto.code,
+      name: createPlanDto.name,
+      price_monthly: createPlanDto.priceMonthly,
+      max_rooms: createPlanDto.maxRooms,
+      max_users: createPlanDto.maxUsers,
+      is_active: createPlanDto.isActive !== undefined ? (createPlanDto.isActive ? 1 : 0) : 1,
+      // Sales Page fields
+      display_order: createPlanDto.displayOrder,
+      is_popular: createPlanDto.isPopular !== undefined ? (createPlanDto.isPopular ? 1 : 0) : 0,
+      badge: createPlanDto.badge,
+      highlight_color: createPlanDto.highlightColor,
+      features: createPlanDto.features,
+      button_text: createPlanDto.buttonText,
+      description: createPlanDto.description,
+      yearly_discount_percent: createPlanDto.yearlyDiscountPercent || 0,
+    };
+
+    // Clean up undefined properties
+    Object.keys(data).forEach(key => {
+      if (data[key] === undefined) {
+        delete data[key];
+      }
+    });
+
     return this.prisma.plans.create({
-      data: createPlanDto as any,
+      data,
       include: { plan_features: { include: { features: true } } },
     });
   }
@@ -36,10 +62,35 @@ export class PlansService {
     });
   }
 
-  update(id: string, updatePlanDto: UpdatePlanDto) {
+  update(id: string, updatePlanDto: UpdatePlanDto & { displayOrder?: number; isPopular?: boolean; badge?: string; highlightColor?: string; features?: string; buttonText?: string; description?: string; yearlyDiscountPercent?: number }) {
+    const data: any = {
+      code: updatePlanDto.code,
+      name: updatePlanDto.name,
+      price_monthly: updatePlanDto.priceMonthly,
+      max_rooms: updatePlanDto.maxRooms,
+      max_users: updatePlanDto.maxUsers,
+      is_active: updatePlanDto.isActive !== undefined ? (updatePlanDto.isActive ? 1 : 0) : undefined,
+      // Sales Page fields
+      display_order: updatePlanDto.displayOrder,
+      is_popular: updatePlanDto.isPopular !== undefined ? (updatePlanDto.isPopular ? 1 : 0) : undefined,
+      badge: updatePlanDto.badge,
+      highlight_color: updatePlanDto.highlightColor,
+      features: updatePlanDto.features,
+      button_text: updatePlanDto.buttonText,
+      description: updatePlanDto.description,
+      yearly_discount_percent: updatePlanDto.yearlyDiscountPercent,
+    };
+
+    // Clean up undefined properties
+    Object.keys(data).forEach(key => {
+      if (data[key] === undefined) {
+        delete data[key];
+      }
+    });
+
     return this.prisma.plans.update({
       where: { id },
-      data: updatePlanDto,
+      data,
       include: { plan_features: { include: { features: true } } },
     });
   }

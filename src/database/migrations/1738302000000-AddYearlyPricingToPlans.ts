@@ -1,31 +1,23 @@
 import { MigrationInterface, QueryRunner, TableColumn } from 'typeorm';
 
-export class AddYearlyPricingToPlans1738302000000
-  implements MigrationInterface
-{
-  public async up(queryRunner: QueryRunner): Promise<void> {
-    // Add yearly pricing columns
-    await queryRunner.addColumn(
-      'plans',
-      new TableColumn({
-        name: 'price_yearly',
-        type: 'decimal',
-        precision: 10,
-        scale: 2,
-        isNullable: true,
-        comment: 'Yearly price (optional, can be auto-calculated)',
-      }),
-    );
+export class AddYearlyPricingToPlans1738302000000 implements MigrationInterface {
+  name = 'AddYearlyPricingToPlans1738302000000';
 
-    await queryRunner.addColumn(
-      'plans',
-      new TableColumn({
-        name: 'yearly_discount_percent',
-        type: 'int',
-        default: 0,
-        comment: 'Discount percentage for yearly subscription (0-100)',
-      }),
-    );
+  public async up(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.addColumn('plans', new TableColumn({
+      name: 'price_yearly',
+      type: 'decimal',
+      precision: 10,
+      scale: 2,
+      isNullable: true,
+      comment: 'Yearly price (optional, can be auto-calculated)',
+    }));
+    await queryRunner.addColumn('plans', new TableColumn({
+      name: 'yearly_discount_percent',
+      type: 'int',
+      default: 0,
+      comment: 'Discount percentage for yearly subscription (0-100)',
+    }));
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {

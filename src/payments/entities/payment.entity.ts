@@ -7,7 +7,6 @@ import {
   CreateDateColumn,
 } from 'typeorm';
 import { Invoice } from '../../invoices/entities/invoice.entity';
-import { Admin } from '../../admins/entities/admin.entity';
 
 export enum PaymentMethod {
   TRANSFER = 'transfer',
@@ -69,9 +68,4 @@ export class Payment {
   @JoinColumn({ name: 'invoice_id' })
   invoice: Invoice;
 
-  @ManyToOne(() => Admin)
-  @JoinColumn({ name: 'approved_by' })
-  approver: Admin;
 }
-
-

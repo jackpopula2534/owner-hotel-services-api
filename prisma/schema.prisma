@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x", "linux-arm64-openssl-3.0.x", "linux-arm64-openssl-1.1.x"]
 }
 
 datasource db {
@@ -245,7 +246,7 @@ model Channel {
 }
 
 model billing_history {
-  id                String                    @id @db.VarChar(36)
+  id String @id @default(uuid()) @db.VarChar(36)
   subscription_id   String                    
   invoice_id        String?                   
   eventType         billing_history_eventType
@@ -269,7 +270,7 @@ model billing_history {
 }
 
 model features {
-  id                    String                  @id @db.VarChar(36)
+  id String @id @default(uuid()) @db.VarChar(36)
   code                  String                  @unique(map: "IDX_c0e1f5d0ba8027c186705d752b") 
   name                  String                  
   description           String?                 @db.Text
@@ -281,7 +282,7 @@ model features {
 }
 
 model invoice_adjustments {
-  id                   String                   @id @db.VarChar(36)
+  id String @id @default(uuid()) @db.VarChar(36)
   invoice_id           String                   
   type                 invoice_adjustments_type
   amount               Decimal                  @db.Decimal(10, 2)
@@ -298,7 +299,7 @@ model invoice_adjustments {
 }
 
 model invoice_items {
-  id              String             @id @db.VarChar(36)
+  id String @id @default(uuid()) @db.VarChar(36)
   invoice_id      String             
   type            invoice_items_type
   ref_id          String?            
@@ -316,7 +317,7 @@ model invoice_items {
 }
 
 model invoices {
-  id                  String                @id @db.VarChar(36)
+  id String @id @default(uuid()) @db.VarChar(36)
   tenant_id           String                
   subscription_id     String?               
   invoice_no          String                @unique(map: "IDX_37669c562a2525929927d9d691") 
@@ -342,7 +343,7 @@ model invoices {
 }
 
 model payment_refunds {
-  id              String                 @id @db.VarChar(36)
+  id String @id @default(uuid()) @db.VarChar(36)
   payment_id      String                 
   refund_no       String                 @unique(map: "IDX_35175cde68c765c82603c2ad4e") 
   amount          Decimal                @db.Decimal(10, 2)
@@ -365,7 +366,7 @@ model payment_refunds {
 }
 
 model payments {
-  id              String            @id @db.VarChar(36)
+  id String @id @default(uuid()) @db.VarChar(36)
   payment_no      String?           @unique(map: "IDX_8aaa54db3d9827cba0999b7fb2") 
   invoice_id      String            
   amount          Decimal?          @db.Decimal(10, 2)
@@ -383,7 +384,7 @@ model payments {
 }
 
 model plan_features {
-  id         String   @id @db.VarChar(36)
+  id String @id @default(uuid()) @db.VarChar(36)
   plan_id    String   
   feature_id String   
   features   features @relation(fields: [feature_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "FK_27e866bdf4c6f2cf5854b7d0e57")
@@ -394,7 +395,7 @@ model plan_features {
 }
 
 model plans {
-  id                                                  String          @id @db.VarChar(36)
+  id String @id @default(uuid()) @db.VarChar(36)
   code                                                String          @unique(map: "IDX_95f7ef3fc4c31a3545b4d825dd") 
   name                                                String          
   price_monthly                                       Decimal         @db.Decimal(10, 2)
@@ -417,7 +418,7 @@ model plans {
 }
 
 model subscription_feature_logs {
-  id                      String                           @id @db.VarChar(36)
+  id String @id @default(uuid()) @db.VarChar(36)
   subscription_feature_id String?                          
   subscription_id         String                           
   feature_id              String                           
@@ -439,7 +440,7 @@ model subscription_feature_logs {
 }
 
 model subscription_features {
-  id                        String                      @id @db.VarChar(36)
+  id String @id @default(uuid()) @db.VarChar(36)
   subscription_id           String                      
   feature_id                String                      
   quantity                  Int?                        @default(1)
@@ -456,7 +457,7 @@ model subscription_features {
 }
 
 model subscriptions {
-  id                                          String                      @id @db.VarChar(36)
+  id String @id @default(uuid()) @db.VarChar(36)
   subscription_code                           String?                     @unique(map: "IDX_616df085ddc496ef3609383682") 
   tenant_id                                   String                      
   plan_id                                     String                      
@@ -487,7 +488,7 @@ model subscriptions {
 }
 
 model tenant_credits {
-  id               String                @id @db.VarChar(36)
+  id String @id @default(uuid()) @db.VarChar(36)
   tenant_id        String                
   type             tenant_credits_type   @default(manual)
   status           tenant_credits_status @default(available)
@@ -506,7 +507,7 @@ model tenant_credits {
 }
 
 model tenants {
-  id             String           @id @db.VarChar(36)
+  id String @id @default(uuid()) @db.VarChar(36)
   name           String           
   room_count     Int              @default(0)
   name_en        String?          
