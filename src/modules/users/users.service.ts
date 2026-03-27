@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 
@@ -7,23 +7,16 @@ export class UsersService {
   constructor(private prisma: PrismaService) {}
 
   async findAll(query: any, tenantId?: string) {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
     const page = parseInt(query.page) || 1;
     const limit = parseInt(query.limit) || 10;
     const { role, status, search } = query;
     const skip = (page - 1) * limit;
 
-    // ถ้าไม่มี tenantId (user ใหม่ยังไม่มีโรงแรม) ให้ return empty data
-    if (!tenantId) {
-      return {
-        data: [],
-        total: 0,
-        page,
-        limit,
-      };
-    }
-
-    const where: any = {};
-    if (tenantId != null) where.tenantId = tenantId;
+    const where: any = { tenantId };
     if (role) where.role = role;
     if (status) where.status = status;
     if (search) {

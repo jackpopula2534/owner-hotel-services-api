@@ -7,5 +7,3 @@ export class CreatePlanFeatureDto {
   @IsUUID()
   featureId: string;
 }
-
-

@@ -1,11 +1,4 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Body,
-  Param,
-  Delete,
-} from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Delete } from '@nestjs/common';
 import { InvoiceItemsService } from './invoice-items.service';
 import { CreateInvoiceItemDto } from './dto/create-invoice-item.dto';
 
@@ -33,5 +26,3 @@ export class InvoiceItemsController {
     return this.invoiceItemsService.remove(id);
   }
 }
-
-

@@ -36,7 +36,7 @@ async function bootstrap() {
          WHERE TABLE_SCHEMA = ?
          AND TABLE_TYPE = 'BASE TABLE'
          AND TABLE_NAME NOT IN ('typeorm_metadata', 'engine_cost', 'server_cost')`,
-        [database]
+        [database],
       );
 
       // Whitelist of safe table names to drop (security: prevent SQL injection via table name)
@@ -138,4 +138,3 @@ async function bootstrap() {
 }
 
 bootstrap();
-

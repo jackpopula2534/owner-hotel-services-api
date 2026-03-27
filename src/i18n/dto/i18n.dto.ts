@@ -25,7 +25,7 @@ export class TranslateDto {
 export class TranslateBulkDto {
   @ApiProperty({
     description: 'Array of translation keys',
-    type: [String]
+    type: [String],
   })
   @IsString({ each: true })
   keys: string[];

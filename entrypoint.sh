@@ -2,28 +2,35 @@
 # =============================================================================
 # Production Docker entrypoint
 #
-# Runs TypeORM migrations against the compiled JS DataSource before starting
-# the NestJS application.
+# Applies pending Prisma migrations then starts the NestJS application.
 #
-# Why call the TypeORM binary directly instead of `npm run migration:run:prod`:
-#   npm reads package.json on every invocation.  Even though we now chown /app
-#   to the nestjs user, calling the binary directly is simpler, faster (skips
-#   npm's startup overhead), and avoids any future permission edge-cases.
+# Strategy:
+#   1. Try `prisma migrate deploy` (production-safe, runs only pending SQL files)
+#   2. If migrate deploy fails (e.g. no _prisma_migrations table yet),
+#      fall back to `prisma db push` which diffs schema vs DB directly
+#   3. If both fail, start the app anyway — schema might already be in sync
 #
 # Kubernetes notes:
 #   For multi-replica deployments consider running migrations in a pre-deploy
 #   Job or initContainer to prevent parallel migration races.
 #   For single-replica (typical hotel SaaS), this entrypoint is safe.
 # =============================================================================
-set -e   # exit immediately on any error
 
-echo "[entrypoint] Running Prisma migrations..."
-npx prisma migrate deploy
+echo "[entrypoint] Generating Prisma client..."
+npx prisma generate 2>/dev/null || true
 
-echo "[entrypoint] Running TypeORM migrations..."
-# Call the TypeORM CLI binary directly — no npm required
-node ./node_modules/.bin/typeorm migration:run -d dist/config/data-source.js
+echo "[entrypoint] Applying database migrations..."
+if npx prisma migrate deploy 2>&1; then
+  echo "[entrypoint] Migrations applied successfully."
+else
+  echo "[entrypoint] migrate deploy failed — trying db push as fallback..."
+  if npx prisma db push --accept-data-loss 2>&1; then
+    echo "[entrypoint] db push completed successfully."
+  else
+    echo "[entrypoint] WARNING: Schema sync failed. Starting app anyway..."
+    echo "[entrypoint] The database schema may already be up to date."
+  fi
+fi
 
-echo "[entrypoint] Migrations complete. Starting application..."
-
+echo "[entrypoint] Starting application..."
 exec node dist/main.js

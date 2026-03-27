@@ -1,11 +1,4 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Body,
-  Param,
-  Delete,
-} from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Delete } from '@nestjs/common';
 import { SubscriptionFeaturesService } from './subscription-features.service';
 import { CreateSubscriptionFeatureDto } from './dto/create-subscription-feature.dto';
 
@@ -33,5 +26,3 @@ export class SubscriptionFeaturesController {
     return this.subscriptionFeaturesService.remove(id);
   }
 }
-
-

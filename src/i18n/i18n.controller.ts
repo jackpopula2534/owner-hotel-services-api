@@ -1,20 +1,5 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Body,
-  Query,
-  Param,
-  HttpStatus,
-  HttpCode,
-} from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiQuery,
-  ApiParam,
-} from '@nestjs/swagger';
+import { Controller, Get, Post, Body, Query, Param, HttpStatus, HttpCode } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiParam } from '@nestjs/swagger';
 import { I18nService } from './i18n.service';
 import {
   SupportedLanguage,
@@ -47,9 +32,7 @@ export class I18nController {
   @ApiOperation({ summary: 'Get available translation namespaces' })
   @ApiQuery({ name: 'language', enum: SupportedLanguage, required: false })
   @ApiResponse({ status: 200, type: [String] })
-  getNamespaces(
-    @Query('language') language: SupportedLanguage = SupportedLanguage.TH,
-  ): string[] {
+  getNamespaces(@Query('language') language: SupportedLanguage = SupportedLanguage.TH): string[] {
     return this.i18nService.getNamespaces(language);
   }
 
@@ -60,9 +43,7 @@ export class I18nController {
   @ApiOperation({ summary: 'Get all translations for a language' })
   @ApiParam({ name: 'language', enum: SupportedLanguage })
   @ApiResponse({ status: 200, description: 'Returns all translations' })
-  getAllTranslations(
-    @Param('language') language: SupportedLanguage,
-  ): Record<string, any> {
+  getAllTranslations(@Param('language') language: SupportedLanguage): Record<string, any> {
     const translations = this.i18nService.getAllTranslations(language);
     return translations || {};
   }
@@ -115,7 +96,10 @@ export class I18nController {
    */
   @Get('t/:key')
   @ApiOperation({ summary: 'Get translation by key' })
-  @ApiParam({ name: 'key', description: 'Translation key (use dot notation, e.g., common.welcome)' })
+  @ApiParam({
+    name: 'key',
+    description: 'Translation key (use dot notation, e.g., common.welcome)',
+  })
   @ApiQuery({ name: 'lang', enum: SupportedLanguage, required: false })
   @ApiResponse({ status: 200, type: TranslationResponseDto })
   getTranslation(

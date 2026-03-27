@@ -10,5 +10,3 @@ import { AdminsController } from './admins.controller';
   exports: [AdminsService],
 })
 export class AdminsModule {}
-
-

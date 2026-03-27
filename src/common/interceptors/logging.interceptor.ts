@@ -1,10 +1,4 @@
-import {
-  CallHandler,
-  ExecutionContext,
-  Injectable,
-  Logger,
-  NestInterceptor,
-} from '@nestjs/common';
+import { CallHandler, ExecutionContext, Injectable, Logger, NestInterceptor } from '@nestjs/common';
 import { randomUUID } from 'crypto'; // Node.js built-in — no extra dependency
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
@@ -16,13 +10,12 @@ export class LoggingInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     const request = context.switchToHttp().getRequest();
     const { method, url, ip } = request;
-    const userId    = request.user?.id ?? request.user?.userId ?? null;
-    const start     = Date.now();
+    const userId = request.user?.id ?? request.user?.userId ?? null;
+    const start = Date.now();
 
     // Honour an upstream correlation ID (API gateway, load balancer) or generate one.
     // Storing it on the request object lets downstream services/logs read it too.
-    const requestId: string =
-      (request.headers['x-request-id'] as string) || randomUUID();
+    const requestId: string = (request.headers['x-request-id'] as string) || randomUUID();
     request['requestId'] = requestId;
 
     return next.handle().pipe(
@@ -31,7 +24,7 @@ export class LoggingInterceptor implements NestInterceptor {
           const { statusCode } = context.switchToHttp().getResponse();
           this.logger.log(
             JSON.stringify({
-              type:       'request',
+              type: 'request',
               method,
               url,
               statusCode,
@@ -57,7 +50,7 @@ export class LoggingInterceptor implements NestInterceptor {
             err?.status ?? err?.statusCode ?? err?.response?.statusCode ?? 500;
           this.logger.error(
             JSON.stringify({
-              type:       'request',
+              type: 'request',
               method,
               url,
               statusCode,

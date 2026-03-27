@@ -9,13 +9,7 @@ import {
   UseGuards,
   ParseUUIDPipe,
 } from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiBearerAuth,
-  ApiParam,
-} from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -56,9 +50,7 @@ export class AdminHotelsController {
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - requires platform_admin role' })
-  async findAll(
-    @Query() query: AdminHotelsQueryDto,
-  ): Promise<AdminHotelsListResponseDto> {
+  async findAll(@Query() query: AdminHotelsQueryDto): Promise<AdminHotelsListResponseDto> {
     return this.adminHotelsService.findAll(query);
   }
 
@@ -101,9 +93,7 @@ export class AdminHotelsController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - requires platform_admin role' })
   @ApiResponse({ status: 404, description: 'Hotel not found' })
-  async findOne(
-    @Param('id', ParseUUIDPipe) id: string,
-  ): Promise<AdminHotelDetailDto> {
+  async findOne(@Param('id', ParseUUIDPipe) id: string): Promise<AdminHotelDetailDto> {
     return this.adminHotelsService.findOne(id);
   }
 

@@ -7,5 +7,3 @@ export class DowngradePlanDto {
   @IsString()
   newPlanId: string;
 }
-
-

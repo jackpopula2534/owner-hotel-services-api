@@ -4,6 +4,8 @@ import { ConfigService } from '@nestjs/config';
 import { UnauthorizedException, ConflictException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { EmailEventsService } from '../../email/email-events.service';
+import { OnboardingService } from '../../onboarding/onboarding.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
@@ -37,6 +39,9 @@ describe('AuthService', () => {
       updateMany: jest.fn(),
       delete: jest.fn(),
     },
+    userTenant: {
+      findFirst: jest.fn().mockResolvedValue(null),
+    },
   };
 
   const mockJwtService = {
@@ -49,6 +54,20 @@ describe('AuthService', () => {
       if (key === 'JWT_EXPIRES_IN') return '15m';
       return null;
     }),
+  };
+
+  const mockEmailEventsService = {
+    sendWelcomeEmail: jest.fn(),
+    sendPasswordResetEmail: jest.fn(),
+    onUserRegistered: jest.fn().mockResolvedValue(undefined),
+    emit: jest.fn(),
+  };
+
+  const mockOnboardingService = {
+    registerHotel: jest.fn(),
+    getTrialStatus: jest.fn(),
+    getProgress: jest.fn(),
+    updateStep: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -66,6 +85,14 @@ describe('AuthService', () => {
         {
           provide: ConfigService,
           useValue: mockConfigService,
+        },
+        {
+          provide: EmailEventsService,
+          useValue: mockEmailEventsService,
+        },
+        {
+          provide: OnboardingService,
+          useValue: mockOnboardingService,
         },
       ],
     }).compile();
@@ -125,9 +152,7 @@ describe('AuthService', () => {
         email: registerDto.email,
       });
 
-      await expect(service.register(registerDto)).rejects.toThrow(
-        ConflictException,
-      );
+      await expect(service.register(registerDto)).rejects.toThrow(ConflictException);
     });
   });
 
@@ -170,9 +195,7 @@ describe('AuthService', () => {
     it('should throw UnauthorizedException if admin not found', async () => {
       mockPrismaService.admin.findUnique.mockResolvedValue(null);
 
-      await expect(service.loginAdmin(loginDto)).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(service.loginAdmin(loginDto)).rejects.toThrow(UnauthorizedException);
     });
 
     it('should throw UnauthorizedException if admin is inactive', async () => {
@@ -184,9 +207,7 @@ describe('AuthService', () => {
         status: 'suspended',
       });
 
-      await expect(service.loginAdmin(loginDto)).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(service.loginAdmin(loginDto)).rejects.toThrow(UnauthorizedException);
     });
 
     it('should throw UnauthorizedException if password is invalid', async () => {
@@ -199,9 +220,7 @@ describe('AuthService', () => {
       });
       (bcrypt.compare as jest.Mock).mockResolvedValue(false);
 
-      await expect(service.loginAdmin(loginDto)).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(service.loginAdmin(loginDto)).rejects.toThrow(UnauthorizedException);
     });
   });
 
@@ -246,9 +265,7 @@ describe('AuthService', () => {
     it('should throw UnauthorizedException if user not found', async () => {
       mockPrismaService.user.findUnique.mockResolvedValue(null);
 
-      await expect(service.login(loginDto)).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(service.login(loginDto)).rejects.toThrow(UnauthorizedException);
     });
 
     it('should throw UnauthorizedException if user is inactive', async () => {
@@ -260,9 +277,7 @@ describe('AuthService', () => {
         status: 'suspended',
       });
 
-      await expect(service.login(loginDto)).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(service.login(loginDto)).rejects.toThrow(UnauthorizedException);
     });
 
     it('should throw UnauthorizedException if password is invalid', async () => {
@@ -277,9 +292,7 @@ describe('AuthService', () => {
       mockPrismaService.user.findUnique.mockResolvedValue(mockUser);
       (bcrypt.compare as jest.Mock).mockResolvedValue(false);
 
-      await expect(service.login(loginDto)).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(service.login(loginDto)).rejects.toThrow(UnauthorizedException);
     });
 
     it('should block platform_admin from login via /auth/login', async () => {
@@ -291,9 +304,7 @@ describe('AuthService', () => {
         status: 'active',
       });
 
-      await expect(service.login(loginDto)).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(service.login(loginDto)).rejects.toThrow(UnauthorizedException);
     });
 
     it('should block super_admin from login via /auth/login', async () => {
@@ -305,9 +316,7 @@ describe('AuthService', () => {
         status: 'active',
       });
 
-      await expect(service.login(loginDto)).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(service.login(loginDto)).rejects.toThrow(UnauthorizedException);
     });
 
     it('should block admin from login via /auth/login', async () => {
@@ -319,9 +328,7 @@ describe('AuthService', () => {
         status: 'active',
       });
 
-      await expect(service.login(loginDto)).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(service.login(loginDto)).rejects.toThrow(UnauthorizedException);
     });
   });
 
@@ -346,9 +353,7 @@ describe('AuthService', () => {
         },
       };
 
-      mockPrismaService.refreshToken.findUnique.mockResolvedValue(
-        mockTokenRecord,
-      );
+      mockPrismaService.refreshToken.findUnique.mockResolvedValue(mockTokenRecord);
       mockJwtService.sign.mockReturnValue('new-access-token');
       mockPrismaService.refreshToken.create.mockResolvedValue({
         id: '2',
@@ -369,9 +374,7 @@ describe('AuthService', () => {
     it('should throw UnauthorizedException if token not found', async () => {
       mockPrismaService.refreshToken.findUnique.mockResolvedValue(null);
 
-      await expect(service.refreshToken(refreshTokenDto)).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(service.refreshToken(refreshTokenDto)).rejects.toThrow(UnauthorizedException);
     });
 
     it('should throw UnauthorizedException if token is expired', async () => {
@@ -384,14 +387,10 @@ describe('AuthService', () => {
         revokedAt: null,
       };
 
-      mockPrismaService.refreshToken.findUnique.mockResolvedValue(
-        mockTokenRecord,
-      );
+      mockPrismaService.refreshToken.findUnique.mockResolvedValue(mockTokenRecord);
       mockPrismaService.refreshToken.delete.mockResolvedValue(mockTokenRecord);
 
-      await expect(service.refreshToken(refreshTokenDto)).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(service.refreshToken(refreshTokenDto)).rejects.toThrow(UnauthorizedException);
     });
 
     it('should throw UnauthorizedException if token is revoked', async () => {
@@ -404,13 +403,9 @@ describe('AuthService', () => {
         revokedAt: new Date(),
       };
 
-      mockPrismaService.refreshToken.findUnique.mockResolvedValue(
-        mockTokenRecord,
-      );
+      mockPrismaService.refreshToken.findUnique.mockResolvedValue(mockTokenRecord);
 
-      await expect(service.refreshToken(refreshTokenDto)).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(service.refreshToken(refreshTokenDto)).rejects.toThrow(UnauthorizedException);
     });
   });
 
@@ -426,10 +421,7 @@ describe('AuthService', () => {
       expect(mockPrismaService.refreshToken.updateMany).toHaveBeenCalledWith({
         where: {
           token: refreshToken,
-          OR: [
-            { userId },
-            { adminId: userId },
-          ],
+          OR: [{ userId }, { adminId: userId }],
         },
         data: {
           revokedAt: expect.any(Date),
@@ -446,10 +438,7 @@ describe('AuthService', () => {
 
       expect(mockPrismaService.refreshToken.updateMany).toHaveBeenCalledWith({
         where: {
-          OR: [
-            { userId },
-            { adminId: userId },
-          ],
+          OR: [{ userId }, { adminId: userId }],
           revokedAt: null,
         },
         data: {

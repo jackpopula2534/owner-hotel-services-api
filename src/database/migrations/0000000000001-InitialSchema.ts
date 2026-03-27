@@ -107,8 +107,12 @@ export class InitialSchema0000000000001 implements MigrationInterface {
         PRIMARY KEY (\`id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
-    await queryRunner.query(`ALTER TABLE \`plan_features\` ADD CONSTRAINT \`FK_plan_features_plan\` FOREIGN KEY (\`plan_id\`) REFERENCES \`plans\`(\`id\`) ON DELETE NO ACTION ON UPDATE NO ACTION`);
-    await queryRunner.query(`ALTER TABLE \`plan_features\` ADD CONSTRAINT \`FK_plan_features_feature\` FOREIGN KEY (\`feature_id\`) REFERENCES \`features\`(\`id\`) ON DELETE NO ACTION ON UPDATE NO ACTION`);
+    await queryRunner.query(
+      `ALTER TABLE \`plan_features\` ADD CONSTRAINT \`FK_plan_features_plan\` FOREIGN KEY (\`plan_id\`) REFERENCES \`plans\`(\`id\`) ON DELETE NO ACTION ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE \`plan_features\` ADD CONSTRAINT \`FK_plan_features_feature\` FOREIGN KEY (\`feature_id\`) REFERENCES \`features\`(\`id\`) ON DELETE NO ACTION ON UPDATE NO ACTION`,
+    );
 
     // ── 6. subscriptions (FK: tenants, plans) ────────────────────────────
     await queryRunner.query(`
@@ -135,9 +139,15 @@ export class InitialSchema0000000000001 implements MigrationInterface {
         PRIMARY KEY (\`id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
-    await queryRunner.query(`ALTER TABLE \`subscriptions\` ADD CONSTRAINT \`FK_subscriptions_tenant\` FOREIGN KEY (\`tenant_id\`) REFERENCES \`tenants\`(\`id\`) ON DELETE NO ACTION ON UPDATE NO ACTION`);
-    await queryRunner.query(`ALTER TABLE \`subscriptions\` ADD CONSTRAINT \`FK_subscriptions_plan\` FOREIGN KEY (\`plan_id\`) REFERENCES \`plans\`(\`id\`) ON DELETE NO ACTION ON UPDATE NO ACTION`);
-    await queryRunner.query(`ALTER TABLE \`subscriptions\` ADD CONSTRAINT \`FK_subscriptions_previous_plan\` FOREIGN KEY (\`previous_plan_id\`) REFERENCES \`plans\`(\`id\`) ON DELETE NO ACTION ON UPDATE NO ACTION`);
+    await queryRunner.query(
+      `ALTER TABLE \`subscriptions\` ADD CONSTRAINT \`FK_subscriptions_tenant\` FOREIGN KEY (\`tenant_id\`) REFERENCES \`tenants\`(\`id\`) ON DELETE NO ACTION ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE \`subscriptions\` ADD CONSTRAINT \`FK_subscriptions_plan\` FOREIGN KEY (\`plan_id\`) REFERENCES \`plans\`(\`id\`) ON DELETE NO ACTION ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE \`subscriptions\` ADD CONSTRAINT \`FK_subscriptions_previous_plan\` FOREIGN KEY (\`previous_plan_id\`) REFERENCES \`plans\`(\`id\`) ON DELETE NO ACTION ON UPDATE NO ACTION`,
+    );
 
     // ── 7. invoices (FK: tenants, subscriptions) ──────────────────────────
     await queryRunner.query(`
@@ -160,8 +170,12 @@ export class InitialSchema0000000000001 implements MigrationInterface {
         PRIMARY KEY (\`id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
-    await queryRunner.query(`ALTER TABLE \`invoices\` ADD CONSTRAINT \`FK_invoices_tenant\` FOREIGN KEY (\`tenant_id\`) REFERENCES \`tenants\`(\`id\`) ON DELETE NO ACTION ON UPDATE NO ACTION`);
-    await queryRunner.query(`ALTER TABLE \`invoices\` ADD CONSTRAINT \`FK_invoices_subscription\` FOREIGN KEY (\`subscription_id\`) REFERENCES \`subscriptions\`(\`id\`) ON DELETE NO ACTION ON UPDATE NO ACTION`);
+    await queryRunner.query(
+      `ALTER TABLE \`invoices\` ADD CONSTRAINT \`FK_invoices_tenant\` FOREIGN KEY (\`tenant_id\`) REFERENCES \`tenants\`(\`id\`) ON DELETE NO ACTION ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE \`invoices\` ADD CONSTRAINT \`FK_invoices_subscription\` FOREIGN KEY (\`subscription_id\`) REFERENCES \`subscriptions\`(\`id\`) ON DELETE NO ACTION ON UPDATE NO ACTION`,
+    );
 
     // ── 8. invoice_adjustments (FK: invoices) ─────────────────────────────
     await queryRunner.query(`
@@ -180,7 +194,9 @@ export class InitialSchema0000000000001 implements MigrationInterface {
         PRIMARY KEY (\`id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
-    await queryRunner.query(`ALTER TABLE \`invoice_adjustments\` ADD CONSTRAINT \`FK_invoice_adjustments_invoice\` FOREIGN KEY (\`invoice_id\`) REFERENCES \`invoices\`(\`id\`) ON DELETE CASCADE ON UPDATE NO ACTION`);
+    await queryRunner.query(
+      `ALTER TABLE \`invoice_adjustments\` ADD CONSTRAINT \`FK_invoice_adjustments_invoice\` FOREIGN KEY (\`invoice_id\`) REFERENCES \`invoices\`(\`id\`) ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
 
     // ── 9. invoice_items (FK: invoices) ───────────────────────────────────
     await queryRunner.query(`
@@ -200,7 +216,9 @@ export class InitialSchema0000000000001 implements MigrationInterface {
         PRIMARY KEY (\`id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
-    await queryRunner.query(`ALTER TABLE \`invoice_items\` ADD CONSTRAINT \`FK_invoice_items_invoice\` FOREIGN KEY (\`invoice_id\`) REFERENCES \`invoices\`(\`id\`) ON DELETE NO ACTION ON UPDATE NO ACTION`);
+    await queryRunner.query(
+      `ALTER TABLE \`invoice_items\` ADD CONSTRAINT \`FK_invoice_items_invoice\` FOREIGN KEY (\`invoice_id\`) REFERENCES \`invoices\`(\`id\`) ON DELETE NO ACTION ON UPDATE NO ACTION`,
+    );
 
     // ── 10. payments (FK: invoices, admins) ───────────────────────────────
     await queryRunner.query(`
@@ -220,8 +238,12 @@ export class InitialSchema0000000000001 implements MigrationInterface {
         PRIMARY KEY (\`id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
-    await queryRunner.query(`ALTER TABLE \`payments\` ADD CONSTRAINT \`FK_payments_invoice\` FOREIGN KEY (\`invoice_id\`) REFERENCES \`invoices\`(\`id\`) ON DELETE NO ACTION ON UPDATE NO ACTION`);
-    await queryRunner.query(`ALTER TABLE \`payments\` ADD CONSTRAINT \`FK_payments_admin\` FOREIGN KEY (\`approved_by\`) REFERENCES \`admins\`(\`id\`) ON DELETE NO ACTION ON UPDATE NO ACTION`);
+    await queryRunner.query(
+      `ALTER TABLE \`payments\` ADD CONSTRAINT \`FK_payments_invoice\` FOREIGN KEY (\`invoice_id\`) REFERENCES \`invoices\`(\`id\`) ON DELETE NO ACTION ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE \`payments\` ADD CONSTRAINT \`FK_payments_admin\` FOREIGN KEY (\`approved_by\`) REFERENCES \`admins\`(\`id\`) ON DELETE NO ACTION ON UPDATE NO ACTION`,
+    );
 
     // ── 11. payment_refunds (FK: payments) ────────────────────────────────
     await queryRunner.query(`
@@ -247,7 +269,9 @@ export class InitialSchema0000000000001 implements MigrationInterface {
         PRIMARY KEY (\`id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
-    await queryRunner.query(`ALTER TABLE \`payment_refunds\` ADD CONSTRAINT \`FK_payment_refunds_payment\` FOREIGN KEY (\`payment_id\`) REFERENCES \`payments\`(\`id\`) ON DELETE CASCADE ON UPDATE NO ACTION`);
+    await queryRunner.query(
+      `ALTER TABLE \`payment_refunds\` ADD CONSTRAINT \`FK_payment_refunds_payment\` FOREIGN KEY (\`payment_id\`) REFERENCES \`payments\`(\`id\`) ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
 
     // ── 12. subscription_features (FK: subscriptions, features) ──────────
     await queryRunner.query(`
@@ -263,8 +287,12 @@ export class InitialSchema0000000000001 implements MigrationInterface {
         PRIMARY KEY (\`id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
-    await queryRunner.query(`ALTER TABLE \`subscription_features\` ADD CONSTRAINT \`FK_subscription_features_subscription\` FOREIGN KEY (\`subscription_id\`) REFERENCES \`subscriptions\`(\`id\`) ON DELETE NO ACTION ON UPDATE NO ACTION`);
-    await queryRunner.query(`ALTER TABLE \`subscription_features\` ADD CONSTRAINT \`FK_subscription_features_feature\` FOREIGN KEY (\`feature_id\`) REFERENCES \`features\`(\`id\`) ON DELETE NO ACTION ON UPDATE NO ACTION`);
+    await queryRunner.query(
+      `ALTER TABLE \`subscription_features\` ADD CONSTRAINT \`FK_subscription_features_subscription\` FOREIGN KEY (\`subscription_id\`) REFERENCES \`subscriptions\`(\`id\`) ON DELETE NO ACTION ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE \`subscription_features\` ADD CONSTRAINT \`FK_subscription_features_feature\` FOREIGN KEY (\`feature_id\`) REFERENCES \`features\`(\`id\`) ON DELETE NO ACTION ON UPDATE NO ACTION`,
+    );
 
     // ── 13. subscription_feature_logs (FK: subscription_features) ────────
     await queryRunner.query(`
@@ -288,7 +316,9 @@ export class InitialSchema0000000000001 implements MigrationInterface {
         PRIMARY KEY (\`id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
-    await queryRunner.query(`ALTER TABLE \`subscription_feature_logs\` ADD CONSTRAINT \`FK_sub_feature_logs_sub_feature\` FOREIGN KEY (\`subscription_feature_id\`) REFERENCES \`subscription_features\`(\`id\`) ON DELETE SET NULL ON UPDATE NO ACTION`);
+    await queryRunner.query(
+      `ALTER TABLE \`subscription_feature_logs\` ADD CONSTRAINT \`FK_sub_feature_logs_sub_feature\` FOREIGN KEY (\`subscription_feature_id\`) REFERENCES \`subscription_features\`(\`id\`) ON DELETE SET NULL ON UPDATE NO ACTION`,
+    );
 
     // ── 14. billing_history (FK: subscriptions, invoices) ─────────────────
     await queryRunner.query(`
@@ -312,8 +342,12 @@ export class InitialSchema0000000000001 implements MigrationInterface {
         PRIMARY KEY (\`id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
-    await queryRunner.query(`ALTER TABLE \`billing_history\` ADD CONSTRAINT \`FK_billing_history_subscription\` FOREIGN KEY (\`subscription_id\`) REFERENCES \`subscriptions\`(\`id\`) ON DELETE CASCADE ON UPDATE NO ACTION`);
-    await queryRunner.query(`ALTER TABLE \`billing_history\` ADD CONSTRAINT \`FK_billing_history_invoice\` FOREIGN KEY (\`invoice_id\`) REFERENCES \`invoices\`(\`id\`) ON DELETE SET NULL ON UPDATE NO ACTION`);
+    await queryRunner.query(
+      `ALTER TABLE \`billing_history\` ADD CONSTRAINT \`FK_billing_history_subscription\` FOREIGN KEY (\`subscription_id\`) REFERENCES \`subscriptions\`(\`id\`) ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE \`billing_history\` ADD CONSTRAINT \`FK_billing_history_invoice\` FOREIGN KEY (\`invoice_id\`) REFERENCES \`invoices\`(\`id\`) ON DELETE SET NULL ON UPDATE NO ACTION`,
+    );
 
     // ── 15. tenant_credits (FK: tenants) ──────────────────────────────────
     await queryRunner.query(`
@@ -334,49 +368,81 @@ export class InitialSchema0000000000001 implements MigrationInterface {
         PRIMARY KEY (\`id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
-    await queryRunner.query(`ALTER TABLE \`tenant_credits\` ADD CONSTRAINT \`FK_tenant_credits_tenant\` FOREIGN KEY (\`tenant_id\`) REFERENCES \`tenants\`(\`id\`) ON DELETE CASCADE ON UPDATE NO ACTION`);
+    await queryRunner.query(
+      `ALTER TABLE \`tenant_credits\` ADD CONSTRAINT \`FK_tenant_credits_tenant\` FOREIGN KEY (\`tenant_id\`) REFERENCES \`tenants\`(\`id\`) ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
     // Drop in reverse FK dependency order (children before parents)
-    await queryRunner.query(`ALTER TABLE \`tenant_credits\` DROP FOREIGN KEY \`FK_tenant_credits_tenant\``);
+    await queryRunner.query(
+      `ALTER TABLE \`tenant_credits\` DROP FOREIGN KEY \`FK_tenant_credits_tenant\``,
+    );
     await queryRunner.query(`DROP TABLE IF EXISTS \`tenant_credits\``);
 
-    await queryRunner.query(`ALTER TABLE \`billing_history\` DROP FOREIGN KEY \`FK_billing_history_invoice\``);
-    await queryRunner.query(`ALTER TABLE \`billing_history\` DROP FOREIGN KEY \`FK_billing_history_subscription\``);
+    await queryRunner.query(
+      `ALTER TABLE \`billing_history\` DROP FOREIGN KEY \`FK_billing_history_invoice\``,
+    );
+    await queryRunner.query(
+      `ALTER TABLE \`billing_history\` DROP FOREIGN KEY \`FK_billing_history_subscription\``,
+    );
     await queryRunner.query(`DROP TABLE IF EXISTS \`billing_history\``);
 
-    await queryRunner.query(`ALTER TABLE \`subscription_feature_logs\` DROP FOREIGN KEY \`FK_sub_feature_logs_sub_feature\``);
+    await queryRunner.query(
+      `ALTER TABLE \`subscription_feature_logs\` DROP FOREIGN KEY \`FK_sub_feature_logs_sub_feature\``,
+    );
     await queryRunner.query(`DROP TABLE IF EXISTS \`subscription_feature_logs\``);
 
-    await queryRunner.query(`ALTER TABLE \`subscription_features\` DROP FOREIGN KEY \`FK_subscription_features_feature\``);
-    await queryRunner.query(`ALTER TABLE \`subscription_features\` DROP FOREIGN KEY \`FK_subscription_features_subscription\``);
+    await queryRunner.query(
+      `ALTER TABLE \`subscription_features\` DROP FOREIGN KEY \`FK_subscription_features_feature\``,
+    );
+    await queryRunner.query(
+      `ALTER TABLE \`subscription_features\` DROP FOREIGN KEY \`FK_subscription_features_subscription\``,
+    );
     await queryRunner.query(`DROP TABLE IF EXISTS \`subscription_features\``);
 
-    await queryRunner.query(`ALTER TABLE \`payment_refunds\` DROP FOREIGN KEY \`FK_payment_refunds_payment\``);
+    await queryRunner.query(
+      `ALTER TABLE \`payment_refunds\` DROP FOREIGN KEY \`FK_payment_refunds_payment\``,
+    );
     await queryRunner.query(`DROP TABLE IF EXISTS \`payment_refunds\``);
 
     await queryRunner.query(`ALTER TABLE \`payments\` DROP FOREIGN KEY \`FK_payments_admin\``);
     await queryRunner.query(`ALTER TABLE \`payments\` DROP FOREIGN KEY \`FK_payments_invoice\``);
     await queryRunner.query(`DROP TABLE IF EXISTS \`payments\``);
 
-    await queryRunner.query(`ALTER TABLE \`invoice_items\` DROP FOREIGN KEY \`FK_invoice_items_invoice\``);
+    await queryRunner.query(
+      `ALTER TABLE \`invoice_items\` DROP FOREIGN KEY \`FK_invoice_items_invoice\``,
+    );
     await queryRunner.query(`DROP TABLE IF EXISTS \`invoice_items\``);
 
-    await queryRunner.query(`ALTER TABLE \`invoice_adjustments\` DROP FOREIGN KEY \`FK_invoice_adjustments_invoice\``);
+    await queryRunner.query(
+      `ALTER TABLE \`invoice_adjustments\` DROP FOREIGN KEY \`FK_invoice_adjustments_invoice\``,
+    );
     await queryRunner.query(`DROP TABLE IF EXISTS \`invoice_adjustments\``);
 
-    await queryRunner.query(`ALTER TABLE \`invoices\` DROP FOREIGN KEY \`FK_invoices_subscription\``);
+    await queryRunner.query(
+      `ALTER TABLE \`invoices\` DROP FOREIGN KEY \`FK_invoices_subscription\``,
+    );
     await queryRunner.query(`ALTER TABLE \`invoices\` DROP FOREIGN KEY \`FK_invoices_tenant\``);
     await queryRunner.query(`DROP TABLE IF EXISTS \`invoices\``);
 
-    await queryRunner.query(`ALTER TABLE \`subscriptions\` DROP FOREIGN KEY \`FK_subscriptions_previous_plan\``);
-    await queryRunner.query(`ALTER TABLE \`subscriptions\` DROP FOREIGN KEY \`FK_subscriptions_plan\``);
-    await queryRunner.query(`ALTER TABLE \`subscriptions\` DROP FOREIGN KEY \`FK_subscriptions_tenant\``);
+    await queryRunner.query(
+      `ALTER TABLE \`subscriptions\` DROP FOREIGN KEY \`FK_subscriptions_previous_plan\``,
+    );
+    await queryRunner.query(
+      `ALTER TABLE \`subscriptions\` DROP FOREIGN KEY \`FK_subscriptions_plan\``,
+    );
+    await queryRunner.query(
+      `ALTER TABLE \`subscriptions\` DROP FOREIGN KEY \`FK_subscriptions_tenant\``,
+    );
     await queryRunner.query(`DROP TABLE IF EXISTS \`subscriptions\``);
 
-    await queryRunner.query(`ALTER TABLE \`plan_features\` DROP FOREIGN KEY \`FK_plan_features_feature\``);
-    await queryRunner.query(`ALTER TABLE \`plan_features\` DROP FOREIGN KEY \`FK_plan_features_plan\``);
+    await queryRunner.query(
+      `ALTER TABLE \`plan_features\` DROP FOREIGN KEY \`FK_plan_features_feature\``,
+    );
+    await queryRunner.query(
+      `ALTER TABLE \`plan_features\` DROP FOREIGN KEY \`FK_plan_features_plan\``,
+    );
     await queryRunner.query(`DROP TABLE IF EXISTS \`plan_features\``);
 
     await queryRunner.query(`DROP TABLE IF EXISTS \`tenants\``);

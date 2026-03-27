@@ -35,13 +35,33 @@ describe('OnboardingService', () => {
     findByCode: jest.fn(),
   };
 
+  const mockPrismaServiceForOnboarding = {
+    onboardingStep: {
+      findMany: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+    },
+    plans: {
+      create: jest.fn(),
+    },
+    features: {
+      findMany: jest.fn(),
+    },
+    subscription_features: {
+      createMany: jest.fn(),
+    },
+    property: {
+      create: jest.fn(),
+    },
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OnboardingService,
         {
           provide: PrismaService,
-          useValue: mockPrismaService,
+          useValue: mockPrismaServiceForOnboarding,
         },
         {
           provide: TenantsService,
@@ -63,6 +83,11 @@ describe('OnboardingService', () => {
     tenantsService = module.get<TenantsService>(TenantsService);
     subscriptionsService = module.get<SubscriptionsService>(SubscriptionsService);
     plansService = module.get<PlansService>(PlansService);
+
+    // Setup default mocks for Prisma calls
+    mockPrismaServiceForOnboarding.features.findMany.mockResolvedValue([]);
+    mockPrismaServiceForOnboarding.subscription_features.createMany.mockResolvedValue({});
+    mockPrismaServiceForOnboarding.property.create.mockResolvedValue({});
   });
 
   afterEach(() => {
@@ -85,8 +110,8 @@ describe('OnboardingService', () => {
 
       const mockPlan = {
         id: 'plan-1',
-        code: 'S',
-        name: 'Small Plan',
+        code: 'TRIAL',
+        name: 'Free Trial (Full Access)',
       };
 
       const mockSubscription = {
@@ -96,9 +121,19 @@ describe('OnboardingService', () => {
         status: SubscriptionStatus.TRIAL,
       };
 
+      const mockProperty = {
+        id: 'prop-1',
+        tenantId: 'tenant-1',
+        name: 'Test Hotel',
+        code: 'TST0001',
+        isDefault: true,
+      };
+
       mockTenantsService.create.mockResolvedValue(mockTenant);
       mockPlansService.findByCode.mockResolvedValue(mockPlan);
       mockSubscriptionsService.create.mockResolvedValue(mockSubscription);
+      mockPrismaServiceForOnboarding.features.findMany.mockResolvedValue([]);
+      mockPrismaServiceForOnboarding.property.create.mockResolvedValue(mockProperty);
 
       const result = await service.registerHotel(
         {
@@ -111,28 +146,55 @@ describe('OnboardingService', () => {
       expect(result.subscription).toEqual(mockSubscription);
       expect(result.message).toContain('14 days');
       expect(tenantsService.create).toHaveBeenCalled();
-      expect(plansService.findByCode).toHaveBeenCalledWith('S');
+      expect(plansService.findByCode).toHaveBeenCalledWith('TRIAL');
       expect(subscriptionsService.create).toHaveBeenCalled();
     });
 
-    it('should throw error if trial plan not found', async () => {
+    it('should create default trial plan if not found', async () => {
       const mockTenant = {
         id: 'tenant-1',
         name: 'Test Hotel',
         status: TenantStatus.TRIAL,
       };
 
+      const mockCreatedPlan = {
+        id: 'trial-plan-' + Date.now(),
+        code: 'TRIAL',
+        name: 'Free Trial (Full Access)',
+      };
+
+      const mockSubscription = {
+        id: 'sub-1',
+        tenantId: 'tenant-1',
+        planId: mockCreatedPlan.id,
+        status: SubscriptionStatus.TRIAL,
+      };
+
+      const mockProperty = {
+        id: 'prop-1',
+        tenantId: 'tenant-1',
+        name: 'Test Hotel',
+        code: 'TST0001',
+        isDefault: true,
+      };
+
       mockTenantsService.create.mockResolvedValue(mockTenant);
       mockPlansService.findByCode.mockResolvedValue(null);
+      mockPrismaServiceForOnboarding.plans.create.mockResolvedValue(mockCreatedPlan);
+      mockSubscriptionsService.create.mockResolvedValue(mockSubscription);
+      mockPrismaServiceForOnboarding.features.findMany.mockResolvedValue([]);
+      mockPrismaServiceForOnboarding.property.create.mockResolvedValue(mockProperty);
 
-      await expect(
-        service.registerHotel(
-          {
-            name: 'Test Hotel',
-          },
-          14,
-        ),
-      ).rejects.toThrow('Trial plan not found');
+      const result = await service.registerHotel(
+        {
+          name: 'Test Hotel',
+        },
+        14,
+      );
+
+      expect(result.tenant).toEqual(mockTenant);
+      expect(mockPrismaServiceForOnboarding.plans.create).toHaveBeenCalled();
+      expect(subscriptionsService.create).toHaveBeenCalled();
     });
   });
 
@@ -145,7 +207,7 @@ describe('OnboardingService', () => {
         id: 'tenant-1',
         name: 'Test Hotel',
         status: TenantStatus.TRIAL,
-        trialEndsAt: futureDate,
+        trial_ends_at: futureDate,
       };
 
       mockTenantsService.findOne.mockResolvedValue(mockTenant);
@@ -165,7 +227,7 @@ describe('OnboardingService', () => {
         id: 'tenant-1',
         name: 'Test Hotel',
         status: TenantStatus.TRIAL,
-        trialEndsAt: pastDate,
+        trial_ends_at: pastDate,
       };
 
       mockTenantsService.findOne.mockResolvedValue(mockTenant);
@@ -191,27 +253,27 @@ describe('OnboardingService', () => {
         { id: '2', tenantId: 'tenant-1', stepKey: 'create_room', isCompleted: false },
       ];
 
-      mockPrismaService.onboardingStep.findMany.mockResolvedValue(mockSteps);
+      mockPrismaServiceForOnboarding.onboardingStep.findMany.mockResolvedValue(mockSteps);
 
       const result = await service.getProgress('tenant-1');
 
       expect(result).toEqual(mockSteps);
-      expect(prisma.onboardingStep.findMany).toHaveBeenCalledWith({
+      expect(mockPrismaServiceForOnboarding.onboardingStep.findMany).toHaveBeenCalledWith({
         where: { tenantId: 'tenant-1' },
         orderBy: { createdAt: 'asc' },
       });
     });
 
     it('should initialize default steps if none exist', async () => {
-      mockPrismaService.onboardingStep.findMany.mockResolvedValue([]);
-      mockPrismaService.onboardingStep.create.mockImplementation((data) =>
+      mockPrismaServiceForOnboarding.onboardingStep.findMany.mockResolvedValue([]);
+      mockPrismaServiceForOnboarding.onboardingStep.create.mockImplementation((data) =>
         Promise.resolve({ id: '1', ...data.data }),
       );
 
       const result = await service.getProgress('tenant-1');
 
       expect(result.length).toBe(4);
-      expect(prisma.onboardingStep.create).toHaveBeenCalledTimes(4);
+      expect(mockPrismaServiceForOnboarding.onboardingStep.create).toHaveBeenCalledTimes(4);
     });
   });
 
@@ -225,13 +287,13 @@ describe('OnboardingService', () => {
         completedAt: new Date(),
       };
 
-      mockPrismaService.onboardingStep.update.mockResolvedValue(mockUpdatedStep);
+      mockPrismaServiceForOnboarding.onboardingStep.update.mockResolvedValue(mockUpdatedStep);
 
       const result = await service.updateStep('tenant-1', '1', true);
 
       expect(result.isCompleted).toBe(true);
       expect(result.completedAt).toBeDefined();
-      expect(prisma.onboardingStep.update).toHaveBeenCalledWith({
+      expect(mockPrismaServiceForOnboarding.onboardingStep.update).toHaveBeenCalledWith({
         where: { id: '1' },
         data: {
           isCompleted: true,
@@ -249,7 +311,7 @@ describe('OnboardingService', () => {
         completedAt: null,
       };
 
-      mockPrismaService.onboardingStep.update.mockResolvedValue(mockUpdatedStep);
+      mockPrismaServiceForOnboarding.onboardingStep.update.mockResolvedValue(mockUpdatedStep);
 
       const result = await service.updateStep('tenant-1', '1', false);
 

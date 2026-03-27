@@ -14,5 +14,3 @@ export class CreateSubscriptionFeatureDto {
   @IsNumber()
   price: number;
 }
-
-

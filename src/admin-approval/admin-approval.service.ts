@@ -41,10 +41,7 @@ export class AdminApprovalService {
     }
 
     // 2. Approve payment
-    const payment = await this.paymentsService.approvePayment(
-      paymentId,
-      adminId,
-    );
+    const payment = await this.paymentsService.approvePayment(paymentId, adminId);
 
     // 3. Update invoice status
     const invoice = await this.invoicesService.findOne(payment.invoice_id);
@@ -59,9 +56,7 @@ export class AdminApprovalService {
 
     // 5. Activate subscription
     if (invoice.subscription_id) {
-      const subscription = await this.subscriptionsService.findOne(
-        invoice.subscription_id,
-      );
+      const subscription = await this.subscriptionsService.findOne(invoice.subscription_id);
 
       if (subscription) {
         // คำนวณวันใช้งานจาก approve จริง
@@ -100,11 +95,7 @@ export class AdminApprovalService {
   /**
    * Reject payment with reason
    */
-  async rejectPayment(
-    paymentId: string,
-    adminId: string,
-    reason?: string,
-  ): Promise<any> {
+  async rejectPayment(paymentId: string, adminId: string, reason?: string): Promise<any> {
     const admin = await this.adminsService.findOne(adminId);
     if (!admin) {
       throw new Error('Admin not found');
@@ -127,5 +118,3 @@ export class AdminApprovalService {
     return payments.filter((p) => p.status === 'pending');
   }
 }
-
-

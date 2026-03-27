@@ -20,5 +20,3 @@ import { InvoicesModule } from '../invoices/invoices.module';
   exports: [SubscriptionManagementService],
 })
 export class SubscriptionManagementModule {}
-
-

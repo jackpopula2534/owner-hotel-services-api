@@ -102,7 +102,9 @@ export class EmailHistoryQueryDto {
   @IsEmail()
   recipient?: string;
 
-  @ApiPropertyOptional({ enum: ['pending', 'queued', 'sent', 'delivered', 'opened', 'bounced', 'failed'] })
+  @ApiPropertyOptional({
+    enum: ['pending', 'queued', 'sent', 'delivered', 'opened', 'bounced', 'failed'],
+  })
   @IsOptional()
   @IsString()
   status?: string;

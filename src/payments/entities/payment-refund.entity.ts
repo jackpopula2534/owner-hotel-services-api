@@ -18,7 +18,7 @@ export enum RefundStatus {
 export enum RefundMethod {
   ORIGINAL_METHOD = 'original_method', // Refund to original payment method
   BANK_TRANSFER = 'bank_transfer',
-  CREDIT = 'credit',                   // Add to tenant credit balance
+  CREDIT = 'credit', // Add to tenant credit balance
 }
 
 @Entity('payment_refunds')

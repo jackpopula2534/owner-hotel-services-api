@@ -40,10 +40,10 @@ export class HealthService {
    */
   async check(): Promise<HealthCheckResult> {
     return {
-      status:    'ok',
+      status: 'ok',
       timestamp: new Date().toISOString(),
-      uptime:    process.uptime(),
-      version:   process.env.npm_package_version || '1.0.0',
+      uptime: process.uptime(),
+      version: process.env.npm_package_version || '1.0.0',
     };
   }
 
@@ -60,18 +60,18 @@ export class HealthService {
     ]);
 
     const checks: Record<string, CheckResult> = {
-      database: this.unwrap(prismaResult,  'prisma'),
-      typeorm:  this.unwrap(typeormResult, 'typeorm'),
-      cache:    this.unwrap(redisResult,   'redis'),
+      database: this.unwrap(prismaResult, 'prisma'),
+      typeorm: this.unwrap(typeormResult, 'typeorm'),
+      cache: this.unwrap(redisResult, 'redis'),
     };
 
     // redis degraded is acceptable — app still runs without cache
     const criticalDown = checks.database.status === 'down' || checks.typeorm.status === 'down';
-    const anyDown      = Object.values(checks).some((c) => c.status === 'down');
-    const allUp        = Object.values(checks).every((c) => c.status === 'up');
+    const anyDown = Object.values(checks).some((c) => c.status === 'down');
+    const allUp = Object.values(checks).every((c) => c.status === 'up');
 
     const result: HealthCheckResult = {
-      status:    allUp ? 'ok' : criticalDown ? 'down' : 'degraded',
+      status: allUp ? 'ok' : criticalDown ? 'down' : 'degraded',
       timestamp: new Date().toISOString(),
       checks,
     };
@@ -79,7 +79,7 @@ export class HealthService {
     if (result.status === 'down') {
       throw new ServiceUnavailableException({
         statusCode: 503,
-        message:    'Service unavailable — critical dependencies are down',
+        message: 'Service unavailable — critical dependencies are down',
         ...result,
       });
     }
@@ -122,17 +122,11 @@ export class HealthService {
    * Runs `fn` with an individual timeout.  Returns { status, latencyMs }
    * on success, { status: 'down', error } on failure or timeout.
    */
-  private async runCheck(
-    name: string,
-    fn: () => Promise<'degraded' | void>,
-  ): Promise<CheckResult> {
+  private async runCheck(name: string, fn: () => Promise<'degraded' | void>): Promise<CheckResult> {
     const start = Date.now();
     try {
       const signal = new Promise<never>((_, rej) =>
-        setTimeout(
-          () => rej(new Error(`Timeout after ${CHECK_TIMEOUT_MS}ms`)),
-          CHECK_TIMEOUT_MS,
-        ),
+        setTimeout(() => rej(new Error(`Timeout after ${CHECK_TIMEOUT_MS}ms`)), CHECK_TIMEOUT_MS),
       );
       const result = await Promise.race([fn(), signal]);
       const latencyMs = Date.now() - start;
@@ -149,10 +143,7 @@ export class HealthService {
   }
 
   /** Converts a PromiseSettledResult into a CheckResult. */
-  private unwrap(
-    result: PromiseSettledResult<CheckResult>,
-    name: string,
-  ): CheckResult {
+  private unwrap(result: PromiseSettledResult<CheckResult>, name: string): CheckResult {
     if (result.status === 'fulfilled') return result.value;
     this.logger.error(`${name} check threw unexpectedly: ${result.reason}`);
     return { status: 'down', error: String(result.reason) };

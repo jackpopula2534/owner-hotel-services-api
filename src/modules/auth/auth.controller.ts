@@ -39,7 +39,9 @@ export class AuthController {
   @Public()
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60 } })
-  @ApiOperation({ summary: 'Login as hotel user (User table - tenant_admin, manager, staff, etc.)' })
+  @ApiOperation({
+    summary: 'Login as hotel user (User table - tenant_admin, manager, staff, etc.)',
+  })
   @ApiResponse({ status: 200, description: 'User successfully logged in' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async login(@Body() loginDto: LoginDto) {
@@ -64,10 +66,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Logout user' })
   @ApiResponse({ status: 200, description: 'User successfully logged out' })
-  async logout(
-    @CurrentUser() user: any,
-    @Body() body?: { refreshToken?: string },
-  ) {
+  async logout(@CurrentUser() user: any, @Body() body?: { refreshToken?: string }) {
     return this.authService.logout(user.userId, body?.refreshToken);
   }
 
@@ -92,4 +91,3 @@ export class AuthController {
     return this.authService.resetPassword(body.token, body.newPassword);
   }
 }
-

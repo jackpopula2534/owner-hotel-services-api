@@ -8,23 +8,16 @@ export class ReviewsService {
   constructor(private prisma: PrismaService) {}
 
   async findAll(query: any, tenantId?: string) {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
     const page = parseInt(query.page) || 1;
     const limit = parseInt(query.limit) || 10;
     const { rating, bookingId, search } = query;
     const skip = (page - 1) * limit;
 
-    // ถ้าไม่มี tenantId (user ใหม่ยังไม่มีโรงแรม) ให้ return empty data
-    if (!tenantId) {
-      return {
-        data: [],
-        total: 0,
-        page,
-        limit,
-      };
-    }
-
-    const where: any = {};
-    if (tenantId != null) where.tenantId = tenantId;
+    const where: any = { tenantId };
     if (rating) where.rating = parseInt(rating);
     if (bookingId) where.bookingId = bookingId;
     if (search) {
@@ -58,8 +51,11 @@ export class ReviewsService {
   }
 
   async findOne(id: string, tenantId?: string) {
-    const where: any = { id };
-    if (tenantId != null) where.tenantId = tenantId;
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
+    const where: any = { id, tenantId };
 
     const review = await this.prisma.review.findFirst({
       where,
@@ -81,8 +77,11 @@ export class ReviewsService {
   }
 
   async findByBookingId(bookingId: string, tenantId?: string) {
-    const where: any = { bookingId };
-    if (tenantId != null) where.tenantId = tenantId;
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
+    const where: any = { bookingId, tenantId };
 
     const review = await this.prisma.review.findFirst({
       where,
@@ -104,21 +103,21 @@ export class ReviewsService {
   }
 
   async create(createReviewDto: CreateReviewDto, tenantId?: string) {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
     if (createReviewDto.bookingId) {
-      const bookingWhere: any = { id: createReviewDto.bookingId };
-      if (tenantId != null) bookingWhere.tenantId = tenantId;
+      const bookingWhere: any = { id: createReviewDto.bookingId, tenantId };
       const booking = await this.prisma.booking.findFirst({
         where: bookingWhere,
       });
 
       if (!booking) {
-        throw new NotFoundException(
-          `Booking with ID ${createReviewDto.bookingId} not found`,
-        );
+        throw new NotFoundException(`Booking with ID ${createReviewDto.bookingId} not found`);
       }
 
-      const existingWhere: any = { bookingId: createReviewDto.bookingId };
-      if (tenantId != null) existingWhere.tenantId = tenantId;
+      const existingWhere: any = { bookingId: createReviewDto.bookingId, tenantId };
       const existingReview = await this.prisma.review.findFirst({
         where: existingWhere,
       });
@@ -130,8 +129,7 @@ export class ReviewsService {
       }
     }
 
-    const data: any = { ...createReviewDto };
-    if (tenantId != null) data.tenantId = tenantId;
+    const data: any = { ...createReviewDto, tenantId };
     return this.prisma.review.create({
       data,
     });
@@ -155,7 +153,11 @@ export class ReviewsService {
   }
 
   async getStats(tenantId?: string) {
-    const where: any = tenantId != null ? { tenantId } : {};
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
+    const where: any = { tenantId };
     const [total, averageRating, ratingDistribution] = await Promise.all([
       this.prisma.review.count({ where }),
       this.prisma.review.aggregate({
@@ -169,10 +171,13 @@ export class ReviewsService {
       }),
     ]);
 
-    const distribution = ratingDistribution.reduce((acc, item) => {
-      acc[item.rating] = item._count.rating;
-      return acc;
-    }, {} as Record<number, number>);
+    const distribution = ratingDistribution.reduce(
+      (acc, item) => {
+        acc[item.rating] = item._count.rating;
+        return acc;
+      },
+      {} as Record<number, number>,
+    );
 
     return {
       total,
@@ -188,8 +193,11 @@ export class ReviewsService {
   }
 
   async generateQRCode(bookingId: string, tenantId?: string) {
-    const bookingWhere: any = { id: bookingId };
-    if (tenantId != null) bookingWhere.tenantId = tenantId;
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
+    const bookingWhere: any = { id: bookingId, tenantId };
     const booking = await this.prisma.booking.findFirst({
       where: bookingWhere,
     });
@@ -198,16 +206,13 @@ export class ReviewsService {
       throw new NotFoundException(`Booking with ID ${bookingId} not found`);
     }
 
-    const existingWhere: any = { bookingId };
-    if (tenantId != null) existingWhere.tenantId = tenantId;
+    const existingWhere: any = { bookingId, tenantId };
     const existingReview = await this.prisma.review.findFirst({
       where: existingWhere,
     });
 
     if (existingReview) {
-      throw new BadRequestException(
-        `Review for booking ${bookingId} already exists`,
-      );
+      throw new BadRequestException(`Review for booking ${bookingId} already exists`);
     }
 
     const reviewCode = `REV-${bookingId.substring(0, 8).toUpperCase()}-${Date.now().toString(36).toUpperCase()}`;
@@ -221,6 +226,10 @@ export class ReviewsService {
   }
 
   async findByQRCode(code: string, tenantId?: string) {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
     const parts = code.split('-');
     if (parts.length < 2) {
       throw new BadRequestException('Invalid QR code format');
@@ -230,8 +239,8 @@ export class ReviewsService {
       bookingId: {
         startsWith: parts[1],
       },
+      tenantId,
     };
-    if (tenantId != null) where.tenantId = tenantId;
 
     const reviews = await this.prisma.review.findMany({
       where,
@@ -252,4 +261,3 @@ export class ReviewsService {
     return reviews[0];
   }
 }
-

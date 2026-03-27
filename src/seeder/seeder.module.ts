@@ -28,4 +28,3 @@ import { SubscriptionFeaturesModule } from '../subscription-features/subscriptio
   exports: [SeederService],
 })
 export class SeederModule {}
-

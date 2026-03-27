@@ -24,8 +24,8 @@ import {
 
 export enum NodeEnvironment {
   Development = 'development',
-  Production  = 'production',
-  Test        = 'test',
+  Production = 'production',
+  Test = 'test',
 }
 
 export class EnvironmentVariables {
@@ -92,13 +92,11 @@ export function validate(config: Record<string, unknown>): EnvironmentVariables 
 
   const errors = validateSync(validated, {
     skipMissingProperties: false,
-    whitelist:             true,
+    whitelist: true,
   });
 
   if (errors.length > 0) {
-    const messages = errors
-      .flatMap((e) => Object.values(e.constraints ?? {}))
-      .join('\n  ');
+    const messages = errors.flatMap((e) => Object.values(e.constraints ?? {})).join('\n  ');
     throw new Error(
       `[Config] Environment validation failed:\n  ${messages}\n\nCheck your .env file.`,
     );

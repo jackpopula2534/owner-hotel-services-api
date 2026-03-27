@@ -1,13 +1,12 @@
-import {
-  Injectable,
-  NotFoundException,
-  BadRequestException,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, LessThan, MoreThan } from 'typeorm';
 import { Payment, PaymentStatus } from '../payments/entities/payment.entity';
-import { PaymentRefund, RefundStatus, RefundMethod } from '../payments/entities/payment-refund.entity';
+import {
+  PaymentRefund,
+  RefundStatus,
+  RefundMethod,
+} from '../payments/entities/payment-refund.entity';
 import { TenantCredit, CreditType, CreditStatus } from '../tenants/entities/tenant-credit.entity';
 import { Tenant } from '../tenants/entities/tenant.entity';
 import { Invoice, InvoiceStatus } from '../invoices/entities/invoice.entity';
@@ -141,9 +140,10 @@ export class AdminRefundCreditService {
 
     return {
       success: true,
-      message: dto.method === RefundMethodDto.CREDIT
-        ? 'Refund processed as credit successfully'
-        : 'Refund request created successfully',
+      message:
+        dto.method === RefundMethodDto.CREDIT
+          ? 'Refund processed as credit successfully'
+          : 'Refund request created successfully',
       data: {
         refundNo,
         paymentNo: payment.paymentNo || payment.id,
@@ -289,9 +289,7 @@ export class AdminRefundCreditService {
 
     await this.refundsRepository.save(refund);
 
-    this.logger.log(
-      `Refund ${refund.refundNo} ${dto.action}: ${refund.amount}`,
-    );
+    this.logger.log(`Refund ${refund.refundNo} ${dto.action}: ${refund.amount}`);
 
     return {
       success: true,
@@ -340,10 +338,7 @@ export class AdminRefundCreditService {
     const availableCredits = credits.filter((c) => c.status === CreditStatus.AVAILABLE);
     const usedCredits = credits.filter((c) => c.status === CreditStatus.USED);
 
-    const totalAvailable = availableCredits.reduce(
-      (sum, c) => sum + Number(c.remainingAmount),
-      0,
-    );
+    const totalAvailable = availableCredits.reduce((sum, c) => sum + Number(c.remainingAmount), 0);
     const totalUsed = usedCredits.reduce(
       (sum, c) => sum + (Number(c.originalAmount) - Number(c.remainingAmount)),
       0,
@@ -392,10 +387,7 @@ export class AdminRefundCreditService {
     const availableCredits = await this.creditsRepository.find({
       where: { tenantId, status: CreditStatus.AVAILABLE },
     });
-    const newBalance = availableCredits.reduce(
-      (sum, c) => sum + Number(c.remainingAmount),
-      0,
-    );
+    const newBalance = availableCredits.reduce((sum, c) => sum + Number(c.remainingAmount), 0);
 
     this.logger.log(
       `Credit ${credit.id} added to tenant ${tenant.name}: ${dto.amount} (${dto.type})`,
@@ -474,10 +466,7 @@ export class AdminRefundCreditService {
       throw new BadRequestException('No available credits for this tenant');
     }
 
-    const totalAvailable = availableCredits.reduce(
-      (sum, c) => sum + Number(c.remainingAmount),
-      0,
-    );
+    const totalAvailable = availableCredits.reduce((sum, c) => sum + Number(c.remainingAmount), 0);
 
     if (totalAvailable === 0) {
       throw new BadRequestException('No available credit balance');

@@ -11,5 +11,3 @@ import { SubscriptionController } from './subscription.controller';
   exports: [SubscriptionGuard],
 })
 export class SubscriptionModule {}
-
-

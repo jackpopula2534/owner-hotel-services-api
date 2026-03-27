@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateRoomDto } from './dto/create-room.dto';
 import { UpdateRoomDto } from './dto/update-room.dto';
@@ -6,6 +6,8 @@ import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class RoomsService {
+  private readonly logger = new Logger(RoomsService.name);
+
   constructor(private prisma: PrismaService) {}
 
   async findAll(query: any, tenantId?: string) {
@@ -30,10 +32,7 @@ export class RoomsService {
     if (type) where.type = type;
     if (floor) where.floor = parseInt(floor);
     if (search) {
-      where.OR = [
-        { number: { contains: search } },
-        { description: { contains: search } },
-      ];
+      where.OR = [{ number: { contains: search } }, { description: { contains: search } }];
     }
 
     try {
@@ -109,22 +108,66 @@ export class RoomsService {
       throw new BadRequestException('Tenant ID is required');
     }
 
-    // Verify property exists and belongs to tenant
-    const propertyWhere: any = { id: createRoomDto.propertyId, tenantId };
+    // Auto-resolve propertyId from tenant's default property if not provided
+    let resolvedPropertyId = createRoomDto.propertyId;
 
+    if (!resolvedPropertyId) {
+      const defaultProperty = await this.prisma.property.findFirst({
+        where: { tenantId, isDefault: true },
+      });
+
+      if (!defaultProperty) {
+        // Fallback: use any active property of the tenant
+        const anyProperty = await this.prisma.property.findFirst({
+          where: { tenantId, status: 'active' },
+          orderBy: { createdAt: 'asc' },
+        });
+
+        if (!anyProperty) {
+          throw new NotFoundException(
+            'No property found for this tenant. Please create a property first.',
+          );
+        }
+        resolvedPropertyId = anyProperty.id;
+      } else {
+        resolvedPropertyId = defaultProperty.id;
+      }
+    }
+
+    // Verify property exists and belongs to tenant
     const property = await this.prisma.property.findFirst({
-      where: propertyWhere,
+      where: { id: resolvedPropertyId, tenantId },
     });
 
     if (!property) {
-      throw new NotFoundException('Property not found');
+      // If we provided a propertyId but it wasn't found for this tenant,
+      // try to fallback to the tenant's default or first property instead of failing.
+      // This helps if the frontend has a stale or wrong propertyId.
+      this.logger.warn(
+        `Property ${resolvedPropertyId} not found for tenant ${tenantId}. Attempting fallback.`,
+      );
+
+      const fallbackProperty = await this.prisma.property.findFirst({
+        where: { tenantId },
+        orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+      });
+
+      if (!fallbackProperty) {
+        throw new NotFoundException(
+          `No property found for tenant ${tenantId}. Please create a property first.`,
+        );
+      }
+
+      resolvedPropertyId = fallbackProperty.id;
+      this.logger.log(`Falling back to property ${resolvedPropertyId}`);
     }
 
     // Check for duplicate room number within property
     const existingRoom = await this.prisma.room.findFirst({
       where: {
-        propertyId: createRoomDto.propertyId,
+        propertyId: resolvedPropertyId,
         number: createRoomDto.number,
+        tenantId,
       },
     });
 
@@ -134,7 +177,7 @@ export class RoomsService {
       );
     }
 
-    const data: any = { ...createRoomDto, tenantId };
+    const data: any = { ...createRoomDto, propertyId: resolvedPropertyId, tenantId };
     return this.prisma.room.create({
       data,
       include: { property: true },
@@ -150,6 +193,7 @@ export class RoomsService {
           propertyId: room.propertyId,
           number: updateRoomDto.number,
           id: { not: id },
+          tenantId,
         },
       });
       if (existingRoom) {
@@ -173,13 +217,12 @@ export class RoomsService {
       where: {
         roomId: id,
         status: { in: ['confirmed', 'checked-in'] },
+        tenantId,
       },
     });
 
     if (activeBookings) {
-      throw new BadRequestException(
-        'Cannot delete room with active bookings',
-      );
+      throw new BadRequestException('Cannot delete room with active bookings');
     }
 
     return this.prisma.room.delete({
@@ -196,7 +239,12 @@ export class RoomsService {
     });
   }
 
-  async getAvailableRooms(checkIn: string, checkOut: string, propertyId?: string, tenantId?: string) {
+  async getAvailableRooms(
+    checkIn: string,
+    checkOut: string,
+    propertyId?: string,
+    tenantId?: string,
+  ) {
     // ถ้าไม่มี tenantId (ผู้ใช้ใหม่) ให้ส่ง empty array กลับไป
     if (!tenantId) {
       return [];
@@ -209,9 +257,7 @@ export class RoomsService {
       const bookingWhere: any = {
         tenantId,
         status: { in: ['confirmed', 'checked-in'] },
-        OR: [
-          { checkIn: { lte: checkOutDate }, checkOut: { gte: checkInDate } },
-        ],
+        OR: [{ checkIn: { lte: checkOutDate }, checkOut: { gte: checkInDate } }],
       };
       if (propertyId) bookingWhere.propertyId = propertyId;
 
@@ -243,4 +289,3 @@ export class RoomsService {
     }
   }
 }
-

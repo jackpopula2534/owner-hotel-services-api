@@ -9,12 +9,7 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiBearerAuth,
-} from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PushNotificationsService } from './push-notifications.service';
@@ -30,9 +25,7 @@ import {
 @ApiTags('Push Notifications')
 @Controller('api/v1/push-notifications')
 export class PushNotificationsController {
-  constructor(
-    private readonly pushNotificationsService: PushNotificationsService,
-  ) {}
+  constructor(private readonly pushNotificationsService: PushNotificationsService) {}
 
   /**
    * Check if push notifications are available
@@ -56,11 +49,7 @@ export class PushNotificationsController {
     @CurrentUser() user: any,
     @Body() dto: RegisterDeviceDto,
   ): Promise<DeviceInfoDto> {
-    return this.pushNotificationsService.registerDevice(
-      user.id,
-      user.tenantId,
-      dto,
-    );
+    return this.pushNotificationsService.registerDevice(user.id, user.tenantId, dto);
   }
 
   /**

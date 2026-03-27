@@ -24,10 +24,7 @@ export class FeatureAccessService {
    * ตรวจสอบว่า tenant มีสิทธิ์ใช้ feature นี้หรือไม่
    * ตาม logic: subscription active? + today <= end_date? + feature enabled?
    */
-  async checkFeatureAccess(
-    tenantId: string,
-    featureCode: string,
-  ): Promise<FeatureAccessResult> {
+  async checkFeatureAccess(tenantId: string, featureCode: string): Promise<FeatureAccessResult> {
     // 1. ตรวจสอบ tenant
     const tenant = await this.tenantsService.findOne(tenantId);
     if (!tenant) {
@@ -146,10 +143,7 @@ export class FeatureAccessService {
    * ตรวจสอบว่า subscription มี feature นี้หรือไม่
    * ตรวจทั้ง plan features และ subscription features
    */
-  private async hasFeatureAccess(
-    subscription: any,
-    featureCode: string,
-  ): Promise<boolean> {
+  private async hasFeatureAccess(subscription: any, featureCode: string): Promise<boolean> {
     // ตรวจสอบ plan features (ฟีเจอร์ที่แถมมากับ plan)
     if (subscription.plans_subscriptions_plan_idToplans?.plan_features) {
       const planFeature = subscription.plans_subscriptions_plan_idToplans.plan_features.find(
@@ -177,10 +171,7 @@ export class FeatureAccessService {
    * ตรวจสอบและ throw exception ถ้าไม่มีสิทธิ์
    * ใช้ใน guards หรือ interceptors
    */
-  async requireFeatureAccess(
-    tenantId: string,
-    featureCode: string,
-  ): Promise<void> {
+  async requireFeatureAccess(tenantId: string, featureCode: string): Promise<void> {
     const result = await this.checkFeatureAccess(tenantId, featureCode);
     if (!result.hasAccess) {
       throw new ForbiddenException({
@@ -216,7 +207,9 @@ export class FeatureAccessService {
     }
 
     const planFeatures =
-      subscription.plans_subscriptions_plan_idToplans?.plan_features?.map((pf: any) => pf.features) || [];
+      subscription.plans_subscriptions_plan_idToplans?.plan_features?.map(
+        (pf: any) => pf.features,
+      ) || [];
     const subscriptionFeatures =
       subscription.subscription_features?.map((sf: any) => sf.features) || [];
 
@@ -265,8 +258,7 @@ export class FeatureAccessService {
     const endDate = new Date(subscription.end_date);
     endDate.setHours(0, 0, 0, 0);
 
-    const isActive =
-      subscription.status === SubscriptionStatus.ACTIVE && endDate >= today;
+    const isActive = subscription.status === SubscriptionStatus.ACTIVE && endDate >= today;
 
     return {
       hasSubscription: true,
@@ -285,4 +277,3 @@ export class FeatureAccessService {
     };
   }
 }
-

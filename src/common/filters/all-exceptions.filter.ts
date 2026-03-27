@@ -21,21 +21,17 @@ import {
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
-import {
-  QueryFailedError,
-  EntityNotFoundError,
-  TypeORMError,
-} from 'typeorm';
+import { QueryFailedError, EntityNotFoundError, TypeORMError } from 'typeorm';
 
 /** Shape matching api-design.md */
 interface ErrorBody {
-  success:    false;
+  success: false;
   error: {
-    code:    string;
+    code: string;
     message: string;
   };
-  timestamp:  string;
-  path:       string;
+  timestamp: string;
+  path: string;
   requestId?: string;
 }
 
@@ -44,13 +40,13 @@ export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name);
 
   catch(exception: unknown, host: ArgumentsHost): void {
-    const ctx       = host.switchToHttp();
-    const response  = ctx.getResponse<Response>();
-    const request   = ctx.getRequest<Request>();
+    const ctx = host.switchToHttp();
+    const response = ctx.getResponse<Response>();
+    const request = ctx.getRequest<Request>();
     const requestId = (request as any)['requestId'] as string | undefined;
 
-    let status  = HttpStatus.INTERNAL_SERVER_ERROR;
-    let code    = 'INTERNAL_SERVER_ERROR';
+    let status = HttpStatus.INTERNAL_SERVER_ERROR;
+    let code = 'INTERNAL_SERVER_ERROR';
     let message = 'Internal server error';
 
     // ─── NestJS / HTTP ────────────────────────────────────────────────────
@@ -60,28 +56,28 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
       if (typeof body === 'string') {
         message = body;
-        code    = this.statusToCode(status);
+        code = this.statusToCode(status);
       } else {
         const b = body as Record<string, any>;
-        message = Array.isArray(b.message) ? b.message.join(', ') : (b.message ?? exception.message);
-        code    = b.error
+        message = Array.isArray(b.message)
+          ? b.message.join(', ')
+          : (b.message ?? exception.message);
+        code = b.error
           ? String(b.error).toUpperCase().replace(/\s+/g, '_')
           : this.statusToCode(status);
       }
 
-    // ─── Prisma known errors ──────────────────────────────────────────────
+      // ─── Prisma known errors ──────────────────────────────────────────────
     } else if (exception instanceof Prisma.PrismaClientKnownRequestError) {
       // Schema not yet migrated — return graceful empty payload (P2021/P2022)
       if (exception.code === 'P2021' || exception.code === 'P2022') {
-        this.logger.warn(
-          `Database schema not ready (${exception.code}): returning empty data`,
-        );
+        this.logger.warn(`Database schema not ready (${exception.code}): returning empty data`);
         const emptyPayload: Record<string, unknown> = {
-          success:   true,
-          data:      [],
-          meta:      { total: 0, page: 1, limit: 10, totalPages: 0 },
+          success: true,
+          data: [],
+          meta: { total: 0, page: 1, limit: 10, totalPages: 0 },
           timestamp: new Date().toISOString(),
-          path:      request.url,
+          path: request.url,
         };
         if (request.url.includes('/notifications')) {
           emptyPayload.items = emptyPayload.data;
@@ -91,26 +87,22 @@ export class AllExceptionsFilter implements ExceptionFilter {
         return;
       }
 
-      status  = this.prismaStatus(exception.code);
-      code    = `PRISMA_${exception.code}`;
+      status = this.prismaStatus(exception.code);
+      code = `PRISMA_${exception.code}`;
       message = this.getPrismaMessage(exception);
-      this.logger.error(
-        `Prisma ${exception.code}: ${exception.message}`,
-        undefined,
-        requestId,
-      );
+      this.logger.error(`Prisma ${exception.code}: ${exception.message}`, undefined, requestId);
 
-    // ─── Prisma validation ────────────────────────────────────────────────
+      // ─── Prisma validation ────────────────────────────────────────────────
     } else if (exception instanceof Prisma.PrismaClientValidationError) {
-      status  = HttpStatus.BAD_REQUEST;
-      code    = 'VALIDATION_ERROR';
+      status = HttpStatus.BAD_REQUEST;
+      code = 'VALIDATION_ERROR';
       message = 'ข้อมูลไม่ถูกต้องตามโครงสร้างฐานข้อมูล (Database validation error)';
       this.logger.error(`Prisma validation: ${exception.message}`, undefined, requestId);
 
-    // ─── TypeORM query failed ─────────────────────────────────────────────
+      // ─── TypeORM query failed ─────────────────────────────────────────────
     } else if (exception instanceof QueryFailedError) {
-      status  = this.typeOrmQueryStatus(exception);
-      code    = `DB_${(exception as any).code ?? 'QUERY_FAILED'}`;
+      status = this.typeOrmQueryStatus(exception);
+      code = `DB_${(exception as any).code ?? 'QUERY_FAILED'}`;
       message = this.getTypeOrmQueryMessage(exception);
       this.logger.error(
         `TypeORM QueryFailedError [(${(exception as any).code}]: ${exception.message}`,
@@ -118,39 +110,31 @@ export class AllExceptionsFilter implements ExceptionFilter {
         requestId,
       );
 
-    // ─── TypeORM entity not found ─────────────────────────────────────────
+      // ─── TypeORM entity not found ─────────────────────────────────────────
     } else if (exception instanceof EntityNotFoundError) {
-      status  = HttpStatus.NOT_FOUND;
-      code    = 'RECORD_NOT_FOUND';
+      status = HttpStatus.NOT_FOUND;
+      code = 'RECORD_NOT_FOUND';
       message = 'ไม่พบข้อมูลที่ต้องการ (Record not found)';
       this.logger.warn(`TypeORM EntityNotFound: ${exception.message}`, requestId);
 
-    // ─── TypeORM base (connection lost, etc.) ────────────────────────────
+      // ─── TypeORM base (connection lost, etc.) ────────────────────────────
     } else if (exception instanceof TypeORMError) {
-      status  = HttpStatus.INTERNAL_SERVER_ERROR;
-      code    = 'DATABASE_ERROR';
+      status = HttpStatus.INTERNAL_SERVER_ERROR;
+      code = 'DATABASE_ERROR';
       message = 'เกิดข้อผิดพลาดในการเชื่อมต่อฐานข้อมูล (Database error)';
-      this.logger.error(
-        `TypeORMError: ${(exception as Error).stack}`,
-        undefined,
-        requestId,
-      );
+      this.logger.error(`TypeORMError: ${(exception as Error).stack}`, undefined, requestId);
 
-    // ─── Generic / unknown ────────────────────────────────────────────────
+      // ─── Generic / unknown ────────────────────────────────────────────────
     } else if (exception instanceof Error) {
       message = exception.message;
-      this.logger.error(
-        `Unhandled Error: ${exception.stack}`,
-        undefined,
-        requestId,
-      );
+      this.logger.error(`Unhandled Error: ${exception.stack}`, undefined, requestId);
     }
 
     const body: ErrorBody = {
-      success:   false,
-      error:     { code, message },
+      success: false,
+      error: { code, message },
       timestamp: new Date().toISOString(),
-      path:      request.url,
+      path: request.url,
       ...(requestId ? { requestId } : {}),
     };
 
@@ -176,21 +160,18 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
   private prismaStatus(code: string): number {
     const map: Record<string, number> = {
-      P2002: HttpStatus.CONFLICT,          // unique constraint
-      P2025: HttpStatus.NOT_FOUND,         // record not found
-      P2003: HttpStatus.BAD_REQUEST,       // FK constraint
-      P2014: HttpStatus.BAD_REQUEST,       // relation violation
+      P2002: HttpStatus.CONFLICT, // unique constraint
+      P2025: HttpStatus.NOT_FOUND, // record not found
+      P2003: HttpStatus.BAD_REQUEST, // FK constraint
+      P2014: HttpStatus.BAD_REQUEST, // relation violation
     };
     return map[code] ?? HttpStatus.BAD_REQUEST;
   }
 
-  private getPrismaMessage(
-    exception: Prisma.PrismaClientKnownRequestError,
-  ): string {
+  private getPrismaMessage(exception: Prisma.PrismaClientKnownRequestError): string {
     switch (exception.code) {
       case 'P2002': {
-        const target =
-          (exception.meta?.target as string[])?.join(', ') || 'field';
+        const target = (exception.meta?.target as string[])?.join(', ') || 'field';
         return `ข้อมูลนี้มีอยู่ในระบบแล้ว (${target} already exists)`;
       }
       case 'P2025':

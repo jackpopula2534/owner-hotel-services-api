@@ -18,18 +18,12 @@ export class BookingsService {
     const { status, guestId, roomId, propertyId, search } = query;
     const skip = (page - 1) * limit;
 
-    // ถ้าไม่มี tenantId (user ใหม่ยังไม่มีโรงแรม) ให้ return empty data
+    // tenantId is required for data isolation
     if (!tenantId) {
-      return {
-        data: [],
-        total: 0,
-        page,
-        limit,
-      };
+      throw new BadRequestException('Tenant ID is required');
     }
 
-    const where: any = {};
-    if (tenantId != null) where.tenantId = tenantId;
+    const where: any = { tenantId };
     if (status) where.status = status;
     if (guestId) where.guestId = guestId;
     if (roomId) where.roomId = roomId;
@@ -83,8 +77,11 @@ export class BookingsService {
   }
 
   async findOne(id: string, tenantId?: string) {
-    const where: any = { id };
-    if (tenantId != null) where.tenantId = tenantId;
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
+    const where: any = { id, tenantId };
 
     const booking = await this.prisma.booking.findFirst({
       where,
@@ -103,6 +100,10 @@ export class BookingsService {
   }
 
   async create(createBookingDto: any, tenantId?: string) {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
     const { propertyId, roomId, guestId, checkIn, checkOut } = createBookingDto;
 
     // Validate dates
@@ -111,8 +112,7 @@ export class BookingsService {
     }
 
     // Verify property belongs to tenant
-    const propertyWhere: any = { id: propertyId };
-    if (tenantId != null) propertyWhere.tenantId = tenantId;
+    const propertyWhere: any = { id: propertyId, tenantId };
     const property = await this.prisma.property.findFirst({
       where: propertyWhere,
     });
@@ -121,9 +121,8 @@ export class BookingsService {
       throw new NotFoundException('Property not found');
     }
 
-    // Verify room belongs to property
-    const roomWhere: any = { id: roomId, propertyId };
-    if (tenantId != null) roomWhere.tenantId = tenantId;
+    // Verify room belongs to property and tenant
+    const roomWhere: any = { id: roomId, propertyId, tenantId };
     const room = await this.prisma.room.findFirst({
       where: roomWhere,
     });
@@ -135,6 +134,7 @@ export class BookingsService {
     // Check room availability
     const bookingScope: any = {
       roomId,
+      tenantId,
       status: { in: ['confirmed', 'checked-in'] },
       OR: [
         {
@@ -143,7 +143,6 @@ export class BookingsService {
         },
       ],
     };
-    if (tenantId != null) bookingScope.tenantId = tenantId;
 
     const existingBooking = await this.prisma.booking.findFirst({
       where: bookingScope,
@@ -155,8 +154,7 @@ export class BookingsService {
 
     // If guestId provided, verify it exists and optionally auto-fill guest data
     if (guestId) {
-      const guestWhere: any = { id: guestId };
-      if (tenantId != null) guestWhere.tenantId = tenantId;
+      const guestWhere: any = { id: guestId, tenantId };
       const guest = await this.prisma.guest.findFirst({
         where: guestWhere,
       });
@@ -189,8 +187,8 @@ export class BookingsService {
     const data: any = {
       ...createBookingDto,
       totalPrice,
+      tenantId,
     };
-    if (tenantId != null) data.tenantId = tenantId;
 
     const booking = await this.prisma.booking.create({
       data,
@@ -247,10 +245,12 @@ export class BookingsService {
 
     // Update room status to occupied
     if (booking.roomId) {
-      await this.prisma.room.update({
-        where: { id: booking.roomId },
-        data: { status: 'occupied' },
-      }).catch(() => {});
+      await this.prisma.room
+        .update({
+          where: { id: booking.roomId },
+          data: { status: 'occupied' },
+        })
+        .catch(() => {});
     }
 
     return updated;
@@ -274,10 +274,12 @@ export class BookingsService {
 
     // Update room status to cleaning
     if (booking.roomId) {
-      await this.prisma.room.update({
-        where: { id: booking.roomId },
-        data: { status: 'cleaning' },
-      }).catch(() => {});
+      await this.prisma.room
+        .update({
+          where: { id: booking.roomId },
+          data: { status: 'cleaning' },
+        })
+        .catch(() => {});
     }
 
     // Send checkout email (async, non-blocking)
@@ -308,4 +310,3 @@ export class BookingsService {
     return cancelledBooking;
   }
 }
-

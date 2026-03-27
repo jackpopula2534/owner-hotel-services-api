@@ -10,18 +10,22 @@ import {
   UseGuards,
   ForbiddenException,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { TenantsService } from './tenants.service';
+import { TenantsService, TenantWithUserRole } from './tenants.service';
 import { HotelDetailService } from './hotel-detail.service';
 import { HotelManagementService } from './hotel-management.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { CreateHotelDto } from './dto/create-hotel.dto';
 import { HotelListQueryDto } from './dto/hotel-list-response.dto';
+import { CreateCompanyDto } from './dto/create-company.dto';
+import { SwitchTenantDto } from './dto/switch-tenant.dto';
+import { InviteUserDto } from './dto/invite-user.dto';
 
 @ApiTags('tenants')
 @ApiBearerAuth('JWT-auth')
@@ -32,7 +36,99 @@ export class TenantsController {
     private readonly tenantsService: TenantsService,
     private readonly hotelDetailService: HotelDetailService,
     private readonly hotelManagementService: HotelManagementService,
+    private readonly prisma: PrismaService,
   ) {}
+
+  // ===== MULTI-TENANT MANAGEMENT ENDPOINTS =====
+
+  /**
+   * Create an additional company/tenant for the current user
+   * Each company requires its own subscription
+   */
+  @Post('create-company')
+  @Roles('tenant_admin')
+  @ApiOperation({ summary: 'Create an additional company/tenant' })
+  @ApiResponse({
+    status: 201,
+    description: 'Company created successfully',
+  })
+  async createAdditionalTenant(
+    @Body() createCompanyDto: CreateCompanyDto,
+    @CurrentUser() user: { userId: string; email: string },
+  ) {
+    const tenant = await this.tenantsService.createAdditionalTenant(user.userId, createCompanyDto);
+    return {
+      success: true,
+      data: tenant,
+      message: 'Company created successfully. Please purchase a subscription to activate it.',
+    };
+  }
+
+  /**
+   * Get all companies/tenants for the current user
+   */
+  @Get('my-companies')
+  @Roles('tenant_admin', 'admin', 'manager', 'receptionist', 'staff', 'user')
+  @ApiOperation({ summary: 'Get all tenants accessible to the current user' })
+  @ApiResponse({
+    status: 200,
+    description: 'List of tenants with user role',
+  })
+  async getMyCompanies(
+    @CurrentUser() user: { userId: string },
+  ): Promise<{ success: boolean; data: TenantWithUserRole[]; meta: { total: number } }> {
+    const tenants = await this.tenantsService.getUserTenants(user.userId);
+    return {
+      success: true,
+      data: tenants,
+      meta: {
+        total: tenants.length,
+      },
+    };
+  }
+
+  /**
+   * Switch the current user's active tenant
+   */
+  @Post('switch')
+  @Roles('tenant_admin', 'admin', 'manager', 'receptionist', 'staff', 'user')
+  @ApiOperation({ summary: 'Switch the current active tenant' })
+  @ApiResponse({
+    status: 200,
+    description: 'Tenant switched successfully',
+  })
+  async switchTenant(
+    @Body() switchTenantDto: SwitchTenantDto,
+    @CurrentUser() user: { userId: string },
+  ) {
+    const result = await this.tenantsService.switchTenant(user.userId, switchTenantDto.tenantId);
+    return {
+      success: true,
+      data: result,
+    };
+  }
+
+  /**
+   * Invite a user to a tenant
+   */
+  @Post('invite')
+  @Roles('tenant_admin', 'admin')
+  @ApiOperation({ summary: 'Invite a user to a tenant' })
+  @ApiResponse({
+    status: 201,
+    description: 'User invited successfully',
+  })
+  async inviteUserToTenant(
+    @Body() inviteUserDto: InviteUserDto,
+    @CurrentUser() user: { userId: string },
+  ) {
+    const userTenant = await this.tenantsService.inviteUserToTenant(user.userId, inviteUserDto);
+    return {
+      success: true,
+      data: userTenant,
+      message: 'User invited successfully',
+    };
+  }
 
   // ===== HOTEL MANAGEMENT ENDPOINTS (Professional UX/UI) =====
 
@@ -45,13 +141,20 @@ export class TenantsController {
   @Roles('platform_admin', 'tenant_admin')
   createHotel(
     @Body() createHotelDto: CreateHotelDto,
-    @CurrentUser() user: { id?: string; tenantId?: string; role?: string; email?: string },
+    @CurrentUser() user: { userId?: string; tenantId?: string; role?: string; email?: string },
   ) {
-    // For tenant_admin creating their first hotel, pass user info to link the hotel
-    const userContext = user?.role === 'tenant_admin' && !user?.tenantId
-      ? { userId: user.id, userEmail: user.email }
-      : undefined;
+    // Case 1: tenant_admin ที่มี tenantId แล้ว → เพิ่ม Property ใน Tenant เดิม (ไม่สร้าง Tenant ใหม่)
+    if (user?.role === 'tenant_admin' && user?.tenantId) {
+      return this.hotelManagementService.addPropertyToTenant(createHotelDto, user.tenantId);
+    }
 
+    // Case 2: tenant_admin ที่ยังไม่มี tenantId → สร้าง Tenant ใหม่ + link user
+    const userContext =
+      user?.role === 'tenant_admin' && !user?.tenantId
+        ? { userId: user.userId, userEmail: user.email }
+        : undefined;
+
+    // Case 3: platform_admin → สร้าง Tenant ใหม่ให้ลูกค้า
     return this.hotelManagementService.createHotel(createHotelDto, userContext);
   }
 
@@ -67,16 +170,14 @@ export class TenantsController {
     @Query() query: HotelListQueryDto,
     @CurrentUser() user: { tenantId?: string; role?: string },
   ) {
-    // For platform_admin, return all hotels without tenant filtering
+    // For platform_admin, return all tenants as hotels
     if (user?.role === 'platform_admin') {
       return this.hotelManagementService.getHotelList(query);
     }
 
-    // For other roles, they MUST be filtered by their own tenantId.
-    // If a user doesn't have a tenantId yet (e.g., brand new user), 
-    // they should see 0 hotels. Using a dummy UUID for filtering ensures 0 results.
-    const tenantIdFilter = user?.tenantId || '00000000-0000-0000-0000-000000000000';
-    return this.hotelManagementService.getHotelList(query, tenantIdFilter);
+    // For tenant users, list properties under their tenant (1 tenant = N properties)
+    const tenantId = user?.tenantId || '00000000-0000-0000-0000-000000000000';
+    return this.hotelManagementService.getPropertyListForTenant(query, tenantId);
   }
 
   /**
@@ -87,21 +188,33 @@ export class TenantsController {
    */
   @Get('hotels/:id')
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'receptionist', 'staff', 'user')
-  getHotelDetail(
+  async getHotelDetail(
     @Param('id') id: string,
-    @CurrentUser() user: { tenantId?: string; role?: string },
+    @CurrentUser() user: { userId?: string; tenantId?: string; role?: string },
   ) {
     // For platform-admin users, they can look at any hotel
     if (user?.role === 'platform_admin') {
       return this.hotelDetailService.getHotelDetail(id);
     }
-    
-    // For non-platform-admin users, they MUST have a tenantId AND it must match the requested ID
+
+    // Check 1: user.tenantId matches the requested hotel (active tenant)
     if (user?.tenantId && user.tenantId === id) {
       return this.hotelDetailService.getHotelDetail(id);
     }
-    
-    throw new ForbiddenException('คุณไม่มีสิทธิ์เข้าถึงข้อมูลของโรงแรมนี้ (Unauthorized access to this hotel)');
+
+    // Check 2: Multi-tenant support — user might belong to this tenant via user_tenants table
+    if (user?.userId) {
+      const userTenant = await this.prisma.userTenant.findFirst({
+        where: { userId: user.userId, tenantId: id },
+      });
+      if (userTenant) {
+        return this.hotelDetailService.getHotelDetail(id);
+      }
+    }
+
+    throw new ForbiddenException(
+      'คุณไม่มีสิทธิ์เข้าถึงข้อมูลของโรงแรมนี้ (Unauthorized access to this hotel)',
+    );
   }
 
   // ===== LEGACY ENDPOINTS =====
@@ -114,8 +227,12 @@ export class TenantsController {
 
   @Get()
   @Roles('platform_admin', 'tenant_admin', 'manager', 'receptionist', 'staff', 'user')
-  findAll() {
-    return this.tenantsService.findAll();
+  findAll(@CurrentUser() user: { tenantId?: string; role?: string }) {
+    // Platform admin เห็นทั้งหมด, คนอื่นเห็นแค่ tenant ตัวเอง
+    if (user?.role === 'platform_admin') {
+      return this.tenantsService.findAll();
+    }
+    return this.tenantsService.findAll(user?.tenantId);
   }
 
   /**
@@ -123,13 +240,24 @@ export class TenantsController {
    */
   @Get(':id/detail')
   @Roles('platform_admin', 'tenant_admin', 'manager', 'receptionist', 'staff', 'user')
-  getHotelDetailLegacy(@Param('id') id: string) {
+  getHotelDetailLegacy(
+    @Param('id') id: string,
+    @CurrentUser() user: { tenantId?: string; role?: string },
+  ) {
+    // Platform admin ดูได้ทุก tenant, คนอื่นดูได้แค่ tenant ตัวเอง
+    if (user?.role !== 'platform_admin' && user?.tenantId !== id) {
+      throw new ForbiddenException('คุณไม่มีสิทธิ์เข้าถึงข้อมูลของโรงแรมนี้');
+    }
     return this.hotelDetailService.getHotelDetail(id);
   }
 
   @Get(':id')
   @Roles('platform_admin', 'tenant_admin', 'manager', 'receptionist', 'staff', 'user')
-  findOne(@Param('id') id: string) {
+  findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string; role?: string }) {
+    // Platform admin ดูได้ทุก tenant, คนอื่นดูได้แค่ tenant ตัวเอง
+    if (user?.role !== 'platform_admin' && user?.tenantId !== id) {
+      throw new ForbiddenException('คุณไม่มีสิทธิ์เข้าถึงข้อมูลของ tenant นี้');
+    }
     return this.tenantsService.findOne(id);
   }
 
@@ -145,5 +273,3 @@ export class TenantsController {
     return this.tenantsService.remove(id);
   }
 }
-
-

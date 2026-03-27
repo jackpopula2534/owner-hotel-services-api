@@ -37,9 +37,11 @@ export class EmailEventsService {
       }
 
       // Get property details for hotel name
-      const property = booking.property || await this.prisma.property.findUnique({
-        where: { id: booking.propertyId },
-      });
+      const property =
+        booking.property ||
+        (await this.prisma.property.findUnique({
+          where: { id: booking.propertyId },
+        }));
 
       await this.emailService.sendBookingConfirmation({
         to: booking.guestEmail,
@@ -68,9 +70,11 @@ export class EmailEventsService {
         return;
       }
 
-      const property = booking.property || await this.prisma.property.findUnique({
-        where: { id: booking.propertyId },
-      });
+      const property =
+        booking.property ||
+        (await this.prisma.property.findUnique({
+          where: { id: booking.propertyId },
+        }));
 
       await this.emailService.sendCancellationEmail({
         to: booking.guestEmail,
@@ -91,11 +95,7 @@ export class EmailEventsService {
   /**
    * Send password reset email
    */
-  async onPasswordResetRequested(
-    email: string,
-    token: string,
-    userName: string,
-  ): Promise<void> {
+  async onPasswordResetRequested(email: string, token: string, userName: string): Promise<void> {
     try {
       const frontendUrl = this.configService.get('FRONTEND_URL', 'http://localhost:3000');
       const resetLink = `${frontendUrl}/reset-password?token=${token}`;
@@ -115,7 +115,11 @@ export class EmailEventsService {
   /**
    * Send welcome email after registration
    */
-  async onUserRegistered(user: { email: string; firstName?: string; lastName?: string }): Promise<void> {
+  async onUserRegistered(user: {
+    email: string;
+    firstName?: string;
+    lastName?: string;
+  }): Promise<void> {
     try {
       const frontendUrl = this.configService.get('FRONTEND_URL', 'http://localhost:3000');
 

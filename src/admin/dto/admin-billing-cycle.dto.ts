@@ -169,7 +169,16 @@ export class BillingHistoryItemDto {
   id: string;
 
   @ApiProperty({
-    enum: ['created', 'renewed', 'upgraded', 'downgraded', 'cycle_changed', 'cancelled', 'reactivated', 'expired'],
+    enum: [
+      'created',
+      'renewed',
+      'upgraded',
+      'downgraded',
+      'cycle_changed',
+      'cancelled',
+      'reactivated',
+      'expired',
+    ],
   })
   eventType: string;
 

@@ -1,17 +1,5 @@
-import {
-  Controller,
-  Get,
-  Post,
-  UseGuards,
-  HttpCode,
-  HttpStatus,
-} from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiBearerAuth,
-} from '@nestjs/swagger';
+import { Controller, Get, Post, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { QueryPerformanceService } from './query-performance.service';
 
@@ -20,9 +8,7 @@ import { QueryPerformanceService } from './query-performance.service';
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class DatabaseOptimizationController {
-  constructor(
-    private readonly queryPerformanceService: QueryPerformanceService,
-  ) {}
+  constructor(private readonly queryPerformanceService: QueryPerformanceService) {}
 
   /**
    * Get slow query report
@@ -39,7 +25,10 @@ export class DatabaseOptimizationController {
    */
   @Get('query-patterns')
   @ApiOperation({ summary: 'Analyze query patterns and get recommendations' })
-  @ApiResponse({ status: 200, description: 'Returns query patterns and optimization recommendations' })
+  @ApiResponse({
+    status: 200,
+    description: 'Returns query patterns and optimization recommendations',
+  })
   async analyzeQueryPatterns() {
     return this.queryPerformanceService.analyzeQueryPatterns();
   }

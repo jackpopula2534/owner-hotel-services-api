@@ -39,9 +39,3 @@ export class RegisterDto {
   @IsOptional()
   hotelPhone?: string;
 }
-
-
-
-
-
-

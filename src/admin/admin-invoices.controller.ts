@@ -8,13 +8,7 @@ import {
   UseGuards,
   ParseUUIDPipe,
 } from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiBearerAuth,
-  ApiParam,
-} from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -54,9 +48,7 @@ export class AdminInvoicesController {
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - requires platform_admin role' })
-  async findAll(
-    @Query() query: AdminInvoicesQueryDto,
-  ): Promise<AdminInvoicesListResponseDto> {
+  async findAll(@Query() query: AdminInvoicesQueryDto): Promise<AdminInvoicesListResponseDto> {
     return this.adminInvoicesService.findAll(query);
   }
 
@@ -67,8 +59,7 @@ export class AdminInvoicesController {
   @Get('summary')
   @ApiOperation({
     summary: 'Get invoices summary',
-    description:
-      'Retrieve summary counts of invoices grouped by status (Pending, Paid, Rejected)',
+    description: 'Retrieve summary counts of invoices grouped by status (Pending, Paid, Rejected)',
   })
   @ApiResponse({
     status: 200,
@@ -99,9 +90,7 @@ export class AdminInvoicesController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - requires platform_admin role' })
   @ApiResponse({ status: 404, description: 'Invoice not found' })
-  async findOne(
-    @Param('id', ParseUUIDPipe) id: string,
-  ): Promise<AdminInvoiceDetailDto> {
+  async findOne(@Param('id', ParseUUIDPipe) id: string): Promise<AdminInvoiceDetailDto> {
     return this.adminInvoicesService.findOne(id);
   }
 

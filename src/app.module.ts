@@ -55,7 +55,7 @@ import { HealthModule } from './health/health.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      validate,          // throws at startup if any required env var is missing
+      validate, // throws at startup if any required env var is missing
     }),
     PrismaModule,
     AuthModule,
@@ -119,4 +119,3 @@ import { HealthModule } from './health/health.module';
   ],
 })
 export class AppModule {}
-

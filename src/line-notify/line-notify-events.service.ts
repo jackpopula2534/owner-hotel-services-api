@@ -27,10 +27,7 @@ export class LineNotifyEventsService {
       totalAmount: number;
     },
   ): Promise<void> {
-    const message = this.formatBookingMessage(
-      '🔔 การจองใหม่ / New Booking',
-      bookingData,
-    );
+    const message = this.formatBookingMessage('🔔 การจองใหม่ / New Booking', bookingData);
 
     await this.lineNotifyService.sendEventNotification(
       tenantId,
@@ -53,10 +50,7 @@ export class LineNotifyEventsService {
       totalAmount: number;
     },
   ): Promise<void> {
-    const message = this.formatBookingMessage(
-      '✅ ยืนยันการจอง / Booking Confirmed',
-      bookingData,
-    );
+    const message = this.formatBookingMessage('✅ ยืนยันการจอง / Booking Confirmed', bookingData);
 
     await this.lineNotifyService.sendEventNotification(
       tenantId,
@@ -283,48 +277,44 @@ ${data.message}`;
     for (const tenant of tenants) {
       try {
         // Get today's statistics
-        const [
-          todayBookings,
-          todayCheckIns,
-          todayCheckOuts,
-          todayRevenue,
-          tomorrowCheckIns,
-        ] = await Promise.all([
-          this.prisma.booking.count({
-            where: {
-              tenantId: tenant.id,
-              createdAt: { gte: today, lt: tomorrow },
-            },
-          }),
-          this.prisma.booking.count({
-            where: {
-              tenantId: tenant.id,
-              checkIn: { gte: today, lt: tomorrow },
-              status: 'checked_in',
-            },
-          }),
-          this.prisma.booking.count({
-            where: {
-              tenantId: tenant.id,
-              checkOut: { gte: today, lt: tomorrow },
-              status: 'checked_out',
-            },
-          }),
-          this.prisma.payments.aggregate({
-            where: {
-              created_at: { gte: today, lt: tomorrow },
-              status: 'approved',
-            },
-            _sum: { amount: true },
-          }),
-          this.prisma.booking.count({
-            where: {
-              tenantId: tenant.id,
-              checkIn: { gte: tomorrow, lt: new Date(tomorrow.getTime() + 86400000) },
-              status: { in: ['confirmed', 'pending'] },
-            },
-          }),
-        ]);
+        const [todayBookings, todayCheckIns, todayCheckOuts, todayRevenue, tomorrowCheckIns] =
+          await Promise.all([
+            this.prisma.booking.count({
+              where: {
+                tenantId: tenant.id,
+                createdAt: { gte: today, lt: tomorrow },
+              },
+            }),
+            this.prisma.booking.count({
+              where: {
+                tenantId: tenant.id,
+                checkIn: { gte: today, lt: tomorrow },
+                status: 'checked_in',
+              },
+            }),
+            this.prisma.booking.count({
+              where: {
+                tenantId: tenant.id,
+                checkOut: { gte: today, lt: tomorrow },
+                status: 'checked_out',
+              },
+            }),
+            this.prisma.payments.aggregate({
+              where: {
+                tenant_id: tenant.id,
+                created_at: { gte: today, lt: tomorrow },
+                status: 'approved',
+              },
+              _sum: { amount: true },
+            }),
+            this.prisma.booking.count({
+              where: {
+                tenantId: tenant.id,
+                checkIn: { gte: tomorrow, lt: new Date(tomorrow.getTime() + 86400000) },
+                status: { in: ['confirmed', 'pending'] },
+              },
+            }),
+          ]);
 
         const revenue = todayRevenue._sum.amount || 0;
 

@@ -25,35 +25,32 @@ import { PrismaModule } from '../prisma/prisma.module';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         type: 'mysql',
-        host:     config.get<string>('DB_HOST',     'localhost'),
+        host: config.get<string>('DB_HOST', 'localhost'),
         // parseInt is mandatory — env vars are always strings; ConfigService
         // generic <number> is a TypeScript hint only, NOT a runtime coercion.
-        port:     parseInt(config.get<string>('DB_PORT', '3306'), 10),
+        port: parseInt(config.get<string>('DB_PORT', '3306'), 10),
         username: config.get<string>('DB_USERNAME', 'root'),
         password: config.get<string>('DB_PASSWORD', 'root'),
         database: config.get<string>('DB_DATABASE', 'hotel_services_db'),
 
         autoLoadEntities: true,
-        synchronize:      false,
-        charset:          'utf8mb4',
-        timezone:         '+07:00',
+        synchronize: false,
+        charset: 'utf8mb4',
+        timezone: '+07:00',
 
         // Retry logic — essential in Docker Compose where MySQL starts slowly
         retryAttempts: 10,
-        retryDelay:    3_000, // ms between retries
+        retryDelay: 3_000, // ms between retries
 
         // SQL query logging — verbose in dev, errors-only in production
-        logging:
-          config.get<string>('NODE_ENV') === 'development'
-            ? ['error', 'warn']
-            : ['error'],
+        logging: config.get<string>('NODE_ENV') === 'development' ? ['error', 'warn'] : ['error'],
 
         // MySQL2 connection pool settings
         extra: {
-          connectionLimit:    20,   // max simultaneous connections
+          connectionLimit: 20, // max simultaneous connections
           waitForConnections: true, // queue requests when pool is full
-          queueLimit:         0,    // 0 = unlimited queue depth
-          connectTimeout:     10_000, // ms before connection attempt times out
+          queueLimit: 0, // 0 = unlimited queue depth
+          connectTimeout: 10_000, // ms before connection attempt times out
         },
       }),
     }),

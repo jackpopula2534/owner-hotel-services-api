@@ -79,7 +79,9 @@ export class ReportsService {
   /**
    * Export to Excel (XLSX) using exceljs
    */
-  private async exportToExcel(dto: ExportRequestDto): Promise<{ buffer: Buffer; filename: string }> {
+  private async exportToExcel(
+    dto: ExportRequestDto,
+  ): Promise<{ buffer: Buffer; filename: string }> {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet(dto.sheetName || 'Sheet1');
 
@@ -211,7 +213,10 @@ export class ReportsService {
         y = doc.y;
 
         // Draw header line
-        doc.moveTo(50, y).lineTo(doc.page.width - 50, y).stroke();
+        doc
+          .moveTo(50, y)
+          .lineTo(doc.page.width - 50, y)
+          .stroke();
         doc.moveDown(0.5);
 
         // Table rows
@@ -244,11 +249,9 @@ export class ReportsService {
         const pages = doc.bufferedPageRange();
         for (let i = 0; i < pages.count; i++) {
           doc.switchToPage(i);
-          doc
-            .fontSize(8)
-            .text(`Page ${i + 1} of ${pages.count}`, 50, doc.page.height - 50, {
-              align: 'center',
-            });
+          doc.fontSize(8).text(`Page ${i + 1} of ${pages.count}`, 50, doc.page.height - 50, {
+            align: 'center',
+          });
         }
 
         doc.end();
@@ -302,6 +305,10 @@ export class ReportsService {
     query: RevenueReportQueryDto,
     tenantId?: string,
   ): Promise<RevenueReportResponseDto> {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
     const startDate = new Date(query.startDate);
     const endDate = new Date(query.endDate);
 
@@ -312,12 +319,9 @@ export class ReportsService {
 
     // Base query conditions
     const baseWhere: any = {
+      tenantId,
       status: { in: ['confirmed', 'checked_in', 'checked_out', 'completed'] },
     };
-
-    if (tenantId) {
-      baseWhere.tenantId = tenantId;
-    }
 
     if (query.propertyId) {
       baseWhere.propertyId = query.propertyId;
@@ -344,21 +348,15 @@ export class ReportsService {
     });
 
     // Calculate totals
-    const totalRevenue = currentBookings.reduce(
-      (sum, b) => sum + Number(b.totalPrice),
-      0,
-    );
+    const totalRevenue = currentBookings.reduce((sum, b) => sum + Number(b.totalPrice), 0);
     const totalBookings = currentBookings.length;
 
-    const prevRevenue = previousBookings.reduce(
-      (sum, b) => sum + Number(b.totalPrice),
-      0,
-    );
+    const prevRevenue = previousBookings.reduce((sum, b) => sum + Number(b.totalPrice), 0);
     const prevBookings = previousBookings.length;
 
     // Calculate room count for RevPAR
     const roomCount = await this.prisma.room.count({
-      where: tenantId ? { tenantId } : undefined,
+      where: { tenantId },
     });
 
     const days = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) || 1;
@@ -369,7 +367,12 @@ export class ReportsService {
     const revpar = availableRoomNights > 0 ? totalRevenue / availableRoomNights : 0;
 
     // Generate trend data
-    const trend = this.generateRevenueTrend(currentBookings, startDate, endDate, query.groupBy || 'day');
+    const trend = this.generateRevenueTrend(
+      currentBookings,
+      startDate,
+      endDate,
+      query.groupBy || 'day',
+    );
 
     // Build response
     const response: RevenueReportResponseDto = {
@@ -382,13 +385,15 @@ export class ReportsService {
       trend,
       comparison: {
         revenueChange: totalRevenue - prevRevenue,
-        revenueChangePercent: prevRevenue > 0
-          ? Math.round(((totalRevenue - prevRevenue) / prevRevenue) * 100 * 100) / 100
-          : 0,
+        revenueChangePercent:
+          prevRevenue > 0
+            ? Math.round(((totalRevenue - prevRevenue) / prevRevenue) * 100 * 100) / 100
+            : 0,
         bookingsChange: totalBookings - prevBookings,
-        bookingsChangePercent: prevBookings > 0
-          ? Math.round(((totalBookings - prevBookings) / prevBookings) * 100 * 100) / 100
-          : 0,
+        bookingsChangePercent:
+          prevBookings > 0
+            ? Math.round(((totalBookings - prevBookings) / prevBookings) * 100 * 100) / 100
+            : 0,
       },
     };
 
@@ -488,9 +493,8 @@ export class ReportsService {
       roomType,
       revenue: data.revenue,
       bookings: data.count,
-      percentage: totalRevenue > 0
-        ? Math.round((data.revenue / totalRevenue) * 100 * 100) / 100
-        : 0,
+      percentage:
+        totalRevenue > 0 ? Math.round((data.revenue / totalRevenue) * 100 * 100) / 100 : 0,
     }));
   }
 
@@ -512,9 +516,8 @@ export class ReportsService {
       channel,
       revenue: data.revenue,
       bookings: data.count,
-      percentage: totalRevenue > 0
-        ? Math.round((data.revenue / totalRevenue) * 100 * 100) / 100
-        : 0,
+      percentage:
+        totalRevenue > 0 ? Math.round((data.revenue / totalRevenue) * 100 * 100) / 100 : 0,
     }));
   }
 
@@ -529,6 +532,10 @@ export class ReportsService {
     query: OccupancyReportQueryDto,
     tenantId?: string,
   ): Promise<OccupancyReportResponseDto> {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
     const startDate = new Date(query.startDate);
     const endDate = new Date(query.endDate);
 
@@ -538,15 +545,11 @@ export class ReportsService {
     const prevEndDate = new Date(startDate.getTime() - 1);
 
     // Base query conditions
-    const roomWhere: any = {};
+    const roomWhere: any = { tenantId };
     const bookingWhere: any = {
+      tenantId,
       status: { in: ['confirmed', 'checked_in', 'checked_out', 'completed'] },
     };
-
-    if (tenantId) {
-      roomWhere.tenantId = tenantId;
-      bookingWhere.tenantId = tenantId;
-    }
 
     if (query.propertyId) {
       roomWhere.propertyId = query.propertyId;
@@ -594,9 +597,10 @@ export class ReportsService {
     const prevRoomNightsSold = this.calculateRoomNights(prevBookings, prevStartDate, prevEndDate);
 
     // Calculate occupancy rate
-    const averageOccupancy = availableRoomNights > 0
-      ? Math.round((roomNightsSold / availableRoomNights) * 100 * 100) / 100
-      : 0;
+    const averageOccupancy =
+      availableRoomNights > 0
+        ? Math.round((roomNightsSold / availableRoomNights) * 100 * 100) / 100
+        : 0;
 
     // Generate trend data
     const trend = this.generateOccupancyTrend(
@@ -627,14 +631,18 @@ export class ReportsService {
       currentStatus,
       trend,
       comparison: {
-        occupancyChange: averageOccupancy - (prevRoomNightsSold / availableRoomNights * 100 || 0),
-        occupancyChangePercent: prevRoomNightsSold > 0
-          ? Math.round(((roomNightsSold - prevRoomNightsSold) / prevRoomNightsSold) * 100 * 100) / 100
-          : 0,
+        occupancyChange: averageOccupancy - ((prevRoomNightsSold / availableRoomNights) * 100 || 0),
+        occupancyChangePercent:
+          prevRoomNightsSold > 0
+            ? Math.round(((roomNightsSold - prevRoomNightsSold) / prevRoomNightsSold) * 100 * 100) /
+              100
+            : 0,
         roomNightsChange: roomNightsSold - prevRoomNightsSold,
-        roomNightsChangePercent: prevRoomNightsSold > 0
-          ? Math.round(((roomNightsSold - prevRoomNightsSold) / prevRoomNightsSold) * 100 * 100) / 100
-          : 0,
+        roomNightsChangePercent:
+          prevRoomNightsSold > 0
+            ? Math.round(((roomNightsSold - prevRoomNightsSold) / prevRoomNightsSold) * 100 * 100) /
+              100
+            : 0,
       },
     };
 
@@ -740,9 +748,8 @@ export class ReportsService {
       if (!trend.find((t) => t.date === key)) {
         trend.push({
           date: key,
-          occupancyRate: totalRooms > 0
-            ? Math.round((occupiedRooms / totalRooms) * 100 * 100) / 100
-            : 0,
+          occupancyRate:
+            totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100 * 100) / 100 : 0,
           occupiedRooms,
           totalRooms,
           checkIns,
@@ -786,9 +793,8 @@ export class ReportsService {
 
     return Array.from(byType.entries()).map(([roomType, data]) => ({
       roomType,
-      occupancyRate: data.total > 0
-        ? Math.round((data.occupied / (data.total * days)) * 100 * 100) / 100
-        : 0,
+      occupancyRate:
+        data.total > 0 ? Math.round((data.occupied / (data.total * days)) * 100 * 100) / 100 : 0,
       occupiedRooms: data.occupied,
       totalRooms: data.total,
     }));

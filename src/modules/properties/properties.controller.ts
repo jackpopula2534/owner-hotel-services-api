@@ -33,7 +33,7 @@ export class PropertiesController {
   async findAll(@Query() query: any, @CurrentUser() user: { tenantId?: string }) {
     if (!user?.tenantId) {
       throw new BadRequestException(
-        'No tenant found. Please complete the onboarding process first to set up your hotel.'
+        'No tenant found. Please complete the onboarding process first to set up your hotel.',
       );
     }
     return this.propertiesService.findAll(query, user.tenantId);
@@ -47,7 +47,7 @@ export class PropertiesController {
   async findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     if (!user?.tenantId) {
       throw new BadRequestException(
-        'No tenant found. Please complete the onboarding process first to set up your hotel.'
+        'No tenant found. Please complete the onboarding process first to set up your hotel.',
       );
     }
     return this.propertiesService.findOne(id, user.tenantId);
@@ -63,7 +63,7 @@ export class PropertiesController {
   ) {
     if (!user?.tenantId) {
       throw new BadRequestException(
-        'No tenant found. Please complete the onboarding process first to set up your hotel.'
+        'No tenant found. Please complete the onboarding process first to set up your hotel.',
       );
     }
     return this.propertiesService.create(createPropertyDto, user.tenantId);
@@ -80,7 +80,7 @@ export class PropertiesController {
   ) {
     if (!user?.tenantId) {
       throw new BadRequestException(
-        'No tenant found. Please complete the onboarding process first to set up your hotel.'
+        'No tenant found. Please complete the onboarding process first to set up your hotel.',
       );
     }
     return this.propertiesService.update(id, updatePropertyDto, user.tenantId);
@@ -93,7 +93,7 @@ export class PropertiesController {
   async remove(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     if (!user?.tenantId) {
       throw new BadRequestException(
-        'No tenant found. Please complete the onboarding process first to set up your hotel.'
+        'No tenant found. Please complete the onboarding process first to set up your hotel.',
       );
     }
     return this.propertiesService.remove(id, user.tenantId);

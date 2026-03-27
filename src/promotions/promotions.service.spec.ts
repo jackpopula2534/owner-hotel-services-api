@@ -58,19 +58,14 @@ describe('PromotionsService', () => {
       expect(prisma.promotion.findMany).toHaveBeenCalledWith({
         where: {
           isActive: true,
-          OR: [
-            { targetSegment: 'new_user' },
-            { targetSegment: null },
-          ],
+          OR: [{ targetSegment: 'new_user' }, { targetSegment: null }],
         },
         orderBy: { createdAt: 'desc' },
       });
     });
 
     it('should return all active promotions without segment filter', async () => {
-      const mockPromotions = [
-        { id: '1', title: 'General Promo', isActive: true },
-      ];
+      const mockPromotions = [{ id: '1', title: 'General Promo', isActive: true }];
 
       mockPrismaService.promotion.findMany.mockResolvedValue(mockPromotions);
 

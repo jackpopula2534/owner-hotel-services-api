@@ -58,7 +58,7 @@ export class LineNotifyPreferenceDto {
   @ApiProperty({
     description: 'Event types to receive notifications for',
     enum: LineNotifyEventType,
-    isArray: true
+    isArray: true,
   })
   @IsEnum(LineNotifyEventType, { each: true })
   enabledEvents: LineNotifyEventType[];

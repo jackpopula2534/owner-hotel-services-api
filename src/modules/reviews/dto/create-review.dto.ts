@@ -19,9 +19,3 @@ export class CreateReviewDto {
   @IsOptional()
   comment?: string;
 }
-
-
-
-
-
-

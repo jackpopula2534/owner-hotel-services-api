@@ -27,9 +27,3 @@ export class CreateRestaurantDto {
   @IsOptional()
   capacity?: number;
 }
-
-
-
-
-
-

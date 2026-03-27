@@ -67,5 +67,4 @@ export class Payment {
   @ManyToOne(() => Invoice, (invoice) => invoice.payments)
   @JoinColumn({ name: 'invoice_id' })
   invoice: Invoice;
-
 }

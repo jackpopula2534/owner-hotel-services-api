@@ -8,28 +8,18 @@ export class ChannelsService {
   constructor(private prisma: PrismaService) {}
 
   async findAll(query: any, tenantId?: string) {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
     const { page = 1, limit = 10, type, isActive, search } = query;
     const skip = (page - 1) * limit;
 
-    // ถ้าไม่มี tenantId (user ใหม่ยังไม่มีโรงแรม) ให้ return empty data
-    if (!tenantId) {
-      return {
-        data: [],
-        total: 0,
-        page: parseInt(page),
-        limit: parseInt(limit),
-      };
-    }
-
-    const where: any = {};
-    if (tenantId != null) where.tenantId = tenantId;
+    const where: any = { tenantId };
     if (type) where.type = type;
     if (isActive !== undefined) where.isActive = isActive === 'true';
     if (search) {
-      where.OR = [
-        { name: { contains: search } },
-        { code: { contains: search } },
-      ];
+      where.OR = [{ name: { contains: search } }, { code: { contains: search } }];
     }
 
     const [data, total] = await Promise.all([
@@ -57,8 +47,11 @@ export class ChannelsService {
   }
 
   async findOne(id: string, tenantId?: string) {
-    const where: any = { id };
-    if (tenantId != null) where.tenantId = tenantId;
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
+    const where: any = { id, tenantId };
 
     const channel = await this.prisma.channel.findFirst({
       where,
@@ -87,9 +80,7 @@ export class ChannelsService {
     });
 
     if (existingChannel) {
-      throw new BadRequestException(
-        `Channel with code ${createChannelDto.code} already exists`,
-      );
+      throw new BadRequestException(`Channel with code ${createChannelDto.code} already exists`);
     }
 
     const data: any = { ...createChannelDto };
@@ -108,9 +99,7 @@ export class ChannelsService {
         where: { ...scope, code: updateChannelDto.code },
       });
       if (existingChannel && existingChannel.id !== id) {
-        throw new BadRequestException(
-          `Channel with code ${updateChannelDto.code} already exists`,
-        );
+        throw new BadRequestException(`Channel with code ${updateChannelDto.code} already exists`);
       }
     }
 
@@ -124,7 +113,7 @@ export class ChannelsService {
     await this.findOne(id, tenantId);
 
     const bookingsCount = await this.prisma.booking.count({
-      where: { channelId: id },
+      where: { channelId: id, tenantId },
     });
 
     if (bookingsCount > 0) {
@@ -168,4 +157,3 @@ export class ChannelsService {
     });
   }
 }
-

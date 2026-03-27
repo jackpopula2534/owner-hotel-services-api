@@ -2,7 +2,10 @@ import { Injectable, NotFoundException, BadRequestException, Logger } from '@nes
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { SubscriptionFeature } from '../subscription-features/entities/subscription-feature.entity';
-import { SubscriptionFeatureLogs, FeatureLogAction } from '../subscription-features/entities/subscription-feature-log.entity';
+import {
+  SubscriptionFeatureLogs,
+  FeatureLogAction,
+} from '../subscription-features/entities/subscription-feature-log.entity';
 import { Subscription } from '../subscriptions/entities/subscription.entity';
 import { Feature } from '../features/entities/feature.entity';
 import { Invoice, InvoiceStatus } from '../invoices/entities/invoice.entity';
@@ -71,7 +74,8 @@ export class AdminSubscriptionFeaturesService {
 
     return {
       subscriptionUuid: subscription.id,
-      subscriptionCode: subscription.subscriptionCode || `SUB-${subscription.id.slice(0, 3).toUpperCase()}`,
+      subscriptionCode:
+        subscription.subscriptionCode || `SUB-${subscription.id.slice(0, 3).toUpperCase()}`,
       hotelName: subscription.tenant?.name || 'N/A',
       planName: subscription.plan?.name || 'No Plan',
       planPrice,
@@ -182,11 +186,7 @@ export class AdminSubscriptionFeaturesService {
     const createCredit = dto.createCredit !== false; // Default to true
 
     if (createCredit) {
-      creditAmount = this.calculateProration(
-        feature.subscription,
-        price,
-        dto.effectiveDate,
-      );
+      creditAmount = this.calculateProration(feature.subscription, price, dto.effectiveDate);
     }
 
     // Mark as inactive (soft delete)
@@ -436,9 +436,7 @@ export class AdminSubscriptionFeaturesService {
     const effective = effectiveDate ? new Date(effectiveDate) : new Date();
 
     // Total days in billing cycle
-    const totalDays = Math.ceil(
-      (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24),
-    );
+    const totalDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
 
     // Remaining days from effective date to end date
     const remainingDays = Math.max(

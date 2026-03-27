@@ -89,5 +89,3 @@ export class Tenant {
   @OneToMany(() => Invoice, (invoice) => invoice.tenant)
   invoices: Invoice[];
 }
-
-

@@ -1,10 +1,4 @@
-import {
-  Injectable,
-  NestInterceptor,
-  ExecutionContext,
-  CallHandler,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, NestInterceptor, ExecutionContext, CallHandler, Logger } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
 
@@ -23,9 +17,7 @@ export class QueryLoggingInterceptor implements NestInterceptor {
 
         // Log slow API endpoints (which may indicate slow queries)
         if (duration > 500) {
-          this.logger.warn(
-            `Slow endpoint: ${method} ${url} - ${duration}ms`,
-          );
+          this.logger.warn(`Slow endpoint: ${method} ${url} - ${duration}ms`);
         }
       }),
     );

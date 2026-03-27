@@ -95,9 +95,7 @@ export class PropertiesService {
     });
 
     if (existing) {
-      throw new BadRequestException(
-        `Property with code ${createPropertyDto.code} already exists`,
-      );
+      throw new BadRequestException(`Property with code ${createPropertyDto.code} already exists`);
     }
 
     const data: any = { ...createPropertyDto, tenantId };
@@ -149,10 +147,7 @@ export class PropertiesService {
     });
 
     // Add quantity from add-ons to max properties
-    const addOnProperties = propertyAddOns.reduce(
-      (sum, addon) => sum + (addon.quantity || 0),
-      0,
-    );
+    const addOnProperties = propertyAddOns.reduce((sum, addon) => sum + (addon.quantity || 0), 0);
     maxProperties += addOnProperties;
 
     // Check if limit is reached
@@ -161,9 +156,7 @@ export class PropertiesService {
         `Property limit reached. Your current plan allows ${plan.max_properties} ${
           plan.max_properties === 1 ? 'property' : 'properties'
         }${
-          addOnProperties > 0
-            ? ` + ${addOnProperties} from add-ons (total: ${maxProperties})`
-            : ''
+          addOnProperties > 0 ? ` + ${addOnProperties} from add-ons (total: ${maxProperties})` : ''
         }. Please upgrade your plan or purchase additional property add-ons.`,
       );
     }
@@ -205,9 +198,9 @@ export class PropertiesService {
 
     await this.findOne(id, tenantId);
 
-    // Check for active rooms
+    // Check for active rooms (ต้องกรอง tenantId ด้วยเพื่อ tenant isolation)
     const roomCount = await this.prisma.room.count({
-      where: { propertyId: id },
+      where: { propertyId: id, tenantId },
     });
 
     if (roomCount > 0) {

@@ -29,7 +29,16 @@ export class RestaurantController {
   @Get()
   @ApiOperation({ summary: 'Get all restaurants' })
   @ApiResponse({ status: 200, description: 'List of restaurants' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'waiter', 'receptionist', 'staff')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'chef',
+    'waiter',
+    'receptionist',
+    'staff',
+  )
   async findAll(@Query() query: any, @CurrentUser() user: { tenantId?: string }) {
     return this.restaurantService.findAll(query, user?.tenantId);
   }
@@ -38,7 +47,16 @@ export class RestaurantController {
   @ApiOperation({ summary: 'Get restaurant by ID' })
   @ApiResponse({ status: 200, description: 'Restaurant details' })
   @ApiResponse({ status: 404, description: 'Restaurant not found' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'waiter', 'receptionist', 'staff')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'chef',
+    'waiter',
+    'receptionist',
+    'staff',
+  )
   async findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.restaurantService.findOne(id, user?.tenantId);
   }
@@ -74,4 +92,3 @@ export class RestaurantController {
     return this.restaurantService.remove(id, user?.tenantId);
   }
 }
-

@@ -26,10 +26,7 @@ export class HttpCacheInterceptor implements NestInterceptor {
     private readonly reflector: Reflector,
   ) {}
 
-  async intercept(
-    context: ExecutionContext,
-    next: CallHandler,
-  ): Promise<Observable<any>> {
+  async intercept(context: ExecutionContext, next: CallHandler): Promise<Observable<any>> {
     // Check if caching is disabled for this route
     const noCache = this.reflector.get<boolean>(NO_CACHE, context.getHandler());
     if (noCache) {
@@ -46,9 +43,7 @@ export class HttpCacheInterceptor implements NestInterceptor {
     // Generate cache key
     const customKey = this.reflector.get<string>(CACHE_KEY, context.getHandler());
     const tenantId = request.user?.tenantId || 'public';
-    const cacheKey = customKey
-      ? `${tenantId}:${customKey}`
-      : `${tenantId}:${request.url}`;
+    const cacheKey = customKey ? `${tenantId}:${customKey}` : `${tenantId}:${request.url}`;
 
     // Check cache
     const cachedResponse = await this.cacheService.get(cacheKey);

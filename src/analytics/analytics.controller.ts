@@ -14,11 +14,7 @@ export class AnalyticsController {
     @CurrentUser() user: { userId: string; tenantId: string },
     @Body() createAnalyticsEventDto: CreateAnalyticsEventDto,
   ) {
-    return this.analyticsService.trackEvent(
-      user.userId,
-      user.tenantId,
-      createAnalyticsEventDto,
-    );
+    return this.analyticsService.trackEvent(user.userId, user.tenantId, createAnalyticsEventDto);
   }
 
   @Get('summary')

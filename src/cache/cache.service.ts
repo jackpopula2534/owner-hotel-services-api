@@ -82,11 +82,7 @@ export class CacheService implements OnModuleInit {
   /**
    * Get or set - fetch from cache or execute function and cache result
    */
-  async getOrSet<T>(
-    key: string,
-    fetchFn: () => Promise<T>,
-    config?: CacheConfig,
-  ): Promise<T> {
+  async getOrSet<T>(key: string, fetchFn: () => Promise<T>, config?: CacheConfig): Promise<T> {
     // Try to get from cache
     const cached = await this.get<T>(key, config?.namespace);
     if (cached !== null) {
@@ -110,17 +106,14 @@ export class CacheService implements OnModuleInit {
 // Cache key generators for common resources
 export const CacheKeys = {
   // Room availability
-  roomAvailability: (propertyId: string, date: string) =>
-    `room:availability:${propertyId}:${date}`,
+  roomAvailability: (propertyId: string, date: string) => `room:availability:${propertyId}:${date}`,
 
   // Menu items
   menuItems: (restaurantId: string) => `menu:${restaurantId}`,
 
   // Reports
-  revenueReport: (tenantId: string, period: string) =>
-    `report:revenue:${tenantId}:${period}`,
-  occupancyReport: (tenantId: string, period: string) =>
-    `report:occupancy:${tenantId}:${period}`,
+  revenueReport: (tenantId: string, period: string) => `report:revenue:${tenantId}:${period}`,
+  occupancyReport: (tenantId: string, period: string) => `report:occupancy:${tenantId}:${period}`,
 
   // Guest data
   guest: (guestId: string) => `guest:${guestId}`,

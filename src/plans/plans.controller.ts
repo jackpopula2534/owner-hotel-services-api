@@ -1,26 +1,9 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Body,
-  Patch,
-  Param,
-  Delete,
-} from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiParam,
-} from '@nestjs/swagger';
+import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { PlansService } from './plans.service';
 import { CreatePlanDto } from './dto/create-plan.dto';
 import { UpdatePlanDto } from './dto/update-plan.dto';
-import {
-  PublicPlansListDto,
-  PublicPlanDto,
-  PublicPlanFeatureDto,
-} from './dto/public-plans.dto';
+import { PublicPlansListDto, PublicPlanDto, PublicPlanFeatureDto } from './dto/public-plans.dto';
 
 @ApiTags('Public - Plans (Sales Page)')
 @Controller({ path: 'plans', version: '1' })
@@ -83,9 +66,7 @@ export class PlansController {
       } else if (yearlyDiscountPercent > 0) {
         // Calculate from discount percentage
         const monthlyTotal = priceMonthly * 12;
-        priceYearly = Math.round(
-          monthlyTotal * (1 - yearlyDiscountPercent / 100),
-        );
+        priceYearly = Math.round(monthlyTotal * (1 - yearlyDiscountPercent / 100));
       }
 
       if (priceYearly) {
@@ -109,8 +90,7 @@ export class PlansController {
         highlightColor: plan.highlight_color,
         features: featuresArray,
         buttonText: plan.button_text || 'เริ่มใช้งาน',
-        addOnFeatures:
-          addOnFeatures.length > 0 ? addOnFeatures : undefined,
+        addOnFeatures: addOnFeatures.length > 0 ? addOnFeatures : undefined,
       };
     });
 
@@ -174,9 +154,7 @@ export class PlansController {
       priceYearly = Number(plan.price_yearly);
     } else if (yearlyDiscountPercent > 0) {
       const monthlyTotal = priceMonthly * 12;
-      priceYearly = Math.round(
-        monthlyTotal * (1 - yearlyDiscountPercent / 100),
-      );
+      priceYearly = Math.round(monthlyTotal * (1 - yearlyDiscountPercent / 100));
     }
 
     if (priceYearly) {
@@ -219,5 +197,3 @@ export class PlansController {
     return this.plansService.remove(id);
   }
 }
-
-

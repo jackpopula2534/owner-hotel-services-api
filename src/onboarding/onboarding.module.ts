@@ -7,16 +7,9 @@ import { PlansModule } from '../plans/plans.module';
 import { PrismaModule } from '../prisma/prisma.module';
 
 @Module({
-  imports: [
-    PrismaModule,
-    TenantsModule,
-    SubscriptionsModule,
-    PlansModule,
-  ],
+  imports: [PrismaModule, TenantsModule, SubscriptionsModule, PlansModule],
   controllers: [OnboardingController],
   providers: [OnboardingService],
   exports: [OnboardingService],
 })
 export class OnboardingModule {}
-
-

@@ -38,15 +38,15 @@ import { AdminPlansService } from './admin-plans.service';
   imports: [
     // Each domain module exposes its Repository<Entity> tokens via "exports: [TypeOrmModule]".
     // Importing the module here makes those tokens available to every service in this module.
-    TenantsModule,             // → Repository<Tenant>, Repository<TenantCredit>
-    SubscriptionsModule,       // → Repository<Subscription>, Repository<BillingHistory>
-    InvoicesModule,            // → Repository<Invoice>, Repository<InvoiceAdjustment>
-    InvoiceItemsModule,        // → Repository<InvoiceItem>
-    PaymentsModule,            // → Repository<Payment>, Repository<PaymentRefund>
-    PlansModule,               // → Repository<Plan>
-    FeaturesModule,            // → Repository<Feature>
-    SubscriptionFeaturesModule,// → Repository<SubscriptionFeature>, Repository<SubscriptionFeatureLogs>
-    PrismaModule,              // → PrismaService (used by several admin services for user queries)
+    TenantsModule, // → Repository<Tenant>, Repository<TenantCredit>
+    SubscriptionsModule, // → Repository<Subscription>, Repository<BillingHistory>
+    InvoicesModule, // → Repository<Invoice>, Repository<InvoiceAdjustment>
+    InvoiceItemsModule, // → Repository<InvoiceItem>
+    PaymentsModule, // → Repository<Payment>, Repository<PaymentRefund>
+    PlansModule, // → Repository<Plan>
+    FeaturesModule, // → Repository<Feature>
+    SubscriptionFeaturesModule, // → Repository<SubscriptionFeature>, Repository<SubscriptionFeatureLogs>
+    PrismaModule, // → PrismaService (used by several admin services for user queries)
   ],
   controllers: [
     AdminHotelsController,

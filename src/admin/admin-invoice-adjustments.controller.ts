@@ -1,19 +1,5 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Param,
-  Body,
-  UseGuards,
-} from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiBearerAuth,
-  ApiParam,
-} from '@nestjs/swagger';
+import { Controller, Get, Post, Patch, Param, Body, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -36,9 +22,7 @@ import {
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('platform_admin')
 export class AdminInvoiceAdjustmentsController {
-  constructor(
-    private readonly adminInvoiceAdjustmentsService: AdminInvoiceAdjustmentsService,
-  ) {}
+  constructor(private readonly adminInvoiceAdjustmentsService: AdminInvoiceAdjustmentsService) {}
 
   /**
    * GET /api/v1/admin/invoices/:id/items
@@ -58,9 +42,7 @@ export class AdminInvoiceAdjustmentsController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - requires platform_admin role' })
   @ApiResponse({ status: 404, description: 'Invoice not found' })
-  async getInvoiceWithItems(
-    @Param('id') id: string,
-  ): Promise<InvoiceWithItemsDto> {
+  async getInvoiceWithItems(@Param('id') id: string): Promise<InvoiceWithItemsDto> {
     return this.adminInvoiceAdjustmentsService.getInvoiceWithItems(id);
   }
 
@@ -82,9 +64,7 @@ export class AdminInvoiceAdjustmentsController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - requires platform_admin role' })
   @ApiResponse({ status: 404, description: 'Invoice not found' })
-  async getAdjustments(
-    @Param('id') id: string,
-  ): Promise<InvoiceAdjustmentsListDto> {
+  async getAdjustments(@Param('id') id: string): Promise<InvoiceAdjustmentsListDto> {
     return this.adminInvoiceAdjustmentsService.getAdjustments(id);
   }
 
@@ -149,7 +129,8 @@ export class AdminInvoiceAdjustmentsController {
   @Patch('invoice-items/:id')
   @ApiOperation({
     summary: 'Update invoice item',
-    description: 'Update quantity, price, or description of an invoice line item (pending invoices only)',
+    description:
+      'Update quantity, price, or description of an invoice line item (pending invoices only)',
   })
   @ApiParam({ name: 'id', description: 'Invoice Item ID (UUID)' })
   @ApiResponse({

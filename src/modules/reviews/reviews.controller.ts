@@ -114,4 +114,3 @@ export class ReviewsController {
     return this.reviewsService.remove(id, user?.tenantId);
   }
 }
-

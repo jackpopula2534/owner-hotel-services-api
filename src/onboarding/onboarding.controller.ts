@@ -17,10 +17,7 @@ export class OnboardingController {
     @Body() createTenantDto: CreateTenantDto,
     @Body('trialDays') trialDays?: number,
   ) {
-    return this.onboardingService.registerHotel(
-      createTenantDto,
-      trialDays || 14,
-    );
+    return this.onboardingService.registerHotel(createTenantDto, trialDays || 14);
   }
 
   /**
@@ -48,5 +45,3 @@ export class OnboardingController {
     return this.onboardingService.updateStep(user.tenantId, id, isCompleted);
   }
 }
-
-

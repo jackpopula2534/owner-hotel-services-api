@@ -7,10 +7,7 @@ import { Subscription } from './entities/subscription.entity';
 import { BillingHistory } from './entities/billing-history.entity';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([Subscription, BillingHistory]),
-    PrismaModule,
-  ],
+  imports: [TypeOrmModule.forFeature([Subscription, BillingHistory]), PrismaModule],
   controllers: [SubscriptionsController],
   providers: [SubscriptionsService],
   exports: [

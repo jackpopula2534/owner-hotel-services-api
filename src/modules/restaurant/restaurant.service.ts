@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateRestaurantDto } from './dto/create-restaurant.dto';
 import { UpdateRestaurantDto } from './dto/update-restaurant.dto';
@@ -8,21 +8,14 @@ export class RestaurantService {
   constructor(private prisma: PrismaService) {}
 
   async findAll(query: any, tenantId?: string) {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
     const { page = 1, limit = 10, search } = query;
     const skip = (page - 1) * limit;
 
-    // ถ้าไม่มี tenantId (user ใหม่ยังไม่มีโรงแรม) ให้ return empty data
-    if (!tenantId) {
-      return {
-        data: [],
-        total: 0,
-        page: parseInt(page),
-        limit: parseInt(limit),
-      };
-    }
-
-    const where: any = {};
-    if (tenantId != null) where.tenantId = tenantId;
+    const where: any = { tenantId };
     if (search) {
       where.OR = [
         { name: { contains: search } },
@@ -50,8 +43,11 @@ export class RestaurantService {
   }
 
   async findOne(id: string, tenantId?: string) {
-    const where: any = { id };
-    if (tenantId != null) where.tenantId = tenantId;
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
+    const where: any = { id, tenantId };
 
     const restaurant = await this.prisma.restaurant.findFirst({
       where,
@@ -65,8 +61,11 @@ export class RestaurantService {
   }
 
   async create(createRestaurantDto: CreateRestaurantDto, tenantId?: string) {
-    const data: any = { ...createRestaurantDto };
-    if (tenantId != null) data.tenantId = tenantId;
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
+    const data: any = { ...createRestaurantDto, tenantId };
     return this.prisma.restaurant.create({
       data,
     });
@@ -89,4 +88,3 @@ export class RestaurantService {
     });
   }
 }
-

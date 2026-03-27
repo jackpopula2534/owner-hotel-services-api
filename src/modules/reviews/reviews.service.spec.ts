@@ -1,8 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import {
-  BadRequestException,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ReviewsService } from './reviews.service';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -14,6 +11,7 @@ describe('ReviewsService', () => {
     ({
       review: {
         findMany: jest.fn(),
+        findFirst: jest.fn(),
         count: jest.fn(),
         findUnique: jest.fn(),
         create: jest.fn(),
@@ -24,8 +22,9 @@ describe('ReviewsService', () => {
       },
       booking: {
         findUnique: jest.fn(),
+        findFirst: jest.fn(),
       },
-    } as any);
+    }) as any;
 
   beforeEach(async () => {
     const mockPrisma = createMockPrisma();
@@ -45,6 +44,8 @@ describe('ReviewsService', () => {
     jest.clearAllMocks();
   });
 
+  const testTenantId = 'tenant-1';
+
   it('should be defined', () => {
     expect(service).toBeDefined();
   });
@@ -54,7 +55,7 @@ describe('ReviewsService', () => {
       (prisma.review.findMany as jest.Mock).mockResolvedValue([{ id: '1' }]);
       (prisma.review.count as jest.Mock).mockResolvedValue(1);
 
-      const result = await service.findAll({ page: 1, limit: 10 });
+      const result = await service.findAll({ page: 1, limit: 10 }, testTenantId);
 
       expect(result).toEqual({
         data: [{ id: '1' }],
@@ -67,44 +68,44 @@ describe('ReviewsService', () => {
 
   describe('findOne', () => {
     it('should return a review when found', async () => {
-      (prisma.review.findUnique as jest.Mock).mockResolvedValue({ id: '1' });
+      (prisma.review.findFirst as jest.Mock).mockResolvedValue({ id: '1' });
 
-      const result = await service.findOne('1');
+      const result = await service.findOne('1', testTenantId);
 
       expect(result).toEqual({ id: '1' });
     });
 
     it('should throw NotFoundException when review not found', async () => {
-      (prisma.review.findUnique as jest.Mock).mockResolvedValue(null);
+      (prisma.review.findFirst as jest.Mock).mockResolvedValue(null);
 
-      await expect(service.findOne('1')).rejects.toThrow(NotFoundException);
+      await expect(service.findOne('1', testTenantId)).rejects.toThrow(NotFoundException);
     });
   });
 
   describe('findByBookingId', () => {
     it('should return review for booking', async () => {
-      (prisma.review.findUnique as jest.Mock).mockResolvedValue({ id: '1' });
+      (prisma.review.findFirst as jest.Mock).mockResolvedValue({ id: '1' });
 
-      const result = await service.findByBookingId('booking-1');
+      const result = await service.findByBookingId('booking-1', testTenantId);
 
       expect(result).toEqual({ id: '1' });
     });
 
     it('should throw NotFoundException when no review for booking', async () => {
-      (prisma.review.findUnique as jest.Mock).mockResolvedValue(null);
+      (prisma.review.findFirst as jest.Mock).mockResolvedValue(null);
 
-      await expect(
-        service.findByBookingId('booking-1'),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.findByBookingId('booking-1', testTenantId)).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
   describe('create', () => {
     it('should create review when booking exists and no existing review', async () => {
-      (prisma.booking.findUnique as jest.Mock).mockResolvedValue({
+      (prisma.booking.findFirst as jest.Mock).mockResolvedValue({
         id: 'booking-1',
       });
-      (prisma.review.findUnique as jest.Mock).mockResolvedValue(null);
+      (prisma.review.findFirst as jest.Mock).mockResolvedValue(null);
       (prisma.review.create as jest.Mock).mockResolvedValue({ id: '1' });
 
       const dto = {
@@ -113,51 +114,55 @@ describe('ReviewsService', () => {
         bookingId: 'booking-1',
       } as any;
 
-      const result = await service.create(dto);
+      const result = await service.create(dto, testTenantId);
 
       expect(prisma.review.create).toHaveBeenCalled();
       expect(result).toEqual({ id: '1' });
     });
 
     it('should throw NotFoundException when booking not found', async () => {
-      (prisma.booking.findUnique as jest.Mock).mockResolvedValue(null);
+      (prisma.booking.findFirst as jest.Mock).mockResolvedValue(null);
 
       await expect(
-        service.create({
-          rating: 5,
-          comment: 'Great',
-          bookingId: 'booking-1',
-        } as any),
+        service.create(
+          {
+            rating: 5,
+            comment: 'Great',
+            bookingId: 'booking-1',
+          } as any,
+          testTenantId,
+        ),
       ).rejects.toThrow(NotFoundException);
     });
 
     it('should throw BadRequestException when review already exists for booking', async () => {
-      (prisma.booking.findUnique as jest.Mock).mockResolvedValue({
+      (prisma.booking.findFirst as jest.Mock).mockResolvedValue({
         id: 'booking-1',
       });
-      (prisma.review.findUnique as jest.Mock).mockResolvedValue({ id: '1' });
+      (prisma.review.findFirst as jest.Mock).mockResolvedValue({ id: '1' });
 
       await expect(
-        service.create({
-          rating: 5,
-          comment: 'Great',
-          bookingId: 'booking-1',
-        } as any),
+        service.create(
+          {
+            rating: 5,
+            comment: 'Great',
+            bookingId: 'booking-1',
+          } as any,
+          testTenantId,
+        ),
       ).rejects.toThrow(BadRequestException);
     });
   });
 
   describe('update', () => {
     it('should update review successfully', async () => {
-      jest
-        .spyOn(service, 'findOne')
-        .mockResolvedValue({ id: '1' } as any);
+      jest.spyOn(service, 'findOne').mockResolvedValue({ id: '1' } as any);
       (prisma.review.update as jest.Mock).mockResolvedValue({
         id: '1',
         comment: 'Updated',
       });
 
-      const result = await service.update('1', { comment: 'Updated' } as any);
+      const result = await service.update('1', { comment: 'Updated' } as any, testTenantId);
 
       expect(result).toEqual({ id: '1', comment: 'Updated' });
     });
@@ -165,12 +170,10 @@ describe('ReviewsService', () => {
 
   describe('remove', () => {
     it('should delete review successfully', async () => {
-      jest
-        .spyOn(service, 'findOne')
-        .mockResolvedValue({ id: '1' } as any);
+      jest.spyOn(service, 'findOne').mockResolvedValue({ id: '1' } as any);
       (prisma.review.delete as jest.Mock).mockResolvedValue({ id: '1' });
 
-      const result = await service.remove('1');
+      const result = await service.remove('1', testTenantId);
 
       expect(result).toEqual({ id: '1' });
     });
@@ -187,7 +190,7 @@ describe('ReviewsService', () => {
         { rating: 3, _count: { rating: 1 } },
       ]);
 
-      const result = await service.getStats();
+      const result = await service.getStats(testTenantId);
 
       expect(result.total).toBe(3);
       expect(result.averageRating).toBe(4);
@@ -198,32 +201,32 @@ describe('ReviewsService', () => {
 
   describe('generateQRCode', () => {
     it('should generate QR code when booking exists and no review', async () => {
-      (prisma.booking.findUnique as jest.Mock).mockResolvedValue({
+      (prisma.booking.findFirst as jest.Mock).mockResolvedValue({
         id: 'booking-1',
       });
-      (prisma.review.findUnique as jest.Mock).mockResolvedValue(null);
+      (prisma.review.findFirst as jest.Mock).mockResolvedValue(null);
 
-      const result = await service.generateQRCode('booking-1');
+      const result = await service.generateQRCode('booking-1', testTenantId);
 
       expect(result).toHaveProperty('code');
       expect(result).toHaveProperty('qrCodeUrl');
     });
 
     it('should throw NotFoundException when booking not found', async () => {
-      (prisma.booking.findUnique as jest.Mock).mockResolvedValue(null);
+      (prisma.booking.findFirst as jest.Mock).mockResolvedValue(null);
 
-      await expect(service.generateQRCode('booking-1')).rejects.toThrow(
+      await expect(service.generateQRCode('booking-1', testTenantId)).rejects.toThrow(
         NotFoundException,
       );
     });
 
     it('should throw BadRequestException when review already exists', async () => {
-      (prisma.booking.findUnique as jest.Mock).mockResolvedValue({
+      (prisma.booking.findFirst as jest.Mock).mockResolvedValue({
         id: 'booking-1',
       });
-      (prisma.review.findUnique as jest.Mock).mockResolvedValue({ id: '1' });
+      (prisma.review.findFirst as jest.Mock).mockResolvedValue({ id: '1' });
 
-      await expect(service.generateQRCode('booking-1')).rejects.toThrow(
+      await expect(service.generateQRCode('booking-1', testTenantId)).rejects.toThrow(
         BadRequestException,
       );
     });
@@ -231,17 +234,15 @@ describe('ReviewsService', () => {
 
   describe('findByQRCode', () => {
     it('should throw BadRequestException for invalid format', async () => {
-      await expect(service.findByQRCode('INVALID')).rejects.toThrow(
+      await expect(service.findByQRCode('INVALID', testTenantId)).rejects.toThrow(
         BadRequestException,
       );
     });
 
     it('should return first matching review', async () => {
-      (prisma.review.findMany as jest.Mock).mockResolvedValue([
-        { id: '1' },
-      ]);
+      (prisma.review.findMany as jest.Mock).mockResolvedValue([{ id: '1' }]);
 
-      const result = await service.findByQRCode('REV-BOOKING-XYZ');
+      const result = await service.findByQRCode('REV-BOOKING-XYZ', testTenantId);
 
       expect(result).toEqual({ id: '1' });
     });
@@ -249,13 +250,9 @@ describe('ReviewsService', () => {
     it('should throw NotFoundException when no reviews match', async () => {
       (prisma.review.findMany as jest.Mock).mockResolvedValue([]);
 
-      await expect(
-        service.findByQRCode('REV-BOOKING-XYZ'),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.findByQRCode('REV-BOOKING-XYZ', testTenantId)).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 });
-
-
-
-

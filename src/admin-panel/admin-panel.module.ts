@@ -8,17 +8,9 @@ import { PaymentsModule } from '../payments/payments.module';
 import { FeaturesModule } from '../features/features.module';
 
 @Module({
-  imports: [
-    TenantsModule,
-    SubscriptionsModule,
-    InvoicesModule,
-    PaymentsModule,
-    FeaturesModule,
-  ],
+  imports: [TenantsModule, SubscriptionsModule, InvoicesModule, PaymentsModule, FeaturesModule],
   controllers: [AdminPanelController],
   providers: [AdminPanelService],
   exports: [AdminPanelService],
 })
 export class AdminPanelModule {}
-
-

@@ -58,9 +58,7 @@ export class QueryPerformanceService implements OnModuleInit {
 
     // Log slow queries
     if (duration > this.slowQueryThreshold) {
-      this.logger.warn(
-        `Slow query detected (${duration}ms): ${this.truncateQuery(query)}`,
-      );
+      this.logger.warn(`Slow query detected (${duration}ms): ${this.truncateQuery(query)}`);
     }
   }
 
@@ -68,25 +66,15 @@ export class QueryPerformanceService implements OnModuleInit {
    * Get slow query report
    */
   getSlowQueryReport(): SlowQueryReport {
-    const slowQueries = this.queryMetrics.filter(
-      (m) => m.duration > this.slowQueryThreshold,
-    );
+    const slowQueries = this.queryMetrics.filter((m) => m.duration > this.slowQueryThreshold);
 
-    const totalDuration = this.queryMetrics.reduce(
-      (sum, m) => sum + m.duration,
-      0,
-    );
+    const totalDuration = this.queryMetrics.reduce((sum, m) => sum + m.duration, 0);
 
     return {
       totalQueries: this.queryMetrics.length,
       slowQueries: slowQueries.length,
-      averageDuration:
-        this.queryMetrics.length > 0
-          ? totalDuration / this.queryMetrics.length
-          : 0,
-      slowestQueries: slowQueries
-        .sort((a, b) => b.duration - a.duration)
-        .slice(0, 10),
+      averageDuration: this.queryMetrics.length > 0 ? totalDuration / this.queryMetrics.length : 0,
+      slowestQueries: slowQueries.sort((a, b) => b.duration - a.duration).slice(0, 10),
     };
   }
 
@@ -104,10 +92,7 @@ export class QueryPerformanceService implements OnModuleInit {
     patterns: { query: string; count: number; avgDuration: number }[];
     recommendations: string[];
   }> {
-    const queryMap = new Map<
-      string,
-      { count: number; totalDuration: number }
-    >();
+    const queryMap = new Map<string, { count: number; totalDuration: number }>();
 
     for (const metric of this.queryMetrics) {
       const normalized = this.normalizeQuery(metric.query);
@@ -174,9 +159,7 @@ export class QueryPerformanceService implements OnModuleInit {
       },
       avgQueryTime: report.averageDuration,
       slowQueryPercentage:
-        report.totalQueries > 0
-          ? (report.slowQueries / report.totalQueries) * 100
-          : 0,
+        report.totalQueries > 0 ? (report.slowQueries / report.totalQueries) * 100 : 0,
     };
   }
 
@@ -235,9 +218,7 @@ export class QueryPerformanceService implements OnModuleInit {
 
       // SELECT * patterns
       if (pattern.query.includes('SELECT *')) {
-        recommendations.push(
-          'Avoid SELECT * - specify only needed columns for better performance',
-        );
+        recommendations.push('Avoid SELECT * - specify only needed columns for better performance');
       }
 
       // Missing index hints

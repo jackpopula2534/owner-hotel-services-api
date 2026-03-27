@@ -7,10 +7,7 @@ import { SubscriptionFeature } from './entities/subscription-feature.entity';
 import { SubscriptionFeatureLogs } from './entities/subscription-feature-log.entity';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([SubscriptionFeature, SubscriptionFeatureLogs]),
-    PrismaModule,
-  ],
+  imports: [TypeOrmModule.forFeature([SubscriptionFeature, SubscriptionFeatureLogs]), PrismaModule],
   controllers: [SubscriptionFeaturesController],
   providers: [SubscriptionFeaturesService],
   exports: [

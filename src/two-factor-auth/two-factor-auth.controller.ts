@@ -8,12 +8,7 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiBearerAuth,
-} from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { TwoFactorAuthService } from './two-factor-auth.service';
 import {
@@ -109,10 +104,7 @@ export class TwoFactorAuthController {
       return { success: false, message: 'Invalid or expired session' };
     }
 
-    const isValid = await this.twoFactorAuthService.verifyCode(
-      tokenData.userId,
-      dto.code,
-    );
+    const isValid = await this.twoFactorAuthService.verifyCode(tokenData.userId, dto.code);
 
     return {
       success: isValid,

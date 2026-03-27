@@ -10,12 +10,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { Response } from 'express';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiBearerAuth,
-} from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { LineNotifyService } from './line-notify.service';
@@ -40,13 +35,8 @@ export class LineNotifyController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get Line Notify authorization URL' })
   @ApiResponse({ status: 200, description: 'Returns authorization URL' })
-  getAuthUrl(
-    @CurrentUser() user: any,
-  ): { authUrl: string } {
-    const authUrl = this.lineNotifyService.getAuthorizationUrl(
-      user.tenantId,
-      user.id,
-    );
+  getAuthUrl(@CurrentUser() user: any): { authUrl: string } {
+    const authUrl = this.lineNotifyService.getAuthorizationUrl(user.tenantId, user.id);
     return { authUrl };
   }
 
@@ -96,9 +86,7 @@ export class LineNotifyController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get Line Notify connection status' })
   @ApiResponse({ status: 200, type: LineNotifyStatusDto })
-  async getStatus(
-    @CurrentUser() user: any,
-  ): Promise<LineNotifyStatusDto> {
+  async getStatus(@CurrentUser() user: any): Promise<LineNotifyStatusDto> {
     return this.lineNotifyService.getStatus(user.tenantId, user.id);
   }
 
@@ -129,12 +117,28 @@ export class LineNotifyController {
   getEventTypes(): { eventTypes: { key: string; label: string; labelTh: string }[] } {
     const eventTypes = [
       { key: LineNotifyEventType.BOOKING_CREATED, label: 'New Booking', labelTh: 'การจองใหม่' },
-      { key: LineNotifyEventType.BOOKING_CONFIRMED, label: 'Booking Confirmed', labelTh: 'ยืนยันการจอง' },
-      { key: LineNotifyEventType.BOOKING_CANCELLED, label: 'Booking Cancelled', labelTh: 'ยกเลิกการจอง' },
+      {
+        key: LineNotifyEventType.BOOKING_CONFIRMED,
+        label: 'Booking Confirmed',
+        labelTh: 'ยืนยันการจอง',
+      },
+      {
+        key: LineNotifyEventType.BOOKING_CANCELLED,
+        label: 'Booking Cancelled',
+        labelTh: 'ยกเลิกการจอง',
+      },
       { key: LineNotifyEventType.BOOKING_CHECKIN, label: 'Check-in', labelTh: 'เช็คอิน' },
       { key: LineNotifyEventType.BOOKING_CHECKOUT, label: 'Check-out', labelTh: 'เช็คเอาท์' },
-      { key: LineNotifyEventType.PAYMENT_RECEIVED, label: 'Payment Received', labelTh: 'ได้รับชำระเงิน' },
-      { key: LineNotifyEventType.PAYMENT_FAILED, label: 'Payment Failed', labelTh: 'ชำระเงินไม่สำเร็จ' },
+      {
+        key: LineNotifyEventType.PAYMENT_RECEIVED,
+        label: 'Payment Received',
+        labelTh: 'ได้รับชำระเงิน',
+      },
+      {
+        key: LineNotifyEventType.PAYMENT_FAILED,
+        label: 'Payment Failed',
+        labelTh: 'ชำระเงินไม่สำเร็จ',
+      },
       { key: LineNotifyEventType.DAILY_SUMMARY, label: 'Daily Summary', labelTh: 'สรุปประจำวัน' },
       { key: LineNotifyEventType.NEW_REVIEW, label: 'New Review', labelTh: 'รีวิวใหม่' },
       { key: LineNotifyEventType.SYSTEM_ALERT, label: 'System Alert', labelTh: 'การแจ้งเตือนระบบ' },
@@ -150,9 +154,7 @@ export class LineNotifyController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Disconnect Line Notify' })
   @ApiResponse({ status: 200, description: 'Disconnected successfully' })
-  async disconnect(
-    @CurrentUser() user: any,
-  ): Promise<{ success: boolean }> {
+  async disconnect(@CurrentUser() user: any): Promise<{ success: boolean }> {
     await this.lineNotifyService.disconnect(user.tenantId, user.id);
     return { success: true };
   }
@@ -165,14 +167,10 @@ export class LineNotifyController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Send test notification' })
   @ApiResponse({ status: 200, description: 'Test notification sent' })
-  async sendTest(
-    @CurrentUser() user: any,
-  ): Promise<{ success: boolean; message: string }> {
-    const sent = await this.lineNotifyService.sendNotification(
-      user.tenantId,
-      user.id,
-      { message: '🔔 ทดสอบการแจ้งเตือน / Test Notification\n\nLine Notify เชื่อมต่อสำเร็จแล้ว! ✅' },
-    );
+  async sendTest(@CurrentUser() user: any): Promise<{ success: boolean; message: string }> {
+    const sent = await this.lineNotifyService.sendNotification(user.tenantId, user.id, {
+      message: '🔔 ทดสอบการแจ้งเตือน / Test Notification\n\nLine Notify เชื่อมต่อสำเร็จแล้ว! ✅',
+    });
 
     return {
       success: sent,

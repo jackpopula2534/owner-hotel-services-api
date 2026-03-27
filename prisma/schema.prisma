@@ -9,7 +9,7 @@ datasource db {
 }
 
 model User {
-  id            String         @id @default(uuid()) @db.VarChar(36) 
+  id            String         @id @default(uuid())
   email         String         @unique
   password      String
   firstName     String?
@@ -25,10 +25,11 @@ model User {
   metadata      String?        @db.Text
   phone         String?
   status        String         @default("active")
-  tenantId      String?
+  tenantId      String?        // activeTenantId for current session context
   timezone      String?
   refreshTokens RefreshToken[]
   notifications Notification[]
+  userTenants   UserTenant[]   // Junction table for multi-tenant support
 
   @@map("users")
 }
@@ -125,19 +126,23 @@ model Property {
 }
 
 model Room {
-  id          String    @id @default(uuid())
-  tenantId    String?
-  propertyId  String
-  number      String
-  type        String
-  floor       Int?
-  price       Decimal   @db.Decimal(10, 2)
-  status      String    @default("available")
-  description String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  property    Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  bookings    Booking[]
+  id           String    @id @default(uuid())
+  tenantId     String?
+  propertyId   String
+  number       String
+  type         String
+  floor        Int?
+  price        Decimal   @db.Decimal(10, 2)
+  status       String    @default("available")
+  maxOccupancy Int?      @default(2)
+  bedType      String?
+  size         Int?
+  amenities    Json?
+  description  String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  property     Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  bookings     Booking[]
 
   @@unique([propertyId, number])
   @@index([tenantId])
@@ -367,8 +372,9 @@ model payment_refunds {
 
 model payments {
   id String @id @default(uuid()) @db.VarChar(36)
-  payment_no      String?           @unique(map: "IDX_8aaa54db3d9827cba0999b7fb2") 
-  invoice_id      String            
+  payment_no      String?           @unique(map: "IDX_8aaa54db3d9827cba0999b7fb2")
+  invoice_id      String
+  tenant_id       String?           @db.VarChar(36)
   amount          Decimal?          @db.Decimal(10, 2)
   method          payments_method
   slip_url        String?           @db.Text
@@ -379,8 +385,10 @@ model payments {
   created_at      DateTime          @default(now()) @db.DateTime(6)
   payment_refunds payment_refunds[]
   invoices        invoices          @relation(fields: [invoice_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "FK_563a5e248518c623eebd987d43e")
+  tenants         tenants?          @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([invoice_id], map: "FK_563a5e248518c623eebd987d43e")
+  @@index([tenant_id])
 }
 
 model plan_features {
@@ -506,23 +514,42 @@ model tenant_credits {
   @@index([tenant_id], map: "FK_1c75d0789feee398e6cd35df720")
 }
 
+model UserTenant {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  userId    String   @db.VarChar(36)
+  tenantId  String   @db.VarChar(36)
+  role      String   @default("member") // 'owner', 'admin', 'member'
+  isDefault Boolean  @default(false)
+  joinedAt  DateTime @default(now()) @db.DateTime(6)
+  createdAt DateTime @default(now()) @db.DateTime(6)
+  updatedAt DateTime @default(now()) @updatedAt @db.DateTime(6)
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant    tenants  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tenantId])
+  @@index([userId])
+  @@index([tenantId])
+  @@map("user_tenants")
+}
+
 model tenants {
   id String @id @default(uuid()) @db.VarChar(36)
-  name           String           
+  name           String
   room_count     Int              @default(0)
-  name_en        String?          
-  property_type  String?          
-  location       String?          
-  website        String?          
+  name_en        String?
+  property_type  String?
+  location       String?
+  website        String?
   description    String?          @db.Text
-  customer_name  String?          
-  tax_id         String?          
-  email          String?          
-  phone          String?          
+  customer_name  String?
+  tax_id         String?
+  email          String?
+  phone          String?
   address        String?          @db.Text
-  district       String?          
-  province       String?          
-  postal_code    String?          
+  district       String?
+  province       String?
+  postal_code    String?
   status         tenants_status   @default(trial)
   trial_ends_at  DateTime?        @db.Timestamp(0)
   created_at     DateTime         @default(now()) @db.DateTime(6)
@@ -530,6 +557,8 @@ model tenants {
   invoices       invoices[]
   subscriptions  subscriptions[]
   tenant_credits tenant_credits[]
+  userTenants    UserTenant[]     // Junction table for multi-tenant support
+  payments       payments[]
 }
 
 model Notification {

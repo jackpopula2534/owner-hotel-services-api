@@ -52,4 +52,3 @@ export class GuestsController {
     return this.guestsService.remove(id, user?.tenantId);
   }
 }
-

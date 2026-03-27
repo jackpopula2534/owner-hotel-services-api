@@ -35,8 +35,7 @@ export class HealthController {
   @SkipThrottle()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary:
-      'Readiness check - verifies all critical dependencies (database, cache)',
+    summary: 'Readiness check - verifies all critical dependencies (database, cache)',
   })
   @ApiResponse({
     status: 200,

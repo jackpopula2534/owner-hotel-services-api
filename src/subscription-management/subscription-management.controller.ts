@@ -1,9 +1,4 @@
-import {
-  Controller,
-  Post,
-  Body,
-  Param,
-} from '@nestjs/common';
+import { Controller, Post, Body, Param } from '@nestjs/common';
 import { SubscriptionManagementService } from './subscription-management.service';
 import { UpgradePlanDto } from './dto/upgrade-plan.dto';
 import { AddFeatureDto } from './dto/add-feature.dto';
@@ -11,9 +6,7 @@ import { DowngradePlanDto } from './dto/downgrade-plan.dto';
 
 @Controller('subscription-management')
 export class SubscriptionManagementController {
-  constructor(
-    private readonly subscriptionManagementService: SubscriptionManagementService,
-  ) {}
+  constructor(private readonly subscriptionManagementService: SubscriptionManagementService) {}
 
   /**
    * 8️⃣ Upgrade Plan
@@ -51,4 +44,3 @@ export class SubscriptionManagementController {
     );
   }
 }
-

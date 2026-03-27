@@ -35,7 +35,16 @@ export class HotelDetailService {
     // 1. ดึงข้อมูล tenant พร้อม relations
     const tenant = await this.tenantsRepository.findOne({
       where: { id: tenantId },
-      relations: ['subscription', 'subscription.plan', 'subscription.plan.planFeatures', 'subscription.plan.planFeatures.feature', 'subscription.subscriptionFeatures', 'subscription.subscriptionFeatures.feature', 'invoices', 'invoices.payments'],
+      relations: [
+        'subscription',
+        'subscription.plan',
+        'subscription.plan.planFeatures',
+        'subscription.plan.planFeatures.feature',
+        'subscription.subscriptionFeatures',
+        'subscription.subscriptionFeatures.feature',
+        'invoices',
+        'invoices.payments',
+      ],
     });
 
     if (!tenant) {
@@ -206,8 +215,8 @@ export class HotelDetailService {
   }
 
   private buildStatistics(tenant: Tenant, invoices: Invoice[]): HotelStatistics {
-    const paidInvoices = invoices.filter(inv => inv.status === InvoiceStatus.PAID);
-    const pendingInvoices = invoices.filter(inv => inv.status === InvoiceStatus.PENDING);
+    const paidInvoices = invoices.filter((inv) => inv.status === InvoiceStatus.PAID);
+    const pendingInvoices = invoices.filter((inv) => inv.status === InvoiceStatus.PENDING);
 
     const totalRevenue = paidInvoices.reduce((sum, inv) => sum + Number(inv.amount), 0);
     const maxRooms = tenant.subscription?.plan?.maxRooms || 0;
@@ -339,22 +348,24 @@ export class HotelDetailService {
       source: 'plan' as const,
     }));
 
-    const addonFeatures: FeatureInfo[] = (subscription.subscriptionFeatures || []).map((sf: any) => ({
-      id: sf.feature?.id || '',
-      code: sf.feature?.code || '',
-      name: sf.feature?.name || '',
-      nameTh: featureNameTh[sf.feature?.code] || sf.feature?.name || '',
-      description: sf.feature?.description || '',
-      descriptionTh: featureDescTh[sf.feature?.code] || sf.feature?.description || '',
-      type: sf.feature?.type || 'MODULE',
-      icon: featureIcons[sf.feature?.code] || 'check',
-      isEnabled: true,
-      source: 'addon' as const,
-    }));
+    const addonFeatures: FeatureInfo[] = (subscription.subscriptionFeatures || []).map(
+      (sf: any) => ({
+        id: sf.feature?.id || '',
+        code: sf.feature?.code || '',
+        name: sf.feature?.name || '',
+        nameTh: featureNameTh[sf.feature?.code] || sf.feature?.name || '',
+        description: sf.feature?.description || '',
+        descriptionTh: featureDescTh[sf.feature?.code] || sf.feature?.description || '',
+        type: sf.feature?.type || 'MODULE',
+        icon: featureIcons[sf.feature?.code] || 'check',
+        isEnabled: true,
+        source: 'addon' as const,
+      }),
+    );
 
     // Combine unique features
     const allFeaturesMap = new Map<string, FeatureInfo>();
-    [...planFeatures, ...addonFeatures].forEach(f => {
+    [...planFeatures, ...addonFeatures].forEach((f) => {
       if (f.id) allFeaturesMap.set(f.id, f);
     });
 
@@ -382,7 +393,7 @@ export class HotelDetailService {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    return invoices.slice(0, 5).map(inv => {
+    return invoices.slice(0, 5).map((inv) => {
       const dueDate = new Date(inv.dueDate);
       dueDate.setHours(0, 0, 0, 0);
       const isOverdue = inv.status === InvoiceStatus.PENDING && dueDate < today;
@@ -413,9 +424,9 @@ export class HotelDetailService {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const pendingInvoices = invoices.filter(inv => inv.status === InvoiceStatus.PENDING);
+    const pendingInvoices = invoices.filter((inv) => inv.status === InvoiceStatus.PENDING);
     const totalPending = pendingInvoices.reduce((sum, inv) => sum + Number(inv.amount), 0);
-    const hasOverdueInvoices = pendingInvoices.some(inv => {
+    const hasOverdueInvoices = pendingInvoices.some((inv) => {
       const dueDate = new Date(inv.dueDate);
       dueDate.setHours(0, 0, 0, 0);
       return dueDate < today;
@@ -536,7 +547,9 @@ export class HotelDetailService {
     if (tenant.status === TenantStatus.TRIAL && tenant.trialEndsAt) {
       const today = new Date();
       const trialEnd = new Date(tenant.trialEndsAt);
-      const daysRemaining = Math.ceil((trialEnd.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+      const daysRemaining = Math.ceil(
+        (trialEnd.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
+      );
 
       if (daysRemaining <= 3 && daysRemaining > 0) {
         alerts.push({
@@ -610,7 +623,9 @@ export class HotelDetailService {
   } {
     const createdAt = new Date(tenant.createdAt);
     const now = new Date();
-    const monthsDiff = Math.floor((now.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24 * 30));
+    const monthsDiff = Math.floor(
+      (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24 * 30),
+    );
 
     let memberSince: string;
     if (monthsDiff < 1) {
@@ -676,8 +691,18 @@ export class HotelDetailService {
     const d = typeof date === 'string' ? new Date(date) : date;
 
     const thaiMonths = [
-      'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
-      'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'
+      'ม.ค.',
+      'ก.พ.',
+      'มี.ค.',
+      'เม.ย.',
+      'พ.ค.',
+      'มิ.ย.',
+      'ก.ค.',
+      'ส.ค.',
+      'ก.ย.',
+      'ต.ค.',
+      'พ.ย.',
+      'ธ.ค.',
     ];
 
     const day = d.getDate();

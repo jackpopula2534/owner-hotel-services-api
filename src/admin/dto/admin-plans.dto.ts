@@ -41,7 +41,8 @@ export class CreatePlanDto {
   priceMonthly: number;
 
   @ApiPropertyOptional({
-    description: 'Yearly price in THB (optional, can be auto-calculated from monthly * 12 - discount)',
+    description:
+      'Yearly price in THB (optional, can be auto-calculated from monthly * 12 - discount)',
     example: 30504,
     minimum: 0,
   })

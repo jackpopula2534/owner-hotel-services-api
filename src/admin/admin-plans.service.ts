@@ -123,9 +123,7 @@ export class AdminPlansService {
     });
 
     if (existingPlan) {
-      throw new ConflictException(
-        `Plan with code "${dto.code}" already exists`,
-      );
+      throw new ConflictException(`Plan with code "${dto.code}" already exists`);
     }
 
     // Validate business rules
@@ -205,14 +203,10 @@ export class AdminPlansService {
     const hasActiveSubscriptions = plan.subscriptions?.length > 0;
     if (hasActiveSubscriptions) {
       if (dto.maxRooms !== undefined && dto.maxRooms < plan.maxRooms) {
-        this.logger.warn(
-          `Reducing maxRooms for plan "${plan.code}" with active subscriptions`,
-        );
+        this.logger.warn(`Reducing maxRooms for plan "${plan.code}" with active subscriptions`);
       }
       if (dto.maxUsers !== undefined && dto.maxUsers < plan.maxUsers) {
-        this.logger.warn(
-          `Reducing maxUsers for plan "${plan.code}" with active subscriptions`,
-        );
+        this.logger.warn(`Reducing maxUsers for plan "${plan.code}" with active subscriptions`);
       }
     }
 
@@ -239,8 +233,7 @@ export class AdminPlansService {
     if (dto.displayOrder !== undefined) plan.displayOrder = dto.displayOrder;
     if (dto.isPopular !== undefined) plan.isPopular = dto.isPopular;
     if (dto.badge !== undefined) plan.badge = dto.badge;
-    if (dto.highlightColor !== undefined)
-      plan.highlightColor = dto.highlightColor;
+    if (dto.highlightColor !== undefined) plan.highlightColor = dto.highlightColor;
     if (dto.features !== undefined) plan.features = dto.features;
     if (dto.buttonText !== undefined) plan.buttonText = dto.buttonText;
 

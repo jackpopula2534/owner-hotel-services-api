@@ -10,12 +10,7 @@ import {
   Request,
   Param,
 } from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiBearerAuth,
-} from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -103,7 +98,11 @@ export class EmailController {
 
   @Get('preferences')
   @ApiOperation({ summary: 'Get email preferences for current user' })
-  @ApiResponse({ status: 200, description: 'Email preferences retrieved', type: EmailPreferencesResponseDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Email preferences retrieved',
+    type: EmailPreferencesResponseDto,
+  })
   async getEmailPreferences(@Request() req: any) {
     const email = req.user?.email;
     const tenantId = req.user?.tenantId;
@@ -113,22 +112,24 @@ export class EmailController {
   @Get('preferences/:email')
   @Roles('platform_admin', 'tenant_admin')
   @ApiOperation({ summary: 'Get email preferences for a specific email (admin)' })
-  @ApiResponse({ status: 200, description: 'Email preferences retrieved', type: EmailPreferencesResponseDto })
-  async getEmailPreferencesByEmail(
-    @Param('email') email: string,
-    @Request() req: any,
-  ) {
+  @ApiResponse({
+    status: 200,
+    description: 'Email preferences retrieved',
+    type: EmailPreferencesResponseDto,
+  })
+  async getEmailPreferencesByEmail(@Param('email') email: string, @Request() req: any) {
     const tenantId = req.user?.role === 'platform_admin' ? undefined : req.user?.tenantId;
     return this.emailService.getEmailPreferences(email, tenantId);
   }
 
   @Put('preferences')
   @ApiOperation({ summary: 'Update email preferences for current user' })
-  @ApiResponse({ status: 200, description: 'Email preferences updated', type: EmailPreferencesResponseDto })
-  async updateEmailPreferences(
-    @Body() dto: UpdateEmailPreferencesDto,
-    @Request() req: any,
-  ) {
+  @ApiResponse({
+    status: 200,
+    description: 'Email preferences updated',
+    type: EmailPreferencesResponseDto,
+  })
+  async updateEmailPreferences(@Body() dto: UpdateEmailPreferencesDto, @Request() req: any) {
     const email = req.user?.email;
     const tenantId = req.user?.tenantId;
     const guestId = req.user?.guestId;
@@ -138,7 +139,11 @@ export class EmailController {
   @Put('preferences/:email')
   @Roles('platform_admin', 'tenant_admin')
   @ApiOperation({ summary: 'Update email preferences for a specific email (admin)' })
-  @ApiResponse({ status: 200, description: 'Email preferences updated', type: EmailPreferencesResponseDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Email preferences updated',
+    type: EmailPreferencesResponseDto,
+  })
   async updateEmailPreferencesByEmail(
     @Param('email') email: string,
     @Body() dto: UpdateEmailPreferencesDto,

@@ -138,9 +138,7 @@ export class PushNotificationsService implements OnModuleInit {
   /**
    * Send push notification to a user
    */
-  async sendToUser(
-    dto: SendPushNotificationDto,
-  ): Promise<PushNotificationResponseDto> {
+  async sendToUser(dto: SendPushNotificationDto): Promise<PushNotificationResponseDto> {
     if (!this.isInitialized) {
       return { success: false, error: 'Push notifications not configured' };
     }
@@ -224,9 +222,7 @@ export class PushNotificationsService implements OnModuleInit {
   /**
    * Send push notification to a topic (all subscribers)
    */
-  async sendToTopic(
-    dto: SendTopicNotificationDto,
-  ): Promise<PushNotificationResponseDto> {
+  async sendToTopic(dto: SendTopicNotificationDto): Promise<PushNotificationResponseDto> {
     if (!this.isInitialized) {
       return { success: false, error: 'Push notifications not configured' };
     }
@@ -298,10 +294,7 @@ export class PushNotificationsService implements OnModuleInit {
   /**
    * Update push notification preferences
    */
-  async updatePreferences(
-    userId: string,
-    dto: UpdatePushPreferencesDto,
-  ): Promise<void> {
+  async updatePreferences(userId: string, dto: UpdatePushPreferencesDto): Promise<void> {
     await this.prisma.pushNotificationPreference.upsert({
       where: { userId },
       create: {
@@ -338,10 +331,7 @@ export class PushNotificationsService implements OnModuleInit {
   /**
    * Check if user has enabled specific notification type
    */
-  async isNotificationTypeEnabled(
-    userId: string,
-    type: PushNotificationType,
-  ): Promise<boolean> {
+  async isNotificationTypeEnabled(userId: string, type: PushNotificationType): Promise<boolean> {
     const prefs = await this.getPreferences(userId);
 
     switch (type) {

@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  NotFoundException,
-  BadRequestException,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
@@ -70,8 +65,14 @@ export class AdminBillingCycleService {
       status: subscription.status,
       currentPeriodStart: this.formatDate(subscription.startDate),
       currentPeriodEnd: this.formatDate(subscription.endDate),
-      nextBillingDate: this.formatDate(subscription.nextBillingDate) || this.formatDate(subscription.endDate) || 'N/A',
-      billingAnchorDate: this.formatDate(subscription.billingAnchorDate) || this.formatDate(subscription.startDate) || 'N/A',
+      nextBillingDate:
+        this.formatDate(subscription.nextBillingDate) ||
+        this.formatDate(subscription.endDate) ||
+        'N/A',
+      billingAnchorDate:
+        this.formatDate(subscription.billingAnchorDate) ||
+        this.formatDate(subscription.startDate) ||
+        'N/A',
       autoRenew: subscription.autoRenew,
       renewedCount: subscription.renewedCount || 0,
       lastRenewedAt: this.formatDateTime(subscription.lastRenewedAt),
@@ -183,7 +184,8 @@ export class AdminBillingCycleService {
     }
 
     // Calculate renewal period
-    const periodMonths = dto.periodMonths || (subscription.billingCycle === BillingCycle.YEARLY ? 12 : 1);
+    const periodMonths =
+      dto.periodMonths || (subscription.billingCycle === BillingCycle.YEARLY ? 12 : 1);
 
     // Calculate new dates
     const newStartDate = new Date(subscription.endDate);
@@ -197,7 +199,8 @@ export class AdminBillingCycleService {
     });
     const addonAmount = addons.reduce((sum, a) => sum + Number(a.price || 0), 0);
     const monthlyTotal = planPrice + addonAmount;
-    const renewalAmount = dto.customPrice !== undefined ? dto.customPrice : monthlyTotal * periodMonths;
+    const renewalAmount =
+      dto.customPrice !== undefined ? dto.customPrice : monthlyTotal * periodMonths;
 
     // Create invoice if requested
     let invoiceNo: string | undefined;
@@ -226,7 +229,9 @@ export class AdminBillingCycleService {
       newAmount: renewalAmount,
       periodStart: newStartDate,
       periodEnd: newEndDate,
-      invoiceId: invoiceNo ? (await this.invoicesRepository.findOne({ where: { invoiceNo } }))?.id : undefined,
+      invoiceId: invoiceNo
+        ? (await this.invoicesRepository.findOne({ where: { invoiceNo } }))?.id
+        : undefined,
       createdBy: adminId,
       metadata: { periodMonths, notes: dto.notes },
     });
@@ -358,7 +363,8 @@ export class AdminBillingCycleService {
       newBillingCycle: h.newBillingCycle || undefined,
       oldAmount: h.oldAmount ? Number(h.oldAmount) : undefined,
       newAmount: h.newAmount ? Number(h.newAmount) : undefined,
-      periodStart: this.formatDate(h.periodStart) !== 'N/A' ? this.formatDate(h.periodStart) : undefined,
+      periodStart:
+        this.formatDate(h.periodStart) !== 'N/A' ? this.formatDate(h.periodStart) : undefined,
       periodEnd: this.formatDate(h.periodEnd) !== 'N/A' ? this.formatDate(h.periodEnd) : undefined,
       invoiceNo: h.invoice?.invoiceNo || undefined,
       createdAt: this.formatDateTime(h.createdAt) || new Date().toISOString(),
@@ -370,7 +376,10 @@ export class AdminBillingCycleService {
       hotelName: subscription.tenant?.name || 'N/A',
       currentPlan: subscription.plan?.name || 'No Plan',
       billingCycle: subscription.billingCycle || 'monthly',
-      nextBillingDate: this.formatDate(subscription.nextBillingDate) || this.formatDate(subscription.endDate) || 'N/A',
+      nextBillingDate:
+        this.formatDate(subscription.nextBillingDate) ||
+        this.formatDate(subscription.endDate) ||
+        'N/A',
       history: historyItems,
       total: historyItems.length,
     };
@@ -433,7 +442,10 @@ export class AdminBillingCycleService {
     const effective = effectiveDate ? new Date(effectiveDate) : new Date();
 
     const totalDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-    const remainingDays = Math.max(0, Math.ceil((end.getTime() - effective.getTime()) / (1000 * 60 * 60 * 24)));
+    const remainingDays = Math.max(
+      0,
+      Math.ceil((end.getTime() - effective.getTime()) / (1000 * 60 * 60 * 24)),
+    );
 
     if (totalDays <= 0) return 0;
 
@@ -458,7 +470,10 @@ export class AdminBillingCycleService {
     const now = new Date();
 
     const totalDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-    const remainingDays = Math.max(0, Math.ceil((end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
+    const remainingDays = Math.max(
+      0,
+      Math.ceil((end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)),
+    );
 
     if (totalDays <= 0) return 0;
 

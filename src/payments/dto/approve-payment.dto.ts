@@ -4,5 +4,3 @@ export class ApprovePaymentDto {
   @IsString()
   adminId: string;
 }
-
-

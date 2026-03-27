@@ -11,4 +11,3 @@ import { EmailModule } from '../../email/email.module';
   exports: [BookingsService],
 })
 export class BookingsModule {}
-

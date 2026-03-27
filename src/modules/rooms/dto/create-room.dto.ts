@@ -1,18 +1,29 @@
-import { IsString, IsNotEmpty, IsOptional, IsInt, IsNumber, IsEnum, IsUUID } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsInt,
+  IsNumber,
+  IsArray,
+  IsUUID,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateRoomDto {
-  @ApiProperty({ example: 'uuid-of-property' })
+  @ApiPropertyOptional({
+    example: 'uuid-of-property',
+    description: 'Property ID (auto-resolved to default property if not provided)',
+  })
   @IsUUID()
-  @IsNotEmpty()
-  propertyId: string;
+  @IsOptional()
+  propertyId?: string;
 
   @ApiProperty({ example: '101' })
   @IsString()
   @IsNotEmpty()
   number: string;
 
-  @ApiProperty({ example: 'single' })
+  @ApiProperty({ example: 'standard' })
   @IsString()
   @IsNotEmpty()
   type: string;
@@ -22,7 +33,7 @@ export class CreateRoomDto {
   @IsOptional()
   floor?: number;
 
-  @ApiProperty({ example: 1500.00 })
+  @ApiProperty({ example: 1500.0 })
   @IsNumber()
   @IsNotEmpty()
   price: number;
@@ -32,14 +43,28 @@ export class CreateRoomDto {
   @IsOptional()
   status?: string;
 
+  @ApiPropertyOptional({ example: 2 })
+  @IsInt()
+  @IsOptional()
+  maxOccupancy?: number;
+
+  @ApiPropertyOptional({ example: 'king' })
+  @IsString()
+  @IsOptional()
+  bedType?: string;
+
+  @ApiPropertyOptional({ example: 35 })
+  @IsInt()
+  @IsOptional()
+  size?: number;
+
+  @ApiPropertyOptional({ example: ['wifi', 'tv', 'ac'] })
+  @IsArray()
+  @IsOptional()
+  amenities?: string[];
+
   @ApiPropertyOptional({ example: 'Standard single room' })
   @IsString()
   @IsOptional()
   description?: string;
 }
-
-
-
-
-
-

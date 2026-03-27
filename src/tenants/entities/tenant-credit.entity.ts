@@ -9,10 +9,10 @@ import {
 import { Tenant } from './tenant.entity';
 
 export enum CreditType {
-  MANUAL = 'manual',           // Admin manual credit
-  REFUND = 'refund',           // From payment refund
-  PRORATION = 'proration',     // From proration calculation
-  PROMOTION = 'promotion',     // Promotional credit
+  MANUAL = 'manual', // Admin manual credit
+  REFUND = 'refund', // From payment refund
+  PRORATION = 'proration', // From proration calculation
+  PROMOTION = 'promotion', // Promotional credit
   CANCELLATION = 'cancellation', // From subscription cancellation
 }
 

@@ -1,9 +1,4 @@
-import {
-  Entity,
-  PrimaryGeneratedColumn,
-  Column,
-  OneToMany,
-} from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, OneToMany } from 'typeorm';
 import { PlanFeature } from '../../plan-features/entities/plan-feature.entity';
 import { SubscriptionFeature } from '../../subscription-features/entities/subscription-feature.entity';
 
@@ -45,5 +40,3 @@ export class Feature {
   @OneToMany(() => SubscriptionFeature, (subscriptionFeature) => subscriptionFeature.feature)
   subscriptionFeatures: SubscriptionFeature[];
 }
-
-

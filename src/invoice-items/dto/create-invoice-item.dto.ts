@@ -17,5 +17,3 @@ export class CreateInvoiceItemDto {
   @IsNumber()
   amount: number;
 }
-
-

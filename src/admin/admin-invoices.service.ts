@@ -34,9 +34,7 @@ export class AdminInvoicesService {
    * GET /api/admin/invoices
    * Get all invoices with filtering, search, and pagination
    */
-  async findAll(
-    query: AdminInvoicesQueryDto,
-  ): Promise<AdminInvoicesListResponseDto> {
+  async findAll(query: AdminInvoicesQueryDto): Promise<AdminInvoicesListResponseDto> {
     const { status, search, page = 1, limit = 10 } = query;
     const skip = (page - 1) * limit;
 
@@ -55,20 +53,16 @@ export class AdminInvoicesService {
 
     // Search by invoice number or hotel name
     if (search) {
-      queryBuilder.andWhere(
-        '(invoice.invoiceNo LIKE :search OR tenant.name LIKE :search)',
-        { search: `%${search}%` },
-      );
+      queryBuilder.andWhere('(invoice.invoiceNo LIKE :search OR tenant.name LIKE :search)', {
+        search: `%${search}%`,
+      });
     }
 
     // Get total count
     const total = await queryBuilder.getCount();
 
     // Apply pagination and order
-    queryBuilder
-      .orderBy('invoice.createdAt', 'DESC')
-      .skip(skip)
-      .take(limit);
+    queryBuilder.orderBy('invoice.createdAt', 'DESC').skip(skip).take(limit);
 
     const invoices = await queryBuilder.getMany();
 
@@ -85,11 +79,8 @@ export class AdminInvoicesService {
 
         // Build plan description with add-ons count
         const planName = invoice.subscription?.plan?.name || 'No Plan';
-        const addOnsCount = await this.getAddOnsCount(
-          invoice.subscription?.id,
-        );
-        const planDescription =
-          addOnsCount > 0 ? `${planName} +${addOnsCount} add-ons` : planName;
+        const addOnsCount = await this.getAddOnsCount(invoice.subscription?.id);
+        const planDescription = addOnsCount > 0 ? `${planName} +${addOnsCount} add-ons` : planName;
 
         return {
           id: invoice.id,
@@ -139,13 +130,7 @@ export class AdminInvoicesService {
   async findOne(id: string): Promise<AdminInvoiceDetailDto> {
     const invoice = await this.invoicesRepository.findOne({
       where: { id },
-      relations: [
-        'tenant',
-        'subscription',
-        'subscription.plan',
-        'invoiceItems',
-        'payments',
-      ],
+      relations: ['tenant', 'subscription', 'subscription.plan', 'invoiceItems', 'payments'],
     });
 
     if (!invoice) {
@@ -163,16 +148,12 @@ export class AdminInvoicesService {
     // Build plan description with add-ons count
     const planName = invoice.subscription?.plan?.name || 'No Plan';
     const addOnsCount = await this.getAddOnsCount(invoice.subscription?.id);
-    const planDescription =
-      addOnsCount > 0 ? `${planName} +${addOnsCount} add-ons` : planName;
+    const planDescription = addOnsCount > 0 ? `${planName} +${addOnsCount} add-ons` : planName;
 
     // Get payment proof (slip URL) from the latest payment
     const latestPayment = invoice.payments
       ?.filter((p) => p.slipUrl)
-      .sort(
-        (a, b) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-      )[0];
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
 
     return {
       id: invoice.id,
@@ -218,9 +199,7 @@ export class AdminInvoicesService {
 
     // If approved, also update associated pending payments
     if (dto.status === AdminInvoiceStatusAction.APPROVED) {
-      const pendingPayments = invoice.payments?.filter(
-        (p) => p.status === PaymentStatus.PENDING,
-      );
+      const pendingPayments = invoice.payments?.filter((p) => p.status === PaymentStatus.PENDING);
 
       if (pendingPayments && pendingPayments.length > 0) {
         await Promise.all(
@@ -240,9 +219,7 @@ export class AdminInvoicesService {
 
     // If rejected, also update associated pending payments
     if (dto.status === AdminInvoiceStatusAction.REJECTED) {
-      const pendingPayments = invoice.payments?.filter(
-        (p) => p.status === PaymentStatus.PENDING,
-      );
+      const pendingPayments = invoice.payments?.filter((p) => p.status === PaymentStatus.PENDING);
 
       if (pendingPayments && pendingPayments.length > 0) {
         await Promise.all(
@@ -281,12 +258,10 @@ export class AdminInvoicesService {
     // This is a simplified implementation - in production, you might
     // want to exclude features that are already included in the plan
     try {
-      const { SubscriptionFeature } = await import(
-        '../subscription-features/entities/subscription-feature.entity'
-      );
+      const { SubscriptionFeature } =
+        await import('../subscription-features/entities/subscription-feature.entity');
       const dataSource = this.invoicesRepository.manager.connection;
-      const subscriptionFeatureRepo =
-        dataSource.getRepository(SubscriptionFeature);
+      const subscriptionFeatureRepo = dataSource.getRepository(SubscriptionFeature);
 
       const count = await subscriptionFeatureRepo.count({
         where: { subscriptionId },

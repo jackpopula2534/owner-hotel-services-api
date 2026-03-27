@@ -1,19 +1,5 @@
-import {
-  Controller,
-  Get,
-  Query,
-  Param,
-  UseGuards,
-  Request,
-  Res,
-  HttpStatus,
-} from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiBearerAuth,
-} from '@nestjs/swagger';
+import { Controller, Get, Query, Param, UseGuards, Request, Res, HttpStatus } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { Response } from 'express';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -42,11 +28,7 @@ export class AuditLogController {
   @Roles('platform_admin', 'tenant_admin')
   @ApiOperation({ summary: 'Export audit logs to CSV' })
   @ApiResponse({ status: 200, description: 'CSV file downloaded' })
-  async exportLogs(
-    @Query() query: AuditLogQueryDto,
-    @Request() req: any,
-    @Res() res: Response,
-  ) {
+  async exportLogs(@Query() query: AuditLogQueryDto, @Request() req: any, @Res() res: Response) {
     const tenantId = req.user?.role === 'platform_admin' ? undefined : req.user?.tenantId;
     const csv = await this.auditLogService.exportLogs(query, tenantId);
 

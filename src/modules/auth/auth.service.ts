@@ -1,4 +1,10 @@
-import { Injectable, UnauthorizedException, ConflictException, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  UnauthorizedException,
+  ConflictException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -23,7 +29,8 @@ export class AuthService {
   ) {}
 
   async register(registerDto: RegisterDto) {
-    const { email, password, firstName, lastName, hotelName, hotelAddress, hotelPhone } = registerDto;
+    const { email, password, firstName, lastName, hotelName, hotelAddress, hotelPhone } =
+      registerDto;
 
     // Check if user already exists
     const existingUser = await this.prisma.user.findUnique({
@@ -86,8 +93,20 @@ export class AuthService {
           createdAt: true,
         },
       });
+
+      // Create UserTenant junction record with owner role and isDefault=true
+      await this.prisma.userTenant.create({
+        data: {
+          userId: user.id,
+          tenantId: onboardingResult.tenant.id,
+          role: 'owner',
+          isDefault: true,
+        },
+      });
     } catch (err) {
-      this.logger.warn(`Onboarding failed for user ${user.id}: ${err.message}. User created without tenant.`);
+      this.logger.warn(
+        `Onboarding failed for user ${user.id}: ${err.message}. User created without tenant.`,
+      );
     }
 
     // Generate tokens (include tenantId for multi-tenant PMS)
@@ -99,13 +118,15 @@ export class AuthService {
     );
 
     // Send welcome email (async, non-blocking)
-    this.emailEventsService.onUserRegistered({
-      email: user.email,
-      firstName: user.firstName,
-      lastName: user.lastName,
-    }).catch((err) => {
-      this.logger.error(`Failed to send welcome email: ${err.message}`);
-    });
+    this.emailEventsService
+      .onUserRegistered({
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+      })
+      .catch((err) => {
+        this.logger.error(`Failed to send welcome email: ${err.message}`);
+      });
 
     return {
       ...tokens,
@@ -113,11 +134,21 @@ export class AuthService {
         ...user,
         tenantId: user.tenantId ?? undefined,
       },
-      onboarding: onboardingResult ? {
-        tenantId: onboardingResult.tenant.id,
-        trialEndsAt: onboardingResult.trialEndsAt,
-        message: onboardingResult.message,
-      } : undefined,
+      onboarding: onboardingResult
+        ? {
+            tenantId: onboardingResult.tenant.id,
+            subscriptionId: onboardingResult.subscription.id,
+            trialEndsAt: onboardingResult.trialEndsAt,
+            message: onboardingResult.message,
+            property: onboardingResult.property
+              ? {
+                  id: onboardingResult.property.id,
+                  name: onboardingResult.property.name,
+                  code: onboardingResult.property.code,
+                }
+              : undefined,
+          }
+        : undefined,
     };
   }
 
@@ -141,13 +172,7 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const tokens = await this.generateTokens(
-      admin.id,
-      admin.email,
-      admin.role,
-      undefined,
-      'admin'
-    );
+    const tokens = await this.generateTokens(admin.id, admin.email, admin.role, undefined, 'admin');
 
     return {
       ...tokens,
@@ -192,13 +217,38 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const tokens = await this.generateTokens(
-      user.id,
-      user.email,
-      user.role,
-      user.tenantId ?? undefined,
-      'user'
-    );
+    // Determine tenantId: prefer user.tenantId, fallback to default from UserTenant table
+    let tenantId = user.tenantId ?? undefined;
+    if (!tenantId) {
+      // If user doesn't have active tenantId, try to load from UserTenant table
+      const userTenant = await (this.prisma as any).userTenant
+        .findFirst({
+          where: {
+            userId: user.id,
+            isDefault: true,
+          },
+        })
+        .catch(() => null);
+
+      if (userTenant) {
+        tenantId = userTenant.tenantId;
+      }
+    }
+
+    const tokens = await this.generateTokens(user.id, user.email, user.role, tenantId, 'user');
+
+    // Resolve default property for this tenant so frontend has the correct propertyId
+    let defaultProperty: { id: string; name: string; code: string } | undefined;
+    if (tenantId) {
+      const property = await this.prisma.property.findFirst({
+        where: { tenantId },
+        orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+        select: { id: true, name: true, code: true },
+      });
+      if (property) {
+        defaultProperty = property;
+      }
+    }
 
     return {
       ...tokens,
@@ -208,9 +258,11 @@ export class AuthService {
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role,
-        tenantId: user.tenantId ?? undefined,
+        tenantId: tenantId,
+        defaultPropertyId: defaultProperty?.id ?? null,
         isPlatformAdmin: false,
       },
+      property: defaultProperty ?? null,
     };
   }
 
@@ -220,7 +272,7 @@ export class AuthService {
     // Find refresh token in database
     const tokenRecord = await this.prisma.refreshToken.findUnique({
       where: { token: refreshToken },
-      include: { 
+      include: {
         user: true,
         admin: true,
       },
@@ -250,7 +302,27 @@ export class AuthService {
     }
 
     const userType = tokenRecord.adminId ? 'admin' : 'user';
-    const tenantId = (tokenRecord.user as any)?.tenantId ?? undefined;
+    let tenantId: string | undefined;
+
+    if (userType === 'user' && tokenRecord.user) {
+      // Determine tenantId for user: prefer user.tenantId, fallback to default from UserTenant table
+      tenantId = tokenRecord.user.tenantId ?? undefined;
+      if (!tenantId) {
+        // If user doesn't have active tenantId, try to load from UserTenant table
+        const userTenant = await (this.prisma as any).userTenant
+          .findFirst({
+            where: {
+              userId: tokenRecord.user.id,
+              isDefault: true,
+            },
+          })
+          .catch(() => null);
+
+        if (userTenant) {
+          tenantId = userTenant.tenantId;
+        }
+      }
+    }
 
     // Generate new tokens
     const tokens = await this.generateTokens(
@@ -258,7 +330,7 @@ export class AuthService {
       account.email,
       account.role,
       tenantId,
-      userType
+      userType,
     );
 
     // Revoke old refresh token
@@ -267,7 +339,24 @@ export class AuthService {
       data: { revokedAt: new Date() },
     });
 
-    return tokens;
+    // Resolve default property for this tenant
+    let defaultProperty: { id: string; name: string; code: string } | undefined;
+    if (tenantId) {
+      const property = await this.prisma.property.findFirst({
+        where: { tenantId },
+        orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+        select: { id: true, name: true, code: true },
+      });
+      if (property) {
+        defaultProperty = property;
+      }
+    }
+
+    return {
+      ...tokens,
+      defaultPropertyId: defaultProperty?.id ?? null,
+      property: defaultProperty ?? null,
+    };
   }
 
   async logout(userIdOrAdminId: string, refreshToken?: string) {
@@ -276,10 +365,7 @@ export class AuthService {
       await this.prisma.refreshToken.updateMany({
         where: {
           token: refreshToken,
-          OR: [
-            { userId: userIdOrAdminId },
-            { adminId: userIdOrAdminId }
-          ]
+          OR: [{ userId: userIdOrAdminId }, { adminId: userIdOrAdminId }],
         },
         data: {
           revokedAt: new Date(),
@@ -289,10 +375,7 @@ export class AuthService {
       // Revoke all refresh tokens for user/admin
       await this.prisma.refreshToken.updateMany({
         where: {
-          OR: [
-            { userId: userIdOrAdminId },
-            { adminId: userIdOrAdminId }
-          ],
+          OR: [{ userId: userIdOrAdminId }, { adminId: userIdOrAdminId }],
           revokedAt: null,
         },
         data: {
@@ -301,7 +384,6 @@ export class AuthService {
       });
     }
   }
-
 
   async forgotPassword(email: string) {
     const user = await this.prisma.user.findUnique({
@@ -328,13 +410,11 @@ export class AuthService {
     });
 
     // Send password reset email
-    this.emailEventsService.onPasswordResetRequested(
-      email,
-      token,
-      user.firstName || 'User',
-    ).catch((err) => {
-      this.logger.error(`Failed to send password reset email: ${err.message}`);
-    });
+    this.emailEventsService
+      .onPasswordResetRequested(email, token, user.firstName || 'User')
+      .catch((err) => {
+        this.logger.error(`Failed to send password reset email: ${err.message}`);
+      });
 
     return {
       message: 'If an account with that email exists, a reset link has been sent.',
@@ -373,14 +453,14 @@ export class AuthService {
     email: string,
     role: string,
     tenantId?: string,
-    userType: 'admin' | 'user' = 'user'
+    userType: 'admin' | 'user' = 'user',
   ) {
-    const payload = { 
-      sub: id, 
-      email, 
-      role, 
+    const payload = {
+      sub: id,
+      email,
+      role,
       tenantId: tenantId ?? null,
-      isPlatformAdmin: userType === 'admin'
+      isPlatformAdmin: userType === 'admin',
     };
 
     // Generate access token (short-lived)
@@ -404,16 +484,22 @@ export class AuthService {
         },
       });
     } catch (error) {
-      console.error('Error creating refresh token:', error);
-      
+      this.logger.error(
+        `Error creating refresh token: ${error instanceof Error ? error.message : String(error)}`,
+      );
+
       // Check for missing column error (Prisma error P2025 or similar message)
-      if (error.message?.includes('column') && error.message?.includes('does not exist')) {
+      if (
+        error instanceof Error &&
+        error.message?.includes('column') &&
+        error.message?.includes('does not exist')
+      ) {
         throw new Error(
           'Database schema mismatch: The "adminId" column is missing in "refresh_tokens" table. ' +
-          'Please run "npm run db:refresh" to synchronize the database.'
+            'Please run "npm run db:refresh" to synchronize the database.',
         );
       }
-      
+
       throw new BadRequestException('Could not create session. Please try again later.');
     }
 
@@ -423,4 +509,3 @@ export class AuthService {
     };
   }
 }
-

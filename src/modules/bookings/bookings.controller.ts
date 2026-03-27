@@ -32,10 +32,7 @@ export class BookingsController {
   @Throttle({ default: { limit: 20, ttl: 60 } })
   @ApiOperation({ summary: 'Create a new booking' })
   @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
-  async create(
-    @Body() createBookingDto: any,
-    @CurrentUser() user: { tenantId?: string },
-  ) {
+  async create(@Body() createBookingDto: any, @CurrentUser() user: { tenantId?: string }) {
     return this.bookingsService.create(createBookingDto, user?.tenantId);
   }
 
@@ -73,4 +70,3 @@ export class BookingsController {
     return this.bookingsService.remove(id, user?.tenantId);
   }
 }
-

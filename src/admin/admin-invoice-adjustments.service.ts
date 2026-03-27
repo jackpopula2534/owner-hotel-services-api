@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  NotFoundException,
-  BadRequestException,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Invoice, InvoiceStatus } from '../invoices/entities/invoice.entity';
@@ -72,7 +67,10 @@ export class AdminInvoiceAdjustmentsService {
 
     // Generate Credit Memo reference if requested
     let creditMemoNo: string | undefined;
-    if (dto.generateCreditMemo && (dto.type === AdjustmentTypeDto.DISCOUNT || dto.type === AdjustmentTypeDto.CREDIT)) {
+    if (
+      dto.generateCreditMemo &&
+      (dto.type === AdjustmentTypeDto.DISCOUNT || dto.type === AdjustmentTypeDto.CREDIT)
+    ) {
       creditMemoNo = `CM-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
     }
 
@@ -300,10 +298,7 @@ export class AdminInvoiceAdjustmentsService {
       where: { invoiceId: invoice.id },
     });
 
-    const newInvoiceTotal = allItems.reduce(
-      (sum, i) => sum + Number(i.amount),
-      0,
-    );
+    const newInvoiceTotal = allItems.reduce((sum, i) => sum + Number(i.amount), 0);
 
     // Update invoice
     if (!invoice.originalAmount) {
@@ -370,18 +365,16 @@ export class AdminInvoiceAdjustmentsService {
   }
 
   private mapInvoiceWithItems(invoice: Invoice): InvoiceWithItemsDto {
-    const items: InvoiceItemDetailDto[] = (invoice.invoiceItems || []).map(
-      (item) => ({
-        id: item.id,
-        type: item.type,
-        description: item.description,
-        quantity: item.quantity || 1,
-        unitPrice: Number(item.unitPrice || item.amount),
-        amount: Number(item.amount),
-        originalAmount: item.originalAmount ? Number(item.originalAmount) : undefined,
-        isAdjusted: item.isAdjusted || false,
-      }),
-    );
+    const items: InvoiceItemDetailDto[] = (invoice.invoiceItems || []).map((item) => ({
+      id: item.id,
+      type: item.type,
+      description: item.description,
+      quantity: item.quantity || 1,
+      unitPrice: Number(item.unitPrice || item.amount),
+      amount: Number(item.amount),
+      originalAmount: item.originalAmount ? Number(item.originalAmount) : undefined,
+      isAdjusted: item.isAdjusted || false,
+    }));
 
     const subtotal = items.reduce((sum, i) => sum + i.amount, 0);
     const originalAmount = Number(invoice.originalAmount || invoice.amount);

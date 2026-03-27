@@ -6,9 +6,3 @@ export class UpdateRoomDto extends PartialType(CreateRoomDto) {
   @ApiPropertyOptional({ example: 'occupied' })
   status?: string;
 }
-
-
-
-
-
-

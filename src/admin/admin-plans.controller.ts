@@ -1,20 +1,5 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Body,
-  Patch,
-  Param,
-  Delete,
-  UseGuards,
-} from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiBearerAuth,
-  ApiParam,
-} from '@nestjs/swagger';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -95,8 +80,7 @@ export class AdminPlansController {
   @Post()
   @ApiOperation({
     summary: 'Create new plan',
-    description:
-      'Create a new subscription plan. Plan code must be unique (e.g., S, M, L)',
+    description: 'Create a new subscription plan. Plan code must be unique (e.g., S, M, L)',
   })
   @ApiResponse({
     status: 201,
@@ -144,10 +128,7 @@ export class AdminPlansController {
     description: 'Forbidden - requires platform_admin role',
   })
   @ApiResponse({ status: 404, description: 'Plan not found' })
-  async update(
-    @Param('id') id: string,
-    @Body() dto: UpdatePlanDto,
-  ): Promise<PlanResponseDto> {
+  async update(@Param('id') id: string, @Body() dto: UpdatePlanDto): Promise<PlanResponseDto> {
     return this.adminPlansService.update(id, dto);
   }
 

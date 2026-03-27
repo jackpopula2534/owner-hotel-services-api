@@ -1,19 +1,5 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Param,
-  Body,
-  UseGuards,
-} from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiBearerAuth,
-  ApiParam,
-} from '@nestjs/swagger';
+import { Controller, Get, Post, Patch, Param, Body, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -36,9 +22,7 @@ import {
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('platform_admin')
 export class AdminBillingCycleController {
-  constructor(
-    private readonly adminBillingCycleService: AdminBillingCycleService,
-  ) {}
+  constructor(private readonly adminBillingCycleService: AdminBillingCycleService) {}
 
   /**
    * GET /api/v1/admin/subscriptions/:id/billing-info
@@ -61,9 +45,7 @@ export class AdminBillingCycleController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - requires platform_admin role' })
   @ApiResponse({ status: 404, description: 'Subscription not found' })
-  async getBillingInfo(
-    @Param('id') id: string,
-  ): Promise<SubscriptionBillingInfoDto> {
+  async getBillingInfo(@Param('id') id: string): Promise<SubscriptionBillingInfoDto> {
     return this.adminBillingCycleService.getBillingInfo(id);
   }
 
@@ -88,9 +70,7 @@ export class AdminBillingCycleController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - requires platform_admin role' })
   @ApiResponse({ status: 404, description: 'Subscription not found' })
-  async getBillingHistory(
-    @Param('id') id: string,
-  ): Promise<BillingHistoryListDto> {
+  async getBillingHistory(@Param('id') id: string): Promise<BillingHistoryListDto> {
     return this.adminBillingCycleService.getBillingHistory(id);
   }
 

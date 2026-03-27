@@ -1,10 +1,4 @@
-import {
-  Entity,
-  PrimaryGeneratedColumn,
-  Column,
-  ManyToOne,
-  JoinColumn,
-} from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
 import { Plan } from '../../plans/entities/plan.entity';
 import { Feature } from '../../features/entities/feature.entity';
 
@@ -27,5 +21,3 @@ export class PlanFeature {
   @JoinColumn({ name: 'feature_id' })
   feature: Feature;
 }
-
-

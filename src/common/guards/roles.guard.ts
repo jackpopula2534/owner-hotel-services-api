@@ -1,9 +1,4 @@
-import {
-  CanActivate,
-  ExecutionContext,
-  Injectable,
-  ForbiddenException,
-} from '@nestjs/common';
+import { CanActivate, ExecutionContext, Injectable, ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ROLES_KEY, UserRole } from '../decorators/roles.decorator';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
@@ -40,20 +35,19 @@ export class RolesGuard implements CanActivate {
 
   canActivate(context: ExecutionContext): boolean {
     // 1) Public route -> allow
-    const isPublic = this.reflector.getAllAndOverride<boolean>(
-      IS_PUBLIC_KEY,
-      [context.getHandler(), context.getClass()],
-    );
+    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
     if (isPublic) {
       return true;
     }
 
     // 2) If no roles metadata -> allow (only JwtAuthGuard will run)
-    const requiredRoles =
-      this.reflector.getAllAndOverride<UserRole[]>(ROLES_KEY, [
-        context.getHandler(),
-        context.getClass(),
-      ]);
+    const requiredRoles = this.reflector.getAllAndOverride<UserRole[]>(ROLES_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
 
     if (!requiredRoles || requiredRoles.length === 0) {
       return true;
@@ -74,9 +68,7 @@ export class RolesGuard implements CanActivate {
 
     // Check hierarchy: user's level >= highest required role level
     const userLevel = getRoleLevel(user.role);
-    const minRequiredLevel = Math.min(
-      ...requiredRoles.map((r) => getRoleLevel(r)),
-    );
+    const minRequiredLevel = Math.min(...requiredRoles.map((r) => getRoleLevel(r)));
 
     const hasHierarchyAccess = userLevel >= minRequiredLevel;
 

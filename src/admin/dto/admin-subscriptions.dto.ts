@@ -1,12 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsEnum,
-  IsOptional,
-  IsString,
-  IsInt,
-  Min,
-  Max,
-} from 'class-validator';
+import { IsEnum, IsOptional, IsString, IsInt, Min, Max } from 'class-validator';
 import { Type } from 'class-transformer';
 
 // ============ Enums ============
@@ -110,7 +103,10 @@ export class AdminSubscriptionListItemDto {
   @ApiProperty({ type: SubscriptionPeriodDto })
   period: SubscriptionPeriodDto;
 
-  @ApiProperty({ type: [SubscriptionAddonItemDto], description: 'List of add-ons with name and price' })
+  @ApiProperty({
+    type: [SubscriptionAddonItemDto],
+    description: 'List of add-ons with name and price',
+  })
   addons: SubscriptionAddonItemDto[];
 
   @ApiProperty({ example: 2480, description: 'Total add-on amount' })

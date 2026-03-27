@@ -37,9 +37,3 @@ export class CreateEmployeeDto {
   @IsOptional()
   startDate?: string;
 }
-
-
-
-
-
-

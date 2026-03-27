@@ -35,5 +35,3 @@ export class AdminPanelController {
     return this.adminPanelService.getPendingPaymentsWithDetails();
   }
 }
-
-

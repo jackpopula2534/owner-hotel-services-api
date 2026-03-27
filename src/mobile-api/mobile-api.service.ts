@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CacheService } from '../cache/cache.service';
 import {
@@ -82,9 +82,10 @@ export class MobileApiService {
           room: { select: { number: true } },
         },
       }),
-      // Today's revenue (from payments)
+      // Today's revenue (from payments) — ต้องกรอง tenantId ด้วย!
       this.prisma.payments.aggregate({
         where: {
+          tenant_id: tenantId,
           created_at: { gte: today, lt: tomorrow },
           status: 'approved',
         },
@@ -261,6 +262,15 @@ export class MobileApiService {
     roomId: string,
     status: string,
   ): Promise<MobileRoomSummaryDto> {
+    // Verify room belongs to this tenant before updating
+    const existing = await this.prisma.room.findFirst({
+      where: { id: roomId, tenantId },
+    });
+
+    if (!existing) {
+      throw new NotFoundException(`Room with ID ${roomId} not found`);
+    }
+
     const room = await this.prisma.room.update({
       where: { id: roomId },
       data: { status },
@@ -287,6 +297,15 @@ export class MobileApiService {
     bookingId: string,
     status: string,
   ): Promise<MobileBookingSummaryDto> {
+    // Verify booking belongs to this tenant before updating
+    const existing = await this.prisma.booking.findFirst({
+      where: { id: bookingId, tenantId },
+    });
+
+    if (!existing) {
+      throw new NotFoundException(`Booking with ID ${bookingId} not found`);
+    }
+
     const booking = await this.prisma.booking.update({
       where: { id: bookingId },
       data: { status },
@@ -375,10 +394,7 @@ export class MobileApiService {
       this.prisma.room.findMany({
         where: {
           tenantId,
-          OR: [
-            { number: { contains: query } },
-            { type: { contains: query } },
-          ],
+          OR: [{ number: { contains: query } }, { type: { contains: query } }],
         },
         take: 5,
       }),

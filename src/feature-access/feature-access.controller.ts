@@ -1,10 +1,4 @@
-import {
-  Controller,
-  Get,
-  Param,
-  Query,
-  ForbiddenException,
-} from '@nestjs/common';
+import { Controller, Get, Param, Query, ForbiddenException } from '@nestjs/common';
 import { FeatureAccessService } from './feature-access.service';
 
 @Controller('feature-access')
@@ -45,4 +39,3 @@ export class FeatureAccessController {
     return this.featureAccessService.getSubscriptionStatus(tenantId);
   }
 }
-

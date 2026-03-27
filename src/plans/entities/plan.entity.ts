@@ -1,9 +1,4 @@
-import {
-  Entity,
-  PrimaryGeneratedColumn,
-  Column,
-  OneToMany,
-} from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, OneToMany } from 'typeorm';
 import { PlanFeature } from '../../plan-features/entities/plan-feature.entity';
 import { Subscription } from '../../subscriptions/entities/subscription.entity';
 
@@ -33,6 +28,9 @@ export class Plan {
   @Column({ name: 'max_users', type: 'int' })
   maxUsers: number;
 
+  @Column({ name: 'max_properties', type: 'int', default: 1 })
+  maxProperties: number;
+
   @Column({ name: 'is_active', default: true })
   isActive: boolean;
 
@@ -55,7 +53,13 @@ export class Plan {
   @Column({ type: 'text', nullable: true })
   features: string; // JSON stringified array of feature strings
 
-  @Column({ name: 'button_text', type: 'varchar', length: 100, nullable: true, default: 'เริ่มใช้งาน' })
+  @Column({
+    name: 'button_text',
+    type: 'varchar',
+    length: 100,
+    nullable: true,
+    default: 'เริ่มใช้งาน',
+  })
   buttonText: string;
 
   @OneToMany(() => PlanFeature, (planFeature) => planFeature.plan)
@@ -64,5 +68,3 @@ export class Plan {
   @OneToMany(() => Subscription, (subscription) => subscription.plan)
   subscriptions: Subscription[];
 }
-
-

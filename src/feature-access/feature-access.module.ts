@@ -12,5 +12,3 @@ import { FeaturesModule } from '../features/features.module';
   exports: [FeatureAccessService],
 })
 export class FeatureAccessModule {}
-
-

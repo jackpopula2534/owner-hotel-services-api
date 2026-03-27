@@ -1,11 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
-import {
-  SupportedLanguage,
-  TranslationResponseDto,
-  LanguageInfoDto,
-} from './dto/i18n.dto';
+import { SupportedLanguage, TranslationResponseDto, LanguageInfoDto } from './dto/i18n.dto';
 
 @Injectable()
 export class I18nService {
@@ -182,10 +178,7 @@ export class I18nService {
     const lowerQuery = query.toLowerCase();
 
     for (const [key, value] of Object.entries(flatTranslations)) {
-      if (
-        key.toLowerCase().includes(lowerQuery) ||
-        value.toLowerCase().includes(lowerQuery)
-      ) {
+      if (key.toLowerCase().includes(lowerQuery) || value.toLowerCase().includes(lowerQuery)) {
         results.push({
           key,
           value,
@@ -217,10 +210,7 @@ export class I18nService {
   /**
    * Helper: Interpolate variables in translation string
    */
-  private interpolate(
-    template: string,
-    variables?: Record<string, string | number>,
-  ): string {
+  private interpolate(template: string, variables?: Record<string, string | number>): string {
     if (!variables || typeof template !== 'string') {
       return template;
     }
@@ -241,10 +231,7 @@ export class I18nService {
   /**
    * Helper: Flatten nested object to dot notation keys
    */
-  private flattenObject(
-    obj: Record<string, any>,
-    prefix = '',
-  ): Record<string, string> {
+  private flattenObject(obj: Record<string, any>, prefix = ''): Record<string, string> {
     const result: Record<string, string> = {};
 
     for (const [key, value] of Object.entries(obj)) {

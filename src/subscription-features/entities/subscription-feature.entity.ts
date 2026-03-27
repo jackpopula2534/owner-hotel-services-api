@@ -44,5 +44,3 @@ export class SubscriptionFeature {
   @JoinColumn({ name: 'feature_id' })
   feature: Feature;
 }
-
-

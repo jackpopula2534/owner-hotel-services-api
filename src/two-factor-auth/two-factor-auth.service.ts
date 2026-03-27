@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  BadRequestException,
-  UnauthorizedException,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, BadRequestException, UnauthorizedException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
@@ -11,10 +6,7 @@ import * as speakeasy from 'speakeasy';
 import * as QRCode from 'qrcode';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
-import {
-  Enable2FAResponseDto,
-  TwoFactorStatusDto,
-} from './dto/two-factor.dto';
+import { Enable2FAResponseDto, TwoFactorStatusDto } from './dto/two-factor.dto';
 
 @Injectable()
 export class TwoFactorAuthService {
@@ -60,9 +52,7 @@ export class TwoFactorAuthService {
 
     // Generate backup codes
     const backupCodes = this.generateBackupCodes(8);
-    const hashedBackupCodes = await Promise.all(
-      backupCodes.map((code) => bcrypt.hash(code, 10)),
-    );
+    const hashedBackupCodes = await Promise.all(backupCodes.map((code) => bcrypt.hash(code, 10)));
 
     // Save or update 2FA settings (not enabled yet until verified)
     await this.prisma.user2FASettings.upsert({
@@ -99,7 +89,10 @@ export class TwoFactorAuthService {
   /**
    * Verify TOTP code and enable 2FA
    */
-  async verifyAndEnable(userId: string, code: string): Promise<{ success: boolean; message: string }> {
+  async verifyAndEnable(
+    userId: string,
+    code: string,
+  ): Promise<{ success: boolean; message: string }> {
     const settings = await this.prisma.user2FASettings.findUnique({
       where: { userId },
     });
@@ -175,7 +168,7 @@ export class TwoFactorAuthService {
       throw new BadRequestException('2FA is not enabled for this account');
     }
 
-    const storedCodes: string[] = JSON.parse(settings.backupCodes as string || '[]');
+    const storedCodes: string[] = JSON.parse((settings.backupCodes as string) || '[]');
 
     // Check each backup code
     for (let i = 0; i < storedCodes.length; i++) {
@@ -269,7 +262,7 @@ export class TwoFactorAuthService {
       };
     }
 
-    const backupCodes: string[] = JSON.parse(settings.backupCodes as string || '[]');
+    const backupCodes: string[] = JSON.parse((settings.backupCodes as string) || '[]');
 
     return {
       isEnabled: settings.isEnabled,
@@ -304,9 +297,7 @@ export class TwoFactorAuthService {
 
     // Generate new backup codes
     const backupCodes = this.generateBackupCodes(8);
-    const hashedBackupCodes = await Promise.all(
-      backupCodes.map((code) => bcrypt.hash(code, 10)),
-    );
+    const hashedBackupCodes = await Promise.all(backupCodes.map((code) => bcrypt.hash(code, 10)));
 
     await this.prisma.user2FASettings.update({
       where: { userId },

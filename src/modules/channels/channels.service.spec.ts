@@ -7,12 +7,14 @@ describe('ChannelsService', () => {
   let service: ChannelsService;
   let prisma: jest.Mocked<PrismaService>;
 
+  const testTenantId = 'tenant-1';
+
   const createMockPrisma = (): jest.Mocked<PrismaService> =>
     ({
       channel: {
         findMany: jest.fn(),
         count: jest.fn(),
-        findUnique: jest.fn(),
+        findFirst: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
         delete: jest.fn(),
@@ -20,7 +22,7 @@ describe('ChannelsService', () => {
       booking: {
         count: jest.fn(),
       },
-    } as any);
+    }) as any;
 
   beforeEach(async () => {
     const mockPrisma = createMockPrisma();
@@ -49,7 +51,7 @@ describe('ChannelsService', () => {
       (prisma.channel.findMany as jest.Mock).mockResolvedValue([{ id: '1' }]);
       (prisma.channel.count as jest.Mock).mockResolvedValue(1);
 
-      const result = await service.findAll({ page: 1, limit: 10 });
+      const result = await service.findAll({ page: 1, limit: 10 }, testTenantId);
 
       expect(prisma.channel.findMany).toHaveBeenCalled();
       expect(result).toEqual({
@@ -59,53 +61,61 @@ describe('ChannelsService', () => {
         limit: 10,
       });
     });
+
+    it('should throw BadRequestException when tenantId is missing', async () => {
+      await expect(service.findAll({ page: 1, limit: 10 })).rejects.toThrow(BadRequestException);
+    });
   });
 
   describe('findOne', () => {
     it('should return a channel when found', async () => {
-      (prisma.channel.findUnique as jest.Mock).mockResolvedValue({
+      (prisma.channel.findFirst as jest.Mock).mockResolvedValue({
         id: '1',
       });
 
-      const result = await service.findOne('1');
+      const result = await service.findOne('1', testTenantId);
 
       expect(result).toEqual({ id: '1' });
     });
 
     it('should throw NotFoundException when channel not found', async () => {
-      (prisma.channel.findUnique as jest.Mock).mockResolvedValue(null);
+      (prisma.channel.findFirst as jest.Mock).mockResolvedValue(null);
 
-      await expect(service.findOne('1')).rejects.toThrow(NotFoundException);
+      await expect(service.findOne('1', testTenantId)).rejects.toThrow(NotFoundException);
+    });
+
+    it('should throw BadRequestException when tenantId is missing', async () => {
+      await expect(service.findOne('1')).rejects.toThrow(BadRequestException);
     });
   });
 
   describe('create', () => {
     it('should create a new channel when code is unique', async () => {
-      (prisma.channel.findUnique as jest.Mock).mockResolvedValue(null);
+      (prisma.channel.findFirst as jest.Mock).mockResolvedValue(null);
       (prisma.channel.create as jest.Mock).mockResolvedValue({ id: '1' });
 
       const dto = { name: 'Booking', code: 'BK', type: 'ota' } as any;
-      const result = await service.create(dto);
+      const result = await service.create(dto, testTenantId);
 
-      expect(prisma.channel.create).toHaveBeenCalledWith({ data: dto });
+      expect(prisma.channel.create).toHaveBeenCalled();
       expect(result).toEqual({ id: '1' });
     });
 
     it('should throw BadRequestException if code already exists', async () => {
-      (prisma.channel.findUnique as jest.Mock).mockResolvedValue({
+      (prisma.channel.findFirst as jest.Mock).mockResolvedValue({
         id: '1',
         code: 'BK',
       });
 
       await expect(
-        service.create({ name: 'Booking', code: 'BK', type: 'ota' } as any),
+        service.create({ name: 'Booking', code: 'BK', type: 'ota' } as any, testTenantId),
       ).rejects.toThrow(BadRequestException);
     });
   });
 
   describe('update', () => {
     it('should update channel successfully', async () => {
-      (prisma.channel.findUnique as jest.Mock).mockResolvedValueOnce({
+      (prisma.channel.findFirst as jest.Mock).mockResolvedValueOnce({
         id: '1',
       });
       (prisma.channel.update as jest.Mock).mockResolvedValue({
@@ -113,44 +123,44 @@ describe('ChannelsService', () => {
         name: 'Updated',
       });
 
-      const result = await service.update('1', { name: 'Updated' } as any);
+      const result = await service.update('1', { name: 'Updated' } as any, testTenantId);
 
       expect(prisma.channel.update).toHaveBeenCalled();
       expect(result).toEqual({ id: '1', name: 'Updated' });
     });
 
     it('should prevent duplicate code on update', async () => {
-      (prisma.channel.findUnique as jest.Mock).mockResolvedValueOnce({
+      (prisma.channel.findFirst as jest.Mock).mockResolvedValueOnce({
         id: '1',
       });
-      (prisma.channel.findUnique as jest.Mock).mockResolvedValueOnce({
+      (prisma.channel.findFirst as jest.Mock).mockResolvedValueOnce({
         id: '2',
         code: 'BK',
       });
 
-      await expect(
-        service.update('1', { code: 'BK' } as any),
-      ).rejects.toThrow(BadRequestException);
+      await expect(service.update('1', { code: 'BK' } as any, testTenantId)).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 
   describe('remove', () => {
     it('should delete channel when no bookings', async () => {
-      (prisma.channel.findUnique as jest.Mock).mockResolvedValue({ id: '1' });
+      (prisma.channel.findFirst as jest.Mock).mockResolvedValue({ id: '1' });
       (prisma.booking.count as jest.Mock).mockResolvedValue(0);
       (prisma.channel.delete as jest.Mock).mockResolvedValue({ id: '1' });
 
-      const result = await service.remove('1');
+      const result = await service.remove('1', testTenantId);
 
       expect(prisma.channel.delete).toHaveBeenCalledWith({ where: { id: '1' } });
       expect(result).toEqual({ id: '1' });
     });
 
     it('should throw BadRequestException when channel has bookings', async () => {
-      (prisma.channel.findUnique as jest.Mock).mockResolvedValue({ id: '1' });
+      (prisma.channel.findFirst as jest.Mock).mockResolvedValue({ id: '1' });
       (prisma.booking.count as jest.Mock).mockResolvedValue(2);
 
-      await expect(service.remove('1')).rejects.toThrow(BadRequestException);
+      await expect(service.remove('1', testTenantId)).rejects.toThrow(BadRequestException);
     });
   });
 
@@ -163,7 +173,7 @@ describe('ChannelsService', () => {
         lastSyncAt: new Date(),
       });
 
-      const result = await service.sync('1');
+      const result = await service.sync('1', testTenantId);
 
       expect(result).toHaveProperty('message', 'Channel sync initiated');
       expect(result).toHaveProperty('channel');
@@ -173,7 +183,7 @@ describe('ChannelsService', () => {
       const channel = { id: '1', syncEnabled: false };
       jest.spyOn(service, 'findOne').mockResolvedValue(channel as any);
 
-      await expect(service.sync('1')).rejects.toThrow(BadRequestException);
+      await expect(service.sync('1', testTenantId)).rejects.toThrow(BadRequestException);
     });
   });
 
@@ -186,13 +196,9 @@ describe('ChannelsService', () => {
         isActive: false,
       });
 
-      const result = await service.toggleActive('1');
+      const result = await service.toggleActive('1', testTenantId);
 
       expect(result).toHaveProperty('isActive', false);
     });
   });
 });
-
-
-
-

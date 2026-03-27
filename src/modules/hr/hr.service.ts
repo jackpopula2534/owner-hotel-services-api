@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
@@ -9,23 +9,16 @@ export class HrService {
   constructor(private prisma: PrismaService) {}
 
   async findAll(query: any, tenantId?: string) {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
     const page = parseInt(query.page) || 1;
     const limit = parseInt(query.limit) || 10;
     const { department, position, search } = query;
     const skip = (page - 1) * limit;
 
-    // ถ้าไม่มี tenantId (user ใหม่ยังไม่มีโรงแรม) ให้ return empty data
-    if (!tenantId) {
-      return {
-        data: [],
-        total: 0,
-        page,
-        limit,
-      };
-    }
-
-    const where: any = {};
-    if (tenantId != null) where.tenantId = tenantId;
+    const where: any = { tenantId };
     if (department) where.department = department;
     if (position) where.position = position;
     if (search) {
@@ -71,8 +64,11 @@ export class HrService {
   }
 
   async findOne(id: string, tenantId?: string) {
-    const where: any = { id };
-    if (tenantId != null) where.tenantId = tenantId;
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
+    const where: any = { id, tenantId };
 
     const employee = await this.prisma.employee.findFirst({
       where,
@@ -86,8 +82,11 @@ export class HrService {
   }
 
   async create(createEmployeeDto: CreateEmployeeDto, tenantId?: string) {
-    const data: any = { ...createEmployeeDto };
-    if (tenantId != null) data.tenantId = tenantId;
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
+    const data: any = { ...createEmployeeDto, tenantId };
     return this.prisma.employee.create({
       data,
     });
@@ -110,4 +109,3 @@ export class HrService {
     });
   }
 }
-

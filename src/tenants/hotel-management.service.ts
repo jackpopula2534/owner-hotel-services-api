@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Like, In } from 'typeorm';
 import { Tenant, TenantStatus } from './entities/tenant.entity';
@@ -20,6 +20,8 @@ import { randomBytes } from 'crypto';
 
 @Injectable()
 export class HotelManagementService {
+  private readonly logger = new Logger(HotelManagementService.name);
+
   constructor(
     @InjectRepository(Tenant)
     private tenantsRepository: Repository<Tenant>,
@@ -32,10 +34,85 @@ export class HotelManagementService {
     private prisma: PrismaService,
   ) {}
 
-  // ===== CREATE HOTEL =====
+  // ===== ADD PROPERTY TO EXISTING TENANT =====
 
   /**
-   * สร้างโรงแรมใหม่ (เพิ่มโรงแรมใหม่)
+   * เพิ่ม Property ใหม่ให้ Tenant ที่มีอยู่แล้ว (สำหรับ tenant_admin ที่มี tenantId)
+   * ไม่สร้าง Tenant ใหม่ — แค่เพิ่ม Property ใต้ Tenant เดิม
+   */
+  async addPropertyToTenant(dto: CreateHotelDto, tenantId: string) {
+    // 1. ตรวจสอบว่า tenant มีอยู่จริง
+    const tenant = await this.tenantsRepository.findOne({ where: { id: tenantId } });
+    if (!tenant) {
+      throw new NotFoundException(`Tenant ${tenantId} not found`);
+    }
+
+    // 2. ตรวจสอบ plan limit — เช็คจำนวน properties ที่มีอยู่ vs maxProperties
+    // หมายเหตุ: room limit จะเช็คตอนสร้าง Room จริงใน rooms.service.ts ไม่ใช่ตอนสร้าง Property
+    const subscription = await this.subscriptionsRepository.findOne({
+      where: { tenantId },
+      relations: ['plan'],
+      order: { createdAt: 'DESC' },
+    });
+
+    if (subscription?.plan) {
+      const existingPropertyCount = await this.prisma.property.count({
+        where: { tenantId },
+      });
+      const maxProperties = subscription.plan.maxProperties || 10;
+
+      if (existingPropertyCount >= maxProperties) {
+        throw new BadRequestException(
+          `จำนวนที่พักรวม (${existingPropertyCount}) ถึงขีดจำกัดแพ็คเกจแล้ว (${maxProperties} ที่พัก สำหรับ Plan ${subscription.plan.code})`,
+        );
+      }
+    }
+
+    // 3. สร้าง Property ใหม่ใต้ Tenant เดิม
+    const propertyCode =
+      (dto.name || 'PROP')
+        .substring(0, 3)
+        .toUpperCase()
+        .replace(/[^A-Z]/g, 'X') + Date.now().toString().slice(-4);
+
+    const property = await this.prisma.property.create({
+      data: {
+        tenantId,
+        name: dto.name || 'ที่พักใหม่',
+        code: propertyCode,
+        location: dto.address || dto.location || null,
+        phone: dto.phone || null,
+        email: dto.email || null,
+        isDefault: false,
+        status: 'active',
+      },
+    });
+
+    return {
+      success: true,
+      message: `Property "${dto.name}" added successfully`,
+      messageTh: `เพิ่มที่พัก "${dto.name}" สำเร็จ`,
+      data: {
+        hotel: {
+          id: tenant.id,
+          name: tenant.name,
+          roomCount: tenant.roomCount,
+          status: tenant.status,
+          statusTh: this.getStatusLabelTh(tenant.status),
+        },
+        property: {
+          id: property.id,
+          name: property.name,
+          code: property.code,
+        },
+      },
+    };
+  }
+
+  // ===== CREATE HOTEL (NEW TENANT) =====
+
+  /**
+   * สร้างโรงแรมใหม่ (สร้าง Tenant ใหม่ — สำหรับ user ที่ยังไม่มี tenant หรือ platform_admin)
    * @param dto - Hotel creation data
    * @param userContext - Optional: User context for tenant_admin creating their first hotel
    */
@@ -117,9 +194,9 @@ export class HotelManagementService {
           where: { id: userContext.userId },
           data: { tenantId: savedTenant.id },
         });
-        console.log(`Linked existing user ${userContext.userId} to tenant ${savedTenant.id}`);
+        this.logger.log(`Linked existing user ${userContext.userId} to tenant ${savedTenant.id}`);
       } catch (error) {
-        console.error('Failed to link user to tenant:', error);
+        this.logger.error('Failed to link user to tenant:', error);
       }
     } else {
       // Platform admin สร้าง hotel ให้ลูกค้า - สร้าง user ใหม่หรือ update email ที่มีอยู่
@@ -151,7 +228,7 @@ export class HotelManagementService {
           },
         });
 
-        console.log(`Initial setup: generated reset token for ${dto.email}: ${resetToken}`);
+        this.logger.log(`Initial setup: generated reset token for ${dto.email}`);
         // TODO: Send email with reset link containing this token
       } catch (error) {
         // ถ้า user มีอยู่แล้ว (email ซ้ำ) ให้ update tenantId
@@ -161,12 +238,38 @@ export class HotelManagementService {
             data: { tenantId: savedTenant.id },
           });
         } else {
-          console.error('Failed to create tenant admin user:', error);
+          this.logger.error('Failed to create tenant admin user:', error);
         }
       }
     }
 
-    // 7. Return formatted response
+    // 7. Auto-create default property from tenant data
+    const propertyCode =
+      (dto.name || 'PROP')
+        .substring(0, 3)
+        .toUpperCase()
+        .replace(/[^A-Z]/g, 'X') + Date.now().toString().slice(-4);
+
+    try {
+      await this.prisma.property.create({
+        data: {
+          tenantId: savedTenant.id,
+          name: dto.name || 'โรงแรมหลัก',
+          code: propertyCode,
+          location: dto.address || dto.location || null,
+          phone: dto.phone || null,
+          email: dto.email || null,
+          isDefault: true,
+          status: 'active',
+        },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Failed to create default property for tenant ${savedTenant.id}: ${err.message}`,
+      );
+    }
+
+    // 8. Return formatted response
     return {
       success: true,
       message: `Hotel "${dto.name}" created successfully with ${trialDays}-day trial`,
@@ -203,7 +306,10 @@ export class HotelManagementService {
    * @param query - Query parameters for filtering, pagination, and sorting
    * @param tenantId - Optional: Filter to only show this tenant's data (for non-platform-admin users)
    */
-  async getHotelList(query: HotelListQueryDto = {}, tenantId?: string): Promise<HotelListResponseDto> {
+  async getHotelList(
+    query: HotelListQueryDto = {},
+    tenantId?: string,
+  ): Promise<HotelListResponseDto> {
     const {
       search,
       status = 'all',
@@ -235,10 +341,14 @@ export class HotelManagementService {
     }
 
     // Sorting
-    const sortColumn = sortBy === 'name' ? 'tenant.name' :
-                       sortBy === 'roomCount' ? 'tenant.roomCount' :
-                       sortBy === 'status' ? 'tenant.status' :
-                       'tenant.createdAt';
+    const sortColumn =
+      sortBy === 'name'
+        ? 'tenant.name'
+        : sortBy === 'roomCount'
+          ? 'tenant.roomCount'
+          : sortBy === 'status'
+            ? 'tenant.status'
+            : 'tenant.createdAt';
     queryBuilder.orderBy(sortColumn, sortOrder.toUpperCase() as 'ASC' | 'DESC');
 
     // Get total count
@@ -252,7 +362,7 @@ export class HotelManagementService {
     const tenants = await queryBuilder.getMany();
 
     // Build response
-    const hotels: HotelListItemDto[] = tenants.map(tenant => this.mapTenantToListItem(tenant));
+    const hotels: HotelListItemDto[] = tenants.map((tenant) => this.mapTenantToListItem(tenant));
 
     // Get summary stats
     const summary = await this.getSummaryStats(tenantId);
@@ -295,7 +405,10 @@ export class HotelManagementService {
     if (tenant.trialEndsAt) {
       const trialEnd = new Date(tenant.trialEndsAt);
       trialEnd.setHours(0, 0, 0, 0);
-      daysRemaining = Math.max(0, Math.ceil((trialEnd.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)));
+      daysRemaining = Math.max(
+        0,
+        Math.ceil((trialEnd.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)),
+      );
     }
 
     const planNameTh: Record<string, string> = {
@@ -314,11 +427,13 @@ export class HotelManagementService {
       customerName: '-', // TODO: Add customer field to tenant entity
       billingCycle: tenant.subscription?.autoRenew ? 'รายปี' : 'รายเดือน',
       billingCycleCode: tenant.subscription?.autoRenew ? 'yearly' : 'monthly',
-      plan: tenant.subscription?.plan ? {
-        code: tenant.subscription.plan.code,
-        name: tenant.subscription.plan.name,
-        nameTh: planNameTh[tenant.subscription.plan.code] || tenant.subscription.plan.name,
-      } : null,
+      plan: tenant.subscription?.plan
+        ? {
+            code: tenant.subscription.plan.code,
+            name: tenant.subscription.plan.name,
+            nameTh: planNameTh[tenant.subscription.plan.code] || tenant.subscription.plan.name,
+          }
+        : null,
       trial: {
         isInTrial: tenant.status === TenantStatus.TRIAL,
         daysRemaining,
@@ -376,7 +491,7 @@ export class HotelManagementService {
 
   private async getSummaryStats(tenantId?: string): Promise<HotelSummaryStatsDto> {
     const whereBase = tenantId ? { id: tenantId } : {};
-    
+
     const [total, active, trial, suspended, expired] = await Promise.all([
       this.tenantsRepository.count({ where: whereBase }),
       this.tenantsRepository.count({ where: { ...whereBase, status: TenantStatus.ACTIVE } }),
@@ -427,14 +542,14 @@ export class HotelManagementService {
     };
 
     return {
-      statuses: statusCounts.map(s => ({
+      statuses: statusCounts.map((s) => ({
         value: s.status,
         label: statusMap[s.status]?.label || s.status,
         labelTh: statusMap[s.status]?.labelTh || s.status,
         count: parseInt(s.count),
       })),
       provinces: [], // TODO: Add when location field is added
-      plans: plans.map(p => ({
+      plans: plans.map((p) => ({
         value: p.code,
         label: p.name,
         labelTh: planNameTh[p.code] || p.name,
@@ -459,8 +574,18 @@ export class HotelManagementService {
     const d = typeof date === 'string' ? new Date(date) : date;
 
     const thaiMonths = [
-      'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
-      'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'
+      'ม.ค.',
+      'ก.พ.',
+      'มี.ค.',
+      'เม.ย.',
+      'พ.ค.',
+      'มิ.ย.',
+      'ก.ค.',
+      'ส.ค.',
+      'ก.ย.',
+      'ต.ค.',
+      'พ.ย.',
+      'ธ.ค.',
     ];
 
     const day = d.getDate();
@@ -478,5 +603,214 @@ export class HotelManagementService {
     } else {
       return `เหลือ ${days} วัน`;
     }
+  }
+
+  // ===== TENANT USER: LIST PROPERTIES AS HOTELS =====
+
+  /**
+   * ดึงรายการ Properties ทั้งหมดของ Tenant (สำหรับ tenant_admin/user)
+   * แต่ละ Property = 1 "โรงแรม" ในหน้า UI
+   */
+  async getPropertyListForTenant(
+    query: HotelListQueryDto = {},
+    tenantId: string,
+  ): Promise<HotelListResponseDto> {
+    const {
+      search,
+      status = 'all',
+      page = 1,
+      limit = 10,
+      sortBy = 'createdAt',
+      sortOrder = 'desc',
+    } = query;
+
+    // Build Prisma where clause for properties
+    const where: any = { tenantId };
+
+    if (search) {
+      where.OR = [
+        { name: { contains: search } },
+        { code: { contains: search } },
+        { location: { contains: search } },
+      ];
+    }
+
+    if (status && status !== 'all') {
+      where.status = status;
+    }
+
+    // Sort mapping
+    const orderByMap: Record<string, any> = {
+      name: { name: sortOrder },
+      createdAt: { createdAt: sortOrder },
+      status: { status: sortOrder },
+    };
+    const orderBy = orderByMap[sortBy] || { createdAt: sortOrder };
+
+    const skip = (page - 1) * limit;
+
+    // Query properties + count
+    const [properties, totalItems] = await Promise.all([
+      this.prisma.property.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy,
+        include: {
+          _count: { select: { rooms: true } },
+        },
+      }),
+      this.prisma.property.count({ where }),
+    ]);
+
+    // Get tenant info with subscription/plan (shared across all properties)
+    const tenant = await this.tenantsRepository.findOne({
+      where: { id: tenantId },
+      relations: ['subscription', 'subscription.plan'],
+    });
+
+    // Map properties to HotelListItemDto
+    const hotels: HotelListItemDto[] = properties.map((prop) =>
+      this.mapPropertyToListItem(prop, tenant),
+    );
+
+    // Summary stats from properties
+    const summary = await this.getPropertySummaryStats(tenantId);
+
+    // Filter options from properties
+    const filterOptions = await this.getPropertyFilterOptions(tenantId);
+
+    const totalPages = Math.ceil(totalItems / limit);
+
+    return {
+      hotels,
+      summary,
+      pagination: {
+        currentPage: page,
+        totalPages,
+        totalItems,
+        itemsPerPage: limit,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
+      filterOptions,
+      metadata: {
+        fetchedAt: new Date().toISOString(),
+        searchQuery: search,
+        appliedFilters: {
+          status: status !== 'all' ? status : undefined,
+        },
+      },
+    };
+  }
+
+  private mapPropertyToListItem(
+    prop: any,
+    tenant: Tenant | null,
+  ): HotelListItemDto {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    let daysRemaining = 0;
+    if (tenant?.trialEndsAt) {
+      const trialEnd = new Date(tenant.trialEndsAt);
+      trialEnd.setHours(0, 0, 0, 0);
+      daysRemaining = Math.max(
+        0,
+        Math.ceil((trialEnd.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)),
+      );
+    }
+
+    const tenantStatus = tenant?.status || TenantStatus.TRIAL;
+
+    const planNameTh: Record<string, string> = {
+      S: 'แพ็คเกจ S',
+      M: 'แพ็คเกจ M',
+      L: 'แพ็คเกจ L',
+    };
+
+    return {
+      id: prop.id,
+      name: prop.name,
+      location: prop.location || '-',
+      status: this.buildStatusBadge(tenantStatus),
+      roomCount: prop._count?.rooms || 0,
+      roomCountFormatted: `${prop._count?.rooms || 0} ห้อง`,
+      customerName: tenant?.customerName || '-',
+      billingCycle: tenant?.subscription?.autoRenew ? 'รายปี' : 'รายเดือน',
+      billingCycleCode: tenant?.subscription?.autoRenew ? 'yearly' : 'monthly',
+      plan: tenant?.subscription?.plan
+        ? {
+            code: tenant.subscription.plan.code,
+            name: tenant.subscription.plan.name,
+            nameTh:
+              planNameTh[tenant.subscription.plan.code] ||
+              tenant.subscription.plan.name,
+          }
+        : null,
+      trial: {
+        isInTrial: tenantStatus === TenantStatus.TRIAL,
+        daysRemaining,
+        daysRemainingText: this.getDaysRemainingText(daysRemaining),
+      },
+      createdAt: prop.createdAt?.toISOString?.() || String(prop.createdAt),
+      createdAtFormatted: this.formatDateTh(prop.createdAt),
+      actions: {
+        canViewDetail: true,
+        canEdit: true,
+        canDelete: tenantStatus !== TenantStatus.ACTIVE,
+        canSuspend: false,
+      },
+    };
+  }
+
+  private async getPropertySummaryStats(
+    tenantId: string,
+  ): Promise<HotelSummaryStatsDto> {
+    const [total, active, trial] = await Promise.all([
+      this.prisma.property.count({ where: { tenantId } }),
+      this.prisma.property.count({ where: { tenantId, status: 'active' } }),
+      this.prisma.property.count({ where: { tenantId, status: 'trial' } }),
+    ]);
+
+    return {
+      totalHotels: total,
+      activeHotels: active,
+      trialHotels: trial,
+      suspendedHotels: 0,
+      expiredHotels: 0,
+      totalHotelsFormatted: `${total} ที่พัก`,
+      activeHotelsFormatted: `${active} ที่พัก`,
+      trialHotelsFormatted: `${trial} ที่พัก`,
+    };
+  }
+
+  private async getPropertyFilterOptions(
+    tenantId: string,
+  ): Promise<HotelFilterOptionsDto> {
+    // Get distinct statuses from properties
+    const properties = await this.prisma.property.groupBy({
+      by: ['status'],
+      where: { tenantId },
+      _count: true,
+    });
+
+    const statusMap: Record<string, { label: string; labelTh: string }> = {
+      active: { label: 'Active', labelTh: 'ใช้งานอยู่' },
+      trial: { label: 'Trial', labelTh: 'ทดลองใช้' },
+      suspended: { label: 'Suspended', labelTh: 'ระงับการใช้งาน' },
+      expired: { label: 'Expired', labelTh: 'ไม่ใช้งาน' },
+    };
+
+    return {
+      statuses: properties.map((p) => ({
+        value: p.status,
+        label: statusMap[p.status]?.label || p.status,
+        labelTh: statusMap[p.status]?.labelTh || p.status,
+        count: p._count,
+      })),
+      provinces: [],
+      plans: [],
+    };
   }
 }

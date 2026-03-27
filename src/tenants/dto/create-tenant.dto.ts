@@ -5,14 +5,14 @@ import { TenantStatus } from '../entities/tenant.entity';
 export class CreateTenantDto {
   @ApiProperty({
     example: 'โรงแรมสุขใจ',
-    description: 'Hotel name in Thai'
+    description: 'Hotel name in Thai',
   })
   @IsString()
   name: string;
 
   @ApiPropertyOptional({
     example: 'Comfort Hotel',
-    description: 'Hotel name in English'
+    description: 'Hotel name in English',
   })
   @IsString()
   @IsOptional()
@@ -20,7 +20,7 @@ export class CreateTenantDto {
 
   @ApiPropertyOptional({
     example: 'boutique_hotel',
-    description: 'Property type (hotel, resort, hostel, guesthouse, etc)'
+    description: 'Property type (hotel, resort, hostel, guesthouse, etc)',
   })
   @IsString()
   @IsOptional()
@@ -28,7 +28,7 @@ export class CreateTenantDto {
 
   @ApiPropertyOptional({
     example: 'กรุงเทพฯ, สุขุมวิท',
-    description: 'Hotel location/area'
+    description: 'Hotel location/area',
   })
   @IsString()
   @IsOptional()
@@ -36,7 +36,7 @@ export class CreateTenantDto {
 
   @ApiPropertyOptional({
     example: 45,
-    description: 'Total number of rooms'
+    description: 'Total number of rooms',
   })
   @IsInt()
   @IsOptional()
@@ -44,7 +44,7 @@ export class CreateTenantDto {
 
   @ApiPropertyOptional({
     example: 'https://example-hotel.com',
-    description: 'Hotel website URL'
+    description: 'Hotel website URL',
   })
   @IsString()
   @IsOptional()
@@ -52,7 +52,7 @@ export class CreateTenantDto {
 
   @ApiPropertyOptional({
     example: 'A comfortable 3-star hotel in central Bangkok',
-    description: 'Hotel description'
+    description: 'Hotel description',
   })
   @IsString()
   @IsOptional()
@@ -60,7 +60,7 @@ export class CreateTenantDto {
 
   @ApiPropertyOptional({
     example: 'สมชาย ใจดี',
-    description: 'Hotel owner or manager name'
+    description: 'Hotel owner or manager name',
   })
   @IsString()
   @IsOptional()
@@ -68,7 +68,7 @@ export class CreateTenantDto {
 
   @ApiPropertyOptional({
     example: '0105556789001',
-    description: 'Thai tax ID (13 digits)'
+    description: 'Thai tax ID (13 digits)',
   })
   @IsString()
   @IsOptional()
@@ -76,7 +76,7 @@ export class CreateTenantDto {
 
   @ApiPropertyOptional({
     example: 'contact@hotel.com',
-    description: 'Hotel contact email'
+    description: 'Hotel contact email',
   })
   @IsEmail()
   @IsOptional()
@@ -84,7 +84,7 @@ export class CreateTenantDto {
 
   @ApiPropertyOptional({
     example: '+66-2-123-4567',
-    description: 'Hotel contact phone number'
+    description: 'Hotel contact phone number',
   })
   @IsString()
   @IsOptional()
@@ -92,7 +92,7 @@ export class CreateTenantDto {
 
   @ApiPropertyOptional({
     example: '123 ถนนสุขุมวิท',
-    description: 'Hotel street address'
+    description: 'Hotel street address',
   })
   @IsString()
   @IsOptional()
@@ -100,7 +100,7 @@ export class CreateTenantDto {
 
   @ApiPropertyOptional({
     example: 'วัฒนา',
-    description: 'District (Amphoe)'
+    description: 'District (Amphoe)',
   })
   @IsString()
   @IsOptional()
@@ -108,7 +108,7 @@ export class CreateTenantDto {
 
   @ApiPropertyOptional({
     example: 'กรุงเทพมหานคร',
-    description: 'Province/State'
+    description: 'Province/State',
   })
   @IsString()
   @IsOptional()
@@ -116,7 +116,7 @@ export class CreateTenantDto {
 
   @ApiPropertyOptional({
     example: '10110',
-    description: 'Postal code'
+    description: 'Postal code',
   })
   @IsString()
   @IsOptional()
@@ -124,7 +124,7 @@ export class CreateTenantDto {
 
   @ApiPropertyOptional({
     example: 'active',
-    description: 'Tenant status (active, trial, suspended, expired)'
+    description: 'Tenant status (active, trial, suspended, expired)',
   })
   @IsEnum(TenantStatus)
   @IsOptional()
@@ -132,7 +132,7 @@ export class CreateTenantDto {
 
   @ApiPropertyOptional({
     example: '2026-04-06T00:00:00Z',
-    description: 'When trial period expires'
+    description: 'When trial period expires',
   })
   @IsDateString()
   @IsOptional()
@@ -140,7 +140,7 @@ export class CreateTenantDto {
 
   @ApiPropertyOptional({
     example: 14,
-    description: 'Number of trial days'
+    description: 'Number of trial days',
   })
   @IsInt()
   @IsOptional()

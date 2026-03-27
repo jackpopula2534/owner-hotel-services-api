@@ -82,5 +82,3 @@ export class Invoice {
   @OneToMany(() => Payment, (payment) => payment.invoice)
   payments: Payment[];
 }
-
-

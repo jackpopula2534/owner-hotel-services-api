@@ -1,13 +1,4 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Param,
-  Body,
-  Query,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Body, Query, UseGuards } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -41,9 +32,7 @@ import {
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('platform_admin')
 export class AdminRefundCreditController {
-  constructor(
-    private readonly adminRefundCreditService: AdminRefundCreditService,
-  ) {}
+  constructor(private readonly adminRefundCreditService: AdminRefundCreditService) {}
 
   // ============ REFUND ENDPOINTS ============
 
@@ -54,7 +43,8 @@ export class AdminRefundCreditController {
   @Post('payments/:id/refund')
   @ApiOperation({
     summary: 'Create refund',
-    description: 'Create a refund for an approved payment. Can refund via original method, bank transfer, or credit.',
+    description:
+      'Create a refund for an approved payment. Can refund via original method, bank transfer, or credit.',
   })
   @ApiParam({ name: 'id', description: 'Payment ID (UUID)' })
   @ApiResponse({
@@ -62,7 +52,10 @@ export class AdminRefundCreditController {
     description: 'Refund created successfully',
     type: CreateRefundResponseDto,
   })
-  @ApiResponse({ status: 400, description: 'Bad request - payment not approved or insufficient amount' })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - payment not approved or insufficient amount',
+  })
   @ApiResponse({ status: 404, description: 'Payment not found' })
   async createRefund(
     @Param('id') id: string,
@@ -81,15 +74,17 @@ export class AdminRefundCreditController {
     summary: 'Get all refunds',
     description: 'Get list of all refunds with optional status filter',
   })
-  @ApiQuery({ name: 'status', required: false, enum: ['pending', 'approved', 'rejected', 'completed'] })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['pending', 'approved', 'rejected', 'completed'],
+  })
   @ApiResponse({
     status: 200,
     description: 'Refunds retrieved successfully',
     type: [RefundItemDto],
   })
-  async getRefunds(
-    @Query('status') status?: string,
-  ): Promise<RefundItemDto[]> {
+  async getRefunds(@Query('status') status?: string): Promise<RefundItemDto[]> {
     return this.adminRefundCreditService.getRefunds(status);
   }
 
@@ -154,9 +149,7 @@ export class AdminRefundCreditController {
     type: TenantCreditsListDto,
   })
   @ApiResponse({ status: 404, description: 'Tenant not found' })
-  async getTenantCredits(
-    @Param('id') id: string,
-  ): Promise<TenantCreditsListDto> {
+  async getTenantCredits(@Param('id') id: string): Promise<TenantCreditsListDto> {
     return this.adminRefundCreditService.getTenantCredits(id);
   }
 
@@ -199,7 +192,10 @@ export class AdminRefundCreditController {
     description: 'Credit applied successfully',
     type: ApplyCreditResponseDto,
   })
-  @ApiResponse({ status: 400, description: 'Bad request - invoice already paid or no credit available' })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - invoice already paid or no credit available',
+  })
   @ApiResponse({ status: 404, description: 'Invoice not found' })
   async applyCredit(
     @Param('id') id: string,

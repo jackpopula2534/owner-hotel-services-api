@@ -17,11 +17,16 @@ export class SubscriptionsService {
       status: createSubscriptionDto.status,
       start_date: createSubscriptionDto.startDate,
       end_date: createSubscriptionDto.endDate,
-      auto_renew: createSubscriptionDto.autoRenew !== undefined ? (createSubscriptionDto.autoRenew ? 1 : 0) : 1,
+      auto_renew:
+        createSubscriptionDto.autoRenew !== undefined
+          ? createSubscriptionDto.autoRenew
+            ? 1
+            : 0
+          : 1,
     };
-    
+
     // Clean up undefined properties
-    Object.keys(data).forEach(key => {
+    Object.keys(data).forEach((key) => {
       if (data[key] === undefined) {
         delete data[key];
       }
@@ -29,13 +34,23 @@ export class SubscriptionsService {
 
     return this.prisma.subscriptions.create({
       data,
-      include: { tenants: true, plans_subscriptions_plan_idToplans: true, subscription_features: { include: { features: true } } },
+      include: {
+        tenants: true,
+        plans_subscriptions_plan_idToplans: true,
+        subscription_features: { include: { features: true } },
+      },
     });
   }
 
   findAll() {
     return this.prisma.subscriptions.findMany({
-      include: { tenants: true, plans_subscriptions_plan_idToplans: { include: { plan_features: { include: { features: true } } } }, subscription_features: { include: { features: true } } },
+      include: {
+        tenants: true,
+        plans_subscriptions_plan_idToplans: {
+          include: { plan_features: { include: { features: true } } },
+        },
+        subscription_features: { include: { features: true } },
+      },
     });
   }
 
@@ -44,8 +59,10 @@ export class SubscriptionsService {
       where: { id },
       include: {
         tenants: true,
-        plans_subscriptions_plan_idToplans: { include: { plan_features: { include: { features: true } } } },
-        subscription_features: { include: { features: true } }
+        plans_subscriptions_plan_idToplans: {
+          include: { plan_features: { include: { features: true } } },
+        },
+        subscription_features: { include: { features: true } },
       },
     });
   }
@@ -54,8 +71,10 @@ export class SubscriptionsService {
     return this.prisma.subscriptions.findFirst({
       where: { tenant_id: tenantId },
       include: {
-        plans_subscriptions_plan_idToplans: { include: { plan_features: { include: { features: true } } } },
-        subscription_features: { include: { features: true } }
+        plans_subscriptions_plan_idToplans: {
+          include: { plan_features: { include: { features: true } } },
+        },
+        subscription_features: { include: { features: true } },
       },
     });
   }
@@ -64,7 +83,11 @@ export class SubscriptionsService {
     return this.prisma.subscriptions.update({
       where: { id },
       data: updateSubscriptionDto,
-      include: { tenants: true, plans_subscriptions_plan_idToplans: true, subscription_features: { include: { features: true } } },
+      include: {
+        tenants: true,
+        plans_subscriptions_plan_idToplans: true,
+        subscription_features: { include: { features: true } },
+      },
     });
   }
 
@@ -83,11 +106,26 @@ export class SubscriptionsService {
     const endDate = new Date(subscription.end_date);
     endDate.setHours(0, 0, 0, 0);
 
-    return (
-      subscription.status === SubscriptionStatus.ACTIVE &&
-      endDate >= today
-    );
+    return subscription.status === SubscriptionStatus.ACTIVE && endDate >= today;
+  }
+
+  /**
+   * Verify that a tenant has an active (non-trial, non-expired) subscription
+   * This is used to enforce that each tenant MUST have its own subscription
+   */
+  async requireActiveSubscription(tenantId: string): Promise<boolean> {
+    const subscription = await this.findByTenantId(tenantId);
+    if (!subscription) {
+      return false;
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const endDate = new Date(subscription.end_date);
+    endDate.setHours(0, 0, 0, 0);
+
+    // Must be active status (not trial or pending) and not expired
+    const isActive = subscription.status === SubscriptionStatus.ACTIVE && endDate >= today;
+    return isActive;
   }
 }
-
-

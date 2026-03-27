@@ -4,21 +4,21 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 export class CreateDemoBookingDto {
   @ApiProperty({
     example: 'John Doe',
-    description: 'Full name of the person requesting demo'
+    description: 'Full name of the person requesting demo',
   })
   @IsString()
   name: string;
 
   @ApiProperty({
     example: 'john@example.com',
-    description: 'Email address'
+    description: 'Email address',
   })
   @IsEmail()
   email: string;
 
   @ApiPropertyOptional({
     example: '+66-8-1234-5678',
-    description: 'Phone number'
+    description: 'Phone number',
   })
   @IsString()
   @IsOptional()
@@ -26,21 +26,21 @@ export class CreateDemoBookingDto {
 
   @ApiProperty({
     example: '2026-04-15T10:00:00Z',
-    description: 'Preferred date for demo'
+    description: 'Preferred date for demo',
   })
   @IsDateString()
   demoDate: string;
 
   @ApiProperty({
     example: 'online',
-    description: 'Demo type (online or onsite)'
+    description: 'Demo type (online or onsite)',
   })
   @IsString()
   demoType: string; // online, onsite
 
   @ApiPropertyOptional({
     example: 'Interested in booking management features',
-    description: 'Additional notes or requirements'
+    description: 'Additional notes or requirements',
   })
   @IsString()
   @IsOptional()
@@ -50,21 +50,21 @@ export class CreateDemoBookingDto {
 export class CreateContactMessageDto {
   @ApiProperty({
     example: 'Jane Smith',
-    description: 'Full name of contact'
+    description: 'Full name of contact',
   })
   @IsString()
   name: string;
 
   @ApiProperty({
     example: 'jane@example.com',
-    description: 'Email address'
+    description: 'Email address',
   })
   @IsEmail()
   email: string;
 
   @ApiPropertyOptional({
     example: 'Question about pricing',
-    description: 'Subject of the message'
+    description: 'Subject of the message',
   })
   @IsString()
   @IsOptional()
@@ -72,7 +72,7 @@ export class CreateContactMessageDto {
 
   @ApiProperty({
     example: 'I would like to know more about your pricing plans',
-    description: 'Message content'
+    description: 'Message content',
   })
   @IsString()
   message: string;

@@ -1,19 +1,5 @@
-import {
-  Controller,
-  Get,
-  Patch,
-  Param,
-  Query,
-  Body,
-  UseGuards,
-} from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiBearerAuth,
-  ApiParam,
-} from '@nestjs/swagger';
+import { Controller, Get, Patch, Param, Query, Body, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -33,9 +19,7 @@ import {
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('platform_admin')
 export class AdminSubscriptionsController {
-  constructor(
-    private readonly adminSubscriptionsService: AdminSubscriptionsService,
-  ) {}
+  constructor(private readonly adminSubscriptionsService: AdminSubscriptionsService) {}
 
   /**
    * GET /api/v1/admin/subscriptions
@@ -123,8 +107,7 @@ export class AdminSubscriptionsController {
   @Patch(':id/status')
   @ApiOperation({
     summary: 'Update subscription status',
-    description:
-      'Change the status of a subscription (active, pending, cancelled, expired)',
+    description: 'Change the status of a subscription (active, pending, cancelled, expired)',
   })
   @ApiParam({
     name: 'id',

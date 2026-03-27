@@ -32,9 +32,7 @@ export class AdminHotelsService {
    * GET /api/admin/hotels
    * Get all hotels with filtering, search, and pagination
    */
-  async findAll(
-    query: AdminHotelsQueryDto,
-  ): Promise<AdminHotelsListResponseDto> {
+  async findAll(query: AdminHotelsQueryDto): Promise<AdminHotelsListResponseDto> {
     const { status, search, page = 1, limit = 10 } = query;
     const skip = (page - 1) * limit;
 
@@ -60,10 +58,7 @@ export class AdminHotelsService {
     const total = await queryBuilder.getCount();
 
     // Apply pagination and order
-    queryBuilder
-      .orderBy('tenant.createdAt', 'DESC')
-      .skip(skip)
-      .take(limit);
+    queryBuilder.orderBy('tenant.createdAt', 'DESC').skip(skip).take(limit);
 
     const tenants = await queryBuilder.getMany();
 
@@ -90,8 +85,7 @@ export class AdminHotelsService {
           id: tenant.id,
           hotelName: tenant.name,
           ownerName: owner
-            ? `${owner.firstName || ''} ${owner.lastName || ''}`.trim() ||
-              owner.email
+            ? `${owner.firstName || ''} ${owner.lastName || ''}`.trim() || owner.email
             : 'N/A',
           plan: tenant.subscription?.plan?.name || 'No Plan',
           rooms: tenant.roomCount,
@@ -168,8 +162,7 @@ export class AdminHotelsService {
       id: tenant.id,
       hotelName: tenant.name,
       ownerName: owner
-        ? `${owner.firstName || ''} ${owner.lastName || ''}`.trim() ||
-          owner.email
+        ? `${owner.firstName || ''} ${owner.lastName || ''}`.trim() || owner.email
         : 'N/A',
       email: owner?.email || 'N/A',
       createdAt: tenant.createdAt.toISOString().split('T')[0],
@@ -192,10 +185,7 @@ export class AdminHotelsService {
    * PATCH /api/admin/hotels/:id/status
    * Update hotel status (suspend/activate)
    */
-  async updateStatus(
-    id: string,
-    dto: UpdateHotelStatusDto,
-  ): Promise<HotelStatusUpdateResponseDto> {
+  async updateStatus(id: string, dto: UpdateHotelStatusDto): Promise<HotelStatusUpdateResponseDto> {
     const tenant = await this.tenantsRepository.findOne({ where: { id } });
 
     if (!tenant) {
@@ -206,9 +196,7 @@ export class AdminHotelsService {
     tenant.status = dto.status;
     await this.tenantsRepository.save(tenant);
 
-    this.logger.log(
-      `Hotel ${id} status changed from ${previousStatus} to ${dto.status}`,
-    );
+    this.logger.log(`Hotel ${id} status changed from ${previousStatus} to ${dto.status}`);
 
     return {
       success: true,
@@ -240,9 +228,7 @@ export class AdminHotelsService {
     });
 
     if (!owner) {
-      throw new NotFoundException(
-        `Owner for hotel with ID "${id}" not found`,
-      );
+      throw new NotFoundException(`Owner for hotel with ID "${id}" not found`);
     }
 
     // In a real implementation, you would integrate with an email service here

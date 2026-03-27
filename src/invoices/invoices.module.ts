@@ -7,10 +7,7 @@ import { Invoice } from './entities/invoice.entity';
 import { InvoiceAdjustment } from './entities/invoice-adjustment.entity';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([Invoice, InvoiceAdjustment]),
-    PrismaModule,
-  ],
+  imports: [TypeOrmModule.forFeature([Invoice, InvoiceAdjustment]), PrismaModule],
   controllers: [InvoicesController],
   providers: [InvoicesService],
   exports: [

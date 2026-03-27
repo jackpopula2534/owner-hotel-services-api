@@ -18,8 +18,8 @@ import { PlansModule } from '../plans/plans.module';
   imports: [
     TypeOrmModule.forFeature([Tenant, TenantCredit]), // own entities only
     SubscriptionsModule, // provides Repository<Subscription>, Repository<BillingHistory>
-    InvoicesModule,      // provides Repository<Invoice>, Repository<InvoiceAdjustment>
-    PlansModule,         // provides Repository<Plan>
+    InvoicesModule, // provides Repository<Invoice>, Repository<InvoiceAdjustment>
+    PlansModule, // provides Repository<Plan>
     PrismaModule,
   ],
   controllers: [TenantsController],

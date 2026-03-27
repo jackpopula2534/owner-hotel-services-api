@@ -6,10 +6,7 @@ import { PlanFeaturesController } from './plan-features.controller';
 import { PlanFeature } from './entities/plan-feature.entity';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([PlanFeature]),
-    PrismaModule,
-  ],
+  imports: [TypeOrmModule.forFeature([PlanFeature]), PrismaModule],
   controllers: [PlanFeaturesController],
   providers: [PlanFeaturesService],
   exports: [

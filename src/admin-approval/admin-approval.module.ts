@@ -13,5 +13,3 @@ import { AdminsModule } from '../admins/admins.module';
   exports: [AdminApprovalService],
 })
 export class AdminApprovalModule {}
-
-

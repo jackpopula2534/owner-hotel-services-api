@@ -49,28 +49,18 @@ export class AdminPanelService {
     const summary = {
       totalHotels: tenants.length,
       trialHotels: tenants.filter((t) => t.status === TenantStatus.TRIAL).length,
-      activeHotels: tenants.filter((t) => t.status === TenantStatus.ACTIVE)
-        .length,
-      expiredHotels: tenants.filter((t) => t.status === TenantStatus.EXPIRED)
-        .length,
-      suspendedHotels: tenants.filter(
-        (t) => t.status === TenantStatus.SUSPENDED,
-      ).length,
+      activeHotels: tenants.filter((t) => t.status === TenantStatus.ACTIVE).length,
+      expiredHotels: tenants.filter((t) => t.status === TenantStatus.EXPIRED).length,
+      suspendedHotels: tenants.filter((t) => t.status === TenantStatus.SUSPENDED).length,
     };
 
     // 2. Revenue
     const invoices = await this.invoicesService.findAll();
-    const paidInvoices = invoices.filter(
-      (i) => i.status === InvoiceStatus.PAID,
-    );
+    const paidInvoices = invoices.filter((i) => i.status === InvoiceStatus.PAID);
 
     const today = new Date();
     const thisMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-    const lastMonthStart = new Date(
-      today.getFullYear(),
-      today.getMonth() - 1,
-      1,
-    );
+    const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
     const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
 
     const thisMonthRevenue = paidInvoices
@@ -79,22 +69,15 @@ export class AdminPanelService {
 
     const lastMonthRevenue = paidInvoices
       .filter(
-        (i) =>
-          new Date(i.created_at) >= lastMonthStart &&
-          new Date(i.created_at) <= lastMonthEnd,
+        (i) => new Date(i.created_at) >= lastMonthStart && new Date(i.created_at) <= lastMonthEnd,
       )
       .reduce((sum, i) => sum + Number(i.amount), 0);
 
-    const totalRevenue = paidInvoices.reduce(
-      (sum, i) => sum + Number(i.amount),
-      0,
-    );
+    const totalRevenue = paidInvoices.reduce((sum, i) => sum + Number(i.amount), 0);
 
     // 3. Pending Payments
     const payments = await this.paymentsService.findAll();
-    const pendingPayments = payments.filter(
-      (p) => p.status === PaymentStatus.PENDING,
-    ).length;
+    const pendingPayments = payments.filter((p) => p.status === PaymentStatus.PENDING).length;
 
     // 4. Feature Usage
     const features = await this.featuresService.findAll();
@@ -138,9 +121,7 @@ export class AdminPanelService {
     const subscriptions = await this.subscriptionsService.findAll();
 
     return tenants.map((tenant) => {
-      const subscription = subscriptions.find(
-        (s) => s.tenant_id === tenant.id,
-      );
+      const subscription = subscriptions.find((s) => s.tenant_id === tenant.id);
 
       return {
         id: tenant.id,
@@ -166,16 +147,12 @@ export class AdminPanelService {
    */
   async getPendingPaymentsWithDetails(): Promise<any[]> {
     const payments = await this.paymentsService.findAll();
-    const pendingPayments = payments.filter(
-      (p) => p.status === PaymentStatus.PENDING,
-    );
+    const pendingPayments = payments.filter((p) => p.status === PaymentStatus.PENDING);
 
     const result = await Promise.all(
       pendingPayments.map(async (payment) => {
         const invoice = await this.invoicesService.findOne(payment.invoice_id);
-        const tenant = invoice
-          ? await this.tenantsService.findOne(invoice.tenant_id)
-          : null;
+        const tenant = invoice ? await this.tenantsService.findOne(invoice.tenant_id) : null;
 
         return {
           payment: {
@@ -206,5 +183,3 @@ export class AdminPanelService {
     return result;
   }
 }
-
-

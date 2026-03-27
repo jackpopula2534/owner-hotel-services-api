@@ -35,13 +35,13 @@ describe('SubscriptionController', () => {
 
   describe('getRenewalStatus', () => {
     it('should return renewal status with subscription details', async () => {
-      const mockUser = { userId: 'user-1', tenantId: 'tenant-1' };
+      const mockUser = { userId: 'user-1', tenant_id: 'tenant-1' };
       const mockSubscription = {
         id: 'sub-1',
-        tenantId: 'tenant-1',
+        tenant_id: 'tenant-1',
         status: 'active',
-        endDate: new Date('2024-12-31'),
-        autoRenew: true,
+        end_date: new Date('2024-12-31'),
+        auto_renew: true,
       };
 
       mockSubscriptionsService.findByTenantId.mockResolvedValue(mockSubscription);
@@ -51,14 +51,14 @@ describe('SubscriptionController', () => {
       expect(service.findByTenantId).toHaveBeenCalledWith('tenant-1');
       expect(result).toEqual({
         status: 'active',
-        endDate: mockSubscription.endDate,
+        endDate: mockSubscription.end_date,
         autoRenew: true,
         paymentHistory: [],
       });
     });
 
     it('should return inactive status when no subscription', async () => {
-      const mockUser = { userId: 'user-1', tenantId: 'tenant-1' };
+      const mockUser = { userId: 'user-1', tenant_id: 'tenant-1' };
 
       mockSubscriptionsService.findByTenantId.mockResolvedValue(null);
 

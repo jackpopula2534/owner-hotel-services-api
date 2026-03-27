@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantsService } from '../tenants/tenants.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
@@ -12,10 +12,13 @@ export interface OnboardingResult {
   subscription: any;
   trialEndsAt: Date;
   message: string;
+  property: any;
 }
 
 @Injectable()
 export class OnboardingService {
+  private readonly logger = new Logger(OnboardingService.name);
+
   constructor(
     private prisma: PrismaService,
     private tenantsService: TenantsService,
@@ -55,9 +58,9 @@ export class OnboardingService {
           code: 'TRIAL',
           name: 'Free Trial (Full Access)',
           price_monthly: 0,
-          max_rooms: 5,   // Limit rooms to 5
-          max_users: 2,   // Limit users to 2
-          max_properties: 1,
+          max_rooms: 5, // Limit rooms to 5
+          max_users: 2, // Limit users to 2
+          max_properties: 10,
           is_active: 1,
           description: 'Try all enterprise features with limited capacity',
         },
@@ -84,7 +87,7 @@ export class OnboardingService {
       if (allFeatures.length > 0) {
         const { randomUUID } = require('crypto');
         await this.prisma.subscription_features.createMany({
-          data: allFeatures.map(f => ({
+          data: allFeatures.map((f) => ({
             id: randomUUID(),
             subscription_id: subscription.id,
             feature_id: f.id,
@@ -94,7 +97,9 @@ export class OnboardingService {
         });
       }
     } catch (err) {
-      console.error('Failed to add full features to trial subscription:', err);
+      this.logger.warn(
+        `Failed to add full features to trial subscription: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
 
     // 4. Auto-create default property from tenant data
@@ -104,7 +109,7 @@ export class OnboardingService {
         .toUpperCase()
         .replace(/[^A-Z]/g, 'X') + Date.now().toString().slice(-4);
 
-    await this.prisma.property.create({
+    const defaultProperty = await this.prisma.property.create({
       data: {
         tenantId: tenant.id,
         name: createTenantDto.name || 'โรงแรมหลัก',
@@ -122,6 +127,7 @@ export class OnboardingService {
       subscription,
       trialEndsAt,
       message: `Hotel registered successfully. Trial period: ${trialDays} days.`,
+      property: defaultProperty,
     };
   }
 
@@ -223,5 +229,3 @@ export class OnboardingService {
     });
   }
 }
-
-

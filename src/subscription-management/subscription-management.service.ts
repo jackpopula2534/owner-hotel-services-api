@@ -93,12 +93,11 @@ export class SubscriptionManagementService {
     }
 
     // เพิ่ม feature ทันที
-    const subscriptionFeature =
-      await this.subscriptionFeaturesService.create({
-        subscriptionId: subscriptionId,
-        featureId: featureId,
-        price: Number(feature.price_monthly),
-      });
+    const subscriptionFeature = await this.subscriptionFeaturesService.create({
+      subscriptionId: subscriptionId,
+      featureId: featureId,
+      price: Number(feature.price_monthly),
+    });
 
     // สร้าง invoice
     const invoice = await this.invoicesService.create({
@@ -157,12 +156,8 @@ export class SubscriptionManagementService {
     endDate: Date,
   ): number {
     const today = new Date();
-    const totalDays = Math.ceil(
-      (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24),
-    );
-    const remainingDays = Math.ceil(
-      (endDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
-    );
+    const totalDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+    const remainingDays = Math.ceil((endDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
     const dailyOldPrice = oldPrice / 30; // สมมติว่า 30 วันต่อเดือน
     const dailyNewPrice = newPrice / 30;
@@ -174,5 +169,3 @@ export class SubscriptionManagementService {
     return Math.max(0, remainingNewCost - remainingOldCost);
   }
 }
-
-

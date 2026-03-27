@@ -1,12 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsString,
-  IsNumber,
-  IsOptional,
-  IsBoolean,
-  IsEnum,
-  Min,
-} from 'class-validator';
+import { IsString, IsNumber, IsOptional, IsBoolean, IsEnum, Min } from 'class-validator';
 
 // ============ Enums ============
 // Must match Feature entity enum

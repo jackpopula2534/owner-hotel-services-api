@@ -7,7 +7,19 @@ import { UpdatePlanDto } from './dto/update-plan.dto';
 export class PlansService {
   constructor(private readonly prisma: PrismaService) {}
 
-  create(createPlanDto: CreatePlanDto & { id?: string; displayOrder?: number; isPopular?: boolean; badge?: string; highlightColor?: string; features?: string; buttonText?: string; description?: string; yearlyDiscountPercent?: number }) {
+  create(
+    createPlanDto: CreatePlanDto & {
+      id?: string;
+      displayOrder?: number;
+      isPopular?: boolean;
+      badge?: string;
+      highlightColor?: string;
+      features?: string;
+      buttonText?: string;
+      description?: string;
+      yearlyDiscountPercent?: number;
+    },
+  ) {
     const data: any = {
       id: createPlanDto.id,
       code: createPlanDto.code,
@@ -28,7 +40,7 @@ export class PlansService {
     };
 
     // Clean up undefined properties
-    Object.keys(data).forEach(key => {
+    Object.keys(data).forEach((key) => {
       if (data[key] === undefined) {
         delete data[key];
       }
@@ -62,17 +74,31 @@ export class PlansService {
     });
   }
 
-  update(id: string, updatePlanDto: UpdatePlanDto & { displayOrder?: number; isPopular?: boolean; badge?: string; highlightColor?: string; features?: string; buttonText?: string; description?: string; yearlyDiscountPercent?: number }) {
+  update(
+    id: string,
+    updatePlanDto: UpdatePlanDto & {
+      displayOrder?: number;
+      isPopular?: boolean;
+      badge?: string;
+      highlightColor?: string;
+      features?: string;
+      buttonText?: string;
+      description?: string;
+      yearlyDiscountPercent?: number;
+    },
+  ) {
     const data: any = {
       code: updatePlanDto.code,
       name: updatePlanDto.name,
       price_monthly: updatePlanDto.priceMonthly,
       max_rooms: updatePlanDto.maxRooms,
       max_users: updatePlanDto.maxUsers,
-      is_active: updatePlanDto.isActive !== undefined ? (updatePlanDto.isActive ? 1 : 0) : undefined,
+      is_active:
+        updatePlanDto.isActive !== undefined ? (updatePlanDto.isActive ? 1 : 0) : undefined,
       // Sales Page fields
       display_order: updatePlanDto.displayOrder,
-      is_popular: updatePlanDto.isPopular !== undefined ? (updatePlanDto.isPopular ? 1 : 0) : undefined,
+      is_popular:
+        updatePlanDto.isPopular !== undefined ? (updatePlanDto.isPopular ? 1 : 0) : undefined,
       badge: updatePlanDto.badge,
       highlight_color: updatePlanDto.highlightColor,
       features: updatePlanDto.features,
@@ -82,7 +108,7 @@ export class PlansService {
     };
 
     // Clean up undefined properties
-    Object.keys(data).forEach(key => {
+    Object.keys(data).forEach((key) => {
       if (data[key] === undefined) {
         delete data[key];
       }
@@ -101,5 +127,3 @@ export class PlansService {
     });
   }
 }
-
-

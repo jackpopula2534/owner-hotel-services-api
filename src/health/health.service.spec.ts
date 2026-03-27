@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ServiceUnavailableException } from '@nestjs/common';
+import { DataSource } from 'typeorm';
 import { HealthService } from './health.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CacheService } from '../cache/cache.service';
@@ -8,6 +9,7 @@ describe('HealthService', () => {
   let service: HealthService;
   let prismaService: PrismaService;
   let cacheService: CacheService;
+  let dataSource: DataSource;
 
   const mockPrismaService = {
     $queryRaw: jest.fn(),
@@ -17,6 +19,11 @@ describe('HealthService', () => {
     isAvailable: jest.fn(),
     set: jest.fn(),
     del: jest.fn(),
+  };
+
+  const mockDataSource = {
+    isInitialized: true,
+    query: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -31,12 +38,17 @@ describe('HealthService', () => {
           provide: CacheService,
           useValue: mockCacheService,
         },
+        {
+          provide: DataSource,
+          useValue: mockDataSource,
+        },
       ],
     }).compile();
 
     service = module.get<HealthService>(HealthService);
     prismaService = module.get<PrismaService>(PrismaService);
     cacheService = module.get<CacheService>(CacheService);
+    dataSource = module.get<DataSource>(DataSource);
   });
 
   afterEach(() => {
@@ -75,50 +87,46 @@ describe('HealthService', () => {
       mockCacheService.isAvailable.mockReturnValue(true);
       mockCacheService.set.mockResolvedValue(undefined);
       mockCacheService.del.mockResolvedValue(undefined);
+      mockDataSource.query.mockResolvedValue([]);
 
       const result = await service.readinessCheck();
 
       expect(result.status).toBe('ok');
       expect(result.checks.database.status).toBe('up');
-      expect(result.checks.redis.status).toBe('up');
+      expect(result.checks.typeorm.status).toBe('up');
+      expect(result.checks.cache.status).toBe('up');
     });
 
-    it('should return degraded status when database is down', async () => {
-      mockPrismaService.$queryRaw.mockRejectedValue(
-        new Error('Connection timeout'),
-      );
+    it('should throw when database is down', async () => {
+      mockPrismaService.$queryRaw.mockRejectedValue(new Error('Connection timeout'));
       mockCacheService.isAvailable.mockReturnValue(true);
       mockCacheService.set.mockResolvedValue(undefined);
       mockCacheService.del.mockResolvedValue(undefined);
+      mockDataSource.query.mockResolvedValue([]);
 
-      const result = await service.readinessCheck();
-
-      expect(result.checks.database.status).toBe('down');
-      expect(result.checks.database.error).toBe('Connection failed');
+      await expect(service.readinessCheck()).rejects.toThrow(ServiceUnavailableException);
     });
 
     it('should return degraded status when cache is unavailable', async () => {
       mockPrismaService.$queryRaw.mockResolvedValue([{ '1': 1 }]);
       mockCacheService.isAvailable.mockReturnValue(false);
+      mockDataSource.query.mockResolvedValue([]);
 
       const result = await service.readinessCheck();
 
       expect(result.status).toBe('degraded');
       expect(result.checks.database.status).toBe('up');
-      expect(result.checks.redis.status).toBe('degraded');
+      expect(result.checks.cache.status).toBe('degraded');
     });
 
     it('should throw ServiceUnavailableException when database is down', async () => {
-      mockPrismaService.$queryRaw.mockRejectedValue(
-        new Error('Connection refused'),
-      );
+      mockPrismaService.$queryRaw.mockRejectedValue(new Error('Connection refused'));
       mockCacheService.isAvailable.mockReturnValue(true);
       mockCacheService.set.mockResolvedValue(undefined);
       mockCacheService.del.mockResolvedValue(undefined);
+      mockDataSource.query.mockResolvedValue([]);
 
-      await expect(service.readinessCheck()).rejects.toThrow(
-        ServiceUnavailableException,
-      );
+      await expect(service.readinessCheck()).rejects.toThrow(ServiceUnavailableException);
     });
 
     it('should include timestamp in response', async () => {
@@ -126,6 +134,7 @@ describe('HealthService', () => {
       mockCacheService.isAvailable.mockReturnValue(true);
       mockCacheService.set.mockResolvedValue(undefined);
       mockCacheService.del.mockResolvedValue(undefined);
+      mockDataSource.query.mockResolvedValue([]);
 
       const result = await service.readinessCheck();
 
@@ -139,14 +148,11 @@ describe('HealthService', () => {
       mockCacheService.isAvailable.mockReturnValue(true);
       mockCacheService.set.mockResolvedValue(undefined);
       mockCacheService.del.mockResolvedValue(undefined);
+      mockDataSource.query.mockResolvedValue([]);
 
       await service.readinessCheck();
 
-      expect(mockCacheService.set).toHaveBeenCalledWith(
-        '__health_check__',
-        'test',
-        { ttl: 5 },
-      );
+      expect(mockCacheService.set).toHaveBeenCalledWith('__health_check__', 'ok', { ttl: 5 });
       expect(mockCacheService.del).toHaveBeenCalledWith('__health_check__');
     });
   });

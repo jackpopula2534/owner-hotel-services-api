@@ -19,9 +19,9 @@ export const ROLES_KEY = 'roles';
 export type UserRole =
   | 'platform_admin'
   | 'tenant_admin'
-  | 'admin'       // legacy alias (Level 90)
+  | 'admin' // legacy alias (Level 90)
   | 'manager'
-  | 'hr'          // Human Resources (Level 70)
+  | 'hr' // Human Resources (Level 70)
   | 'chef'
   | 'receptionist'
   | 'waiter'
@@ -33,5 +33,3 @@ export type UserRole =
   | 'user';
 
 export const Roles = (...roles: UserRole[]) => SetMetadata(ROLES_KEY, roles);
-
-

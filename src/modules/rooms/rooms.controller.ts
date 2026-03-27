@@ -60,10 +60,7 @@ export class RoomsController {
   @ApiOperation({ summary: 'Create a new room' })
   @ApiResponse({ status: 201, description: 'Room created successfully' })
   @Roles('admin', 'manager', 'tenant_admin', 'platform_admin')
-  async create(
-    @Body() createRoomDto: CreateRoomDto,
-    @CurrentUser() user: { tenantId?: string },
-  ) {
+  async create(@Body() createRoomDto: CreateRoomDto, @CurrentUser() user: { tenantId?: string }) {
     return this.roomsService.create(createRoomDto, user?.tenantId);
   }
 
@@ -99,4 +96,3 @@ export class RoomsController {
     return this.roomsService.remove(id, user?.tenantId);
   }
 }
-

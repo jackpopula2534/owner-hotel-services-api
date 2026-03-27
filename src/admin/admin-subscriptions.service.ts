@@ -42,9 +42,7 @@ export class AdminSubscriptionsService {
    * GET /api/admin/subscriptions
    * Get all subscriptions with filtering, search, and pagination
    */
-  async findAll(
-    query: AdminSubscriptionsQueryDto,
-  ): Promise<AdminSubscriptionsListResponseDto> {
+  async findAll(query: AdminSubscriptionsQueryDto): Promise<AdminSubscriptionsListResponseDto> {
     const { status, search, page = 1, limit = 10 } = query;
     const skip = (page - 1) * limit;
 
@@ -82,10 +80,7 @@ export class AdminSubscriptionsService {
     const total = await queryBuilder.getCount();
 
     // Apply pagination and order
-    queryBuilder
-      .orderBy('subscription.createdAt', 'DESC')
-      .skip(skip)
-      .take(limit);
+    queryBuilder.orderBy('subscription.createdAt', 'DESC').skip(skip).take(limit);
 
     const subscriptions = await queryBuilder.getMany();
 
@@ -118,12 +113,8 @@ export class AdminSubscriptionsService {
         plan: sub.plan?.name || 'No Plan',
         previousPlan: previousPlanName,
         period: {
-          start: sub.startDate
-            ? new Date(sub.startDate).toISOString().split('T')[0]
-            : 'N/A',
-          end: sub.endDate
-            ? new Date(sub.endDate).toISOString().split('T')[0]
-            : 'N/A',
+          start: sub.startDate ? new Date(sub.startDate).toISOString().split('T')[0] : 'N/A',
+          end: sub.endDate ? new Date(sub.endDate).toISOString().split('T')[0] : 'N/A',
         },
         addons,
         addonAmount,
@@ -189,7 +180,7 @@ export class AdminSubscriptionsService {
       if (sub.previousPlan && sub.plan) {
         const currentPrice = Number(sub.plan.priceMonthly || 0);
         const previousPrice = Number(sub.previousPlan.priceMonthly || 0);
-        
+
         if (currentPrice > previousPrice) {
           upgrades++;
         } else if (currentPrice < previousPrice) {
@@ -230,7 +221,7 @@ export class AdminSubscriptionsService {
         ],
       });
     }
-    
+
     if (!subscription) {
       subscription = await this.subscriptionsRepository.findOne({
         where: { id },
@@ -258,9 +249,7 @@ export class AdminSubscriptionsService {
     });
 
     // Build addons list
-    const addons: SubscriptionAddonDto[] = (
-      subscription.subscriptionFeatures || []
-    ).map((sf) => ({
+    const addons: SubscriptionAddonDto[] = (subscription.subscriptionFeatures || []).map((sf) => ({
       name: sf.feature?.name || 'Unknown',
       price: Number(sf.price || 0),
     }));
@@ -271,15 +260,14 @@ export class AdminSubscriptionsService {
     const pricePerMonth = planPrice + addonTotal;
 
     // Get latest invoice
-    const latestInvoice = subscription.invoices
-      ?.sort(
-        (a, b) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-      )[0];
+    const latestInvoice = subscription.invoices?.sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    )[0];
 
     return {
       id: subscription.id,
-      subscriptionCode: subscription.subscriptionCode || `SUB-${subscription.id.slice(0, 3).toUpperCase()}`,
+      subscriptionCode:
+        subscription.subscriptionCode || `SUB-${subscription.id.slice(0, 3).toUpperCase()}`,
       hotelName: subscription.tenant?.name || 'N/A',
       hotelEmail: owner?.email || 'N/A',
       plan: subscription.plan?.name || 'No Plan',
@@ -319,7 +307,7 @@ export class AdminSubscriptionsService {
         where: { subscriptionCode: id },
       });
     }
-    
+
     if (!subscription) {
       subscription = await this.subscriptionsRepository.findOne({
         where: { id },
@@ -340,7 +328,7 @@ export class AdminSubscriptionsService {
 
     const previousStatus = subscription.status;
     const newStatus = statusMap[dto.status];
-    
+
     subscription.status = newStatus;
     await this.subscriptionsRepository.save(subscription);
 

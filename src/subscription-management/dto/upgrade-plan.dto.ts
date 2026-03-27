@@ -7,5 +7,3 @@ export class UpgradePlanDto {
   @IsString()
   newPlanId: string;
 }
-
-

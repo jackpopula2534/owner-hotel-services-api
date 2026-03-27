@@ -18,7 +18,7 @@ export class FeaturesService {
     };
 
     // Clean up undefined properties
-    Object.keys(data).forEach(key => {
+    Object.keys(data).forEach((key) => {
       if (data[key] === undefined) {
         delete data[key];
       }
@@ -54,11 +54,12 @@ export class FeaturesService {
       description: updateFeatureDto.description,
       type: updateFeatureDto.type,
       price_monthly: updateFeatureDto.priceMonthly,
-      is_active: updateFeatureDto.isActive !== undefined ? (updateFeatureDto.isActive ? 1 : 0) : undefined,
+      is_active:
+        updateFeatureDto.isActive !== undefined ? (updateFeatureDto.isActive ? 1 : 0) : undefined,
     };
 
     // Clean up undefined properties
-    Object.keys(data).forEach(key => {
+    Object.keys(data).forEach((key) => {
       if (data[key] === undefined) {
         delete data[key];
       }
@@ -76,5 +77,3 @@ export class FeaturesService {
     });
   }
 }
-
-

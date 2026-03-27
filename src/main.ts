@@ -9,7 +9,7 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
   const app = await NestFactory.create(AppModule);
-  
+
   // Global validation pipe
   app.useGlobalPipes(
     new ValidationPipe({
@@ -27,8 +27,10 @@ async function bootstrap() {
 
   // CORS configuration
   // Read allowed origins from .env or use defaults
-  const allowedOriginsEnv = process.env.ALLOWED_ORIGINS || 'http://localhost:3000,http://localhost:2000,http://localhost:9010,http://localhost:9011';
-  const allowedOrigins = allowedOriginsEnv.split(',').map(origin => origin.trim());
+  const allowedOriginsEnv =
+    process.env.ALLOWED_ORIGINS ||
+    'http://localhost:3000,http://localhost:2000,http://localhost:9010,http://localhost:9011';
+  const allowedOrigins = allowedOriginsEnv.split(',').map((origin) => origin.trim());
 
   logger.log('CORS allowed origins: ' + allowedOrigins.join(', '));
 
@@ -83,5 +85,3 @@ async function bootstrap() {
   logger.log(`Swagger documentation: http://localhost:${port}/api/docs`);
 }
 bootstrap();
-
-

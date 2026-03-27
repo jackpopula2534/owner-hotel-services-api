@@ -1,10 +1,4 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Body,
-  Param,
-} from '@nestjs/common';
+import { Controller, Get, Post, Body, Param } from '@nestjs/common';
 import { AdminApprovalService } from './admin-approval.service';
 import { ApprovePaymentDto } from './dto/approve-payment.dto';
 import { RejectPaymentDto } from './dto/reject-payment.dto';
@@ -22,10 +16,7 @@ export class AdminApprovalController {
     @Param('paymentId') paymentId: string,
     @Body() approvePaymentDto: ApprovePaymentDto,
   ) {
-    return this.adminApprovalService.approvePayment(
-      paymentId,
-      approvePaymentDto.adminId,
-    );
+    return this.adminApprovalService.approvePayment(paymentId, approvePaymentDto.adminId);
   }
 
   /**
@@ -51,5 +42,3 @@ export class AdminApprovalController {
     return this.adminApprovalService.getPendingPayments();
   }
 }
-
-

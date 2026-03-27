@@ -74,4 +74,3 @@ export class HrController {
     return this.hrService.remove(id, user?.tenantId);
   }
 }
-

@@ -109,5 +109,3 @@ export class Subscription {
   @OneToMany(() => Invoice, (invoice) => invoice.subscription)
   invoices: Invoice[];
 }
-
-

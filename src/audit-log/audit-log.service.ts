@@ -63,11 +63,7 @@ export class AuditLogService {
   /**
    * Log admin login
    */
-  async logAdminLogin(
-    adminId: string,
-    ipAddress?: string,
-    userAgent?: string,
-  ): Promise<void> {
+  async logAdminLogin(adminId: string, ipAddress?: string, userAgent?: string): Promise<void> {
     await this.log({
       action: AuditAction.LOGIN,
       resource: AuditResource.ADMIN,
@@ -82,11 +78,7 @@ export class AuditLogService {
   /**
    * Log failed login attempt
    */
-  async logLoginFailed(
-    email: string,
-    ipAddress?: string,
-    userAgent?: string,
-  ): Promise<void> {
+  async logLoginFailed(email: string, ipAddress?: string, userAgent?: string): Promise<void> {
     await this.log({
       action: AuditAction.LOGIN_FAILED,
       resource: AuditResource.USER,
@@ -99,11 +91,7 @@ export class AuditLogService {
   /**
    * Log logout
    */
-  async logLogout(
-    userId: string,
-    isAdmin: boolean = false,
-    ipAddress?: string,
-  ): Promise<void> {
+  async logLogout(userId: string, isAdmin: boolean = false, ipAddress?: string): Promise<void> {
     await this.log({
       action: AuditAction.LOGOUT,
       resource: isAdmin ? AuditResource.ADMIN : AuditResource.USER,
@@ -118,11 +106,7 @@ export class AuditLogService {
   /**
    * Log booking creation
    */
-  async logBookingCreate(
-    booking: any,
-    userId: string,
-    ipAddress?: string,
-  ): Promise<void> {
+  async logBookingCreate(booking: any, userId: string, ipAddress?: string): Promise<void> {
     await this.log({
       action: AuditAction.BOOKING_CREATE,
       resource: AuditResource.BOOKING,
@@ -144,11 +128,7 @@ export class AuditLogService {
   /**
    * Log booking cancellation
    */
-  async logBookingCancel(
-    booking: any,
-    userId: string,
-    ipAddress?: string,
-  ): Promise<void> {
+  async logBookingCancel(booking: any, userId: string, ipAddress?: string): Promise<void> {
     await this.log({
       action: AuditAction.BOOKING_CANCEL,
       resource: AuditResource.BOOKING,
@@ -165,11 +145,7 @@ export class AuditLogService {
   /**
    * Log payment approval
    */
-  async logPaymentApprove(
-    payment: any,
-    adminId: string,
-    ipAddress?: string,
-  ): Promise<void> {
+  async logPaymentApprove(payment: any, adminId: string, ipAddress?: string): Promise<void> {
     await this.log({
       action: AuditAction.PAYMENT_APPROVE,
       resource: AuditResource.PAYMENT,
@@ -274,10 +250,7 @@ export class AuditLogService {
   /**
    * Log 2FA enable
    */
-  async log2FAEnabled(
-    userId: string,
-    ipAddress?: string,
-  ): Promise<void> {
+  async log2FAEnabled(userId: string, ipAddress?: string): Promise<void> {
     await this.log({
       action: AuditAction.TWO_FA_ENABLED,
       resource: AuditResource.USER,
@@ -291,10 +264,7 @@ export class AuditLogService {
   /**
    * Log 2FA disable
    */
-  async log2FADisabled(
-    userId: string,
-    ipAddress?: string,
-  ): Promise<void> {
+  async log2FADisabled(userId: string, ipAddress?: string): Promise<void> {
     await this.log({
       action: AuditAction.TWO_FA_DISABLED,
       resource: AuditResource.USER,
@@ -422,7 +392,17 @@ export class AuditLogService {
     });
 
     // Convert to CSV
-    const headers = ['ID', 'Timestamp', 'Action', 'Resource', 'Resource ID', 'User ID', 'Admin ID', 'IP Address', 'Description'];
+    const headers = [
+      'ID',
+      'Timestamp',
+      'Action',
+      'Resource',
+      'Resource ID',
+      'User ID',
+      'Admin ID',
+      'IP Address',
+      'Description',
+    ];
     const rows = logs.map((log) => [
       log.id,
       log.createdAt.toISOString(),

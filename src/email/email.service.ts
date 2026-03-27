@@ -106,7 +106,9 @@ export class EmailService implements OnModuleInit {
 
     const defaultTemplates: Record<string, { th: string; en: string }> = {
       [EmailTemplate.BOOKING_CONFIRMATION]: {
-        th: this.wrapInBase(baseTemplate, `
+        th: this.wrapInBase(
+          baseTemplate,
+          `
           <h2>ยืนยันการจอง</h2>
           <p>เรียน {{guestName}},</p>
           <p>ขอบคุณสำหรับการจองห้องพักกับเรา</p>
@@ -118,8 +120,11 @@ export class EmailService implements OnModuleInit {
             <p><strong>ราคารวม:</strong> ฿{{totalPrice}}</p>
           </div>
           <p>หากมีคำถามใดๆ กรุณาติดต่อเรา</p>
-        `),
-        en: this.wrapInBase(baseTemplate, `
+        `,
+        ),
+        en: this.wrapInBase(
+          baseTemplate,
+          `
           <h2>Booking Confirmation</h2>
           <p>Dear {{guestName}},</p>
           <p>Thank you for booking with us.</p>
@@ -131,10 +136,13 @@ export class EmailService implements OnModuleInit {
             <p><strong>Total Price:</strong> ฿{{totalPrice}}</p>
           </div>
           <p>If you have any questions, please contact us.</p>
-        `),
+        `,
+        ),
       },
       [EmailTemplate.CHECK_IN_REMINDER]: {
-        th: this.wrapInBase(baseTemplate, `
+        th: this.wrapInBase(
+          baseTemplate,
+          `
           <h2>แจ้งเตือนการเช็คอิน</h2>
           <p>เรียน {{guestName}},</p>
           <p>เราตั้งตารอต้อนรับคุณพรุ่งนี้!</p>
@@ -144,8 +152,11 @@ export class EmailService implements OnModuleInit {
             <p><strong>เวลาเช็คอิน:</strong> {{checkInTime}}</p>
           </div>
           <p>กรุณาเตรียมบัตรประชาชนหรือพาสปอร์ตมาด้วยนะคะ</p>
-        `),
-        en: this.wrapInBase(baseTemplate, `
+        `,
+        ),
+        en: this.wrapInBase(
+          baseTemplate,
+          `
           <h2>Check-in Reminder</h2>
           <p>Dear {{guestName}},</p>
           <p>We look forward to welcoming you tomorrow!</p>
@@ -155,10 +166,13 @@ export class EmailService implements OnModuleInit {
             <p><strong>Check-in Time:</strong> {{checkInTime}}</p>
           </div>
           <p>Please bring your ID or passport.</p>
-        `),
+        `,
+        ),
       },
       [EmailTemplate.PAYMENT_RECEIPT]: {
-        th: this.wrapInBase(baseTemplate, `
+        th: this.wrapInBase(
+          baseTemplate,
+          `
           <h2>ใบเสร็จรับเงิน</h2>
           <p>เรียน {{guestName}},</p>
           <p>เราได้รับการชำระเงินของคุณเรียบร้อยแล้ว</p>
@@ -170,8 +184,11 @@ export class EmailService implements OnModuleInit {
             <p><strong>วิธีการชำระ:</strong> {{paymentMethod}}</p>
           </div>
           <p>ขอบคุณที่ใช้บริการ</p>
-        `),
-        en: this.wrapInBase(baseTemplate, `
+        `,
+        ),
+        en: this.wrapInBase(
+          baseTemplate,
+          `
           <h2>Payment Receipt</h2>
           <p>Dear {{guestName}},</p>
           <p>We have received your payment successfully.</p>
@@ -183,10 +200,13 @@ export class EmailService implements OnModuleInit {
             <p><strong>Payment Method:</strong> {{paymentMethod}}</p>
           </div>
           <p>Thank you for your business.</p>
-        `),
+        `,
+        ),
       },
       [EmailTemplate.PASSWORD_RESET]: {
-        th: this.wrapInBase(baseTemplate, `
+        th: this.wrapInBase(
+          baseTemplate,
+          `
           <h2>รีเซ็ตรหัสผ่าน</h2>
           <p>เรียนคุณ {{userName}},</p>
           <p>เราได้รับคำขอรีเซ็ตรหัสผ่านของคุณ</p>
@@ -194,8 +214,11 @@ export class EmailService implements OnModuleInit {
           <a href="{{resetLink}}" class="button">รีเซ็ตรหัสผ่าน</a>
           <p>ลิงก์นี้จะหมดอายุใน 1 ชั่วโมง</p>
           <p>หากคุณไม่ได้ขอรีเซ็ตรหัสผ่าน กรุณาเพิกเฉยอีเมลนี้</p>
-        `),
-        en: this.wrapInBase(baseTemplate, `
+        `,
+        ),
+        en: this.wrapInBase(
+          baseTemplate,
+          `
           <h2>Password Reset</h2>
           <p>Dear {{userName}},</p>
           <p>We received a request to reset your password.</p>
@@ -203,28 +226,37 @@ export class EmailService implements OnModuleInit {
           <a href="{{resetLink}}" class="button">Reset Password</a>
           <p>This link will expire in 1 hour.</p>
           <p>If you didn't request a password reset, please ignore this email.</p>
-        `),
+        `,
+        ),
       },
       [EmailTemplate.WELCOME]: {
-        th: this.wrapInBase(baseTemplate, `
+        th: this.wrapInBase(
+          baseTemplate,
+          `
           <h2>ยินดีต้อนรับ!</h2>
           <p>เรียน {{guestName}},</p>
           <p>ขอบคุณที่ลงทะเบียนกับเรา</p>
           <p>คุณสามารถเข้าสู่ระบบได้ที่:</p>
           <a href="{{loginLink}}" class="button">เข้าสู่ระบบ</a>
           <p>หากมีคำถามใดๆ กรุณาติดต่อเรา</p>
-        `),
-        en: this.wrapInBase(baseTemplate, `
+        `,
+        ),
+        en: this.wrapInBase(
+          baseTemplate,
+          `
           <h2>Welcome!</h2>
           <p>Dear {{guestName}},</p>
           <p>Thank you for registering with us.</p>
           <p>You can login at:</p>
           <a href="{{loginLink}}" class="button">Login</a>
           <p>If you have any questions, please contact us.</p>
-        `),
+        `,
+        ),
       },
       [EmailTemplate.CANCELLATION]: {
-        th: this.wrapInBase(baseTemplate, `
+        th: this.wrapInBase(
+          baseTemplate,
+          `
           <h2>ยกเลิกการจอง</h2>
           <p>เรียน {{guestName}},</p>
           <p>การจองของคุณได้ถูกยกเลิกเรียบร้อยแล้ว</p>
@@ -236,8 +268,11 @@ export class EmailService implements OnModuleInit {
             {{/if}}
           </div>
           <p>หากมีคำถามใดๆ กรุณาติดต่อเรา</p>
-        `),
-        en: this.wrapInBase(baseTemplate, `
+        `,
+        ),
+        en: this.wrapInBase(
+          baseTemplate,
+          `
           <h2>Booking Cancellation</h2>
           <p>Dear {{guestName}},</p>
           <p>Your booking has been cancelled.</p>
@@ -249,10 +284,13 @@ export class EmailService implements OnModuleInit {
             {{/if}}
           </div>
           <p>If you have any questions, please contact us.</p>
-        `),
+        `,
+        ),
       },
       [EmailTemplate.INVOICE]: {
-        th: this.wrapInBase(baseTemplate, `
+        th: this.wrapInBase(
+          baseTemplate,
+          `
           <h2>ใบแจ้งหนี้</h2>
           <p>เรียน {{customerName}},</p>
           <p>แนบมาพร้อมนี้คือใบแจ้งหนี้ของคุณ</p>
@@ -263,8 +301,11 @@ export class EmailService implements OnModuleInit {
             <p><strong>จำนวนเงิน:</strong> ฿{{amount}}</p>
           </div>
           <a href="{{paymentLink}}" class="button">ชำระเงิน</a>
-        `),
-        en: this.wrapInBase(baseTemplate, `
+        `,
+        ),
+        en: this.wrapInBase(
+          baseTemplate,
+          `
           <h2>Invoice</h2>
           <p>Dear {{customerName}},</p>
           <p>Please find your invoice attached.</p>
@@ -275,7 +316,8 @@ export class EmailService implements OnModuleInit {
             <p><strong>Amount:</strong> ฿{{amount}}</p>
           </div>
           <a href="{{paymentLink}}" class="button">Pay Now</a>
-        `),
+        `,
+        ),
       },
     };
 
@@ -334,7 +376,7 @@ export class EmailService implements OnModuleInit {
       return d.toLocaleDateString('th-TH', {
         year: 'numeric',
         month: 'long',
-        day: 'numeric'
+        day: 'numeric',
       });
     });
 
@@ -342,12 +384,12 @@ export class EmailService implements OnModuleInit {
       if (!amount) return '0.00';
       return amount.toLocaleString('th-TH', {
         minimumFractionDigits: 2,
-        maximumFractionDigits: 2
+        maximumFractionDigits: 2,
       });
     });
 
-    handlebars.registerHelper('ifEquals', function(arg1: any, arg2: any, options: any) {
-      return (arg1 === arg2) ? options.fn(this) : options.inverse(this);
+    handlebars.registerHelper('ifEquals', function (arg1: any, arg2: any, options: any) {
+      return arg1 === arg2 ? options.fn(this) : options.inverse(this);
     });
   }
 
@@ -376,7 +418,9 @@ export class EmailService implements OnModuleInit {
     return { success: true, emailLogId: emailLog.id };
   }
 
-  async sendBulkEmail(dto: SendBulkEmailDto): Promise<{ success: boolean; count: number; emailLogIds: string[] }> {
+  async sendBulkEmail(
+    dto: SendBulkEmailDto,
+  ): Promise<{ success: boolean; count: number; emailLogIds: string[] }> {
     const emailLogIds: string[] = [];
 
     for (const recipient of dto.recipients) {
@@ -624,11 +668,7 @@ export class EmailService implements OnModuleInit {
     });
   }
 
-  async sendPasswordReset(params: {
-    to: string;
-    userName: string;
-    resetLink: string;
-  }) {
+  async sendPasswordReset(params: { to: string; userName: string; resetLink: string }) {
     return this.sendEmail({
       to: params.to,
       subject: 'รีเซ็ตรหัสผ่าน - Password Reset',

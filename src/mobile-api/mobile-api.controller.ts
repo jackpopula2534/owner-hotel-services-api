@@ -9,13 +9,7 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiBearerAuth,
-  ApiQuery,
-} from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { MobileApiService } from './mobile-api.service';
@@ -136,10 +130,7 @@ export class MobileApiController {
   @ApiOperation({ summary: 'Quick search across bookings, guests, and rooms' })
   @ApiQuery({ name: 'q', required: true, type: String })
   @ApiResponse({ status: 200 })
-  async quickSearch(
-    @CurrentUser() user: any,
-    @Query('q') query: string,
-  ) {
+  async quickSearch(@CurrentUser() user: any, @Query('q') query: string) {
     return this.mobileApiService.quickSearch(user.tenantId, query);
   }
 
@@ -172,11 +163,7 @@ export class MobileApiController {
     @Param('id') bookingId: string,
     @Body('status') status: string,
   ): Promise<MobileBookingSummaryDto> {
-    return this.mobileApiService.updateBookingStatus(
-      user.tenantId,
-      bookingId,
-      status,
-    );
+    return this.mobileApiService.updateBookingStatus(user.tenantId, bookingId, status);
   }
 
   /**
@@ -191,11 +178,7 @@ export class MobileApiController {
     @CurrentUser() user: any,
     @Param('id') bookingId: string,
   ): Promise<MobileBookingSummaryDto> {
-    return this.mobileApiService.updateBookingStatus(
-      user.tenantId,
-      bookingId,
-      'checked_in',
-    );
+    return this.mobileApiService.updateBookingStatus(user.tenantId, bookingId, 'checked_in');
   }
 
   /**
@@ -210,10 +193,6 @@ export class MobileApiController {
     @CurrentUser() user: any,
     @Param('id') bookingId: string,
   ): Promise<MobileBookingSummaryDto> {
-    return this.mobileApiService.updateBookingStatus(
-      user.tenantId,
-      bookingId,
-      'checked_out',
-    );
+    return this.mobileApiService.updateBookingStatus(user.tenantId, bookingId, 'checked_out');
   }
 }

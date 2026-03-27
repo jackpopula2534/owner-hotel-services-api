@@ -1,3 +1,9 @@
+// Mock bcrypt to avoid native binary issues on linux/arm64
+jest.mock('bcrypt', () => ({
+  hash: jest.fn(),
+  compare: jest.fn(),
+}));
+
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
@@ -155,10 +161,7 @@ describe('AuthController', () => {
 
       const result = await controller.logout(mockUser, body);
 
-      expect(authService.logout).toHaveBeenCalledWith(
-        mockUser.userId,
-        body.refreshToken,
-      );
+      expect(authService.logout).toHaveBeenCalledWith(mockUser.userId, body.refreshToken);
       expect(result).toBeUndefined();
     });
   });

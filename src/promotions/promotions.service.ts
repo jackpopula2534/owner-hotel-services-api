@@ -10,10 +10,7 @@ export class PromotionsService {
   async getActivePromotions(segment?: string) {
     const where: any = { isActive: true };
     if (segment) {
-      where.OR = [
-        { targetSegment: segment },
-        { targetSegment: null },
-      ];
+      where.OR = [{ targetSegment: segment }, { targetSegment: null }];
     }
 
     try {

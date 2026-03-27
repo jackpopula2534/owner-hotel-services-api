@@ -82,11 +82,7 @@ export class SeederService {
         isPopular: false,
         badge: null,
         highlightColor: null,
-        features: JSON.stringify([
-          'รองรับ 20 ห้อง',
-          'ผู้ใช้งาน 3 คน',
-          'ระบบจองครบครัน',
-        ]),
+        features: JSON.stringify(['รองรับ 20 ห้อง', 'ผู้ใช้งาน 3 คน', 'ระบบจองครบครัน']),
         buttonText: 'เริ่มใช้งาน',
       },
       {
@@ -104,11 +100,7 @@ export class SeederService {
         isPopular: true,
         badge: 'ยอดนิยม',
         highlightColor: '#8B5CF6',
-        features: JSON.stringify([
-          'รองรับ 50 ห้อง',
-          'ผู้ใช้งาน 10 คน',
-          'ระบบจองครบครัน',
-        ]),
+        features: JSON.stringify(['รองรับ 50 ห้อง', 'ผู้ใช้งาน 10 คน', 'ระบบจองครบครัน']),
         buttonText: 'เริ่มใช้งาน',
       },
       {
@@ -126,11 +118,7 @@ export class SeederService {
         isPopular: false,
         badge: null,
         highlightColor: null,
-        features: JSON.stringify([
-          'รองรับ 200 ห้อง',
-          'ผู้ใช้งาน 50 คน',
-          'ระบบจองครบครัน',
-        ]),
+        features: JSON.stringify(['รองรับ 200 ห้อง', 'ผู้ใช้งาน 50 คน', 'ระบบจองครบครัน']),
         buttonText: 'เริ่มใช้งาน',
       },
     ];
@@ -139,7 +127,9 @@ export class SeederService {
       const existing = await this.plansService.findByCode(planData.code);
       if (!existing) {
         await this.plansService.create(planData);
-        this.logger.log(`  ✓ Created plan: ${planData.code} - ${planData.name} (฿${planData.priceMonthly}/mo)`);
+        this.logger.log(
+          `  ✓ Created plan: ${planData.code} - ${planData.name} (฿${planData.priceMonthly}/mo)`,
+        );
       } else {
         // Update existing plan with Sales Page data
         await this.plansService.update(existing.id, planData);
@@ -241,7 +231,9 @@ export class SeederService {
       const existing = await this.featuresService.findByCode(featureData.code);
       if (!existing) {
         await this.featuresService.create(featureData);
-        this.logger.log(`  ✓ Created feature: ${featureData.code} (฿${featureData.priceMonthly}/mo)`);
+        this.logger.log(
+          `  ✓ Created feature: ${featureData.code} (฿${featureData.priceMonthly}/mo)`,
+        );
       } else {
         this.logger.log(`  ⊙ Feature already exists: ${featureData.code}`);
       }
@@ -294,7 +286,7 @@ export class SeederService {
       const existing = await this.planFeaturesService.findByPlanId(planL.id);
       if (existing.length === 0) {
         const advancedReport = await this.featuresService.findByCode('advanced_report');
-        
+
         await this.planFeaturesService.create({
           planId: planL.id,
           featureId: basicReport.id,
@@ -415,13 +407,11 @@ export class SeederService {
           lastName: 'ใจดี',
         },
         addons: [
-          { feature: extraAnalytics, price: 990 },    // Extra Analytics ฿990
-          { feature: customBranding, price: 1490 },   // Custom Branding ฿1,490
+          { feature: extraAnalytics, price: 990 }, // Extra Analytics ฿990
+          { feature: customBranding, price: 1490 }, // Custom Branding ฿1,490
         ],
         // Total: 4,990 + 990 + 1,490 = ฿7,470
-        invoices: [
-          { amount: 7470, status: InvoiceStatus.PAID, daysAgo: 0 },
-        ],
+        invoices: [{ amount: 7470, status: InvoiceStatus.PAID, daysAgo: 0 }],
       },
       {
         // SUB-002: Mountain View Resort - Enterprise + 3 add-ons = ฿13,960
@@ -440,14 +430,12 @@ export class SeederService {
           lastName: 'Mountain',
         },
         addons: [
-          { feature: otaBooking, price: 990 },       // OTA Booking ฿990
-          { feature: automation, price: 990 },       // Automation ฿990
-          { feature: apiAccess, price: 1990 },       // API Access ฿1,990
+          { feature: otaBooking, price: 990 }, // OTA Booking ฿990
+          { feature: automation, price: 990 }, // Automation ฿990
+          { feature: apiAccess, price: 1990 }, // API Access ฿1,990
         ],
         // Total: 9,990 + 990 + 990 + 1,990 = ฿13,960
-        invoices: [
-          { amount: 13960, status: InvoiceStatus.PAID, daysAgo: 0 },
-        ],
+        invoices: [{ amount: 13960, status: InvoiceStatus.PAID, daysAgo: 0 }],
       },
       {
         // SUB-003: บ้านพักริมทะเล - Starter (Trial) ฿0
@@ -486,9 +474,7 @@ export class SeederService {
         },
         addons: [],
         // Total: ฿4,990
-        invoices: [
-          { amount: 4990, status: InvoiceStatus.PENDING, daysAgo: 0 },
-        ],
+        invoices: [{ amount: 4990, status: InvoiceStatus.PENDING, daysAgo: 0 }],
       },
       {
         // SUB-005: โรงแรมวิวภูเขา - Professional + 1 add-on (Expired)
@@ -506,12 +492,8 @@ export class SeederService {
           firstName: 'ประสิทธิ์',
           lastName: 'ภูเขางาม',
         },
-        addons: [
-          { feature: otaBooking, price: 990 },
-        ],
-        invoices: [
-          { amount: 5980, status: InvoiceStatus.PAID, daysAgo: 30 },
-        ],
+        addons: [{ feature: otaBooking, price: 990 }],
+        invoices: [{ amount: 5980, status: InvoiceStatus.PAID, daysAgo: 30 }],
       },
       {
         // SUB-006: Sunset Beach Hotel - Enterprise (Suspended)
@@ -529,12 +511,8 @@ export class SeederService {
           firstName: 'Sunset',
           lastName: 'Beach',
         },
-        addons: [
-          { feature: apiAccess, price: 1990 },
-        ],
-        invoices: [
-          { amount: 11980, status: InvoiceStatus.REJECTED, daysAgo: 45 },
-        ],
+        addons: [{ feature: apiAccess, price: 1990 }],
+        invoices: [{ amount: 11980, status: InvoiceStatus.REJECTED, daysAgo: 45 }],
       },
     ];
 
@@ -544,7 +522,7 @@ export class SeederService {
       try {
         // ตรวจสอบว่ามี tenant อยู่แล้วหรือไม่
         const allTenants = await this.tenantsService.findAll();
-        const existingTenant = allTenants.find(t => t.name === hotelData.name);
+        const existingTenant = allTenants.find((t) => t.name === hotelData.name);
 
         if (existingTenant) {
           this.logger.log(`  ⊙ Hotel already exists: ${hotelData.name}`);
@@ -566,7 +544,9 @@ export class SeederService {
           trialEndsAt,
         });
 
-        this.logger.log(`  ✓ Created hotel: ${hotelData.code} - ${hotelData.name} (${hotelData.status})`);
+        this.logger.log(
+          `  ✓ Created hotel: ${hotelData.code} - ${hotelData.name} (${hotelData.status})`,
+        );
 
         //สร้าง Property record สอดรับกับ Prisma Schema
         const property = await this.prisma.property.create({
@@ -576,7 +556,7 @@ export class SeederService {
             code: hotelData.code.replace('-', ''),
             status: 'active',
             isDefault: true,
-          }
+          },
         });
         this.logger.log(`    ✓ Created Property: ${property.id}`);
 
@@ -591,13 +571,15 @@ export class SeederService {
           endDate: new Date(hotelData.endDate),
           autoRenew: hotelData.status === TenantStatus.ACTIVE,
         });
-        
+
         // ... (owner creation script remains same)
         const ownerData = hotelData.owner;
         const hashedPassword = await bcrypt.hash('password123', 10);
-        
+
         try {
-          const existingOwner = await this.prisma.user.findUnique({ where: { email: ownerData.email } });
+          const existingOwner = await this.prisma.user.findUnique({
+            where: { email: ownerData.email },
+          });
 
           if (!existingOwner) {
             await this.prisma.user.create({
@@ -610,14 +592,13 @@ export class SeederService {
                 role: 'tenant_admin',
                 status: 'active',
                 tenantId: tenant.id,
-              }
+              },
             });
             this.logger.log(`    ✓ Created owner: ${ownerData.firstName} ${ownerData.lastName}`);
           }
         } catch (error) {
           this.logger.warn(`    ⚠️  Could not create owner: ${error.message}`);
         }
-
 
         // สร้าง add-ons (subscription features)
         for (const addon of hotelData.addons) {
@@ -652,13 +633,16 @@ export class SeederService {
             dueDate,
           });
 
-          this.logger.log(`    ✓ Created invoice: ${invoiceNo} (฿${invoiceData.amount}) - ${invoiceData.status}`);
+          this.logger.log(
+            `    ✓ Created invoice: ${invoiceNo} (฿${invoiceData.amount}) - ${invoiceData.status}`,
+          );
 
           // สร้าง payment
           if (invoiceData.status !== InvoiceStatus.REJECTED) {
-            const paymentStatus = 
-              invoiceData.status === InvoiceStatus.PAID ? PaymentStatus.APPROVED :
-              PaymentStatus.PENDING;
+            const paymentStatus =
+              invoiceData.status === InvoiceStatus.PAID
+                ? PaymentStatus.APPROVED
+                : PaymentStatus.PENDING;
 
             await this.paymentsService.create({
               invoiceId: invoice.id,
@@ -668,7 +652,6 @@ export class SeederService {
             });
           }
         }
-
       } catch (error) {
         this.logger.error(`  ❌ Error creating hotel ${hotelData.name}:`, error.message);
       }
@@ -677,22 +660,30 @@ export class SeederService {
     this.logger.log('');
     this.logger.log('📊 Admin Panel Test Data Summary:');
     this.logger.log(`  - Hotels: ${hotels.length}`);
-    this.logger.log(`    • Active: ${hotels.filter(h => h.subscriptionStatus === SubscriptionStatus.ACTIVE).length}`);
-    this.logger.log(`    • Trial: ${hotels.filter(h => h.subscriptionStatus === SubscriptionStatus.TRIAL).length}`);
-    this.logger.log(`    • Pending: ${hotels.filter(h => h.subscriptionStatus === SubscriptionStatus.PENDING).length}`);
-    this.logger.log(`    • Expired: ${hotels.filter(h => h.subscriptionStatus === SubscriptionStatus.EXPIRED).length}`);
+    this.logger.log(
+      `    • Active: ${hotels.filter((h) => h.subscriptionStatus === SubscriptionStatus.ACTIVE).length}`,
+    );
+    this.logger.log(
+      `    • Trial: ${hotels.filter((h) => h.subscriptionStatus === SubscriptionStatus.TRIAL).length}`,
+    );
+    this.logger.log(
+      `    • Pending: ${hotels.filter((h) => h.subscriptionStatus === SubscriptionStatus.PENDING).length}`,
+    );
+    this.logger.log(
+      `    • Expired: ${hotels.filter((h) => h.subscriptionStatus === SubscriptionStatus.EXPIRED).length}`,
+    );
     this.logger.log(`  - Upgrades: 1 (โรงแรมสุขใจ: Starter → Professional)`);
     this.logger.log(`  - Downgrades: 1 (Garden Resort: Enterprise → Professional)`);
-    
+
     // Calculate MRR
-    const activeHotels = hotels.filter(h => h.subscriptionStatus === SubscriptionStatus.ACTIVE);
+    const activeHotels = hotels.filter((h) => h.subscriptionStatus === SubscriptionStatus.ACTIVE);
     const mrr = activeHotels.reduce((sum, h) => {
       const planPrice = Number(h.plan.price_monthly);
       const addonTotal = h.addons.reduce((s, a) => s + a.price, 0);
       return sum + planPrice + addonTotal;
     }, 0);
     this.logger.log(`  - MRR: ฿${mrr.toLocaleString()}`);
-    
+
     this.logger.log('');
   }
 
@@ -703,18 +694,82 @@ export class SeederService {
   private async seedDemoGuests(): Promise<void> {
     this.logger.log('👥 Seeding Demo Guests...');
 
+    // Get all tenants to assign guests per tenant
+    const allTenants = await this.tenantsService.findAll();
+    const defaultTenantId = allTenants.length > 0 ? allTenants[0].id : null;
+
     // รายชื่อแขกตัวอย่าง (Thai + International)
     const demoGuests = [
-      { firstName: 'สมชาย', lastName: 'ใจดี', email: 'somchai.jaidia@example.com', phone: '+66-8-1111-1111', nationality: 'Thailand' },
-      { firstName: 'สมหญิง', lastName: 'สวยงาม', email: 'somying.suyyam@example.com', phone: '+66-8-2222-2222', nationality: 'Thailand' },
-      { firstName: 'วิชัย', lastName: 'ประสพ', email: 'vichai.prasop@example.com', phone: '+66-8-3333-3333', nationality: 'Thailand' },
-      { firstName: 'นัฐญา', lastName: 'บัวบาน', email: 'nattaya.buaban@example.com', phone: '+66-8-4444-4444', nationality: 'Thailand' },
-      { firstName: 'ประเทศ', lastName: 'อยู่สุข', email: 'prashet.yousuk@example.com', phone: '+66-8-5555-5555', nationality: 'Thailand' },
-      { firstName: 'Michael', lastName: 'Johnson', email: 'michael.johnson@example.com', phone: '+1-213-555-1234', nationality: 'United States' },
-      { firstName: 'Emma', lastName: 'Smith', email: 'emma.smith@example.com', phone: '+44-20-7123-4567', nationality: 'United Kingdom' },
-      { firstName: 'Jean', lastName: 'Dubois', email: 'jean.dubois@example.com', phone: '+33-1-42-86-82-00', nationality: 'France' },
-      { firstName: 'Marco', lastName: 'Rossi', email: 'marco.rossi@example.com', phone: '+39-06-1234-5678', nationality: 'Italy' },
-      { firstName: 'Liu', lastName: 'Wei', email: 'liu.wei@example.com', phone: '+86-10-1234-5678', nationality: 'China' },
+      {
+        firstName: 'สมชาย',
+        lastName: 'ใจดี',
+        email: 'somchai.jaidia@example.com',
+        phone: '+66-8-1111-1111',
+        nationality: 'Thailand',
+      },
+      {
+        firstName: 'สมหญิง',
+        lastName: 'สวยงาม',
+        email: 'somying.suyyam@example.com',
+        phone: '+66-8-2222-2222',
+        nationality: 'Thailand',
+      },
+      {
+        firstName: 'วิชัย',
+        lastName: 'ประสพ',
+        email: 'vichai.prasop@example.com',
+        phone: '+66-8-3333-3333',
+        nationality: 'Thailand',
+      },
+      {
+        firstName: 'นัฐญา',
+        lastName: 'บัวบาน',
+        email: 'nattaya.buaban@example.com',
+        phone: '+66-8-4444-4444',
+        nationality: 'Thailand',
+      },
+      {
+        firstName: 'ประเทศ',
+        lastName: 'อยู่สุข',
+        email: 'prashet.yousuk@example.com',
+        phone: '+66-8-5555-5555',
+        nationality: 'Thailand',
+      },
+      {
+        firstName: 'Michael',
+        lastName: 'Johnson',
+        email: 'michael.johnson@example.com',
+        phone: '+1-213-555-1234',
+        nationality: 'United States',
+      },
+      {
+        firstName: 'Emma',
+        lastName: 'Smith',
+        email: 'emma.smith@example.com',
+        phone: '+44-20-7123-4567',
+        nationality: 'United Kingdom',
+      },
+      {
+        firstName: 'Jean',
+        lastName: 'Dubois',
+        email: 'jean.dubois@example.com',
+        phone: '+33-1-42-86-82-00',
+        nationality: 'France',
+      },
+      {
+        firstName: 'Marco',
+        lastName: 'Rossi',
+        email: 'marco.rossi@example.com',
+        phone: '+39-06-1234-5678',
+        nationality: 'Italy',
+      },
+      {
+        firstName: 'Liu',
+        lastName: 'Wei',
+        email: 'liu.wei@example.com',
+        phone: '+86-10-1234-5678',
+        nationality: 'China',
+      },
     ];
 
     let guestCount = 0;
@@ -726,9 +781,10 @@ export class SeederService {
 
         if (Array.isArray(existingGuest) && existingGuest.length === 0) {
           await this.prisma.$executeRaw`
-            INSERT INTO guests (id, firstName, lastName, email, phone, nationality, createdAt, updatedAt)
+            INSERT INTO guests (id, tenantId, firstName, lastName, email, phone, nationality, createdAt, updatedAt)
             VALUES (
               UUID(),
+              ${defaultTenantId},
               ${guestData.firstName},
               ${guestData.lastName},
               ${guestData.email},
@@ -764,7 +820,8 @@ export class SeederService {
       }
 
       // ดึงแขกทั้งหมด
-      const allGuests: any[] = await this.prisma.$queryRaw`SELECT id, firstName, lastName FROM guests LIMIT 50`;
+      const allGuests: any[] = await this.prisma
+        .$queryRaw`SELECT id, firstName, lastName FROM guests LIMIT 50`;
       if (!Array.isArray(allGuests) || allGuests.length === 0) {
         this.logger.warn('  ⚠️ No guests found, skipping demo bookings');
         return;
@@ -777,7 +834,7 @@ export class SeederService {
       for (const tenant of allTenants) {
         // ดึง property สำหรับ tenant นี้ (Prisma)
         const property = await this.prisma.property.findFirst({
-          where: { tenantId: tenant.id }
+          where: { tenantId: tenant.id },
         });
 
         if (!property) {
@@ -788,7 +845,7 @@ export class SeederService {
         // ดึงห้องของโรงแรมนี้ โดยใช้ property.id ที่แท้จริง (ไม่ใช่ tenant.id)
         const rooms: any[] = await this.prisma.room.findMany({
           where: { propertyId: property.id },
-          take: 10
+          take: 10,
         });
 
         if (rooms.length === 0) {
@@ -797,26 +854,26 @@ export class SeederService {
           const newRooms = [];
           for (let i = 1; i <= 4; i++) {
             const roomType = roomTypes[i - 1];
-            const basePrice = 1000 + (i * 500);
+            const basePrice = 1000 + i * 500;
 
             const r = await this.prisma.room.create({
               data: {
                 id: uuidv4(),
                 propertyId: property.id,
+                tenantId: property.tenantId,
                 number: String(100 + i),
                 type: roomType,
                 floor: 1,
                 price: basePrice,
                 status: 'available',
                 description: `${roomType} room created by seeder`,
-              }
+              },
             });
             newRooms.push(r);
             bookingCount++;
           }
           rooms.push(...newRooms);
         }
-
 
         // สร้าง 3-5 การจองต่อโรงแรม
         const bookingsPerHotel = Math.floor(Math.random() * 3) + 3; // 3-5 bookings
@@ -834,17 +891,23 @@ export class SeederService {
 
           // กำหนด status ตามวันที่
           let status = 'confirmed';
-          if (daysOffset < -2) status = 'completed'; // อดีตมากกว่า 2 วัน = completed
-          else if (daysOffset <= 1) status = 'checked_in'; // ใน 1 วัน = checked_in
+          if (daysOffset < -2)
+            status = 'completed'; // อดีตมากกว่า 2 วัน = completed
+          else if (daysOffset <= 1)
+            status = 'checked_in'; // ใน 1 วัน = checked_in
           else status = 'confirmed'; // อนาคต = confirmed
 
-          const nights = Math.max(1, Math.ceil((checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24)));
+          const nights = Math.max(
+            1,
+            Math.ceil((checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24)),
+          );
           const totalPrice = Number(room.price) * nights;
 
           try {
             await this.prisma.booking.create({
               data: {
                 id: uuidv4(),
+                tenantId: tenant.id,
                 property: { connect: { id: property.id } },
                 room: { connect: { id: room.id } },
                 guest: { connect: { id: guest.id } },
@@ -857,7 +920,7 @@ export class SeederService {
                 status: status,
                 totalPrice: totalPrice,
                 notes: 'Demo booking created by seeder',
-              }
+              },
             });
             bookingCount++;
           } catch (error) {
@@ -882,9 +945,10 @@ export class SeederService {
     try {
       // ดึง booking ที่เป็น completed
       const completedBookings: any[] = await this.prisma.$queryRaw`
-        SELECT id, propertyId, guestId, guestFirstName, guestLastName
-        FROM bookings
-        WHERE status = 'completed'
+        SELECT b.id, b.tenantId
+        FROM bookings b
+        LEFT JOIN reviews r ON r.bookingId = b.id
+        WHERE b.status = 'completed' AND r.id IS NULL
         LIMIT 50
       `;
 
@@ -914,17 +978,13 @@ export class SeederService {
         try {
           await this.prisma.$executeRaw`
             INSERT INTO reviews (
-              id, propertyId, bookingId, guestId, guestName,
-              rating, title, review, createdAt, updatedAt
+              id, tenantId, bookingId, rating, comment, createdAt, updatedAt
             )
             VALUES (
               UUID(),
-              ${booking.propertyId},
+              ${booking.tenantId},
               ${booking.id},
-              ${booking.guestId},
-              ${booking.guestFirstName + ' ' + booking.guestLastName},
               ${ratings[i % ratings.length]},
-              'Great experience',
               ${reviewTexts[i % reviewTexts.length]},
               NOW(),
               NOW()
@@ -959,17 +1019,105 @@ export class SeederService {
 
     // Staff templates สำหรับแต่ละโรงแรม
     const staffTemplates = [
-      { role: 'manager', position: 'General Manager', department: 'Management', firstNameTh: 'วิชัย', lastNameTh: 'บริหารดี', firstNameEn: 'Michael', lastNameEn: 'Manager' },
-      { role: 'hr', position: 'HR Manager', department: 'Human Resources', firstNameTh: 'พิมพ์ใจ', lastNameTh: 'ดูแลคน', firstNameEn: 'Helen', lastNameEn: 'Resources' },
-      { role: 'receptionist', position: 'Front Desk Agent', department: 'Front Office', firstNameTh: 'สุนิสา', lastNameTh: 'ต้อนรับดี', firstNameEn: 'Sarah', lastNameEn: 'Reception' },
-      { role: 'receptionist', position: 'Night Auditor', department: 'Front Office', firstNameTh: 'ปรีชา', lastNameTh: 'กลางคืน', firstNameEn: 'Paul', lastNameEn: 'Night' },
-      { role: 'housekeeper', position: 'Head Housekeeper', department: 'Housekeeping', firstNameTh: 'มาลี', lastNameTh: 'สะอาดใส', firstNameEn: 'Maria', lastNameEn: 'Clean' },
-      { role: 'housekeeper', position: 'Room Attendant', department: 'Housekeeping', firstNameTh: 'สมศรี', lastNameTh: 'ห้องสวย', firstNameEn: 'Linda', lastNameEn: 'Room' },
-      { role: 'chef', position: 'Head Chef', department: 'Kitchen', firstNameTh: 'ธนกฤต', lastNameTh: 'ครัวอร่อย', firstNameEn: 'Gordon', lastNameEn: 'Kitchen' },
-      { role: 'waiter', position: 'F&B Server', department: 'Restaurant', firstNameTh: 'นภาพร', lastNameTh: 'เสิร์ฟดี', firstNameEn: 'Anna', lastNameEn: 'Service' },
-      { role: 'maintenance', position: 'Chief Engineer', department: 'Engineering', firstNameTh: 'ช่างชัย', lastNameTh: 'ซ่อมเก่ง', firstNameEn: 'John', lastNameEn: 'Fix' },
-      { role: 'accountant', position: 'Hotel Accountant', department: 'Finance', firstNameTh: 'กัลยา', lastNameTh: 'บัญชีดี', firstNameEn: 'Karen', lastNameEn: 'Finance' },
-      { role: 'security', position: 'Security Officer', department: 'Security', firstNameTh: 'สมชาย', lastNameTh: 'ปลอดภัย', firstNameEn: 'David', lastNameEn: 'Guard' },
+      {
+        role: 'manager',
+        position: 'General Manager',
+        department: 'Management',
+        firstNameTh: 'วิชัย',
+        lastNameTh: 'บริหารดี',
+        firstNameEn: 'Michael',
+        lastNameEn: 'Manager',
+      },
+      {
+        role: 'hr',
+        position: 'HR Manager',
+        department: 'Human Resources',
+        firstNameTh: 'พิมพ์ใจ',
+        lastNameTh: 'ดูแลคน',
+        firstNameEn: 'Helen',
+        lastNameEn: 'Resources',
+      },
+      {
+        role: 'receptionist',
+        position: 'Front Desk Agent',
+        department: 'Front Office',
+        firstNameTh: 'สุนิสา',
+        lastNameTh: 'ต้อนรับดี',
+        firstNameEn: 'Sarah',
+        lastNameEn: 'Reception',
+      },
+      {
+        role: 'receptionist',
+        position: 'Night Auditor',
+        department: 'Front Office',
+        firstNameTh: 'ปรีชา',
+        lastNameTh: 'กลางคืน',
+        firstNameEn: 'Paul',
+        lastNameEn: 'Night',
+      },
+      {
+        role: 'housekeeper',
+        position: 'Head Housekeeper',
+        department: 'Housekeeping',
+        firstNameTh: 'มาลี',
+        lastNameTh: 'สะอาดใส',
+        firstNameEn: 'Maria',
+        lastNameEn: 'Clean',
+      },
+      {
+        role: 'housekeeper',
+        position: 'Room Attendant',
+        department: 'Housekeeping',
+        firstNameTh: 'สมศรี',
+        lastNameTh: 'ห้องสวย',
+        firstNameEn: 'Linda',
+        lastNameEn: 'Room',
+      },
+      {
+        role: 'chef',
+        position: 'Head Chef',
+        department: 'Kitchen',
+        firstNameTh: 'ธนกฤต',
+        lastNameTh: 'ครัวอร่อย',
+        firstNameEn: 'Gordon',
+        lastNameEn: 'Kitchen',
+      },
+      {
+        role: 'waiter',
+        position: 'F&B Server',
+        department: 'Restaurant',
+        firstNameTh: 'นภาพร',
+        lastNameTh: 'เสิร์ฟดี',
+        firstNameEn: 'Anna',
+        lastNameEn: 'Service',
+      },
+      {
+        role: 'maintenance',
+        position: 'Chief Engineer',
+        department: 'Engineering',
+        firstNameTh: 'ช่างชัย',
+        lastNameTh: 'ซ่อมเก่ง',
+        firstNameEn: 'John',
+        lastNameEn: 'Fix',
+      },
+      {
+        role: 'accountant',
+        position: 'Hotel Accountant',
+        department: 'Finance',
+        firstNameTh: 'กัลยา',
+        lastNameTh: 'บัญชีดี',
+        firstNameEn: 'Karen',
+        lastNameEn: 'Finance',
+      },
+      {
+        role: 'security',
+        position: 'Security Officer',
+        department: 'Security',
+        firstNameTh: 'สมชาย',
+        lastNameTh: 'ปลอดภัย',
+        firstNameEn: 'David',
+        lastNameEn: 'Guard',
+      },
     ];
 
     const defaultPassword = 'Staff@123';

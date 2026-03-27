@@ -90,4 +90,3 @@ export class ChannelsController {
     return this.channelsService.remove(id, user?.tenantId);
   }
 }
-
