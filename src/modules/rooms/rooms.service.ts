@@ -177,7 +177,20 @@ export class RoomsService {
       );
     }
 
-    const data: any = { ...createRoomDto, propertyId: resolvedPropertyId, tenantId };
+    const data: Prisma.RoomCreateInput = {
+      number: createRoomDto.number,
+      type: createRoomDto.type,
+      price: new Prisma.Decimal(createRoomDto.price),
+      property: { connect: { id: resolvedPropertyId } },
+      tenantId,
+      ...(createRoomDto.floor !== undefined && { floor: createRoomDto.floor }),
+      ...(createRoomDto.status !== undefined && { status: createRoomDto.status }),
+      ...(createRoomDto.maxOccupancy !== undefined && { maxOccupancy: createRoomDto.maxOccupancy }),
+      ...(createRoomDto.bedType !== undefined && { bedType: createRoomDto.bedType }),
+      ...(createRoomDto.size !== undefined && { size: createRoomDto.size }),
+      ...(createRoomDto.amenities !== undefined && { amenities: createRoomDto.amenities }),
+      ...(createRoomDto.description !== undefined && { description: createRoomDto.description }),
+    };
     return this.prisma.room.create({
       data,
       include: { property: true },
@@ -203,9 +216,21 @@ export class RoomsService {
       }
     }
 
+    const updateData: Prisma.RoomUpdateInput = {
+      ...(updateRoomDto.number !== undefined && { number: updateRoomDto.number }),
+      ...(updateRoomDto.type !== undefined && { type: updateRoomDto.type }),
+      ...(updateRoomDto.price !== undefined && { price: new Prisma.Decimal(updateRoomDto.price) }),
+      ...(updateRoomDto.floor !== undefined && { floor: updateRoomDto.floor }),
+      ...(updateRoomDto.status !== undefined && { status: updateRoomDto.status }),
+      ...(updateRoomDto.maxOccupancy !== undefined && { maxOccupancy: updateRoomDto.maxOccupancy }),
+      ...(updateRoomDto.bedType !== undefined && { bedType: updateRoomDto.bedType }),
+      ...(updateRoomDto.size !== undefined && { size: updateRoomDto.size }),
+      ...(updateRoomDto.amenities !== undefined && { amenities: updateRoomDto.amenities }),
+      ...(updateRoomDto.description !== undefined && { description: updateRoomDto.description }),
+    };
     return this.prisma.room.update({
       where: { id },
-      data: updateRoomDto,
+      data: updateData,
       include: { property: true },
     });
   }
