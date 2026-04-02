@@ -11,6 +11,9 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
+import { randomBytes } from 'crypto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -37,6 +40,8 @@ export class TenantsController {
     private readonly hotelDetailService: HotelDetailService,
     private readonly hotelManagementService: HotelManagementService,
     private readonly prisma: PrismaService,
+    private readonly jwtService: JwtService,
+    private readonly configService: ConfigService,
   ) {}
 
   // ===== MULTI-TENANT MANAGEMENT ENDPOINTS =====
@@ -99,12 +104,43 @@ export class TenantsController {
   })
   async switchTenant(
     @Body() switchTenantDto: SwitchTenantDto,
-    @CurrentUser() user: { userId: string },
+    @CurrentUser() user: { userId: string; email: string; role: string },
   ) {
     const result = await this.tenantsService.switchTenant(user.userId, switchTenantDto.tenantId);
+
+    // Generate new JWT tokens with the updated tenantId
+    const payload = {
+      sub: user.userId,
+      email: user.email,
+      role: user.role,
+      tenantId: switchTenantDto.tenantId,
+      isPlatformAdmin: false,
+    };
+
+    const accessToken = this.jwtService.sign(payload, {
+      expiresIn: this.configService.get<string>('JWT_EXPIRES_IN') || '24h',
+    });
+
+    const refreshToken = randomBytes(32).toString('hex');
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 7);
+
+    // Store refresh token in database
+    await this.prisma.refreshToken.create({
+      data: {
+        token: refreshToken,
+        userId: user.userId,
+        expiresAt,
+      },
+    });
+
     return {
       success: true,
-      data: result,
+      data: {
+        ...result,
+        accessToken,
+        refreshToken,
+      },
     };
   }
 

@@ -143,6 +143,7 @@ model Room {
   updatedAt    DateTime  @updatedAt
   property     Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   bookings     Booking[]
+  housekeepingTasks HousekeepingTask[]
 
   @@unique([propertyId, number])
   @@index([tenantId])
@@ -323,9 +324,10 @@ model invoice_items {
 
 model invoices {
   id String @id @default(uuid()) @db.VarChar(36)
-  tenant_id           String                
-  subscription_id     String?               
-  invoice_no          String                @unique(map: "IDX_37669c562a2525929927d9d691") 
+  tenant_id           String
+  subscription_id     String?
+  booking_id          String?               // Link to booking for room reservations
+  invoice_no          String                @unique(map: "IDX_37669c562a2525929927d9d691")
   amount              Decimal               @db.Decimal(10, 2)
   original_amount     Decimal?              @db.Decimal(10, 2)
   adjusted_amount     Decimal?              @db.Decimal(10, 2)
@@ -345,6 +347,7 @@ model invoices {
 
   @@index([tenant_id], map: "FK_440f531f452dcc4389d201b9d4b")
   @@index([subscription_id], map: "FK_5152c0aa0f851d9b95972b442e0")
+  @@index([booking_id])
 }
 
 model payment_refunds {
@@ -420,6 +423,9 @@ model plans {
   highlight_color                                     String?         @db.VarChar(50)
   features                                            String?         @db.Text
   button_text                                         String?         @default("เริ่มใช้งาน") @db.VarChar(100)
+  subtitle                                            String?         @db.VarChar(200)
+  target_audience                                     String?         @db.VarChar(200)
+  price_per_room                                      String?         @db.VarChar(50)
   plan_features                                       plan_features[]
   subscriptions_subscriptions_previous_plan_idToplans subscriptions[] @relation("subscriptions_previous_plan_idToplans")
   subscriptions_subscriptions_plan_idToplans          subscriptions[] @relation("subscriptions_plan_idToplans")
@@ -648,12 +654,15 @@ model OnboardingStep {
 
 model LoyaltyPoint {
   id        String   @id @default(uuid())
-  tenantId  String   @unique
+  tenantId  String
+  guestId   String?
   points    Int      @default(0)
   tier      String   @default("standard")
   updatedAt DateTime @default(now()) @updatedAt @db.DateTime(6)
 
+  @@unique([tenantId, guestId])
   @@index([tenantId])
+  @@index([guestId])
   @@map("loyalty_points")
 }
 
@@ -714,6 +723,12 @@ enum invoice_items_type {
   plan
   feature
   adjustment
+  room_charge
+  room_service
+  restaurant
+  minibar
+  laundry
+  other
 }
 
 enum tenant_credits_type {
@@ -802,8 +817,10 @@ enum subscriptions_billing_cycle {
 }
 
 enum invoices_status {
+  draft
   pending
   paid
+  finalized
   rejected
   voided
 }
@@ -1007,4 +1024,33 @@ model PushNotificationLog {
   @@index([userId])
   @@index([sentAt])
   @@map("push_notification_logs")
+}
+
+// ==================== Housekeeping Management ====================
+model HousekeepingTask {
+  id                String   @id @default(uuid())
+  roomId            String
+  room              Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  type              String   @default("daily") // daily, checkout, deep, turndown, inspection
+  priority          String   @default("medium") // low, medium, high, urgent
+  status            String   @default("pending") // pending, in_progress, completed, inspected
+  notes             String?  @db.Text
+  estimatedDuration Int      @default(30) // in minutes
+  assignedToId      String?
+  assignedToName    String?
+  startTime         DateTime?
+  endTime           DateTime?
+  completionPercentage Int?
+  inspectedBy       String?
+  inspectedAt       DateTime?
+  rating            Int?     // 1-5 star rating
+  tenantId          String
+  createdAt         DateTime @default(now()) @db.DateTime(6)
+  updatedAt         DateTime @default(now()) @updatedAt @db.DateTime(6)
+
+  @@index([roomId])
+  @@index([tenantId])
+  @@index([status])
+  @@index([type])
+  @@map("housekeeping_tasks")
 }

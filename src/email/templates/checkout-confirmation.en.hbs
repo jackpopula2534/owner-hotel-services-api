@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Checkout Confirmation</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f4f4f4;">
+  <table width="100%" style="background-color: #f4f4f4; padding: 20px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" style="background-color: #ffffff; border-radius: 8px;">
+          <tr>
+            <td style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center;">
+              <h1 style="color: #ffffff; margin: 0;">{{hotelName}}</h1>
+              <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0;">Checkout Confirmation</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 40px 30px;">
+              <h2 style="color: #333333; margin: 0 0 20px 0;">Thank you for your stay, {{guestName}}!</h2>
+              <p style="color: #666666; line-height: 1.6; margin: 0 0 20px 0;">
+                We hope you enjoyed your stay with us. Here is a summary of your visit.
+              </p>
+              <table width="100%" style="background-color: #f8f9fa; border-radius: 8px; margin: 20px 0;">
+                <tr>
+                  <td style="padding: 25px;">
+                    <h3 style="color: #333; margin: 0 0 20px 0;">Stay Summary</h3>
+                    <table width="100%" cellpadding="5">
+                      <tr><td style="color: #888; width: 40%;">Booking Number:</td><td style="color: #333; font-weight: bold;">#{{bookingId}}</td></tr>
+                      <tr><td style="color: #888;">Checkout Date:</td><td style="color: #333; font-weight: bold;">{{checkOutDate}}</td></tr>
+                      <tr><td style="color: #888;">Duration:</td><td style="color: #333; font-weight: bold;">{{stayDuration}} night(s)</td></tr>
+                      <tr><td style="color: #888; font-size: 16px;">Total Amount:</td><td style="color: #667eea; font-weight: bold; font-size: 20px;">{{formatNumber totalAmount}}</td></tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+              <p style="color: #666666; line-height: 1.6; text-align: center;">
+                We look forward to welcoming you again soon!
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #f8f9fa; padding: 20px; text-align: center;">
+              <p style="color: #888; font-size: 12px;">© {{currentYear}} {{hotelName}}</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

@@ -140,6 +140,55 @@ export class EmailEventsService {
   }
 
   /**
+   * Send check-in confirmation email after guest checks in
+   */
+  async onBookingCheckIn(booking: any): Promise<void> {
+    try {
+      if (!booking.guestEmail) {
+        this.logger.warn(`No email for booking ${booking.id}, skipping check-in confirmation`);
+        return;
+      }
+
+      // Check email preferences
+      const canSend = await this.checkEmailPreference(
+        booking.guestEmail,
+        'checkInReminder',
+        booking.tenantId,
+      );
+
+      if (!canSend) {
+        this.logger.log(`Guest ${booking.guestEmail} has opted out of check-in emails`);
+        return;
+      }
+
+      const property =
+        booking.property ||
+        (await this.prisma.property.findUnique({
+          where: { id: booking.propertyId },
+        }));
+
+      await this.emailService.sendEmail({
+        to: booking.guestEmail,
+        subject: 'Check-in Confirmed - สถานะการเช็คอิน',
+        template: 'check-in-confirmation' as any,
+        context: {
+          guestName: `${booking.guestFirstName} ${booking.guestLastName}`,
+          bookingId: booking.id,
+          roomNumber: booking.room?.number || 'N/A',
+          checkInDate: this.formatDate(booking.actualCheckIn || booking.checkIn),
+          checkOutDate: this.formatDate(booking.checkOut),
+          tenantId: booking.tenantId,
+          hotelName: property?.name,
+        },
+      });
+
+      this.logger.log(`Check-in confirmation email sent for booking ${booking.id}`);
+    } catch (error) {
+      this.logger.error(`Failed to send check-in confirmation email for ${booking.id}:`, error.message);
+    }
+  }
+
+  /**
    * Send check-in reminder (1 day before)
    * Runs daily at 9:00 AM
    */
@@ -257,6 +306,145 @@ export class EmailEventsService {
       this.logger.log(`Invoice email sent for ${invoice.invoice_no}`);
     } catch (error) {
       this.logger.error(`Failed to send invoice email:`, error.message);
+    }
+  }
+
+  /**
+   * Send checkout email
+   */
+  async onBookingCheckout(booking: any): Promise<void> {
+    try {
+      if (!booking.guestEmail) {
+        return;
+      }
+
+      const property =
+        booking.property ||
+        (await this.prisma.property.findUnique({
+          where: { id: booking.propertyId },
+        }));
+
+      const stayDuration = Math.ceil(
+        (new Date(booking.actualCheckOut || new Date()).getTime() -
+          new Date(booking.actualCheckIn || booking.checkIn).getTime()) /
+          (1000 * 60 * 60 * 24),
+      );
+
+      await this.emailService.sendEmail({
+        to: booking.guestEmail,
+        subject: 'Thank you for your stay!',
+        template: 'checkout-confirmation' as any,
+        context: {
+          guestName: `${booking.guestFirstName} ${booking.guestLastName}`,
+          bookingId: booking.id,
+          checkOutDate: this.formatDate(booking.actualCheckOut || new Date()),
+          stayDuration,
+          totalAmount: Number(booking.totalPrice),
+          tenantId: booking.tenantId,
+          hotelName: property?.name,
+        },
+      });
+
+      this.logger.log(`Checkout email sent for booking ${booking.id}`);
+    } catch (error) {
+      this.logger.error(`Failed to send checkout email for ${booking.id}:`, error.message);
+    }
+  }
+
+  /**
+   * Send review request email after checkout
+   * Requests guest to leave a review of their stay
+   */
+  async sendReviewRequest(booking: any): Promise<void> {
+    try {
+      if (!booking.guestEmail) {
+        this.logger.warn(`No email for booking ${booking.id}, skipping review request`);
+        return;
+      }
+
+      // Check email preferences
+      const canSend = await this.checkEmailPreference(
+        booking.guestEmail,
+        'promotionalEmails',
+        booking.tenantId,
+      );
+
+      if (!canSend) {
+        this.logger.log(`Guest ${booking.guestEmail} has opted out of promotional emails, skipping review request`);
+        return;
+      }
+
+      const property =
+        booking.property ||
+        (await this.prisma.property.findUnique({
+          where: { id: booking.propertyId },
+        }));
+
+      const frontendUrl = this.configService.get('FRONTEND_URL', 'http://localhost:3000');
+      const reviewLink = `${frontendUrl}/reviews/new?bookingId=${booking.id}`;
+
+      await this.emailService.sendEmail({
+        to: booking.guestEmail,
+        subject: 'Share your stay experience with us',
+        template: 'review-request' as any,
+        context: {
+          guestName: `${booking.guestFirstName} ${booking.guestLastName}`,
+          bookingId: booking.id,
+          hotelName: property?.name,
+          reviewLink,
+          checkOutDate: this.formatDate(booking.actualCheckOut || new Date()),
+        },
+      });
+
+      this.logger.log(`Review request email sent for booking ${booking.id}`);
+    } catch (error) {
+      this.logger.error(`Failed to send review request email for ${booking.id}:`, error.message);
+      // Don't throw - review request shouldn't block checkout
+    }
+  }
+
+  /**
+   * Send payment received email
+   */
+  async onPaymentReceived(params: {
+    to: string;
+    receiptNo?: string;
+    invoiceNo?: string;
+    bookingId?: string;
+    amount: number;
+    paymentMethod: string;
+    paymentDate: Date;
+    tenantId: string;
+  }): Promise<void> {
+    try {
+      if (!params.to) return;
+
+      // Check email preferences
+      const canSend = await this.checkEmailPreference(
+        params.to,
+        'paymentReceipt',
+        params.tenantId,
+      );
+
+      if (!canSend) {
+        this.logger.log(`Recipient ${params.to} has opted out of payment receipt emails`);
+        return;
+      }
+
+      await this.emailService.sendPaymentReceipt({
+        to: params.to,
+        guestName: 'Guest',
+        receiptNo: params.receiptNo || params.invoiceNo || 'RCP-' + Date.now(),
+        bookingId: params.bookingId || 'N/A',
+        amount: params.amount,
+        paymentMethod: params.paymentMethod,
+        paymentDate: this.formatDate(params.paymentDate),
+        tenantId: params.tenantId,
+      });
+
+      this.logger.log(`Payment receipt email sent to ${params.to}`);
+    } catch (error) {
+      this.logger.error(`Failed to send payment receipt email:`, error.message);
     }
   }
 

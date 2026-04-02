@@ -169,6 +169,38 @@ export class EmailService implements OnModuleInit {
         `,
         ),
       },
+      [EmailTemplate.CHECK_IN_CONFIRMATION]: {
+        th: this.wrapInBase(
+          baseTemplate,
+          `
+          <h2>ยืนยันการเช็คอิน</h2>
+          <p>เรียน {{guestName}},</p>
+          <p>ยินดีต้อนรับสู่ {{hotelName}}!</p>
+          <div class="details">
+            <p><strong>รหัสการจอง:</strong> {{bookingId}}</p>
+            <p><strong>ห้องพัก:</strong> {{roomNumber}}</p>
+            <p><strong>วันเช็คอิน:</strong> {{checkInDate}}</p>
+            <p><strong>วันเช็คเอาท์:</strong> {{checkOutDate}}</p>
+          </div>
+          <p>หากมีคำถามใดๆ กรุณาติดต่อฝ่ายพนักงานต้อนรับของเรา</p>
+        `,
+        ),
+        en: this.wrapInBase(
+          baseTemplate,
+          `
+          <h2>Check-in Confirmed</h2>
+          <p>Dear {{guestName}},</p>
+          <p>Welcome to {{hotelName}}!</p>
+          <div class="details">
+            <p><strong>Booking ID:</strong> {{bookingId}}</p>
+            <p><strong>Room:</strong> {{roomNumber}}</p>
+            <p><strong>Check-in Date:</strong> {{checkInDate}}</p>
+            <p><strong>Check-out Date:</strong> {{checkOutDate}}</p>
+          </div>
+          <p>If you have any questions, please contact our front desk.</p>
+        `,
+        ),
+      },
       [EmailTemplate.PAYMENT_RECEIPT]: {
         th: this.wrapInBase(
           baseTemplate,

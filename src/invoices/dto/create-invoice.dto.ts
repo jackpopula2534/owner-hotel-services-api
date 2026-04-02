@@ -18,6 +18,14 @@ export class CreateInvoiceDto {
   @IsOptional()
   subscriptionId?: string;
 
+  @ApiPropertyOptional({
+    example: '550e8400-e29b-41d4-a716-446655440000',
+    description: 'UUID of the booking this invoice is for (room reservation)',
+  })
+  @IsString()
+  @IsOptional()
+  bookingId?: string;
+
   @ApiProperty({
     example: 'INV-2026-001',
     description: 'Unique invoice number',

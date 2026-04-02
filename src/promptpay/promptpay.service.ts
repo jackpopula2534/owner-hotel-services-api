@@ -535,24 +535,41 @@ export class PromptPayService {
 
   /**
    * Update booking payment status
+   * Supports both direct bookingId and finding booking via invoice relationship
    */
-  private async updateBookingPaymentStatus(bookingId: string): Promise<void> {
+  private async updateBookingPaymentStatus(bookingId?: string): Promise<void> {
     try {
+      if (!bookingId) {
+        this.logger.warn('No bookingId provided for booking payment status update');
+        return;
+      }
+
       await this.prisma.booking.update({
         where: { id: bookingId },
         data: { status: 'confirmed' },
       });
-      this.logger.log(`Booking ${bookingId} status updated to confirmed`);
+      this.logger.log(`Booking ${bookingId} status updated to confirmed from PromptPay payment`);
     } catch (error) {
       this.logger.error(`Failed to update booking ${bookingId}:`, error.message);
     }
   }
 
   /**
-   * Update invoice payment status
+   * Update invoice payment status and related booking after PromptPay payment
+   * Handles both subscription invoices and booking-related invoices
    */
   private async updateInvoicePaymentStatus(invoiceId: string, amount: number): Promise<void> {
     try {
+      // Get invoice to check for booking_id
+      const invoice = await this.prisma.invoices.findUnique({
+        where: { id: invoiceId },
+      });
+
+      if (!invoice) {
+        this.logger.warn(`Invoice ${invoiceId} not found for payment status update`);
+        return;
+      }
+
       // Create payment record
       const paymentNo = `PAY-${Date.now().toString(36).toUpperCase()}`;
 
@@ -575,6 +592,11 @@ export class PromptPayService {
       });
 
       this.logger.log(`Invoice ${invoiceId} marked as paid`);
+
+      // If invoice is linked to a booking, update booking status to confirmed
+      if (invoice.booking_id) {
+        await this.updateBookingPaymentStatus(invoice.booking_id);
+      }
     } catch (error) {
       this.logger.error(`Failed to update invoice ${invoiceId}:`, error.message);
     }

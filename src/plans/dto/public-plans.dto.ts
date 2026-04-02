@@ -79,6 +79,24 @@ export class PublicPlanDto {
   buttonText?: string;
 
   @ApiPropertyOptional({
+    example: 'ระบบจัดการครบจบในที่เดียว',
+    description: 'Short marketing subtitle',
+  })
+  subtitle?: string;
+
+  @ApiPropertyOptional({
+    example: 'โรงแรมขนาดเล็ก 1-20 ห้อง',
+    description: 'Who this plan is best for',
+  })
+  targetAudience?: string;
+
+  @ApiPropertyOptional({
+    example: '~฿100/ห้อง/เดือน',
+    description: 'Price per room label',
+  })
+  pricePerRoom?: string;
+
+  @ApiPropertyOptional({
     type: [PublicPlanFeatureDto],
     description: 'Optional add-on features',
   })

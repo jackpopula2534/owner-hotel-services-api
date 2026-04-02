@@ -50,6 +50,9 @@ import { DatabaseOptimizationModule } from './database-optimization/database-opt
 import { MobileApiModule } from './mobile-api/mobile-api.module';
 import { PushNotificationsModule } from './push-notifications/push-notifications.module';
 import { HealthModule } from './health/health.module';
+import { HousekeepingModule } from './modules/housekeeping/housekeeping.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { SearchModule } from './modules/search/search.module';
 
 @Module({
   imports: [
@@ -104,6 +107,9 @@ import { HealthModule } from './health/health.module';
     MobileApiModule,
     PushNotificationsModule,
     HealthModule,
+    HousekeepingModule,
+    DashboardModule,
+    SearchModule,
     ThrottlerModule.forRoot([
       {
         ttl: 60, // 60 seconds window

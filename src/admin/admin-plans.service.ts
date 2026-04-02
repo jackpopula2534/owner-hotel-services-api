@@ -8,6 +8,8 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Plan } from '../plans/entities/plan.entity';
+import { PlanFeature } from '../plan-features/entities/plan-feature.entity';
+import { Feature } from '../features/entities/feature.entity';
 import {
   AdminPlansListDto,
   AdminPlanItemDto,
@@ -15,6 +17,9 @@ import {
   UpdatePlanDto,
   PlanResponseDto,
   PlanFeatureItemDto,
+  AssignFeatureToPlanDto,
+  PlanFeaturesResponseDto,
+  FeatureItemDto,
 } from './dto/admin-plans.dto';
 
 @Injectable()
@@ -24,6 +29,10 @@ export class AdminPlansService {
   constructor(
     @InjectRepository(Plan)
     private plansRepository: Repository<Plan>,
+    @InjectRepository(PlanFeature)
+    private planFeaturesRepository: Repository<PlanFeature>,
+    @InjectRepository(Feature)
+    private featuresRepository: Repository<Feature>,
   ) {}
 
   /**
@@ -274,6 +283,160 @@ export class AdminPlansService {
 
     return {
       message: `Plan "${plan.name}" deleted successfully`,
+    };
+  }
+
+  /**
+   * POST /api/v1/admin/plans/:planId/features
+   * Assign a feature to a plan
+   */
+  async assignFeatureToPlan(planId: string, dto: AssignFeatureToPlanDto): Promise<PlanResponseDto> {
+    // Verify plan exists
+    const plan = await this.plansRepository.findOne({
+      where: { id: planId },
+      relations: ['planFeatures', 'planFeatures.feature', 'subscriptions'],
+    });
+
+    if (!plan) {
+      throw new NotFoundException(`Plan with ID "${planId}" not found`);
+    }
+
+    // Verify feature exists
+    const feature = await this.featuresRepository.findOne({
+      where: { id: dto.featureId },
+    });
+
+    if (!feature) {
+      throw new NotFoundException(`Feature with ID "${dto.featureId}" not found`);
+    }
+
+    // Check if feature is already assigned to this plan
+    const existingPlanFeature = await this.planFeaturesRepository.findOne({
+      where: {
+        planId,
+        featureId: dto.featureId,
+      },
+    });
+
+    if (existingPlanFeature) {
+      throw new ConflictException(
+        `Feature "${feature.name}" is already assigned to plan "${plan.name}"`,
+      );
+    }
+
+    // Create plan_features record
+    const planFeature = this.planFeaturesRepository.create({
+      planId,
+      featureId: dto.featureId,
+    });
+
+    await this.planFeaturesRepository.save(planFeature);
+
+    this.logger.log(
+      `Assigned feature "${feature.name}" to plan "${plan.name}" (${plan.code})`,
+    );
+
+    return this.findOne(planId);
+  }
+
+  /**
+   * DELETE /api/v1/admin/plans/:planId/features/:featureId
+   * Remove a feature from a plan
+   */
+  async removeFeatureFromPlan(planId: string, featureId: string): Promise<{ message: string }> {
+    // Verify plan exists
+    const plan = await this.plansRepository.findOne({
+      where: { id: planId },
+      relations: ['planFeatures', 'planFeatures.feature'],
+    });
+
+    if (!plan) {
+      throw new NotFoundException(`Plan with ID "${planId}" not found`);
+    }
+
+    // Verify feature exists
+    const feature = await this.featuresRepository.findOne({
+      where: { id: featureId },
+    });
+
+    if (!feature) {
+      throw new NotFoundException(`Feature with ID "${featureId}" not found`);
+    }
+
+    // Find and delete the plan_features record
+    const planFeature = await this.planFeaturesRepository.findOne({
+      where: {
+        planId,
+        featureId,
+      },
+    });
+
+    if (!planFeature) {
+      throw new NotFoundException(
+        `Feature "${feature.name}" is not assigned to plan "${plan.name}"`,
+      );
+    }
+
+    await this.planFeaturesRepository.remove(planFeature);
+
+    this.logger.log(
+      `Removed feature "${feature.name}" from plan "${plan.name}" (${plan.code})`,
+    );
+
+    return {
+      message: `Feature "${feature.name}" removed from plan "${plan.name}" successfully`,
+    };
+  }
+
+  /**
+   * GET /api/v1/admin/plans/:planId/features
+   * Get all features for a plan (assigned + available)
+   */
+  async getPlanFeatures(planId: string): Promise<PlanFeaturesResponseDto> {
+    // Verify plan exists
+    const plan = await this.plansRepository.findOne({
+      where: { id: planId },
+      relations: ['planFeatures', 'planFeatures.feature'],
+    });
+
+    if (!plan) {
+      throw new NotFoundException(`Plan with ID "${planId}" not found`);
+    }
+
+    // Get all active features
+    const allFeatures = await this.featuresRepository.find({
+      where: { isActive: true },
+      order: { name: 'ASC' },
+    });
+
+    // Map assigned features
+    const assignedFeatures: PlanFeatureItemDto[] =
+      plan.planFeatures?.map((pf) => ({
+        id: pf.id,
+        featureCode: pf.feature?.code || '',
+        featureName: pf.feature?.name || '',
+        priceMonthly: Number(pf.feature?.priceMonthly || 0),
+      })) || [];
+
+    // Get IDs of assigned features
+    const assignedFeatureIds = new Set(plan.planFeatures?.map((pf) => pf.featureId) || []);
+
+    // Map available features (not yet assigned)
+    const availableFeatures: FeatureItemDto[] = allFeatures
+      .filter((f) => !assignedFeatureIds.has(f.id))
+      .map((f) => ({
+        id: f.id,
+        code: f.code,
+        name: f.name,
+        description: f.description || undefined,
+        type: f.type,
+        priceMonthly: Number(f.priceMonthly || 0),
+        isActive: f.isActive,
+      }));
+
+    return {
+      assignedFeatures,
+      availableFeatures,
     };
   }
 }

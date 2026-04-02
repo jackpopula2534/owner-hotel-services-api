@@ -11,6 +11,7 @@ export class InvoicesService {
     const data: any = {
       tenant_id: createInvoiceDto.tenantId,
       subscription_id: createInvoiceDto.subscriptionId,
+      booking_id: createInvoiceDto.bookingId,
       invoice_no: createInvoiceDto.invoiceNo,
       amount: createInvoiceDto.amount,
       status: createInvoiceDto.status,
@@ -30,15 +31,19 @@ export class InvoicesService {
     });
   }
 
-  findAll() {
+  findAll(tenantId?: string) {
+    const where = tenantId ? { tenant_id: tenantId } : {};
     return this.prisma.invoices.findMany({
+      where,
       include: { tenants: true, subscriptions: true, invoice_items: true, payments: true },
+      orderBy: { created_at: 'desc' },
     });
   }
 
-  findOne(id: string) {
-    return this.prisma.invoices.findUnique({
-      where: { id },
+  findOne(id: string, tenantId?: string) {
+    const where = tenantId ? { id, tenant_id: tenantId } : { id };
+    return this.prisma.invoices.findFirst({
+      where,
       include: { tenants: true, subscriptions: true, invoice_items: true, payments: true },
     });
   }
@@ -75,9 +80,10 @@ export class InvoicesService {
     });
   }
 
-  remove(id: string) {
-    return this.prisma.invoices.delete({
-      where: { id },
+  remove(id: string, tenantId?: string) {
+    const where = tenantId ? { id, tenant_id: tenantId } : { id };
+    return this.prisma.invoices.deleteMany({
+      where,
     });
   }
 }

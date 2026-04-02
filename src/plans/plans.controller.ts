@@ -90,6 +90,9 @@ export class PlansController {
         highlightColor: plan.highlight_color,
         features: featuresArray,
         buttonText: plan.button_text || 'เริ่มใช้งาน',
+        subtitle: plan.subtitle || undefined,
+        targetAudience: plan.target_audience || undefined,
+        pricePerRoom: plan.price_per_room || undefined,
         addOnFeatures: addOnFeatures.length > 0 ? addOnFeatures : undefined,
       };
     });
@@ -178,6 +181,9 @@ export class PlansController {
       highlightColor: plan.highlight_color,
       features: featuresArray,
       buttonText: plan.button_text || 'เริ่มใช้งาน',
+      subtitle: plan.subtitle || undefined,
+      targetAudience: plan.target_audience || undefined,
+      pricePerRoom: plan.price_per_room || undefined,
       addOnFeatures: addOnFeatures.length > 0 ? addOnFeatures : undefined,
     };
   }

@@ -23,8 +23,10 @@ echo "[entrypoint] Applying database migrations..."
 if npx prisma migrate deploy 2>&1; then
   echo "[entrypoint] Migrations applied successfully."
 else
-  echo "[entrypoint] migrate deploy failed — trying db push as fallback..."
-  if npx prisma db push --accept-data-loss 2>&1; then
+  echo "[entrypoint] WARNING: migrate deploy failed — trying db push as fallback..."
+  echo "[entrypoint] NOTE: db push without --accept-data-loss will NOT drop columns/tables."
+  echo "[entrypoint] If schema changes require destructive operations, run migrations manually."
+  if npx prisma db push 2>&1; then
     echo "[entrypoint] db push completed successfully."
   else
     echo "[entrypoint] WARNING: Schema sync failed. Starting app anyway..."

@@ -18,6 +18,9 @@ export class PlansService {
       buttonText?: string;
       description?: string;
       yearlyDiscountPercent?: number;
+      subtitle?: string;
+      targetAudience?: string;
+      pricePerRoom?: string;
     },
   ) {
     const data: any = {
@@ -37,6 +40,9 @@ export class PlansService {
       button_text: createPlanDto.buttonText,
       description: createPlanDto.description,
       yearly_discount_percent: createPlanDto.yearlyDiscountPercent || 0,
+      subtitle: createPlanDto.subtitle,
+      target_audience: createPlanDto.targetAudience,
+      price_per_room: createPlanDto.pricePerRoom,
     };
 
     // Clean up undefined properties
@@ -85,6 +91,9 @@ export class PlansService {
       buttonText?: string;
       description?: string;
       yearlyDiscountPercent?: number;
+      subtitle?: string;
+      targetAudience?: string;
+      pricePerRoom?: string;
     },
   ) {
     const data: any = {
@@ -105,6 +114,9 @@ export class PlansService {
       button_text: updatePlanDto.buttonText,
       description: updatePlanDto.description,
       yearly_discount_percent: updatePlanDto.yearlyDiscountPercent,
+      subtitle: updatePlanDto.subtitle,
+      target_audience: updatePlanDto.targetAudience,
+      price_per_room: updatePlanDto.pricePerRoom,
     };
 
     // Clean up undefined properties

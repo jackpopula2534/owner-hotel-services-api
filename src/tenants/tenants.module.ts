@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { JwtModule } from '@nestjs/jwt';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { PrismaModule } from '../prisma/prisma.module';
 import { TenantsService } from './tenants.service';
 import { HotelDetailService } from './hotel-detail.service';
@@ -21,6 +23,16 @@ import { PlansModule } from '../plans/plans.module';
     InvoicesModule, // provides Repository<Invoice>, Repository<InvoiceAdjustment>
     PlansModule, // provides Repository<Plan>
     PrismaModule,
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      useFactory: async (configService: ConfigService) => ({
+        secret: configService.getOrThrow<string>('JWT_SECRET'),
+        signOptions: {
+          expiresIn: configService.get<string>('JWT_EXPIRES_IN') || '24h',
+        },
+      }),
+      inject: [ConfigService],
+    }),
   ],
   controllers: [TenantsController],
   providers: [TenantsService, HotelDetailService, HotelManagementService],

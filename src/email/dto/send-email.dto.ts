@@ -14,6 +14,7 @@ import { Type } from 'class-transformer';
 export enum EmailTemplate {
   BOOKING_CONFIRMATION = 'booking-confirmation',
   CHECK_IN_REMINDER = 'check-in-reminder',
+  CHECK_IN_CONFIRMATION = 'check-in-confirmation',
   CHECK_OUT_REMINDER = 'check-out-reminder',
   PAYMENT_RECEIPT = 'payment-receipt',
   PASSWORD_RESET = 'password-reset',

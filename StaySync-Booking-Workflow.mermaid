@@ -1,0 +1,118 @@
+---
+title: "StaySync Hotel Booking Workflow — Booking to Check-Out"
+---
+
+flowchart TD
+    %% ============ STAGE 1: BOOKING CREATION ============
+    subgraph S1["📋 STAGE 1 — สร้างการจอง (Booking Creation)"]
+        direction TB
+        A1["🌐 แขกจองผ่านช่องทาง\n(Website / OTA / Walk-in / Phone)"]
+        A2["📝 Frontend: BookingForm (3 ขั้นตอน)\n1. ข้อมูลการจอง (Property, Guest, วันที่)\n2. เลือกห้อง (ค้นหาห้องว่าง)\n3. รายละเอียดเพิ่มเติม (จำนวนคน, หมายเหตุ)"]
+        A3["🔍 Backend: ตรวจสอบห้องว่าง\n- checkOut > checkIn?\n- Property อยู่ใน Tenant?\n- Room อยู่ใน Property?\n- ไม่ซ้อนกับ booking อื่น?"]
+        A4["💰 คำนวณราคา\ntotalPrice = room.price × nights"]
+        A5["💾 สร้าง Booking\nstatus = 'pending'"]
+        A6["📧 ส่ง Email ยืนยันการจอง\n(Email Events Service)"]
+
+        A1 --> A2 --> A3
+        A3 -->|ผ่าน| A4 --> A5 --> A6
+        A3 -->|ไม่ผ่าน| A3X["❌ BadRequestException\nห้องไม่ว่าง / ข้อมูลไม่ถูกต้อง"]
+    end
+
+    %% ============ STAGE 2: PAYMENT ============
+    subgraph S2["💳 STAGE 2 — ชำระเงิน (Payment & Confirmation)"]
+        direction TB
+        B1["📄 สร้าง Invoice\n- invoice_no, amount\n- InvoiceItems (ค่าห้อง, บริการ)\n- InvoiceAdjustments (ส่วนลด)"]
+        B2["🔲 สร้าง PromptPay QR Code\n- EMV QR ตามมาตรฐานไทย\n- Transaction Ref: PP{timestamp}{random}\n- หมดอายุ 15 นาที"]
+        B3{"ช่องทางชำระเงิน?"}
+        B4["📱 PromptPay QR\n→ Webhook รับแจ้ง\n→ auto confirm"]
+        B5["💵 เงินสด / โอน\n→ Admin ตรวจสอบ\n→ manual approve"]
+        B6["✅ Payment approved\n→ สร้าง Payment Record\n→ Invoice status = 'paid'"]
+        B7["🔄 Booking status → 'confirmed'"]
+
+        B1 --> B2 --> B3
+        B3 -->|QR Payment| B4 --> B6
+        B3 -->|Cash/Transfer| B5 --> B6
+        B6 --> B7
+    end
+
+    %% ============ STAGE 3: CHECK-IN ============
+    subgraph S3["🏨 STAGE 3 — เช็คอิน (Check-In)"]
+        direction TB
+        C1["👤 แขกมาถึงโรงแรม\nStaff กด Check-In"]
+        C2["🔐 Backend ตรวจสอบ\n- Booking ต้อง confirmed\n- ไม่ใช่ cancelled/checked-out"]
+        C3["📝 อัพเดทสถานะ\n- Booking → 'checked_in'\n- actualCheckIn = NOW()\n- Room → 'occupied'"]
+        C4["📲 แจ้งเตือน Check-In\n- Push Notification (Firebase)\n- LINE Notify\n- Audit Log"]
+
+        C1 --> C2 -->|ผ่าน| C3 --> C4
+        C2 -->|ไม่ผ่าน| C2X["❌ BadRequestException"]
+    end
+
+    %% ============ STAGE 4: DURING STAY ============
+    subgraph S4["🛏️ STAGE 4 — ระหว่างเข้าพัก (During Stay)"]
+        direction TB
+        D1["🍽️ Restaurant / Room Service\nสั่งอาหาร → เพิ่มใน Invoice"]
+        D2["🧹 Housekeeping\nขอทำความสะอาด / แจ้งซ่อม"]
+        D3["📢 Notifications\n- Email Reminder (Cron 9AM)\n- Push Notifications\n- LINE Notify"]
+        D4["📊 Analytics Tracking\nบันทึก events ต่างๆ"]
+    end
+
+    %% ============ STAGE 5: CHECK-OUT ============
+    subgraph S5["🚪 STAGE 5 — เช็คเอาท์ (Check-Out)"]
+        direction TB
+        E1["👤 Staff กด Check-Out"]
+        E2["🔐 Backend ตรวจสอบ\n- Booking ต้อง 'checked_in'"]
+        E3["📝 อัพเดทสถานะ\n- Booking → 'checked_out'\n- actualCheckOut = NOW()\n- Room → 'cleaning'"]
+        E4["📄 Finalize Invoice\n- รวมค่าห้อง + ค่าบริการเพิ่มเติม\n- หักส่วนลด / ค่าปรับ"]
+        E5["📧 ส่ง Email สรุปการเข้าพัก\n+ ใบเสร็จ"]
+
+        E1 --> E2 -->|ผ่าน| E3 --> E4 --> E5
+        E2 -->|ไม่ผ่าน| E2X["❌ BadRequestException"]
+    end
+
+    %% ============ STAGE 6: POST CHECK-OUT ============
+    subgraph S6["⭐ STAGE 6 — หลังเช็คเอาท์ (Post Check-Out)"]
+        direction TB
+        F1["🧹 Housekeeping\nRoom เข้าสู่ 'cleaning'\n→ ทำความสะอาด\n→ พร้อมรับแขกใหม่"]
+        F2["⭐ Guest Review\nแขกให้คะแนน + ความคิดเห็น\n(1 booking = 1 review)"]
+        F3["🎁 Loyalty Points\nสะสมคะแนนสมาชิก"]
+        F4["📊 Analytics & Reports\n- Revenue report\n- Occupancy rate\n- Guest satisfaction"]
+        F5["📋 Audit Log\nบันทึกทุก operation\nสำหรับ compliance"]
+    end
+
+    %% ============ CONNECTIONS ============
+    S1 --> S2
+    S2 --> S3
+    S3 --> S4
+    S4 --> S5
+    S5 --> S6
+
+    %% ============ CANCELLATION PATH ============
+    subgraph CANCEL["🚫 ยกเลิกการจอง (Cancellation)"]
+        direction TB
+        X1["ยกเลิกได้ทุกสถานะก่อน check-out"]
+        X2["Booking → 'cancelled'"]
+        X3["PromptPay Refund\n(ถ้าชำระแล้ว)"]
+        X4["Room กลับเป็น 'available'"]
+        X1 --> X2 --> X3 --> X4
+    end
+
+    S1 -.->|ยกเลิก| CANCEL
+    S2 -.->|ยกเลิก| CANCEL
+    S3 -.->|ยกเลิก| CANCEL
+
+    %% ============ STYLING ============
+    classDef stage1 fill:#E3F2FD,stroke:#1565C0,color:#0D47A1
+    classDef stage2 fill:#E8F5E9,stroke:#2E7D32,color:#1B5E20
+    classDef stage3 fill:#FFF3E0,stroke:#E65100,color:#BF360C
+    classDef stage4 fill:#F3E5F5,stroke:#6A1B9A,color:#4A148C
+    classDef stage5 fill:#FCE4EC,stroke:#AD1457,color:#880E4F
+    classDef stage6 fill:#E0F7FA,stroke:#00695C,color:#004D40
+    classDef cancel fill:#FFEBEE,stroke:#C62828,color:#B71C1C
+
+    class S1 stage1
+    class S2 stage2
+    class S3 stage3
+    class S4 stage4
+    class S5 stage5
+    class S6 stage6
+    class CANCEL cancel

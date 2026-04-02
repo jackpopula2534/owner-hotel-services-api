@@ -415,3 +415,51 @@ export class PlanResponseDto {
   @ApiPropertyOptional({ example: 'เริ่มใช้งาน' })
   buttonText?: string;
 }
+
+// ============ Plan Features Management DTOs ============
+
+export class AssignFeatureToPlanDto {
+  @ApiProperty({
+    description: 'Feature ID to assign to the plan',
+    example: 'uuid-5678',
+  })
+  @IsString()
+  featureId: string;
+}
+
+export class FeatureItemDto {
+  @ApiProperty({ example: 'uuid-5678' })
+  id: string;
+
+  @ApiProperty({ example: 'extra-analytics' })
+  code: string;
+
+  @ApiProperty({ example: 'Extra Analytics' })
+  name: string;
+
+  @ApiProperty({ example: 'Advanced analytics features' })
+  description?: string;
+
+  @ApiProperty({ example: 'toggle' })
+  type: string;
+
+  @ApiProperty({ example: 990 })
+  priceMonthly: number;
+
+  @ApiProperty({ example: true })
+  isActive: boolean;
+}
+
+export class PlanFeaturesResponseDto {
+  @ApiProperty({
+    type: [PlanFeatureItemDto],
+    description: 'Features currently assigned to the plan',
+  })
+  assignedFeatures: PlanFeatureItemDto[];
+
+  @ApiProperty({
+    type: [FeatureItemDto],
+    description: 'Features available to assign (not yet assigned to this plan)',
+  })
+  availableFeatures: FeatureItemDto[];
+}

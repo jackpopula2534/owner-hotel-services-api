@@ -10,6 +10,7 @@ import { InvoiceItemsModule } from '../invoice-items/invoice-items.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { PlansModule } from '../plans/plans.module';
 import { FeaturesModule } from '../features/features.module';
+import { PlanFeaturesModule } from '../plan-features/plan-features.module';
 import { SubscriptionFeaturesModule } from '../subscription-features/subscription-features.module';
 
 // Controllers
@@ -45,6 +46,7 @@ import { AdminPlansService } from './admin-plans.service';
     PaymentsModule, // → Repository<Payment>, Repository<PaymentRefund>
     PlansModule, // → Repository<Plan>
     FeaturesModule, // → Repository<Feature>
+    PlanFeaturesModule, // → Repository<PlanFeature>
     SubscriptionFeaturesModule, // → Repository<SubscriptionFeature>, Repository<SubscriptionFeatureLogs>
     PrismaModule, // → PrismaService (used by several admin services for user queries)
   ],
