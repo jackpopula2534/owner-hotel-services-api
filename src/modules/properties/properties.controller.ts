@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Put,
+  Patch,
   Delete,
   Body,
   Param,
@@ -70,7 +71,7 @@ export class PropertiesController {
   }
 
   @Put(':id')
-  @ApiOperation({ summary: 'Update property' })
+  @ApiOperation({ summary: 'Update property (full)' })
   @ApiResponse({ status: 200, description: 'Property updated successfully' })
   @Roles('admin', 'tenant_admin', 'platform_admin')
   async update(
@@ -86,9 +87,26 @@ export class PropertiesController {
     return this.propertiesService.update(id, updatePropertyDto, user.tenantId);
   }
 
+  @Patch(':id')
+  @ApiOperation({ summary: 'Update property (partial)' })
+  @ApiResponse({ status: 200, description: 'Property updated successfully' })
+  @Roles('admin', 'tenant_admin', 'platform_admin')
+  async partialUpdate(
+    @Param('id') id: string,
+    @Body() updatePropertyDto: UpdatePropertyDto,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    if (!user?.tenantId) {
+      throw new BadRequestException(
+        'No tenant found. Please complete the onboarding process first to set up your hotel.',
+      );
+    }
+    return this.propertiesService.update(id, updatePropertyDto, user.tenantId);
+  }
+
   @Delete(':id')
-  @ApiOperation({ summary: 'Delete property' })
-  @ApiResponse({ status: 200, description: 'Property deleted successfully' })
+  @ApiOperation({ summary: 'Soft delete property' })
+  @ApiResponse({ status: 200, description: 'Property soft-deleted successfully' })
   @Roles('admin', 'tenant_admin', 'platform_admin')
   async remove(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     if (!user?.tenantId) {
@@ -97,5 +115,19 @@ export class PropertiesController {
       );
     }
     return this.propertiesService.remove(id, user.tenantId);
+  }
+
+  @Post(':id/restore')
+  @ApiOperation({ summary: 'Restore a soft-deleted property' })
+  @ApiResponse({ status: 200, description: 'Property restored successfully' })
+  @ApiResponse({ status: 400, description: 'Property is not deleted' })
+  @Roles('admin', 'tenant_admin', 'platform_admin')
+  async restore(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
+    if (!user?.tenantId) {
+      throw new BadRequestException(
+        'No tenant found. Please complete the onboarding process first to set up your hotel.',
+      );
+    }
+    return this.propertiesService.restore(id, user.tenantId);
   }
 }

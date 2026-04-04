@@ -190,6 +190,7 @@ export class RoomsService {
       ...(createRoomDto.size !== undefined && { size: createRoomDto.size }),
       ...(createRoomDto.amenities !== undefined && { amenities: createRoomDto.amenities }),
       ...(createRoomDto.description !== undefined && { description: createRoomDto.description }),
+      ...(createRoomDto.images !== undefined && { images: createRoomDto.images }),
     };
     return this.prisma.room.create({
       data,
@@ -227,6 +228,7 @@ export class RoomsService {
       ...(updateRoomDto.size !== undefined && { size: updateRoomDto.size }),
       ...(updateRoomDto.amenities !== undefined && { amenities: updateRoomDto.amenities }),
       ...(updateRoomDto.description !== undefined && { description: updateRoomDto.description }),
+      ...(updateRoomDto.images !== undefined && { images: updateRoomDto.images }),
     };
     return this.prisma.room.update({
       where: { id },

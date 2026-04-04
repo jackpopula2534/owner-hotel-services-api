@@ -117,11 +117,13 @@ model Property {
   status      String    @default("active")
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime? @map("deleted_at")
   rooms       Room[]
   bookings    Booking[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
+  @@index([deletedAt])
   @@map("properties")
 }
 
@@ -139,6 +141,7 @@ model Room {
   size         Int?
   amenities    Json?
   description  String?
+  images       Json?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   property     Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)

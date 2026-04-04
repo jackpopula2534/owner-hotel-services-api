@@ -624,8 +624,8 @@ export class HotelManagementService {
       sortOrder = 'desc',
     } = query;
 
-    // Build Prisma where clause for properties
-    const where: any = { tenantId };
+    // Build Prisma where clause for properties (exclude soft-deleted)
+    const where: any = { tenantId, deletedAt: null };
 
     if (search) {
       where.OR = [
@@ -768,9 +768,9 @@ export class HotelManagementService {
     tenantId: string,
   ): Promise<HotelSummaryStatsDto> {
     const [total, active, trial] = await Promise.all([
-      this.prisma.property.count({ where: { tenantId } }),
-      this.prisma.property.count({ where: { tenantId, status: 'active' } }),
-      this.prisma.property.count({ where: { tenantId, status: 'trial' } }),
+      this.prisma.property.count({ where: { tenantId, deletedAt: null } }),
+      this.prisma.property.count({ where: { tenantId, status: 'active', deletedAt: null } }),
+      this.prisma.property.count({ where: { tenantId, status: 'trial', deletedAt: null } }),
     ]);
 
     return {
@@ -791,7 +791,7 @@ export class HotelManagementService {
     // Get distinct statuses from properties
     const properties = await this.prisma.property.groupBy({
       by: ['status'],
-      where: { tenantId },
+      where: { tenantId, deletedAt: null },
       _count: true,
     });
 

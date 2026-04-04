@@ -9,8 +9,15 @@ import {
   Query,
   Patch,
   UseGuards,
+  UseInterceptors,
+  UploadedFiles,
+  BadRequestException,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse, ApiConsumes } from '@nestjs/swagger';
+import { FilesInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import { extname, join } from 'path';
+import { existsSync, mkdirSync } from 'fs';
 import { RoomsService } from './rooms.service';
 import { CreateRoomDto } from './dto/create-room.dto';
 import { UpdateRoomDto } from './dto/update-room.dto';
@@ -18,6 +25,19 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+
+// Simple interface for multer file to avoid @types/multer dependency
+interface MulterFile {
+  fieldname: string;
+  originalname: string;
+  encoding: string;
+  mimetype: string;
+  size: number;
+  destination: string;
+  filename: string;
+  path: string;
+  buffer: Buffer;
+}
 
 @ApiTags('rooms')
 @ApiBearerAuth('JWT-auth')
@@ -94,5 +114,59 @@ export class RoomsController {
   @Roles('admin', 'tenant_admin', 'platform_admin')
   async remove(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.roomsService.remove(id, user?.tenantId);
+  }
+
+  @Post(':id/images')
+  @ApiOperation({ summary: 'Upload room images' })
+  @ApiConsumes('multipart/form-data')
+  @ApiResponse({ status: 201, description: 'Images uploaded successfully' })
+  @Roles('admin', 'manager', 'tenant_admin', 'platform_admin')
+  @UseInterceptors(
+    FilesInterceptor('images', 8, {
+      storage: diskStorage({
+        destination: (req, file, cb) => {
+          const uploadPath = join(process.cwd(), 'uploads', 'rooms');
+          if (!existsSync(uploadPath)) {
+            mkdirSync(uploadPath, { recursive: true });
+          }
+          cb(null, uploadPath);
+        },
+        filename: (req, file, cb) => {
+          const roomId = req.params.id;
+          const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+          const ext = extname(file.originalname);
+          cb(null, `room-${roomId}-${uniqueSuffix}${ext}`);
+        },
+      }),
+      fileFilter: (req, file, cb) => {
+        if (!file.mimetype.match(/^image\/(jpeg|jpg|png|webp|gif)$/)) {
+          return cb(new BadRequestException('Only image files are allowed'), false);
+        }
+        cb(null, true);
+      },
+      limits: { fileSize: 10 * 1024 * 1024 }, // 10MB per file
+    }),
+  )
+  async uploadImages(
+    @Param('id') id: string,
+    @UploadedFiles() files: MulterFile[],
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    if (!files || files.length === 0) {
+      throw new BadRequestException('No image files provided');
+    }
+
+    // Build URL paths for the uploaded images
+    const baseUrl = process.env.API_BASE_URL || `http://localhost:${process.env.PORT || 9011}`;
+    const imageUrls = files.map((file) => `${baseUrl}/uploads/rooms/${file.filename}`);
+
+    // Fetch current room and append new images to existing ones
+    // Note: Prisma type doesn't reflect `images` yet — regenerate after migration
+    const room = await this.roomsService.findOne(id, user?.tenantId);
+    const roomAny = room as unknown as Record<string, unknown>;
+    const existingImages: string[] = Array.isArray(roomAny.images) ? (roomAny.images as string[]) : [];
+    const updatedImages = [...existingImages, ...imageUrls].slice(0, 8);
+
+    return this.roomsService.update(id, { images: updatedImages }, user?.tenantId);
   }
 }

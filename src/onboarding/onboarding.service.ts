@@ -60,7 +60,7 @@ export class OnboardingService {
           price_monthly: 0,
           max_rooms: 5, // Limit rooms to 5
           max_users: 2, // Limit users to 2
-          max_properties: 10,
+          max_properties: 2,
           is_active: 1,
           description: 'Try all enterprise features with limited capacity',
         },
