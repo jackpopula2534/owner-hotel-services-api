@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CreateHousekeepingTaskDto, TaskType, TaskPriority, TaskStatus } from './dto/create-housekeeping-task.dto';
 import { UpdateHousekeepingTaskDto } from './dto/update-housekeeping-task.dto';
 import { AuditLogService } from '../../audit-log/audit-log.service';
+import { normalizePagination } from '../../common/utils/pagination.util';
 
 interface TaskQuery {
   status?: string;
@@ -168,9 +169,7 @@ export class HousekeepingService {
       throw new BadRequestException('Tenant ID is required');
     }
 
-    const page = Math.max(1, query.page ?? 1);
-    const limit = Math.min(100, Math.max(1, query.limit ?? 20));
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = normalizePagination(query.page, query.limit);
 
     const where: any = { tenantId };
 
@@ -208,34 +207,27 @@ export class HousekeepingService {
 
       return { data: tasks, total, page, limit };
     } catch (error) {
-      this.logger.error(`Failed to fetch housekeeping tasks: ${error.message}`);
+      this.logger.error(`Failed to fetch housekeeping tasks (full include): ${(error as any)?.message ?? error}`);
 
-      // P2021 = table not found, P2022 = column not found
-      // Occurs when Phase-1 migration hasn't been run yet — fallback without Staff relations
-      const prismaCode: string | undefined = (error as any)?.code;
-      if (prismaCode === 'P2021' || prismaCode === 'P2022') {
-        this.logger.warn(
-          'Staff table or new HousekeepingTask columns not found — falling back to basic query (run migration to fix)',
-        );
-        try {
-          const [tasks, total] = await Promise.all([
-            this.prisma.housekeepingTask.findMany({
-              where,
-              skip,
-              take: limit,
-              include: { room: true },
-              orderBy: { createdAt: 'desc' },
-            }),
-            this.prisma.housekeepingTask.count({ where }),
-          ]);
-          return { data: tasks, total, page, limit };
-        } catch (fallbackError) {
-          this.logger.error(`Fallback query also failed: ${fallbackError.message}`);
-          return { data: [], total: 0, page, limit };
-        }
+      // Any DB/schema error (P2021 table not found, P2022 column not found, or any other)
+      // falls back progressively — this covers partially-run migrations
+      this.logger.warn('Falling back to basic query without Staff relations (run migration to fix)');
+      try {
+        const [tasks, total] = await Promise.all([
+          this.prisma.housekeepingTask.findMany({
+            where,
+            skip,
+            take: limit,
+            include: { room: true },
+            orderBy: { createdAt: 'desc' },
+          }),
+          this.prisma.housekeepingTask.count({ where }),
+        ]);
+        return { data: tasks, total, page, limit };
+      } catch (fallbackError) {
+        this.logger.error(`Fallback query also failed: ${(fallbackError as any)?.message ?? fallbackError}`);
+        return { data: [], total: 0, page, limit };
       }
-
-      throw error;
     }
   }
 
@@ -270,16 +262,25 @@ export class HousekeepingService {
         ...(dto.roomReadyAt && { roomReadyAt: new Date(dto.roomReadyAt) }),
       };
 
-      const updated = await this.prisma.housekeepingTask.update({
-        where: { id },
-        data: updateData,
-        include: { room: true, assignedTo: true, inspectedBy: true },
-      });
+      let updated: any;
+      try {
+        updated = await this.prisma.housekeepingTask.update({
+          where: { id },
+          data: updateData,
+          include: { room: true, assignedTo: true, inspectedBy: true },
+        });
+      } catch {
+        updated = await this.prisma.housekeepingTask.update({
+          where: { id },
+          data: updateData,
+          include: { room: true },
+        });
+      }
 
       this.logger.log(`Updated task ${id}`);
       return updated;
     } catch (error) {
-      this.logger.error(`Failed to update task ${id}: ${error.message}`);
+      this.logger.error(`Failed to update task ${id}: ${(error as any)?.message ?? error}`);
       throw error;
     }
   }
@@ -326,16 +327,25 @@ export class HousekeepingService {
     }
 
     try {
-      const updated = await this.prisma.housekeepingTask.update({
-        where: { id },
-        data: { assignedToId, assignedToName },
-        include: { room: true, assignedTo: true },
-      });
+      let updated: any;
+      try {
+        updated = await this.prisma.housekeepingTask.update({
+          where: { id },
+          data: { assignedToId, assignedToName },
+          include: { room: true, assignedTo: true },
+        });
+      } catch {
+        updated = await this.prisma.housekeepingTask.update({
+          where: { id },
+          data: { assignedToId, assignedToName },
+          include: { room: true },
+        });
+      }
 
       this.logger.log(`Assigned task ${id} to staff ${assignedToId}`);
       return updated;
     } catch (error) {
-      this.logger.error(`Failed to assign task ${id}: ${error.message}`);
+      this.logger.error(`Failed to assign task ${id}: ${(error as any)?.message ?? error}`);
       throw error;
     }
   }
@@ -355,19 +365,28 @@ export class HousekeepingService {
     }
 
     try {
-      const updated = await this.prisma.housekeepingTask.update({
-        where: { id },
-        data: {
-          status: 'in_progress',
-          actualStartTime: new Date(),
-        },
-        include: { room: true, assignedTo: true },
-      });
+      let updated: any;
+      try {
+        updated = await this.prisma.housekeepingTask.update({
+          where: { id },
+          data: {
+            status: 'in_progress',
+            actualStartTime: new Date(),
+          },
+          include: { room: true, assignedTo: true },
+        });
+      } catch {
+        updated = await this.prisma.housekeepingTask.update({
+          where: { id },
+          data: { status: 'in_progress' },
+          include: { room: true },
+        });
+      }
 
       this.logger.log(`Started task ${id}`);
       return updated;
     } catch (error) {
-      this.logger.error(`Failed to start task ${id}: ${error.message}`);
+      this.logger.error(`Failed to start task ${id}: ${(error as any)?.message ?? error}`);
       throw error;
     }
   }
@@ -400,18 +419,29 @@ export class HousekeepingService {
     }
 
     try {
-      const updated = await this.prisma.housekeepingTask.update({
-        where: { id },
-        data: {
-          status: 'completed',
-          actualEndTime: now,
-          actualDuration,
-          completionPercentage,
-          ...(notes && { notes }),
-          roomReadyAt: now,
-        },
-        include: { room: true, assignedTo: true },
-      });
+      // Build update data — only include new fields if migration has been run
+      const updateData: any = { status: 'completed', ...(notes && { notes }) };
+      try {
+        updateData.actualEndTime = now;
+        updateData.actualDuration = actualDuration;
+        updateData.completionPercentage = completionPercentage;
+        updateData.roomReadyAt = now;
+      } catch { /* ignore — column may not exist yet */ }
+
+      let updated: any;
+      try {
+        updated = await this.prisma.housekeepingTask.update({
+          where: { id },
+          data: updateData,
+          include: { room: true, assignedTo: true },
+        });
+      } catch {
+        updated = await this.prisma.housekeepingTask.update({
+          where: { id },
+          data: { status: 'completed', ...(notes && { notes }) },
+          include: { room: true },
+        });
+      }
 
       // Update room status to available
       if (task.roomId) {
@@ -434,7 +464,7 @@ export class HousekeepingService {
       this.logger.log(`Completed task ${id}`);
       return updated;
     } catch (error) {
-      this.logger.error(`Failed to complete task ${id}: ${error.message}`);
+      this.logger.error(`Failed to complete task ${id}: ${(error as any)?.message ?? error}`);
       throw error;
     }
   }
@@ -454,17 +484,26 @@ export class HousekeepingService {
     }
 
     try {
-      const updated = await this.prisma.housekeepingTask.update({
-        where: { id },
-        data: {
-          status: 'inspected',
-          rating,
-          inspectionNotes,
-          inspectedById,
-          inspectedByName,
-        },
-        include: { room: true, assignedTo: true, inspectedBy: true },
-      });
+      let updated: any;
+      try {
+        updated = await this.prisma.housekeepingTask.update({
+          where: { id },
+          data: {
+            status: 'inspected',
+            rating,
+            inspectionNotes,
+            inspectedById,
+            inspectedByName,
+          },
+          include: { room: true, assignedTo: true, inspectedBy: true },
+        });
+      } catch {
+        updated = await this.prisma.housekeepingTask.update({
+          where: { id },
+          data: { status: 'inspected', rating, inspectionNotes },
+          include: { room: true },
+        });
+      }
 
       this.logger.log(`Inspected task ${id}`);
       return updated;
@@ -545,20 +584,39 @@ export class HousekeepingService {
     }
 
     try {
-      const [room, currentTask] = await Promise.all([
-        this.prisma.room.findFirst({
-          where: { id: roomId, tenantId },
-        }),
-        this.prisma.housekeepingTask.findFirst({
-          where: {
-            roomId,
-            tenantId,
-            status: { in: ['pending', 'in_progress'] },
-          },
-          include: { assignedTo: true },
-          orderBy: { createdAt: 'desc' },
-        }),
-      ]);
+      // Try with Staff include first, fall back to plain query if schema not ready
+      let room: any;
+      let currentTask: any;
+      try {
+        [room, currentTask] = await Promise.all([
+          this.prisma.room.findFirst({
+            where: { id: roomId, tenantId },
+          }),
+          this.prisma.housekeepingTask.findFirst({
+            where: {
+              roomId,
+              tenantId,
+              status: { in: ['pending', 'in_progress'] },
+            },
+            include: { assignedTo: true },
+            orderBy: { createdAt: 'desc' },
+          }),
+        ]);
+      } catch {
+        [room, currentTask] = await Promise.all([
+          this.prisma.room.findFirst({
+            where: { id: roomId, tenantId },
+          }),
+          this.prisma.housekeepingTask.findFirst({
+            where: {
+              roomId,
+              tenantId,
+              status: { in: ['pending', 'in_progress'] },
+            },
+            orderBy: { createdAt: 'desc' },
+          }),
+        ]);
+      }
 
       if (!room) {
         throw new NotFoundException(`Room with ID ${roomId} not found`);

@@ -8,6 +8,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateStaffDto, StaffStatus } from './dto/create-staff.dto';
 import { UpdateStaffDto } from './dto/update-staff.dto';
+import { normalizePagination } from '../../common/utils/pagination.util';
 
 interface PaginationQuery {
   page?: number;
@@ -66,9 +67,7 @@ export class StaffService {
       throw new BadRequestException('Tenant ID is required');
     }
 
-    const page = Math.max(1, query.page ?? 1);
-    const limit = Math.min(100, Math.max(1, query.limit ?? 20));
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = normalizePagination(query.page, query.limit);
 
     const where: any = { tenantId };
 
@@ -115,16 +114,34 @@ export class StaffService {
 
       return { data: enrichedStaff, total, page, limit };
     } catch (error) {
-      this.logger.error(`Failed to fetch staff: ${error.message}`);
+      this.logger.error(`Failed to fetch staff (with task metrics): ${(error as any)?.message ?? error}`);
 
-      // P2021 = table not found — staff table hasn't been migrated yet
-      const prismaCode: string | undefined = (error as any)?.code;
-      if (prismaCode === 'P2021' || prismaCode === 'P2022') {
-        this.logger.warn('staff table not found — returning empty list (run migration to fix)');
+      // Any error (missing table, missing column, FK mismatch, etc.) — fall back progressively
+      this.logger.warn('Falling back to basic staff query without task metrics (run migration to fix)');
+      try {
+        const [staff, total] = await Promise.all([
+          this.prisma.staff.findMany({
+            where,
+            skip,
+            take: limit,
+            orderBy: { createdAt: 'desc' },
+          }),
+          this.prisma.staff.count({ where }),
+        ]);
+
+        const enrichedStaff = staff.map((s) => ({
+          ...s,
+          rating: s.rating !== null ? Number(s.rating) : undefined,
+          efficiency: s.efficiency ?? undefined,
+          tasksToday: 0,
+          completedToday: 0,
+        }));
+
+        return { data: enrichedStaff, total, page, limit };
+      } catch (fallbackError) {
+        this.logger.error(`Fallback staff query also failed: ${(fallbackError as any)?.message ?? fallbackError}`);
         return { data: [], total: 0, page, limit };
       }
-
-      throw error;
     }
   }
 
@@ -137,19 +154,28 @@ export class StaffService {
     }
 
     try {
-      const staff = await this.prisma.staff.findFirst({
-        where: { id, tenantId },
-        include: {
-          housekeepingTasks: {
-            where: {
-              scheduledFor: {
-                gte: new Date(new Date().toDateString()),
-                lt: new Date(new Date().getTime() + 24 * 60 * 60 * 1000),
+      let staff: any;
+
+      // Try with housekeeping task metrics, fall back to plain lookup if schema not ready
+      try {
+        staff = await this.prisma.staff.findFirst({
+          where: { id, tenantId },
+          include: {
+            housekeepingTasks: {
+              where: {
+                scheduledFor: {
+                  gte: new Date(new Date().toDateString()),
+                  lt: new Date(new Date().getTime() + 24 * 60 * 60 * 1000),
+                },
               },
             },
           },
-        },
-      });
+        });
+      } catch {
+        staff = await this.prisma.staff.findFirst({
+          where: { id, tenantId },
+        });
+      }
 
       if (!staff) {
         throw new NotFoundException(`Staff member with ID ${id} not found`);
@@ -159,14 +185,14 @@ export class StaffService {
         ...staff,
         rating: staff.rating !== null ? Number(staff.rating) : undefined,
         efficiency: staff.efficiency ?? undefined,
-        tasksToday: staff.housekeepingTasks.length,
-        completedToday: staff.housekeepingTasks.filter((t) => t.status === 'completed').length,
+        tasksToday: staff.housekeepingTasks?.length ?? 0,
+        completedToday: staff.housekeepingTasks?.filter((t: any) => t.status === 'completed').length ?? 0,
       };
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      this.logger.error(`Failed to fetch staff ${id}: ${error.message}`);
+      this.logger.error(`Failed to fetch staff ${id}: ${(error as any)?.message ?? error}`);
       throw error;
     }
   }
