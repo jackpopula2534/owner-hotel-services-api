@@ -46,7 +46,7 @@ export class RoomsService {
             property: true,
             bookings: {
               where: {
-                status: { in: ['confirmed', 'checked-in'] },
+                status: { in: ['pending', 'confirmed', 'checked_in'] },
               },
             },
           },
@@ -263,7 +263,7 @@ export class RoomsService {
     const activeBookings = await this.prisma.booking.findFirst({
       where: {
         roomId: id,
-        status: { in: ['confirmed', 'checked-in'] },
+        status: { in: ['pending', 'confirmed', 'checked_in'] },
         tenantId,
       },
     });
@@ -303,7 +303,7 @@ export class RoomsService {
 
       const bookingWhere: any = {
         tenantId,
-        status: { in: ['confirmed', 'checked-in'] },
+        status: { in: ['pending', 'confirmed', 'checked_in'] },
         OR: [{ checkIn: { lte: checkOutDate }, checkOut: { gte: checkInDate } }],
       };
       if (propertyId) bookingWhere.propertyId = propertyId;

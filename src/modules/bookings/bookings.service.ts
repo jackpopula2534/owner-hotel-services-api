@@ -56,6 +56,38 @@ export class BookingsService {
   }
 
   /**
+   * Transform raw Prisma booking record to the response shape expected by the frontend.
+   * Adds alias fields (checkInDate, checkOutDate, totalAmount) and computed fields
+   * (numberOfNights, numberOfRooms, bookingNumber) so the UI always receives consistent data.
+   */
+  private mapBookingResponse(booking: any): any {
+    const nights =
+      booking.checkIn && booking.checkOut
+        ? Math.max(
+            0,
+            Math.ceil(
+              (new Date(booking.checkOut).getTime() - new Date(booking.checkIn).getTime()) /
+                (1000 * 60 * 60 * 24),
+            ),
+          )
+        : 0;
+
+    return {
+      ...booking,
+      // Alias fields — frontend uses checkInDate / checkOutDate
+      checkInDate: booking.checkIn,
+      checkOutDate: booking.checkOut,
+      // totalAmount — frontend field; convert Prisma Decimal to number
+      totalAmount: Number(booking.totalPrice ?? 0),
+      // Computed fields (current schema: 1 room per booking record)
+      numberOfRooms: 1,
+      numberOfNights: nights,
+      // Short human-readable booking reference
+      bookingNumber: booking.id ? booking.id.slice(0, 8).toUpperCase() : '-',
+    };
+  }
+
+  /**
    * Track analytics event
    * Called when important booking events occur
    */
@@ -122,7 +154,7 @@ export class BookingsService {
       ]);
 
       return {
-        data,
+        data: data.map((b) => this.mapBookingResponse(b)),
         total,
         page,
         limit,
@@ -163,7 +195,7 @@ export class BookingsService {
       throw new NotFoundException(`Booking with ID ${id} not found`);
     }
 
-    return booking;
+    return this.mapBookingResponse(booking);
   }
 
   async create(createBookingDto: CreateBookingDto, tenantId?: string) {
@@ -200,11 +232,11 @@ export class BookingsService {
       throw new NotFoundException('Room not found in this property');
     }
 
-    // Check room availability
+    // Check room availability — include pending so double-booking is blocked immediately
     const bookingScope: any = {
       roomId,
       tenantId,
-      status: { in: ['confirmed', 'checked-in'] },
+      status: { in: ['pending', 'confirmed', 'checked_in'] },
       OR: [
         {
           checkIn: { lte: checkOutDate },
@@ -320,13 +352,13 @@ export class BookingsService {
       this.logger.error(`Failed to track booking_created event: ${err.message}`);
     });
 
-    return booking;
+    return this.mapBookingResponse(booking);
   }
 
   async update(id: string, updateBookingDto: any, tenantId?: string) {
     await this.findOne(id, tenantId);
 
-    return this.prisma.booking.update({
+    const updated = await this.prisma.booking.update({
       where: { id },
       data: updateBookingDto,
       include: {
@@ -335,6 +367,8 @@ export class BookingsService {
         property: true,
       },
     });
+
+    return this.mapBookingResponse(updated);
   }
 
   async checkIn(id: string, tenantId?: string) {
@@ -437,7 +471,7 @@ export class BookingsService {
         this.logger.error(`Failed to send check-in confirmation email: ${err.message}`);
       });
 
-    return updated;
+    return this.mapBookingResponse(updated);
   }
 
   async checkOut(id: string, tenantId?: string): Promise<any> {
@@ -555,7 +589,7 @@ export class BookingsService {
         });
     }
 
-    return updated;
+    return this.mapBookingResponse(updated);
   }
 
   async getCheckoutSummary(id: string, tenantId?: string): Promise<any> {
@@ -646,7 +680,7 @@ export class BookingsService {
       this.logger.error(`Failed to send cancellation email: ${err.message}`);
     });
 
-    return cancelledBooking;
+    return this.mapBookingResponse(cancelledBooking);
   }
 
   /**
@@ -826,7 +860,7 @@ export class BookingsService {
       where: {
         roomId,
         tenantId,
-        status: { in: ['confirmed', 'checked_in'] },
+        status: { in: ['pending', 'confirmed', 'checked_in'] },
         OR: [
           {
             checkIn: { lte: checkOutDate },
@@ -953,6 +987,6 @@ export class BookingsService {
 
     this.logger.log(`Walk-in booking created and checked in: ${booking.id} for guest ${guestFirstName} ${guestLastName} in Room ${room.number}`);
 
-    return booking;
+    return this.mapBookingResponse(booking);
   }
 }
