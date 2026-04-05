@@ -344,6 +344,7 @@ export class PropertiesService {
       }
     }
 
+    // Strip fields not yet in DB schema (pending migration: SC/VAT settings)
     return this.prisma.property.update({
       where: { id },
       data: updatePropertyDto,

@@ -9,9 +9,10 @@ import { InvoicesModule } from '../../invoices/invoices.module';
 import { HousekeepingModule } from '../housekeeping/housekeeping.module';
 import { LoyaltyModule } from '../../loyalty/loyalty.module';
 import { NotificationsModule } from '../../notifications/notifications.module';
+import { PaymentsModule } from '../../payments/payments.module';
 
 @Module({
-  imports: [PrismaModule, EmailModule, AuditLogModule, InvoicesModule, HousekeepingModule, LoyaltyModule, NotificationsModule],
+  imports: [PrismaModule, EmailModule, AuditLogModule, InvoicesModule, HousekeepingModule, LoyaltyModule, NotificationsModule, PaymentsModule],
   controllers: [BookingsController],
   providers: [BookingsService, GuestFolioService],
   exports: [BookingsService, GuestFolioService],

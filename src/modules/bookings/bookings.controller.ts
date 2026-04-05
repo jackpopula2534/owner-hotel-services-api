@@ -4,6 +4,7 @@ import { Throttle } from '@nestjs/throttler';
 import { BookingsService } from './bookings.service';
 import { GuestFolioService } from './guest-folio.service';
 import { AddFolioChargeDto } from './dto/add-folio-charge.dto';
+import { CreateBookingDto } from './dto/create-booking.dto';
 import { WalkInDto } from './dto/walk-in.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -31,7 +32,10 @@ export class BookingsController {
   @Throttle({ default: { limit: 20, ttl: 60 } })
   @ApiOperation({ summary: 'Create a new booking' })
   @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
-  async create(@Body() createBookingDto: any, @CurrentUser() user: { tenantId?: string }) {
+  async create(
+    @Body() createBookingDto: CreateBookingDto,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
     return this.bookingsService.create(createBookingDto, user?.tenantId);
   }
 

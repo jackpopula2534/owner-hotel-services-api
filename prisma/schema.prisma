@@ -118,6 +118,14 @@ model Property {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime? @map("deleted_at")
+
+  // Service Charge & VAT Settings
+  serviceChargeEnabled  Boolean @default(true)
+  serviceChargePercent  Float   @default(10)
+  vatEnabled            Boolean @default(true)
+  vatPercent            Float   @default(7)
+  taxDisplayMode        String  @default("breakdown")
+
   rooms       Room[]
   bookings    Booking[]
 
@@ -139,9 +147,21 @@ model Room {
   maxOccupancy Int?      @default(2)
   bedType      String?
   size         Int?
-  amenities    Json?
-  description  String?
-  images       Json?
+  amenities       Json?
+  extraBedAllowed Boolean  @default(false)
+  extraBedLimit   Int      @default(0)
+  extraBedPrice   Decimal  @default(0) @db.Decimal(10, 2)
+  description     String?
+  images          Json?
+
+  // Dynamic Pricing
+  weekendPrice          Decimal? @db.Decimal(10, 2)
+  holidayPriceEnabled   Boolean  @default(false)
+  holidayPriceType      String?
+  holidayPrice          Decimal? @db.Decimal(10, 2)
+  holidayPricePercent   Float?
+  seasonalRates         Json?
+
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   property     Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
@@ -171,6 +191,13 @@ model Booking {
   status          String    @default("pending")
   totalPrice      Decimal   @db.Decimal(10, 2)
   notes           String?
+
+  // Payment Fields
+  paymentMethod   String?
+  paymentStatus   String?   @default("pending")
+  amountPaid      Decimal?  @db.Decimal(10, 2)
+  paymentNote     String?
+
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   channelId       String?

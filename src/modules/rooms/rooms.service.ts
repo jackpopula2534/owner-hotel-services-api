@@ -189,8 +189,18 @@ export class RoomsService {
       ...(createRoomDto.bedType !== undefined && { bedType: createRoomDto.bedType }),
       ...(createRoomDto.size !== undefined && { size: createRoomDto.size }),
       ...(createRoomDto.amenities !== undefined && { amenities: createRoomDto.amenities }),
+      ...(createRoomDto.extraBedAllowed !== undefined && { extraBedAllowed: createRoomDto.extraBedAllowed }),
+      ...(createRoomDto.extraBedLimit !== undefined && { extraBedLimit: createRoomDto.extraBedLimit }),
+      ...(createRoomDto.extraBedPrice !== undefined && { extraBedPrice: new Prisma.Decimal(createRoomDto.extraBedPrice) }),
       ...(createRoomDto.description !== undefined && { description: createRoomDto.description }),
       ...(createRoomDto.images !== undefined && { images: createRoomDto.images }),
+      // Dynamic Pricing
+      ...(createRoomDto.weekendPrice !== undefined && { weekendPrice: createRoomDto.weekendPrice }),
+      ...(createRoomDto.holidayPriceEnabled !== undefined && { holidayPriceEnabled: createRoomDto.holidayPriceEnabled }),
+      ...(createRoomDto.holidayPriceType !== undefined && { holidayPriceType: createRoomDto.holidayPriceType }),
+      ...(createRoomDto.holidayPrice !== undefined && { holidayPrice: createRoomDto.holidayPrice }),
+      ...(createRoomDto.holidayPricePercent !== undefined && { holidayPricePercent: createRoomDto.holidayPricePercent }),
+      ...(createRoomDto.seasonalRates !== undefined && { seasonalRates: createRoomDto.seasonalRates as unknown as Prisma.InputJsonValue }),
     };
     return this.prisma.room.create({
       data,
@@ -227,8 +237,18 @@ export class RoomsService {
       ...(updateRoomDto.bedType !== undefined && { bedType: updateRoomDto.bedType }),
       ...(updateRoomDto.size !== undefined && { size: updateRoomDto.size }),
       ...(updateRoomDto.amenities !== undefined && { amenities: updateRoomDto.amenities }),
+      ...(updateRoomDto.extraBedAllowed !== undefined && { extraBedAllowed: updateRoomDto.extraBedAllowed }),
+      ...(updateRoomDto.extraBedLimit !== undefined && { extraBedLimit: updateRoomDto.extraBedLimit }),
+      ...(updateRoomDto.extraBedPrice !== undefined && { extraBedPrice: new Prisma.Decimal(updateRoomDto.extraBedPrice) }),
       ...(updateRoomDto.description !== undefined && { description: updateRoomDto.description }),
       ...(updateRoomDto.images !== undefined && { images: updateRoomDto.images }),
+      // Dynamic Pricing
+      ...(updateRoomDto.weekendPrice !== undefined && { weekendPrice: updateRoomDto.weekendPrice }),
+      ...(updateRoomDto.holidayPriceEnabled !== undefined && { holidayPriceEnabled: updateRoomDto.holidayPriceEnabled }),
+      ...(updateRoomDto.holidayPriceType !== undefined && { holidayPriceType: updateRoomDto.holidayPriceType }),
+      ...(updateRoomDto.holidayPrice !== undefined && { holidayPrice: updateRoomDto.holidayPrice }),
+      ...(updateRoomDto.holidayPricePercent !== undefined && { holidayPricePercent: updateRoomDto.holidayPricePercent }),
+      ...(updateRoomDto.seasonalRates !== undefined && { seasonalRates: updateRoomDto.seasonalRates as unknown as Prisma.InputJsonValue }),
     };
     return this.prisma.room.update({
       where: { id },

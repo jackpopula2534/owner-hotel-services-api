@@ -8,8 +8,29 @@ import { InvoiceStatus } from '../../invoices/entities/invoice.entity';
 import { HousekeepingService } from '../housekeeping/housekeeping.service';
 import { LoyaltyService } from '../../loyalty/loyalty.service';
 import { NotificationsService } from '../../notifications/notifications.service';
+import { CreateBookingDto } from './dto/create-booking.dto';
 import { TaskType, TaskPriority } from '../housekeeping/dto/create-housekeeping-task.dto';
+import { PaymentsService } from '../../payments/payments.service';
+import { PaymentMethod, PaymentStatus } from '../../payments/entities/payment.entity';
 import { Prisma } from '@prisma/client';
+
+/** Map frontend booking payment options to the payments module enum. */
+function mapToPaymentsMethod(frontendMethod?: string): PaymentMethod | null {
+  switch (frontendMethod) {
+    case 'PROMPTPAY':
+      return PaymentMethod.QR;
+    case 'BANK_TRANSFER':
+      return PaymentMethod.TRANSFER;
+    case 'CASH':
+      return PaymentMethod.CASH;
+    case 'PAY_AT_HOTEL':
+      return PaymentMethod.CASH;
+    case 'CREDIT_CARD':
+      return PaymentMethod.TRANSFER; // fallback until card gateway support is added
+    default:
+      return null;
+  }
+}
 
 @Injectable()
 export class BookingsService {
@@ -23,7 +44,16 @@ export class BookingsService {
     private housekeepingService: HousekeepingService,
     private loyaltyService: LoyaltyService,
     private notificationsService: NotificationsService,
+    private paymentsService: PaymentsService,
   ) {}
+
+  private parseBookingDate(value: string, fieldName: 'checkIn' | 'checkOut'): Date {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new BadRequestException(`${fieldName} must be a valid ISO 8601 date`);
+    }
+    return parsed;
+  }
 
   /**
    * Track analytics event
@@ -136,15 +166,17 @@ export class BookingsService {
     return booking;
   }
 
-  async create(createBookingDto: any, tenantId?: string) {
+  async create(createBookingDto: CreateBookingDto, tenantId?: string) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID is required');
     }
 
     const { propertyId, roomId, guestId, checkIn, checkOut } = createBookingDto;
+    const checkInDate = this.parseBookingDate(checkIn, 'checkIn');
+    const checkOutDate = this.parseBookingDate(checkOut, 'checkOut');
 
     // Validate dates
-    if (new Date(checkOut) <= new Date(checkIn)) {
+    if (checkOutDate <= checkInDate) {
       throw new BadRequestException('Check-out date must be after check-in date');
     }
 
@@ -175,8 +207,8 @@ export class BookingsService {
       status: { in: ['confirmed', 'checked-in'] },
       OR: [
         {
-          checkIn: { lte: new Date(checkOut) },
-          checkOut: { gte: new Date(checkIn) },
+          checkIn: { lte: checkOutDate },
+          checkOut: { gte: checkInDate },
         },
       ],
     };
@@ -217,12 +249,34 @@ export class BookingsService {
 
     // Calculate total price
     const nights = Math.ceil(
-      (new Date(checkOut).getTime() - new Date(checkIn).getTime()) / (1000 * 60 * 60 * 24),
+      (checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24),
     );
     const totalPrice = Number(room.price) * nights;
 
+    // Extract paymentMethod for booking record + Payment record creation
+    const rawPaymentMethod: string | undefined = createBookingDto.paymentMethod;
+
+    // Prisma DateTime requires full ISO-8601 — convert date-only strings (YYYY-MM-DD)
+    const toDateTime = (val: string): Date => {
+      if (!val) return new Date();
+      return val.includes('T') ? new Date(val) : new Date(`${val}T00:00:00.000Z`);
+    };
+
     const data: any = {
-      ...createBookingDto,
+      propertyId:     createBookingDto.propertyId,
+      roomId:         createBookingDto.roomId,
+      guestId:        createBookingDto.guestId || undefined,
+      guestFirstName: createBookingDto.guestFirstName,
+      guestLastName:  createBookingDto.guestLastName,
+      guestEmail:     createBookingDto.guestEmail || undefined,
+      guestPhone:     createBookingDto.guestPhone || undefined,
+      checkIn:        toDateTime(createBookingDto.checkIn),
+      checkOut:       toDateTime(createBookingDto.checkOut),
+      status:         createBookingDto.status || 'pending',
+      notes:          createBookingDto.notes || undefined,
+      channelId:      createBookingDto.channelId || undefined,
+      paymentMethod:  rawPaymentMethod || undefined,
+      paymentStatus:  rawPaymentMethod ? 'pending' : undefined,
       totalPrice,
       tenantId,
     };
@@ -248,8 +302,8 @@ export class BookingsService {
         this.logger.error(`Failed to log booking creation: ${err.message}`);
       });
 
-    // Auto-generate invoice for booking (async, non-blocking)
-    this.generateBookingInvoice(booking).catch((err) => {
+    // Auto-generate invoice + payment record (async, non-blocking)
+    this.generateBookingInvoice(booking, rawPaymentMethod).catch((err) => {
       this.logger.error(`Failed to auto-generate invoice for booking ${booking.id}: ${err.message}`);
     });
 
@@ -599,7 +653,7 @@ export class BookingsService {
    * Auto-generate invoice for booking
    * Called after booking creation
    */
-  private async generateBookingInvoice(booking: any): Promise<void> {
+  private async generateBookingInvoice(booking: any, rawPaymentMethod?: string): Promise<void> {
     if (!booking.tenantId) {
       this.logger.warn(`Cannot generate invoice for booking ${booking.id}: tenantId missing`);
       return;
@@ -609,7 +663,7 @@ export class BookingsService {
       const invoiceNo = this.generateInvoiceNumber();
       const dueDate = new Date(booking.checkIn);
 
-      await this.invoicesService.create({
+      const invoice = await this.invoicesService.create({
         tenantId: booking.tenantId,
         bookingId: booking.id,
         invoiceNo,
@@ -619,6 +673,41 @@ export class BookingsService {
       });
 
       this.logger.log(`Invoice ${invoiceNo} auto-generated for booking ${booking.id}`);
+
+      // Create payment record if payment method was selected
+      const mappedMethod = mapToPaymentsMethod(rawPaymentMethod);
+      if (mappedMethod && invoice?.id) {
+        try {
+          await this.paymentsService.create({
+            invoiceId: invoice.id,
+            method: mappedMethod,
+            status: PaymentStatus.PENDING,
+          });
+          this.logger.log(
+            `Payment record created for booking ${booking.id} | method: ${rawPaymentMethod} → ${mappedMethod}`,
+          );
+
+          // For PAY_AT_HOTEL: create housekeeping task as payment reminder
+          if (rawPaymentMethod === 'PAY_AT_HOTEL') {
+            await this.housekeepingService.createTask(
+              {
+                roomId: booking.roomId,
+                type: TaskType.INSPECTION,
+                priority: TaskPriority.HIGH,
+                notes: `Collect payment on check-in for booking ${booking.id.slice(0, 8)}. Guest: ${booking.guestFirstName} ${booking.guestLastName}. Amount: THB ${Number(booking.totalPrice).toLocaleString()}.`,
+              },
+              booking.tenantId,
+            ).catch((e: Error) =>
+              this.logger.warn(`Could not create payment collection task: ${e.message}`),
+            );
+          }
+        } catch (paymentError) {
+          // Non-blocking — don't fail the booking if payment record fails
+          this.logger.error(
+            `Failed to create payment record for booking ${booking.id}: ${paymentError.message}`,
+          );
+        }
+      }
     } catch (error) {
       this.logger.error(`Failed to generate invoice for booking ${booking.id}: ${error.message}`);
       throw error;
