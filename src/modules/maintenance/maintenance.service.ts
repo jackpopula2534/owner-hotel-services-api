@@ -97,6 +97,16 @@ export class MaintenanceService {
       return { data: tasks, total, page, limit };
     } catch (error) {
       this.logger.error(`Failed to fetch maintenance tasks: ${error.message}`);
+
+      // P2021 = table not found — maintenance_tasks table hasn't been migrated yet
+      const prismaCode: string | undefined = (error as any)?.code;
+      if (prismaCode === 'P2021' || prismaCode === 'P2022') {
+        this.logger.warn(
+          'maintenance_tasks table not found — returning empty list (run migration to fix)',
+        );
+        return { data: [], total: 0, page, limit };
+      }
+
       throw error;
     }
   }

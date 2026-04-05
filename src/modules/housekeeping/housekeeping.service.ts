@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, BadRequestException } from '@nes
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateHousekeepingTaskDto, TaskType, TaskPriority, TaskStatus } from './dto/create-housekeeping-task.dto';
 import { UpdateHousekeepingTaskDto } from './dto/update-housekeeping-task.dto';
+import { AuditLogService } from '../../audit-log/audit-log.service';
 
 interface TaskQuery {
   status?: string;
@@ -30,7 +31,10 @@ interface RoomStatusData {
 export class HousekeepingService {
   private readonly logger = new Logger(HousekeepingService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private auditLogService: AuditLogService,
+  ) {}
 
   /**
    * Create a housekeeping task
@@ -205,6 +209,32 @@ export class HousekeepingService {
       return { data: tasks, total, page, limit };
     } catch (error) {
       this.logger.error(`Failed to fetch housekeeping tasks: ${error.message}`);
+
+      // P2021 = table not found, P2022 = column not found
+      // Occurs when Phase-1 migration hasn't been run yet — fallback without Staff relations
+      const prismaCode: string | undefined = (error as any)?.code;
+      if (prismaCode === 'P2021' || prismaCode === 'P2022') {
+        this.logger.warn(
+          'Staff table or new HousekeepingTask columns not found — falling back to basic query (run migration to fix)',
+        );
+        try {
+          const [tasks, total] = await Promise.all([
+            this.prisma.housekeepingTask.findMany({
+              where,
+              skip,
+              take: limit,
+              include: { room: true },
+              orderBy: { createdAt: 'desc' },
+            }),
+            this.prisma.housekeepingTask.count({ where }),
+          ]);
+          return { data: tasks, total, page, limit };
+        } catch (fallbackError) {
+          this.logger.error(`Fallback query also failed: ${fallbackError.message}`);
+          return { data: [], total: 0, page, limit };
+        }
+      }
+
       throw error;
     }
   }
@@ -345,7 +375,13 @@ export class HousekeepingService {
   /**
    * Complete task (set status, actualEndTime, and actualDuration)
    */
-  async completeTask(id: string, completionPercentage: number, notes: string, tenantId: string): Promise<any> {
+  async completeTask(
+    id: string,
+    completionPercentage: number,
+    notes: string,
+    tenantId: string,
+    completedByUserId?: string,
+  ): Promise<any> {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID is required');
     }
@@ -384,6 +420,16 @@ export class HousekeepingService {
           data: { status: 'available' },
         });
       }
+
+      await this.auditLogService.logHousekeepingTaskCompletion(
+        {
+          ...updated,
+          previousStatus: task.status,
+          previousRoomStatus: task.room?.status,
+        },
+        completedByUserId,
+        tenantId,
+      );
 
       this.logger.log(`Completed task ${id}`);
       return updated;

@@ -116,6 +116,14 @@ export class StaffService {
       return { data: enrichedStaff, total, page, limit };
     } catch (error) {
       this.logger.error(`Failed to fetch staff: ${error.message}`);
+
+      // P2021 = table not found — staff table hasn't been migrated yet
+      const prismaCode: string | undefined = (error as any)?.code;
+      if (prismaCode === 'P2021' || prismaCode === 'P2022') {
+        this.logger.warn('staff table not found — returning empty list (run migration to fix)');
+        return { data: [], total: 0, page, limit };
+      }
+
       throw error;
     }
   }
