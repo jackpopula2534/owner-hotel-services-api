@@ -283,6 +283,16 @@ export class SeederService {
         priceMonthly: 0,
         isActive: true,
       },
+      {
+        // HR Add-on: paid module add-on — sold separately
+        code: 'HR_MODULE',
+        name: 'HR Module',
+        description:
+          'ระบบ HR ครบวงจร: จัดการพนักงาน เงินเดือน การลา และเชื่อมข้อมูลกับทีมแม่บ้าน/ช่าง',
+        type: FeatureType.MODULE,
+        priceMonthly: 1200,
+        isActive: true,
+      },
     ];
 
     for (const featureData of features) {

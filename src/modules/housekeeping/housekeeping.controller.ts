@@ -11,6 +11,7 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import {
   ApiTags,
   ApiOperation,
@@ -50,6 +51,7 @@ export class HousekeepingController {
   constructor(private readonly housekeepingService: HousekeepingService) {}
 
   @Get()
+  @Throttle({ default: { limit: 60, ttl: 60 } })
   @ApiOperation({ summary: 'Get all housekeeping tasks' })
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
   @ApiQuery({ name: 'limit', required: false, type: Number, example: 20 })
@@ -77,6 +79,7 @@ export class HousekeepingController {
       },
     },
   })
+  @ApiResponse({ status: 429, description: 'Too many requests' })
   async getTasks(
     @Query('page') page?: number,
     @Query('limit') limit?: number,
@@ -101,6 +104,7 @@ export class HousekeepingController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
+  @Throttle({ default: { limit: 20, ttl: 60 } })
   @ApiOperation({ summary: 'Create a housekeeping task' })
   @ApiResponse({
     status: 201,
@@ -112,6 +116,7 @@ export class HousekeepingController {
       },
     },
   })
+  @ApiResponse({ status: 429, description: 'Too many requests' })
   async createTask(
     @Body() createHousekeepingTaskDto: CreateHousekeepingTaskDto,
     @CurrentUser() user?: any,
@@ -125,6 +130,7 @@ export class HousekeepingController {
   }
 
   @Get(':id')
+  @Throttle({ default: { limit: 60, ttl: 60 } })
   @ApiOperation({ summary: 'Get a housekeeping task by ID' })
   @ApiParam({ name: 'id', description: 'Task ID' })
   @ApiResponse({
@@ -137,6 +143,7 @@ export class HousekeepingController {
       },
     },
   })
+  @ApiResponse({ status: 429, description: 'Too many requests' })
   async getTask(
     @Param('id') id: string,
     @CurrentUser() user?: any,
@@ -150,6 +157,7 @@ export class HousekeepingController {
   }
 
   @Patch(':id')
+  @Throttle({ default: { limit: 20, ttl: 60 } })
   @ApiOperation({ summary: 'Update a housekeeping task' })
   @ApiParam({ name: 'id', description: 'Task ID' })
   @ApiResponse({
@@ -162,6 +170,7 @@ export class HousekeepingController {
       },
     },
   })
+  @ApiResponse({ status: 429, description: 'Too many requests' })
   async updateTask(
     @Param('id') id: string,
     @Body() updateHousekeepingTaskDto: UpdateHousekeepingTaskDto,
@@ -177,12 +186,14 @@ export class HousekeepingController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @Throttle({ default: { limit: 10, ttl: 60 } })
   @ApiOperation({ summary: 'Delete a housekeeping task' })
   @ApiParam({ name: 'id', description: 'Task ID' })
   @ApiResponse({
     status: 204,
     description: 'Housekeeping task deleted',
   })
+  @ApiResponse({ status: 429, description: 'Too many requests' })
   async deleteTask(
     @Param('id') id: string,
     @CurrentUser() user?: any,
@@ -191,6 +202,7 @@ export class HousekeepingController {
   }
 
   @Patch(':id/assign')
+  @Throttle({ default: { limit: 20, ttl: 60 } })
   @ApiOperation({ summary: 'Assign task to staff member' })
   @ApiParam({ name: 'id', description: 'Task ID' })
   @ApiResponse({
@@ -203,6 +215,7 @@ export class HousekeepingController {
       },
     },
   })
+  @ApiResponse({ status: 429, description: 'Too many requests' })
   async assignTask(
     @Param('id') id: string,
     @Body() assignTaskDto: AssignTaskDto,
@@ -222,6 +235,7 @@ export class HousekeepingController {
   }
 
   @Patch(':id/start')
+  @Throttle({ default: { limit: 20, ttl: 60 } })
   @ApiOperation({ summary: 'Start task (set status to in_progress)' })
   @ApiParam({ name: 'id', description: 'Task ID' })
   @ApiResponse({
@@ -234,6 +248,7 @@ export class HousekeepingController {
       },
     },
   })
+  @ApiResponse({ status: 429, description: 'Too many requests' })
   async startTask(
     @Param('id') id: string,
     @CurrentUser() user?: any,
@@ -247,6 +262,7 @@ export class HousekeepingController {
   }
 
   @Patch(':id/complete')
+  @Throttle({ default: { limit: 15, ttl: 60 } })
   @ApiOperation({ summary: 'Complete task' })
   @ApiParam({ name: 'id', description: 'Task ID' })
   @ApiResponse({
@@ -259,6 +275,7 @@ export class HousekeepingController {
       },
     },
   })
+  @ApiResponse({ status: 429, description: 'Too many requests' })
   async completeTask(
     @Param('id') id: string,
     @Body() completeTaskDto: CompleteTaskDto,
@@ -269,6 +286,7 @@ export class HousekeepingController {
       completeTaskDto.completionPercentage ?? 100,
       completeTaskDto.notes ?? '',
       user?.tenantId,
+      user?.id,
     );
 
     return {
@@ -278,6 +296,7 @@ export class HousekeepingController {
   }
 
   @Patch(':id/inspect')
+  @Throttle({ default: { limit: 15, ttl: 60 } })
   @ApiOperation({ summary: 'Inspect completed task' })
   @ApiParam({ name: 'id', description: 'Task ID' })
   @ApiResponse({
@@ -290,6 +309,7 @@ export class HousekeepingController {
       },
     },
   })
+  @ApiResponse({ status: 429, description: 'Too many requests' })
   async inspectTask(
     @Param('id') id: string,
     @Body() inspectTaskDto: InspectTaskDto,
@@ -311,6 +331,7 @@ export class HousekeepingController {
   }
 
   @Get('dashboard/stats')
+  @Throttle({ default: { limit: 30, ttl: 60 } })
   @ApiOperation({ summary: 'Get housekeeping dashboard metrics' })
   @ApiQuery({ name: 'propertyId', required: false, type: String })
   @ApiResponse({
@@ -328,6 +349,7 @@ export class HousekeepingController {
       },
     },
   })
+  @ApiResponse({ status: 429, description: 'Too many requests' })
   async getDashboard(
     @Query('propertyId') propertyId?: string,
     @CurrentUser() user?: any,
@@ -341,6 +363,7 @@ export class HousekeepingController {
   }
 
   @Get('room/:roomId/status')
+  @Throttle({ default: { limit: 30, ttl: 60 } })
   @ApiOperation({ summary: 'Get room housekeeping status' })
   @ApiParam({ name: 'roomId', description: 'Room ID' })
   @ApiResponse({
@@ -357,6 +380,7 @@ export class HousekeepingController {
       },
     },
   })
+  @ApiResponse({ status: 429, description: 'Too many requests' })
   async getRoomStatus(
     @Param('roomId') roomId: string,
     @CurrentUser() user?: any,

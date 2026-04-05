@@ -1,6 +1,5 @@
 import {
   Entity,
-  PrimaryGeneratedColumn,
   PrimaryColumn,
   Column,
   OneToMany,
@@ -16,7 +15,9 @@ export enum AdminRole {
 }
 @Entity('admins')
 export class Admin {
-  @PrimaryColumn({ type: 'char', length: 36 })
+  // Prisma migration สร้าง id เป็น VARCHAR(36) — ต้องตรง type เพื่อป้องกัน TypeORM synchronize
+  // พยายาม ALTER PRIMARY KEY (ซึ่งจะ fail เพราะ refresh_tokens FK อ้างถึง admins.id)
+  @PrimaryColumn({ type: 'varchar', length: 36 })
   id: string;
 
   @Column({ nullable: true })

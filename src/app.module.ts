@@ -55,6 +55,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { SearchModule } from './modules/search/search.module';
 import { StaffModule } from './modules/staff/staff.module';
 import { MaintenanceModule } from './modules/maintenance/maintenance.module';
+import { AddonModule } from './modules/addons/addon.module';
 
 @Module({
   imports: [
@@ -114,6 +115,7 @@ import { MaintenanceModule } from './modules/maintenance/maintenance.module';
     SearchModule,
     StaffModule,
     MaintenanceModule,
+    AddonModule,
     ThrottlerModule.forRoot([
       {
         ttl: 60, // 60 seconds window

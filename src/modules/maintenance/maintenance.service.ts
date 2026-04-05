@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateMaintenanceTaskDto } from './dto/create-maintenance-task.dto';
 import { UpdateMaintenanceTaskDto, MaintenanceTaskStatus } from './dto/update-maintenance-task.dto';
+import { normalizePagination } from '../../common/utils/pagination.util';
 
 interface MaintenanceQuery {
   status?: string;
@@ -53,9 +54,7 @@ export class MaintenanceService {
       throw new BadRequestException('Tenant ID is required');
     }
 
-    const page = Math.max(1, query.page ?? 1);
-    const limit = Math.min(100, Math.max(1, query.limit ?? 20));
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = normalizePagination(query.page, query.limit);
 
     const where: any = { tenantId };
 

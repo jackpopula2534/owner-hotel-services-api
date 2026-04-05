@@ -13,6 +13,15 @@ import {
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 
+function asNonEmptyString(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 export enum BookingPaymentMethod {
   CASH = 'CASH',
   PROMPTPAY = 'PROMPTPAY',
@@ -23,6 +32,7 @@ export enum BookingPaymentMethod {
 
 export class CreateBookingDto {
   @ApiProperty({ example: 'uuid-of-property' })
+  @Transform(({ value, obj }) => value ?? obj.property?.id)
   @IsUUID()
   @IsNotEmpty()
   propertyId: string;
@@ -39,12 +49,12 @@ export class CreateBookingDto {
 
   @ApiProperty({ example: 'John' })
   @IsString()
-  @IsNotEmpty()
+  @IsOptional()
   guestFirstName: string;
 
   @ApiProperty({ example: 'Doe' })
   @IsString()
-  @IsNotEmpty()
+  @IsOptional()
   guestLastName: string;
 
   @ApiPropertyOptional({ example: 'john.doe@example.com' })
@@ -58,15 +68,13 @@ export class CreateBookingDto {
   guestPhone?: string;
 
   @ApiProperty({ example: '2026-03-01' })
-  @Transform(({ value, obj }) => value ?? obj.checkInDate)
   @IsDateString()
-  @IsNotEmpty()
+  @IsOptional()
   checkIn: string;
 
   @ApiProperty({ example: '2026-03-05' })
-  @Transform(({ value, obj }) => value ?? obj.checkOutDate)
   @IsDateString()
-  @IsNotEmpty()
+  @IsOptional()
   checkOut: string;
 
   @ApiPropertyOptional({ example: 'confirmed' })
@@ -144,4 +152,49 @@ export class CreateBookingDto {
   @Allow()
   @IsOptional()
   children?: number;
+
+  @ApiPropertyOptional({ description: 'Frontend-selected property metadata' })
+  @Allow()
+  @IsOptional()
+  property?: Record<string, any>;
+
+  @ApiPropertyOptional({ example: ['room-type-1'], description: 'Frontend-only room type filter' })
+  @Allow()
+  @IsOptional()
+  roomTypeIds?: string[];
+
+  @ApiPropertyOptional({ example: 'John Doe', description: 'Frontend guest full name alias' })
+  @Allow()
+  @IsOptional()
+  guestName?: string;
+
+  @ApiPropertyOptional({ description: 'Frontend guest object alias' })
+  @Allow()
+  @IsOptional()
+  guest?: Record<string, any>;
+
+  @ApiPropertyOptional({ example: '2026-03-01', description: 'Frontend alias for checkIn' })
+  @Allow()
+  @IsOptional()
+  startDate?: string;
+
+  @ApiPropertyOptional({ example: '2026-03-05', description: 'Frontend alias for checkOut' })
+  @Allow()
+  @IsOptional()
+  endDate?: string;
+
+  @ApiPropertyOptional({ description: 'Frontend date range alias' })
+  @Allow()
+  @IsOptional()
+  dateRange?: { from?: string; to?: string };
+
+  @ApiPropertyOptional({ example: '14:00', description: 'Requested check-in time (HH:mm) — overrides property standard time for scheduledCheckIn' })
+  @IsOptional()
+  @IsString()
+  checkInTime?: string;
+
+  @ApiPropertyOptional({ example: '12:00', description: 'Requested check-out time (HH:mm) — overrides property standard time for scheduledCheckOut' })
+  @IsOptional()
+  @IsString()
+  checkOutTime?: string;
 }

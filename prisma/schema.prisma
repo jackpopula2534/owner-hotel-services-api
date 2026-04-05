@@ -288,6 +288,9 @@ model Employee {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
+  // HR Add-on: reverse relation — one Employee can be linked to one Staff record
+  staff        Staff?    @relation("StaffEmployee")
+
   @@index([tenantId])
   @@map("employees")
 }
@@ -1106,6 +1109,10 @@ model Staff {
   rating           Decimal?  @db.Decimal(3, 2)
   efficiency       Int?      @default(100)
 
+  // HR Add-on: optional link to Employee record (requires HR_MODULE add-on)
+  employeeId       String?   @unique
+  employee         Employee? @relation("StaffEmployee", fields: [employeeId], references: [id], onDelete: SetNull)
+
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
@@ -1117,6 +1124,7 @@ model Staff {
   @@index([tenantId])
   @@index([status])
   @@index([department])
+  @@index([employeeId])
   @@map("staff")
 }
 

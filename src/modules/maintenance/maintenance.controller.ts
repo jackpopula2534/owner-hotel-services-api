@@ -11,6 +11,7 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import {
   ApiTags,
   ApiOperation,
@@ -33,6 +34,7 @@ export class MaintenanceController {
   constructor(private readonly maintenanceService: MaintenanceService) {}
 
   @Get()
+  @Throttle({ default: { limit: 60, ttl: 60 } })
   @ApiOperation({ summary: 'Get all maintenance tasks' })
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
   @ApiQuery({ name: 'limit', required: false, type: Number, example: 20 })
@@ -64,6 +66,7 @@ export class MaintenanceController {
       },
     },
   })
+  @ApiResponse({ status: 429, description: 'Too many requests' })
   async findAll(
     @Query('page') page?: number,
     @Query('limit') limit?: number,
@@ -92,6 +95,7 @@ export class MaintenanceController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
+  @Throttle({ default: { limit: 20, ttl: 60 } })
   @ApiOperation({ summary: 'Create a new maintenance task' })
   @ApiResponse({
     status: 201,
@@ -108,6 +112,7 @@ export class MaintenanceController {
       },
     },
   })
+  @ApiResponse({ status: 429, description: 'Too many requests' })
   async create(
     @Body() createMaintenanceTaskDto: CreateMaintenanceTaskDto,
     @CurrentUser() user?: any,
@@ -121,6 +126,7 @@ export class MaintenanceController {
   }
 
   @Get(':id')
+  @Throttle({ default: { limit: 60, ttl: 60 } })
   @ApiOperation({ summary: 'Get a maintenance task by ID' })
   @ApiParam({ name: 'id', description: 'Task ID' })
   @ApiResponse({
@@ -139,6 +145,7 @@ export class MaintenanceController {
       },
     },
   })
+  @ApiResponse({ status: 429, description: 'Too many requests' })
   async findOne(
     @Param('id') id: string,
     @CurrentUser() user?: any,
@@ -152,6 +159,7 @@ export class MaintenanceController {
   }
 
   @Patch(':id')
+  @Throttle({ default: { limit: 20, ttl: 60 } })
   @ApiOperation({ summary: 'Update a maintenance task' })
   @ApiParam({ name: 'id', description: 'Task ID' })
   @ApiResponse({
@@ -168,6 +176,7 @@ export class MaintenanceController {
       },
     },
   })
+  @ApiResponse({ status: 429, description: 'Too many requests' })
   async update(
     @Param('id') id: string,
     @Body() updateMaintenanceTaskDto: UpdateMaintenanceTaskDto,
@@ -183,12 +192,14 @@ export class MaintenanceController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @Throttle({ default: { limit: 10, ttl: 60 } })
   @ApiOperation({ summary: 'Delete a maintenance task' })
   @ApiParam({ name: 'id', description: 'Task ID' })
   @ApiResponse({
     status: 204,
     description: 'Maintenance task deleted',
   })
+  @ApiResponse({ status: 429, description: 'Too many requests' })
   async remove(
     @Param('id') id: string,
     @CurrentUser() user?: any,
@@ -197,6 +208,7 @@ export class MaintenanceController {
   }
 
   @Get('dashboard/stats')
+  @Throttle({ default: { limit: 30, ttl: 60 } })
   @ApiOperation({ summary: 'Get maintenance dashboard metrics' })
   @ApiQuery({ name: 'propertyId', required: false, type: String })
   @ApiResponse({
@@ -218,6 +230,7 @@ export class MaintenanceController {
       },
     },
   })
+  @ApiResponse({ status: 429, description: 'Too many requests' })
   async getDashboard(
     @Query('propertyId') propertyId?: string,
     @CurrentUser() user?: any,

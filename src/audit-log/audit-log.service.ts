@@ -143,6 +143,38 @@ export class AuditLogService {
   }
 
   /**
+   * Log housekeeping task completion
+   */
+  async logHousekeepingTaskCompletion(
+    task: any,
+    completedByUserId?: string,
+    tenantId?: string,
+    ipAddress?: string,
+  ): Promise<void> {
+    await this.log({
+      action: AuditAction.HOUSEKEEPING_TASK_COMPLETE,
+      resource: AuditResource.HOUSEKEEPING_TASK,
+      resourceId: task.id,
+      oldValues: {
+        status: task.previousStatus ?? task.status,
+        roomStatus: task.previousRoomStatus ?? 'cleaning',
+      },
+      newValues: {
+        status: 'completed',
+        roomId: task.roomId,
+        roomNumber: task.room?.number,
+        completionPercentage: task.completionPercentage,
+        actualDuration: task.actualDuration,
+        roomReadyAt: task.roomReadyAt,
+      },
+      userId: completedByUserId,
+      tenantId: tenantId ?? task.tenantId,
+      ipAddress,
+      description: `Housekeeping task ${task.id} completed for room ${task.room?.number ?? task.roomId ?? 'N/A'}`,
+    });
+  }
+
+  /**
    * Log payment approval
    */
   async logPaymentApprove(payment: any, adminId: string, ipAddress?: string): Promise<void> {

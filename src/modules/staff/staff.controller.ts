@@ -22,7 +22,9 @@ import {
 import { StaffService } from './staff.service';
 import { CreateStaffDto } from './dto/create-staff.dto';
 import { UpdateStaffDto } from './dto/update-staff.dto';
+import { LinkEmployeeDto } from './dto/link-employee.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @ApiTags('Staff')
@@ -233,5 +235,66 @@ export class StaffController {
       success: true,
       data: performance,
     };
+  }
+
+  // ─── HR Add-on bridge endpoints ─────────────────────────────────────────────
+  // Require HrAddonGuard — tenant must have active HR_MODULE subscription add-on
+
+  @Post(':id/link-employee')
+  @UseGuards(HrAddonGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Link an Employee record to this Staff (requires HR add-on)',
+    description:
+      'Creates a relationship between a Staff member and an HR Employee. ' +
+      'Both must belong to the same tenant. Requires active HR_MODULE add-on.',
+  })
+  @ApiParam({ name: 'id', description: 'Staff ID' })
+  @ApiResponse({ status: 200, description: 'Employee linked successfully' })
+  @ApiResponse({ status: 403, description: 'HR add-on not active' })
+  @ApiResponse({ status: 404, description: 'Staff or Employee not found' })
+  @ApiResponse({ status: 409, description: 'Already linked' })
+  async linkEmployee(
+    @Param('id') id: string,
+    @Body() dto: LinkEmployeeDto,
+    @CurrentUser() user?: any,
+  ): Promise<any> {
+    return this.staffService.linkEmployee(id, dto, user?.tenantId);
+  }
+
+  @Delete(':id/link-employee')
+  @UseGuards(HrAddonGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Remove HR Employee link from Staff (requires HR add-on)',
+    description:
+      'Removes the HR link. Staff record is preserved with all operational data; ' +
+      'only the employeeId FK is cleared.',
+  })
+  @ApiParam({ name: 'id', description: 'Staff ID' })
+  @ApiResponse({ status: 200, description: 'Link removed successfully' })
+  @ApiResponse({ status: 403, description: 'HR add-on not active' })
+  @ApiResponse({ status: 400, description: 'Staff is not linked to any employee' })
+  async unlinkEmployee(
+    @Param('id') id: string,
+    @CurrentUser() user?: any,
+  ): Promise<any> {
+    return this.staffService.unlinkEmployee(id, user?.tenantId);
+  }
+
+  @Get(':id/employee')
+  @UseGuards(HrAddonGuard)
+  @ApiOperation({
+    summary: 'Get the HR Employee record linked to this Staff (requires HR add-on)',
+  })
+  @ApiParam({ name: 'id', description: 'Staff ID' })
+  @ApiResponse({ status: 200, description: 'Linked Employee record (or null if not linked)' })
+  @ApiResponse({ status: 403, description: 'HR add-on not active' })
+  @ApiResponse({ status: 404, description: 'Staff not found' })
+  async getLinkedEmployee(
+    @Param('id') id: string,
+    @CurrentUser() user?: any,
+  ): Promise<any> {
+    return this.staffService.getLinkedEmployee(id, user?.tenantId);
   }
 }

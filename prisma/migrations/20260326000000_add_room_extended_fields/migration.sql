@@ -1,5 +1,0 @@
--- AlterTable
-ALTER TABLE `rooms` ADD COLUMN `maxOccupancy` INTEGER NULL DEFAULT 2,
-    ADD COLUMN `bedType` VARCHAR(191) NULL,
-    ADD COLUMN `size` INTEGER NULL,
-    ADD COLUMN `amenities` JSON NULL;

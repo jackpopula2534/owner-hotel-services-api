@@ -74,6 +74,22 @@ describe('StaffService', () => {
         BadRequestException,
       );
     });
+
+    it('falls back to safe defaults when page or limit are invalid', async () => {
+      prismaMock.staff.findMany.mockResolvedValue([]);
+      prismaMock.staff.count.mockResolvedValue(0);
+
+      const result = await service.findAll({ page: Number.NaN, limit: Number.NaN }, 'tenant-1');
+
+      expect(prismaMock.staff.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          skip: 0,
+          take: 20,
+        }),
+      );
+      expect(result.page).toBe(1);
+      expect(result.limit).toBe(20);
+    });
   });
 
   describe('create', () => {

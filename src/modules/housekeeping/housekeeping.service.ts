@@ -65,6 +65,9 @@ export class HousekeepingService {
           notes: dto.notes,
           estimatedDuration: dto.estimatedDuration || 30,
           tenantId,
+          ...(dto.bookingId && { bookingId: dto.bookingId }),
+          ...(dto.scheduledFor && { scheduledFor: new Date(dto.scheduledFor) }),
+          ...(dto.roomReadyAt && { roomReadyAt: new Date(dto.roomReadyAt) }),
         },
       });
 

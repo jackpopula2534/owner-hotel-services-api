@@ -86,6 +86,59 @@ describe('BookingsService', () => {
   });
 
   describe('create', () => {
+    it('normalizes frontend booking aliases before creating the booking', async () => {
+      prismaMock.property.findFirst.mockResolvedValue({
+        id: '550e8400-e29b-41d4-a716-446655440000',
+        tenantId: 'tenant-1',
+        standardCheckInTime: '14:00',
+        standardCheckOutTime: '12:00',
+      });
+      prismaMock.room.findFirst.mockResolvedValue({
+        id: '550e8400-e29b-41d4-a716-446655440001',
+        tenantId: 'tenant-1',
+        propertyId: '550e8400-e29b-41d4-a716-446655440000',
+        price: 2000,
+      });
+      prismaMock.booking.findFirst.mockResolvedValue(null);
+      prismaMock.booking.create.mockImplementation(async ({ data }) => ({
+        id: 'booking-1',
+        ...data,
+        guest: null,
+        room: { id: '550e8400-e29b-41d4-a716-446655440001', number: '101' },
+        property: { id: '550e8400-e29b-41d4-a716-446655440000' },
+      }));
+
+      const result = await service.create(
+        {
+          property: {
+            id: '550e8400-e29b-41d4-a716-446655440000',
+            checkInTime: '14:00',
+            checkOutTime: '12:00',
+          },
+          roomId: '550e8400-e29b-41d4-a716-446655440001',
+          roomTypeIds: ['deluxe'],
+          guestName: 'John Doe',
+          checkInDate: '2026-04-10',
+          checkOutDate: '2026-04-12',
+        } as any,
+        'tenant-1',
+      );
+
+      expect(prismaMock.booking.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            propertyId: '550e8400-e29b-41d4-a716-446655440000',
+            guestFirstName: 'John',
+            guestLastName: 'Doe',
+            checkIn: new Date('2026-04-10T00:00:00.000Z'),
+            checkOut: new Date('2026-04-12T00:00:00.000Z'),
+          }),
+        }),
+      );
+      expect(result.checkInDate).toEqual(new Date('2026-04-10T00:00:00.000Z'));
+      expect(result.checkOutDate).toEqual(new Date('2026-04-12T00:00:00.000Z'));
+    });
+
     it('stores scheduled check-in/check-out using property time settings for date-only input', async () => {
       prismaMock.property.findFirst.mockResolvedValue({
         id: 'property-1',

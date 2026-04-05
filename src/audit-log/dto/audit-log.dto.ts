@@ -22,6 +22,7 @@ export enum AuditAction {
   BOOKING_CANCEL = 'booking_cancel',
   BOOKING_CHECKIN = 'booking_checkin',
   BOOKING_CHECKOUT = 'booking_checkout',
+  HOUSEKEEPING_TASK_COMPLETE = 'housekeeping_task_complete',
 
   // Payment
   PAYMENT_CREATE = 'payment_create',
@@ -74,6 +75,7 @@ export enum AuditResource {
   SETTINGS = 'settings',
   CHANNEL = 'channel',
   REVIEW = 'review',
+  HOUSEKEEPING_TASK = 'housekeeping_task',
 }
 
 export class CreateAuditLogDto {

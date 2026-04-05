@@ -79,7 +79,33 @@ async function bootstrap() {
     }
     logger.log('');
 
-    // 2. Run Prisma migrations (สร้าง Prisma tables เช่น users, guests, etc.)
+    // 2. Prepare _prisma_migrations table
+    // ไม่สร้าง dummy tables (tenants, plans, features) เพราะ collation จะ mismatch กับ TypeORM
+    // Prisma migration ที่มี FK → tenants ถูก defer ไว้ใน migration SQL แล้ว (IF EXISTS check)
+    logger.log('Preparing database for Prisma migrations...');
+    const setupQueryRunner = dataSource.createQueryRunner();
+    try {
+      await setupQueryRunner.query(`
+        CREATE TABLE IF NOT EXISTS \`_prisma_migrations\` (
+          \`id\` VARCHAR(36) NOT NULL PRIMARY KEY,
+          \`checksum\` VARCHAR(64) NOT NULL,
+          \`finished_at\` DATETIME(3),
+          \`migration_name\` VARCHAR(255) NOT NULL,
+          \`logs\` TEXT,
+          \`rolled_back_at\` DATETIME(3),
+          \`started_at\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+          \`applied_steps_count\` INTEGER UNSIGNED NOT NULL DEFAULT 0
+        ) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+      `);
+      logger.log('Prisma migrations table created');
+    } catch (error) {
+      logger.warn('Prisma preparation failed: ' + (error as Error).message);
+    } finally {
+      await setupQueryRunner.release();
+    }
+    logger.log('');
+
+    // 3. Run Prisma migrations (สร้าง Prisma tables เช่น users, admins, guests, etc.)
     logger.log('Running Prisma migrations...');
     try {
       execSync('npx prisma migrate deploy', { stdio: 'inherit' });
@@ -93,28 +119,56 @@ async function bootstrap() {
       await prisma.$connect();
       logger.log('Prisma client reconnected');
     } catch (error) {
-      logger.warn('Prisma setup failed: ' + ((error as Error).message || String(error)));
-      // Continue anyway - tables might already exist
+      logger.error('Prisma setup failed: ' + ((error as Error).message || String(error)));
+      throw error;
     }
     logger.log('');
 
-    // 3. Synchronize TypeORM database (สร้าง TypeORM tables เช่น subscriptions, plans, etc.)
-    // ⚠️ ใช้ synchronize(false) เพื่อไม่ให้ drop Prisma tables ที่เพิ่งสร้าง
-    logger.log('Creating TypeORM tables...');
+    // 4. Synchronize TypeORM database (สร้าง/อัปเดต TypeORM tables เช่น subscriptions, plans และทับตาราง dummy)
+    logger.log('Synchronizing TypeORM entities...');
     try {
       await dataSource.synchronize(false);
-      logger.log('All TypeORM tables created');
+      logger.log('TypeORM synchronization completed');
     } catch (error) {
-      // Ignore metadata table errors (ไม่กระทบการทำงาน)
       if ((error as Error).message && (error as Error).message.includes('typeorm_metadata')) {
-        logger.log('All TypeORM tables created (metadata table warning ignored)');
+        logger.log('TypeORM synchronization completed (metadata warning ignored)');
       } else {
         throw error;
       }
     }
     logger.log('');
 
-    // 4. Run seeder
+    // 4b. Re-add deferred cross-ORM FK constraints
+    logger.log('Re-adding deferred FK constraints...');
+    const fkRunner = dataSource.createQueryRunner();
+    try {
+      // Check if user_tenants_tenantId_fkey is missing
+      const fkResult = await fkRunner.query(`
+        SELECT 1 FROM information_schema.TABLE_CONSTRAINTS
+        WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'user_tenants'
+        AND CONSTRAINT_NAME = 'user_tenants_tenantId_fkey'
+      `);
+      if (!fkResult || fkResult.length === 0) {
+        await fkRunner.query(`
+          ALTER TABLE \`user_tenants\` ADD CONSTRAINT \`user_tenants_tenantId_fkey\`
+          FOREIGN KEY (\`tenantId\`) REFERENCES \`tenants\`(\`id\`)
+          ON DELETE CASCADE ON UPDATE CASCADE
+        `);
+        logger.log('Re-added user_tenants → tenants FK constraint');
+      } else {
+        logger.log('user_tenants → tenants FK already exists');
+      }
+    } catch (fkError) {
+      logger.warn(
+        'Could not re-add user_tenants FK: ' + (fkError as Error).message,
+      );
+    } finally {
+      await fkRunner.release();
+    }
+    logger.log('');
+
+    // 5. Run seeder
     logger.log('Seeding data...');
     await seeder.seed();
     logger.log('');

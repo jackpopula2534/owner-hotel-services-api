@@ -66,6 +66,92 @@ export class BookingsService {
     return date;
   }
 
+  private asNonEmptyString(value: unknown): string | undefined {
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+
+  private normalizeCreateBookingDto(createBookingDto: CreateBookingDto): CreateBookingDto {
+    const rawDto = createBookingDto as any;
+
+    // 1. Map guest info aliases (guestName, guest.name, etc.)
+    const guestName =
+      this.asNonEmptyString(rawDto.guestName) ??
+      this.asNonEmptyString(rawDto.guest?.name) ??
+      this.asNonEmptyString(rawDto.fullName);
+
+    if (!createBookingDto.guestFirstName) {
+      const fn = this.asNonEmptyString(rawDto.guest?.firstName) ?? this.asNonEmptyString(rawDto.guest?.first_name);
+      if (fn) {
+        createBookingDto.guestFirstName = fn;
+      } else if (guestName) {
+        createBookingDto.guestFirstName = guestName.split(/\s+/)[0];
+      }
+    }
+
+    if (!createBookingDto.guestLastName) {
+      const ln = this.asNonEmptyString(rawDto.guest?.lastName) ?? this.asNonEmptyString(rawDto.guest?.last_name);
+      if (ln) {
+        createBookingDto.guestLastName = ln;
+      } else if (guestName) {
+        const parts = guestName.split(/\s+/);
+        createBookingDto.guestLastName = parts.length > 1 ? parts.slice(1).join(' ') : parts[0];
+      }
+    }
+
+    createBookingDto.guestEmail =
+      createBookingDto.guestEmail ??
+      this.asNonEmptyString(rawDto.guest?.email);
+
+    createBookingDto.guestPhone =
+      createBookingDto.guestPhone ??
+      this.asNonEmptyString(rawDto.guest?.phone);
+
+    // 2. Map date aliases (checkInDate, startDate, dateRange.from, etc.)
+    createBookingDto.checkIn =
+      createBookingDto.checkIn ??
+      this.asNonEmptyString(rawDto.checkInDate) ??
+      this.asNonEmptyString(rawDto.startDate) ??
+      this.asNonEmptyString(rawDto.dateRange?.from);
+
+    createBookingDto.checkOut =
+      createBookingDto.checkOut ??
+      this.asNonEmptyString(rawDto.checkOutDate) ??
+      this.asNonEmptyString(rawDto.endDate) ??
+      this.asNonEmptyString(rawDto.dateRange?.to);
+
+    // 3. Map property alias (property.id)
+    createBookingDto.propertyId =
+      createBookingDto.propertyId ??
+      this.asNonEmptyString(rawDto.property?.id);
+
+    // 4. Initial validation (ensure core fields exist)
+    if (!createBookingDto.checkIn) {
+      throw new BadRequestException('checkIn is required');
+    }
+
+    if (!createBookingDto.checkOut) {
+      throw new BadRequestException('checkOut is required');
+    }
+
+    // MANDATORY logic: guestFirstName/LastName can be skipped ONLY if guestId is present,
+    // as we'll fetch them from the database in the next step.
+    if (!createBookingDto.guestId) {
+      if (!createBookingDto.guestFirstName) {
+        throw new BadRequestException('guestFirstName is required');
+      }
+      if (!createBookingDto.guestLastName) {
+        throw new BadRequestException('guestLastName is required');
+      }
+    }
+
+    return createBookingDto;
+  }
+
   /**
    * Transform raw Prisma booking record to the response shape expected by the frontend.
    * Adds alias fields (checkInDate, checkOutDate, totalAmount) and computed fields
@@ -214,6 +300,8 @@ export class BookingsService {
       throw new BadRequestException('Tenant ID is required');
     }
 
+    createBookingDto = this.normalizeCreateBookingDto(createBookingDto);
+
     const { propertyId, roomId, guestId, checkIn, checkOut } = createBookingDto;
     const checkInDate = this.parseBookingDate(checkIn, 'checkIn');
     const checkOutDate = this.parseBookingDate(checkOut, 'checkOut');
@@ -290,6 +378,14 @@ export class BookingsService {
       }
     }
 
+    // FINAL VALIDATION: Ensure we have names before proceeding to creation
+    if (!createBookingDto.guestFirstName) {
+      throw new BadRequestException('guestFirstName is required');
+    }
+    if (!createBookingDto.guestLastName) {
+      throw new BadRequestException('guestLastName is required');
+    }
+
     // Calculate total price
     const nights = Math.ceil(
       (checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24),
@@ -317,11 +413,11 @@ export class BookingsService {
       checkOut:       toDateTime(createBookingDto.checkOut),
       scheduledCheckIn: this.buildScheduledDateTime(
         createBookingDto.checkIn,
-        property.standardCheckInTime ?? '14:00',
+        createBookingDto.checkInTime ?? property.standardCheckInTime ?? '14:00',
       ),
       scheduledCheckOut: this.buildScheduledDateTime(
         createBookingDto.checkOut,
-        property.standardCheckOutTime ?? '11:00',
+        createBookingDto.checkOutTime ?? property.standardCheckOutTime ?? '11:00',
       ),
       status:         createBookingDto.status || 'pending',
       notes:          createBookingDto.notes || undefined,
@@ -574,8 +670,11 @@ export class BookingsService {
       this.logger.error(`Failed to track check_out event: ${err.message}`);
     });
 
-    // Stage 6: Auto-create housekeeping task (async, non-blocking)
+    // Stage 6: Auto-create housekeeping task with roomReadyAt = actualCheckOut + cleaningBufferMinutes
     if (booking.roomId) {
+      const cleaningBufferMinutes = updated.property?.cleaningBufferMinutes ?? 60;
+      const roomReadyAt = new Date(now.getTime() + cleaningBufferMinutes * 60 * 1000);
+
       this.housekeepingService
         .createTask(
           {
@@ -583,7 +682,10 @@ export class BookingsService {
             type: TaskType.CHECKOUT,
             priority: TaskPriority.HIGH,
             notes: `Checkout cleaning - Guest: ${booking.guestFirstName} ${booking.guestLastName}, Room: ${booking.room?.number || 'N/A'}`,
-            estimatedDuration: 45,
+            estimatedDuration: cleaningBufferMinutes,
+            bookingId: booking.id,
+            scheduledFor: now.toISOString(),
+            roomReadyAt: roomReadyAt.toISOString(),
           },
           tenantId,
         )

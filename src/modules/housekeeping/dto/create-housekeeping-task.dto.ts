@@ -1,5 +1,5 @@
-import { IsString, IsOptional, IsEnum, IsNumber } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsString, IsOptional, IsEnum, IsNumber, IsDateString, IsUUID } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export enum TaskType {
   DAILY = 'daily',
@@ -71,4 +71,19 @@ export class CreateHousekeepingTaskDto {
   @IsNumber()
   @IsOptional()
   estimatedDuration?: number;
+
+  @ApiPropertyOptional({ description: 'Booking ID linked to this task (checkout cleaning)', example: 'uuid-booking' })
+  @IsUUID()
+  @IsOptional()
+  bookingId?: string;
+
+  @ApiPropertyOptional({ description: 'Scheduled start time for the task (ISO 8601)', example: '2026-04-05T15:00:00.000Z' })
+  @IsDateString()
+  @IsOptional()
+  scheduledFor?: string;
+
+  @ApiPropertyOptional({ description: 'Pre-calculated room-ready time = checkout + cleaningBuffer (ISO 8601)', example: '2026-04-05T16:00:00.000Z' })
+  @IsDateString()
+  @IsOptional()
+  roomReadyAt?: string;
 }

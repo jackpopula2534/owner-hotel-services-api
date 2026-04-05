@@ -9,6 +9,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CreateStaffDto, StaffStatus } from './dto/create-staff.dto';
 import { UpdateStaffDto } from './dto/update-staff.dto';
 import { normalizePagination } from '../../common/utils/pagination.util';
+import { LinkEmployeeDto } from './dto/link-employee.dto';
 
 interface PaginationQuery {
   page?: number;
@@ -338,6 +339,103 @@ export class StaffService {
       this.logger.error(`Failed to delete staff member ${id}: ${error.message}`);
       throw error;
     }
+  }
+
+  // ─── HR Add-on bridge endpoints ───────────────────────────────────────────
+
+  /**
+   * Link an Employee record to this Staff member (requires HR_MODULE add-on).
+   * Both records must belong to the same tenant.
+   */
+  async linkEmployee(staffId: string, dto: LinkEmployeeDto, tenantId: string): Promise<any> {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
+    const staff = await this.findOne(staffId, tenantId);
+
+    if ((staff as any).employeeId) {
+      throw new ConflictException(
+        `Staff ${staffId} is already linked to employee ${(staff as any).employeeId}. Unlink first.`,
+      );
+    }
+
+    // Verify the Employee belongs to same tenant
+    const employee = await this.prisma.employee.findFirst({
+      where: { id: dto.employeeId, tenantId },
+    });
+    if (!employee) {
+      throw new NotFoundException(
+        `Employee ${dto.employeeId} not found in this tenant`,
+      );
+    }
+
+    // Guard: Employee not already linked to another Staff (cast to any — field added in latest migration)
+    const alreadyLinked = await (this.prisma.staff as any).findUnique({
+      where: { employeeId: dto.employeeId },
+    });
+    if (alreadyLinked) {
+      throw new ConflictException(
+        `Employee ${dto.employeeId} is already linked to staff ${alreadyLinked.id}`,
+      );
+    }
+
+    const updated = await (this.prisma.staff as any).update({
+      where: { id: staffId },
+      data: { employeeId: dto.employeeId },  // field added in latest migration
+      include: { employee: true },
+    });
+
+    this.logger.log(`Linked Staff ${staffId} ↔ Employee ${dto.employeeId} (tenant: ${tenantId})`);
+    return { success: true, data: updated };
+  }
+
+  /**
+   * Remove the HR link from a Staff record (requires HR_MODULE add-on).
+   * Staff record is preserved; employeeId is set to null.
+   */
+  async unlinkEmployee(staffId: string, tenantId: string): Promise<any> {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
+    const staff = await this.findOne(staffId, tenantId) as any;
+
+    if (!staff.employeeId) {
+      throw new BadRequestException(`Staff ${staffId} is not linked to any employee`);
+    }
+
+    const updated = await (this.prisma.staff as any).update({
+      where: { id: staffId },
+      data: { employeeId: null },  // field added in latest migration
+    });
+
+    this.logger.log(`Unlinked Staff ${staffId} from Employee (tenant: ${tenantId})`);
+    return { success: true, data: updated };
+  }
+
+  /**
+   * Get the linked Employee record for a Staff member (requires HR_MODULE add-on).
+   */
+  async getLinkedEmployee(staffId: string, tenantId: string): Promise<any> {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
+    const staff = await (this.prisma.staff as any).findFirst({
+      where: { id: staffId, tenantId },
+      include: { employee: true },  // relation added in latest migration
+    });
+
+    if (!staff) {
+      throw new NotFoundException(`Staff member with ID ${staffId} not found`);
+    }
+
+    if (!(staff as any).employeeId || !(staff as any).employee) {
+      return { success: true, data: null, linked: false };
+    }
+
+    return { success: true, data: (staff as any).employee, linked: true };
   }
 
   /**
