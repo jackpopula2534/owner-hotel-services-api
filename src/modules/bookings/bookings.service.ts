@@ -55,6 +55,17 @@ export class BookingsService {
     return parsed;
   }
 
+  private buildScheduledDateTime(value: string, fallbackTime: string): Date {
+    if (value.includes('T')) {
+      return new Date(value);
+    }
+
+    const [hours, minutes] = fallbackTime.split(':').map(Number);
+    const date = new Date(`${value}T00:00:00.000Z`);
+    date.setUTCHours(hours, minutes, 0, 0);
+    return date;
+  }
+
   /**
    * Transform raw Prisma booking record to the response shape expected by the frontend.
    * Adds alias fields (checkInDate, checkOutDate, totalAmount) and computed fields
@@ -304,6 +315,14 @@ export class BookingsService {
       guestPhone:     createBookingDto.guestPhone || undefined,
       checkIn:        toDateTime(createBookingDto.checkIn),
       checkOut:       toDateTime(createBookingDto.checkOut),
+      scheduledCheckIn: this.buildScheduledDateTime(
+        createBookingDto.checkIn,
+        property.standardCheckInTime ?? '14:00',
+      ),
+      scheduledCheckOut: this.buildScheduledDateTime(
+        createBookingDto.checkOut,
+        property.standardCheckOutTime ?? '11:00',
+      ),
       status:         createBookingDto.status || 'pending',
       notes:          createBookingDto.notes || undefined,
       channelId:      createBookingDto.channelId || undefined,
@@ -988,5 +1007,218 @@ export class BookingsService {
     this.logger.log(`Walk-in booking created and checked in: ${booking.id} for guest ${guestFirstName} ${guestLastName} in Room ${room.number}`);
 
     return this.mapBookingResponse(booking);
+  }
+
+  // ─── Early Check-In / Late Check-Out ─────────────────────────────────────
+
+  /**
+   * Guest or staff requests early check-in for a booking.
+   * If property.earlyCheckInEnabled is true and `approve` flag is set (manager/admin),
+   * the request is approved immediately and the fee is recorded.
+   * Otherwise it's stored as a pending request for manager review.
+   */
+  async requestEarlyCheckIn(
+    id: string,
+    tenantId: string | undefined,
+    approve = false,
+  ): Promise<unknown> {
+    if (!tenantId) throw new BadRequestException('Tenant ID is required');
+
+    const booking = await this.findOne(id, tenantId);
+
+    if (booking.status === 'cancelled' || booking.status === 'checked_out') {
+      throw new BadRequestException(
+        `Cannot request early check-in for a booking in status '${booking.status}'`,
+      );
+    }
+
+    if (booking.requestedEarlyCheckIn) {
+      throw new BadRequestException('Early check-in has already been requested for this booking');
+    }
+
+    // Fetch property time settings to calculate fee
+    const property = await this.prisma.property.findFirst({
+      where: { id: booking.propertyId, tenantId, deletedAt: null },
+      select: {
+        earlyCheckInEnabled: true,
+        earlyCheckInFeeType: true,
+        earlyCheckInFeeAmount: true,
+      },
+    });
+
+    if (!property) {
+      throw new BadRequestException('Property not found');
+    }
+
+    if (!property.earlyCheckInEnabled) {
+      throw new BadRequestException('Early check-in is not enabled for this property');
+    }
+
+    const feeAmount = property.earlyCheckInFeeAmount
+      ? Number(property.earlyCheckInFeeAmount)
+      : 0;
+
+    const updateData: Record<string, unknown> = {
+      requestedEarlyCheckIn: true,
+    };
+
+    if (approve) {
+      updateData.approvedEarlyCheckIn = true;
+      updateData.earlyCheckInFee = feeAmount;
+    }
+
+    const updated = await this.prisma.booking.update({
+      where: { id },
+      data: updateData,
+      include: { guest: true, room: true, property: true },
+    });
+
+    this.logger.log(
+      `Early check-in ${approve ? 'approved' : 'requested'} for booking ${id} | fee: ${feeAmount}`,
+    );
+
+    return this.mapBookingResponse(updated);
+  }
+
+  /**
+   * Manager/admin approves a pending early check-in request.
+   */
+  async approveEarlyCheckIn(id: string, tenantId: string | undefined): Promise<unknown> {
+    if (!tenantId) throw new BadRequestException('Tenant ID is required');
+
+    const booking = await this.findOne(id, tenantId);
+
+    if (!booking.requestedEarlyCheckIn) {
+      throw new BadRequestException('No early check-in request found for this booking');
+    }
+    if (booking.approvedEarlyCheckIn) {
+      throw new BadRequestException('Early check-in has already been approved');
+    }
+
+    const property = await this.prisma.property.findFirst({
+      where: { id: booking.propertyId, tenantId, deletedAt: null },
+      select: { earlyCheckInFeeAmount: true },
+    });
+
+    const feeAmount = property?.earlyCheckInFeeAmount
+      ? Number(property.earlyCheckInFeeAmount)
+      : 0;
+
+    const updated = await this.prisma.booking.update({
+      where: { id },
+      data: {
+        approvedEarlyCheckIn: true,
+        earlyCheckInFee: feeAmount,
+      },
+      include: { guest: true, room: true, property: true },
+    });
+
+    this.logger.log(`Early check-in approved for booking ${id} | fee: ${feeAmount}`);
+
+    return this.mapBookingResponse(updated);
+  }
+
+  /**
+   * Guest or staff requests late check-out for a booking.
+   * If `approve` flag is set (manager/admin), the request is approved immediately.
+   */
+  async requestLateCheckOut(
+    id: string,
+    tenantId: string | undefined,
+    approve = false,
+  ): Promise<unknown> {
+    if (!tenantId) throw new BadRequestException('Tenant ID is required');
+
+    const booking = await this.findOne(id, tenantId);
+
+    if (booking.status === 'cancelled' || booking.status === 'checked_out') {
+      throw new BadRequestException(
+        `Cannot request late check-out for a booking in status '${booking.status}'`,
+      );
+    }
+
+    if (booking.requestedLateCheckOut) {
+      throw new BadRequestException('Late check-out has already been requested for this booking');
+    }
+
+    const property = await this.prisma.property.findFirst({
+      where: { id: booking.propertyId, tenantId, deletedAt: null },
+      select: {
+        lateCheckOutEnabled: true,
+        lateCheckOutFeeType: true,
+        lateCheckOutFeeAmount: true,
+      },
+    });
+
+    if (!property) {
+      throw new BadRequestException('Property not found');
+    }
+
+    if (!property.lateCheckOutEnabled) {
+      throw new BadRequestException('Late check-out is not enabled for this property');
+    }
+
+    const feeAmount = property.lateCheckOutFeeAmount
+      ? Number(property.lateCheckOutFeeAmount)
+      : 0;
+
+    const updateData: Record<string, unknown> = {
+      requestedLateCheckOut: true,
+    };
+
+    if (approve) {
+      updateData.approvedLateCheckOut = true;
+      updateData.lateCheckOutFee = feeAmount;
+    }
+
+    const updated = await this.prisma.booking.update({
+      where: { id },
+      data: updateData,
+      include: { guest: true, room: true, property: true },
+    });
+
+    this.logger.log(
+      `Late check-out ${approve ? 'approved' : 'requested'} for booking ${id} | fee: ${feeAmount}`,
+    );
+
+    return this.mapBookingResponse(updated);
+  }
+
+  /**
+   * Manager/admin approves a pending late check-out request.
+   */
+  async approveLateCheckOut(id: string, tenantId: string | undefined): Promise<unknown> {
+    if (!tenantId) throw new BadRequestException('Tenant ID is required');
+
+    const booking = await this.findOne(id, tenantId);
+
+    if (!booking.requestedLateCheckOut) {
+      throw new BadRequestException('No late check-out request found for this booking');
+    }
+    if (booking.approvedLateCheckOut) {
+      throw new BadRequestException('Late check-out has already been approved');
+    }
+
+    const property = await this.prisma.property.findFirst({
+      where: { id: booking.propertyId, tenantId, deletedAt: null },
+      select: { lateCheckOutFeeAmount: true },
+    });
+
+    const feeAmount = property?.lateCheckOutFeeAmount
+      ? Number(property.lateCheckOutFeeAmount)
+      : 0;
+
+    const updated = await this.prisma.booking.update({
+      where: { id },
+      data: {
+        approvedLateCheckOut: true,
+        lateCheckOutFee: feeAmount,
+      },
+      include: { guest: true, room: true, property: true },
+    });
+
+    this.logger.log(`Late check-out approved for booking ${id} | fee: ${feeAmount}`);
+
+    return this.mapBookingResponse(updated);
   }
 }

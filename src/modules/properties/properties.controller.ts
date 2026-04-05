@@ -13,8 +13,10 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { PropertiesService } from './properties.service';
+import { PropertyTimeSettingsService } from './property-time-settings.service';
 import { CreatePropertyDto } from './dto/create-property.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
+import { UpdateTimeSettingsDto } from './dto/update-time-settings.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -25,7 +27,10 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 @Controller({ path: 'properties', version: '1' })
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class PropertiesController {
-  constructor(private readonly propertiesService: PropertiesService) {}
+  constructor(
+    private readonly propertiesService: PropertiesService,
+    private readonly timeSettingsService: PropertyTimeSettingsService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'Get all properties' })
@@ -129,5 +134,48 @@ export class PropertiesController {
       );
     }
     return this.propertiesService.restore(id, user.tenantId);
+  }
+
+  // ─── Time Settings endpoints ─────────────────────────────────────────────
+
+  @Get(':id/time-settings')
+  @ApiOperation({
+    summary: 'Get property time & cleaning settings',
+    description:
+      'Returns standardCheckInTime, standardCheckOutTime, cleaningBufferMinutes, early/late checkout config and timezone.',
+  })
+  @ApiResponse({ status: 200, description: 'Time settings retrieved successfully' })
+  @ApiResponse({ status: 404, description: 'Property not found' })
+  @Roles('admin', 'manager', 'tenant_admin', 'platform_admin', 'receptionist')
+  async getTimeSettings(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
+    if (!user?.tenantId) {
+      throw new BadRequestException(
+        'No tenant found. Please complete the onboarding process first to set up your hotel.',
+      );
+    }
+    return this.timeSettingsService.getTimeSettings(id, user.tenantId);
+  }
+
+  @Put(':id/time-settings')
+  @ApiOperation({
+    summary: 'Update property time & cleaning settings',
+    description:
+      'Update check-in/out standard times, cleaning buffer, and early/late checkout fees.',
+  })
+  @ApiResponse({ status: 200, description: 'Time settings updated successfully' })
+  @ApiResponse({ status: 400, description: 'Validation error (e.g. fee not set when enabling)' })
+  @ApiResponse({ status: 404, description: 'Property not found' })
+  @Roles('admin', 'tenant_admin', 'platform_admin')
+  async updateTimeSettings(
+    @Param('id') id: string,
+    @Body() dto: UpdateTimeSettingsDto,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    if (!user?.tenantId) {
+      throw new BadRequestException(
+        'No tenant found. Please complete the onboarding process first to set up your hotel.',
+      );
+    }
+    return this.timeSettingsService.updateTimeSettings(id, user.tenantId, dto);
   }
 }

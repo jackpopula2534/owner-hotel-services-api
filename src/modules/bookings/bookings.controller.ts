@@ -1,11 +1,13 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { BookingsService } from './bookings.service';
 import { GuestFolioService } from './guest-folio.service';
 import { AddFolioChargeDto } from './dto/add-folio-charge.dto';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { WalkInDto } from './dto/walk-in.dto';
+import { RequestEarlyCheckInDto } from './dto/request-early-checkin.dto';
+import { RequestLateCheckOutDto } from './dto/request-late-checkout.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -121,5 +123,75 @@ export class BookingsController {
   @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin')
   async finalizeFolio(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.folioService.finalizeFolio(id, user?.tenantId);
+  }
+
+  // ─── Early Check-In / Late Check-Out ─────────────────────────────────────
+
+  @Post(':id/request-early-checkin')
+  @Throttle({ default: { limit: 10, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Request early check-in for a booking',
+    description:
+      'Guest or staff requests early check-in. Pass approve=true (manager/admin only) to approve immediately and record the fee.',
+  })
+  @ApiResponse({ status: 200, description: 'Early check-in requested/approved successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid state or early check-in not enabled' })
+  @ApiResponse({ status: 404, description: 'Booking not found' })
+  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
+  async requestEarlyCheckIn(
+    @Param('id') id: string,
+    @Body() dto: RequestEarlyCheckInDto,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    return this.bookingsService.requestEarlyCheckIn(id, user?.tenantId, dto.approve ?? false);
+  }
+
+  @Post(':id/approve-early-checkin')
+  @Throttle({ default: { limit: 10, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Approve a pending early check-in request (manager/admin only)',
+  })
+  @ApiResponse({ status: 200, description: 'Early check-in approved successfully' })
+  @ApiResponse({ status: 400, description: 'No request pending or already approved' })
+  @Roles('admin', 'manager', 'tenant_admin', 'platform_admin')
+  async approveEarlyCheckIn(
+    @Param('id') id: string,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    return this.bookingsService.approveEarlyCheckIn(id, user?.tenantId);
+  }
+
+  @Post(':id/request-late-checkout')
+  @Throttle({ default: { limit: 10, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Request late check-out for a booking',
+    description:
+      'Guest or staff requests late check-out. Pass approve=true (manager/admin only) to approve immediately and record the fee.',
+  })
+  @ApiResponse({ status: 200, description: 'Late check-out requested/approved successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid state or late check-out not enabled' })
+  @ApiResponse({ status: 404, description: 'Booking not found' })
+  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
+  async requestLateCheckOut(
+    @Param('id') id: string,
+    @Body() dto: RequestLateCheckOutDto,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    return this.bookingsService.requestLateCheckOut(id, user?.tenantId, dto.approve ?? false);
+  }
+
+  @Post(':id/approve-late-checkout')
+  @Throttle({ default: { limit: 10, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Approve a pending late check-out request (manager/admin only)',
+  })
+  @ApiResponse({ status: 200, description: 'Late check-out approved successfully' })
+  @ApiResponse({ status: 400, description: 'No request pending or already approved' })
+  @Roles('admin', 'manager', 'tenant_admin', 'platform_admin')
+  async approveLateCheckOut(
+    @Param('id') id: string,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    return this.bookingsService.approveLateCheckOut(id, user?.tenantId);
   }
 }

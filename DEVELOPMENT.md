@@ -1,5 +1,5 @@
 # StaySync — Backend Development Tracker
-> อัปเดตล่าสุด: 2026-04-05
+> อัปเดตล่าสุด: 2026-04-05 (commit pending)
 
 ## ภาพรวม
 
@@ -37,7 +37,7 @@ Feature หลักที่กำลังพัฒนา:
 | 2.2 | BookingsService.create(): แปลง date-only → scheduledCheckIn/Out ตาม Property time settings | ✅ Done | 2026-04-05 |
 | 2.3 | BookingsService.checkOut(): คำนวณ roomReadyAt = actualCheckOut + cleaningBufferMinutes | ✅ Done | 2026-04-05 |
 | 2.4 | HousekeepingService.completeTask(): update roomReadyAt + room.status = available | ✅ Done | 2026-04-05 |
-| 2.5 | PropertyTimeSettingsService: CRUD settings ต่อ property | ⏳ Pending | — |
+| 2.5 | PropertyTimeSettingsService: CRUD settings ต่อ property | ✅ Done | 2026-04-05 |
 
 ---
 
@@ -50,8 +50,8 @@ Feature หลักที่กำลังพัฒนา:
 | 3.3 | StaffController + StaffService (module ใหม่) | ✅ Done | 2026-04-05 |
 | 3.4 | MaintenanceController + MaintenanceService (module ใหม่) | ✅ Done | 2026-04-05 |
 | 3.5 | RoomsController: GET /rooms/available เพิ่ม datetime-aware check | ✅ Done | 2026-04-05 |
-| 3.6 | PropertiesController: GET/PUT /properties/:id/time-settings | ⏳ Pending | — |
-| 3.7 | BookingsController: POST /bookings/:id/request-early-checkin, request-late-checkout | ⏳ Pending | — |
+| 3.6 | PropertiesController: GET/PUT /properties/:id/time-settings | ✅ Done | 2026-04-05 |
+| 3.7 | BookingsController: POST /bookings/:id/request-early-checkin, request-late-checkout, approve-early-checkin, approve-late-checkout | ✅ Done | 2026-04-05 |
 | 3.8 | เพิ่ม Swagger docs ทุก endpoint ใหม่ | ✅ Done | 2026-04-05 |
 
 ---
@@ -70,11 +70,11 @@ Feature หลักที่กำลังพัฒนา:
 
 | # | รายการ | สถานะ | วันที่แล้วเสร็จ |
 |---|--------|--------|----------------|
-| 5.1 | Unit tests: RoomAvailabilityService | ⏳ Pending | — |
-| 5.2 | Unit tests: BookingsService time-aware logic | ⏳ Pending | — |
-| 5.3 | Unit tests: StaffService | ⏳ Pending | — |
-| 5.4 | Unit tests: MaintenanceService | ⏳ Pending | — |
-| 5.5 | Integration tests: Booking → Checkout → Housekeeping flow | ⏳ Pending | — |
+| 5.1 | Unit tests: RoomAvailabilityService | ✅ Done | 2026-04-05 |
+| 5.2 | Unit tests: BookingsService time-aware logic | ✅ Done | 2026-04-05 |
+| 5.3 | Unit tests: StaffService | ✅ Done | 2026-04-05 |
+| 5.4 | Unit tests: MaintenanceService | ✅ Done | 2026-04-05 |
+| 5.5 | Integration tests: Booking → Checkout → Housekeeping flow | ✅ Done | 2026-04-05 |
 
 ---
 
@@ -83,8 +83,8 @@ Feature หลักที่กำลังพัฒนา:
 | # | รายการ | สถานะ | วันที่แล้วเสร็จ |
 |---|--------|--------|----------------|
 | 6.1 | Index optimization สำหรับ scheduledCheckIn/scheduledCheckOut | ✅ Done (ใน schema) | 2026-04-05 |
-| 6.2 | Rate limiting บน housekeeping/maintenance endpoints | ⏳ Pending | — |
-| 6.3 | Audit log สำหรับ housekeeping task completion | ⏳ Pending | — |
+| 6.2 | Rate limiting บน housekeeping/maintenance endpoints | ✅ Done | 2026-04-05 |
+| 6.3 | Audit log สำหรับ housekeeping task completion | ✅ Done | 2026-04-05 |
 
 ---
 
@@ -92,8 +92,8 @@ Feature หลักที่กำลังพัฒนา:
 
 | # | รายการ | สถานะ | วันที่แล้วเสร็จ |
 |---|--------|--------|----------------|
-| 7.1 | Swagger docs ครบทุก endpoint | ✅ Partial | 2026-04-05 |
-| 7.2 | CLAUDE.md อัปเดต tech stack ใหม่ | ⏳ Pending | — |
+| 7.1 | Swagger docs ครบทุก endpoint | ✅ Done | 2026-04-05 |
+| 7.2 | CLAUDE.md อัปเดต tech stack ใหม่ | ✅ Done | 2026-04-05 |
 
 ---
 
@@ -140,9 +140,34 @@ src/modules/
 
 ---
 
+## Modules / Files เพิ่มเติม (Phase 2.5, 3.6, 3.7)
+
+```
+src/modules/properties/
+├── property-time-settings.service.ts   ← ใหม่ (Phase 2.5)
+└── dto/
+    └── update-time-settings.dto.ts     ← ใหม่ (Phase 3.6)
+
+src/modules/bookings/dto/
+├── request-early-checkin.dto.ts        ← ใหม่ (Phase 3.7)
+└── request-late-checkout.dto.ts        ← ใหม่ (Phase 3.7)
+```
+
+## New API Endpoints (Phase 3.6, 3.7)
+
+| Method | Endpoint | หน้าที่ |
+|--------|----------|--------|
+| GET | `/api/v1/properties/:id/time-settings` | ดึง time settings ของ property |
+| PUT | `/api/v1/properties/:id/time-settings` | อัปเดต time settings |
+| POST | `/api/v1/bookings/:id/request-early-checkin` | Guest/staff ขอ early check-in |
+| POST | `/api/v1/bookings/:id/approve-early-checkin` | Manager อนุมัติ early check-in |
+| POST | `/api/v1/bookings/:id/request-late-checkout` | Guest/staff ขอ late check-out |
+| POST | `/api/v1/bookings/:id/approve-late-checkout` | Manager อนุมัติ late check-out |
+
 ## Commit History
 
 | Hash | Message | วันที่ |
 |------|---------|-------|
+| pending | feat: add PropertyTimeSettingsService + early/late check-in/out endpoints | 2026-04-05 |
 | 48b2e2e | fix: resolve booking display and double-booking bugs | 2026-04-05 |
-| (pending) | feat: add time-aware booking system + housekeeping/maintenance modules | 2026-04-05 |
+| 7aabb04 | feat: add time-aware booking + housekeeping/maintenance/staff modules | 2026-04-05 |
