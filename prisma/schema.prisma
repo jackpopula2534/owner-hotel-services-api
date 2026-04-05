@@ -126,8 +126,21 @@ model Property {
   vatPercent            Float   @default(7)
   taxDisplayMode        String  @default("breakdown")
 
-  rooms       Room[]
-  bookings    Booking[]
+  // Check-in / Check-out Time Settings
+  standardCheckInTime    String   @default("14:00")   // HH:mm
+  standardCheckOutTime   String   @default("12:00")   // HH:mm
+  cleaningBufferMinutes  Int      @default(60)         // นาทีหลัง checkout ก่อนห้องพร้อม
+  earlyCheckInEnabled    Boolean  @default(false)
+  lateCheckOutEnabled    Boolean  @default(false)
+  earlyCheckInFeeType    String?  @default("fixed")   // "fixed" | "percentage"
+  earlyCheckInFeeAmount  Decimal? @db.Decimal(10, 2)
+  lateCheckOutFeeType    String?  @default("fixed")   // "fixed" | "percentage"
+  lateCheckOutFeeAmount  Decimal? @db.Decimal(10, 2)
+  timezone               String   @default("Asia/Bangkok")
+
+  rooms            Room[]
+  bookings         Booking[]
+  maintenanceTasks MaintenanceTask[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -164,9 +177,10 @@ model Room {
 
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
-  property     Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  bookings     Booking[]
+  property          Property           @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  bookings          Booking[]
   housekeepingTasks HousekeepingTask[]
+  maintenanceTasks  MaintenanceTask[]
 
   @@unique([propertyId, number])
   @@index([tenantId])
@@ -184,10 +198,22 @@ model Booking {
   guestLastName   String
   guestEmail      String?
   guestPhone      String?
-  checkIn         DateTime
-  checkOut        DateTime
-  actualCheckIn   DateTime?
-  actualCheckOut  DateTime?
+  checkIn              DateTime
+  checkOut             DateTime
+  // Scheduled times (date + standard property time)
+  scheduledCheckIn     DateTime?
+  scheduledCheckOut    DateTime?
+  actualCheckIn        DateTime?
+  actualCheckOut       DateTime?
+
+  // Early Check-in / Late Check-out
+  requestedEarlyCheckIn  Boolean?  @default(false)
+  approvedEarlyCheckIn   Boolean?  @default(false)
+  earlyCheckInFee        Decimal?  @db.Decimal(10, 2)
+  requestedLateCheckOut  Boolean?  @default(false)
+  approvedLateCheckOut   Boolean?  @default(false)
+  lateCheckOutFee        Decimal?  @db.Decimal(10, 2)
+
   status          String    @default("pending")
   totalPrice      Decimal   @db.Decimal(10, 2)
   notes           String?
@@ -201,17 +227,22 @@ model Booking {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   channelId       String?
-  channel         Channel?  @relation(fields: [channelId], references: [id])
-  guest           Guest?    @relation(fields: [guestId], references: [id], onDelete: SetNull)
-  room            Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  property        Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  review          Review?
+  channel           Channel?          @relation(fields: [channelId], references: [id])
+  guest             Guest?            @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  room              Room              @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  property          Property          @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  review            Review?
+  housekeepingTasks HousekeepingTask[]
+  addOns            BookingAddOn[]
 
   @@index([tenantId])
   @@index([propertyId])
   @@index([channelId], map: "bookings_channelId_fkey")
   @@index([guestId], map: "bookings_guestId_fkey")
   @@index([roomId], map: "bookings_roomId_fkey")
+  @@index([scheduledCheckIn])
+  @@index([scheduledCheckOut])
+  @@index([status])
   @@map("bookings")
 }
 
@@ -1057,30 +1088,166 @@ model PushNotificationLog {
 }
 
 // ==================== Housekeeping Management ====================
-model HousekeepingTask {
-  id                String   @id @default(uuid())
-  roomId            String
-  room              Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  type              String   @default("daily") // daily, checkout, deep, turndown, inspection
-  priority          String   @default("medium") // low, medium, high, urgent
-  status            String   @default("pending") // pending, in_progress, completed, inspected
-  notes             String?  @db.Text
-  estimatedDuration Int      @default(30) // in minutes
-  assignedToId      String?
-  assignedToName    String?
-  startTime         DateTime?
-  endTime           DateTime?
-  completionPercentage Int?
-  inspectedBy       String?
-  inspectedAt       DateTime?
-  rating            Int?     // 1-5 star rating
+// ─── Staff ────────────────────────────────────────────────────────────────────
+model Staff {
+  id               String    @id @default(uuid())
+  tenantId         String
+  firstName        String
+  lastName         String
+  email            String
+  phone            String?
+  role             String    // housekeeper | technician | supervisor | manager
+  department       String?   // housekeeping | maintenance | front_desk
+  employeeCode     String?
+  status           String    @default("active") // active | inactive | on_leave
+  shiftType        String?   // morning | afternoon | night | flexible
+  maxTasksPerShift Int?      @default(8)
+  specializations  String?   @db.Text  // JSON: ["deep-cleaning","ac-repair"]
+  rating           Decimal?  @db.Decimal(3, 2)
+  efficiency       Int?      @default(100)
+
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  housekeepingTasks    HousekeepingTask[] @relation("AssignedStaff")
+  inspectedTasks       HousekeepingTask[] @relation("InspectorStaff")
+  maintenanceTasks     MaintenanceTask[]  @relation("AssignedTechnician")
+  inspectedMaintenance MaintenanceTask[]  @relation("InspectorTechnician")
+
+  @@index([tenantId])
+  @@index([status])
+  @@index([department])
+  @@map("staff")
+}
+
+// ─── MaintenanceTask ──────────────────────────────────────────────────────────
+model MaintenanceTask {
+  id                String    @id @default(uuid())
   tenantId          String
-  createdAt         DateTime @default(now()) @db.DateTime(6)
-  updatedAt         DateTime @default(now()) @updatedAt @db.DateTime(6)
+  propertyId        String
+  roomId            String?
+
+  title             String
+  description       String?   @db.Text
+  category          String    // ac | plumbing | electrical | furniture | structural | pest | safety | other
+  priority          String    @default("medium") // low | medium | high | urgent
+  status            String    @default("pending") // pending | in_progress | completed | on_hold | cancelled
+
+  // Scheduling
+  assignedToId      String?
+  requestedDate     DateTime?
+  scheduledDate     DateTime?
+  estimatedDuration Int?      // นาที
+
+  // Execution
+  startedAt         DateTime?
+  completedAt       DateTime?
+  actualDuration    Int?      // นาที
+
+  // Cost
+  estimatedCost     Decimal?  @db.Decimal(10, 2)
+  actualCost        Decimal?  @db.Decimal(10, 2)
+  partsUsed         String?   @db.Text  // JSON: [{name,qty,cost}]
+
+  // QA
+  inspectedById     String?
+  inspectedAt       DateTime?
+  rating            Int?      // 1-5
+  inspectionNotes   String?   @db.Text
+
+  notes             String?   @db.Text
+  attachments       String?   @db.Text  // JSON: [urls]
+
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  property     Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  room         Room?     @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  assignedTo   Staff?    @relation("AssignedTechnician", fields: [assignedToId], references: [id], onDelete: SetNull)
+  inspectedBy  Staff?    @relation("InspectorTechnician", fields: [inspectedById], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([propertyId])
+  @@index([roomId])
+  @@index([status])
+  @@index([category])
+  @@index([assignedToId])
+  @@map("maintenance_tasks")
+}
+
+// ─── BookingAddOn ─────────────────────────────────────────────────────────────
+model BookingAddOn {
+  id          String   @id @default(uuid())
+  bookingId   String
+  tenantId    String
+  type        String   // early_checkin | late_checkout | extra_bed | breakfast | parking
+  description String
+  quantity    Int      @default(1)
+  unitPrice   Decimal  @db.Decimal(10, 2)
+  amount      Decimal  @db.Decimal(10, 2)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  booking     Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId])
+  @@index([tenantId])
+  @@map("booking_add_ons")
+}
+
+// ─── HousekeepingTask ─────────────────────────────────────────────────────────
+model HousekeepingTask {
+  id                   String    @id @default(uuid())
+  tenantId             String
+  roomId               String
+  bookingId            String?   // link to checkout booking
+
+  type                 String    @default("daily")   // daily | checkout | deep | turndown | inspection | urgent
+  priority             String    @default("medium")  // low | medium | high | urgent
+  status               String    @default("pending") // pending | in_progress | completed | inspected
+
+  // Scheduling
+  scheduledFor         DateTime? // เวลาที่ควรเริ่มทำ
+  estimatedDuration    Int       @default(30) // นาที
+
+  // Execution Tracking
+  actualStartTime      DateTime?
+  actualEndTime        DateTime?
+  actualDuration       Int?      // นาที (คำนวณจาก end - start)
+  startTime            DateTime? // legacy alias
+  endTime              DateTime? // legacy alias
+
+  // Room Readiness
+  roomReadyAt          DateTime? // checkout + cleaningBufferMinutes
+
+  // Assignment
+  assignedToId         String?
+  assignedToName       String?   // denormalized
+  completionPercentage Int?
+
+  // QA
+  inspectedById        String?
+  inspectedByName      String?   // denormalized
+  inspectedAt          DateTime?
+  rating               Int?      // 1-5
+  inspectionNotes      String?   @db.Text
+  notes                String?   @db.Text
+
+  createdAt            DateTime  @default(now()) @db.DateTime(6)
+  updatedAt            DateTime  @default(now()) @updatedAt @db.DateTime(6)
+
+  room         Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  booking      Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  assignedTo   Staff?   @relation("AssignedStaff", fields: [assignedToId], references: [id], onDelete: SetNull)
+  inspectedBy  Staff?   @relation("InspectorStaff", fields: [inspectedById], references: [id], onDelete: SetNull)
 
   @@index([roomId])
+  @@index([bookingId])
   @@index([tenantId])
   @@index([status])
   @@index([type])
+  @@index([assignedToId])
+  @@index([scheduledFor])
   @@map("housekeeping_tasks")
 }

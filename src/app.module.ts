@@ -53,6 +53,8 @@ import { HealthModule } from './health/health.module';
 import { HousekeepingModule } from './modules/housekeeping/housekeeping.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { SearchModule } from './modules/search/search.module';
+import { StaffModule } from './modules/staff/staff.module';
+import { MaintenanceModule } from './modules/maintenance/maintenance.module';
 
 @Module({
   imports: [
@@ -110,6 +112,8 @@ import { SearchModule } from './modules/search/search.module';
     HousekeepingModule,
     DashboardModule,
     SearchModule,
+    StaffModule,
+    MaintenanceModule,
     ThrottlerModule.forRoot([
       {
         ttl: 60, // 60 seconds window
