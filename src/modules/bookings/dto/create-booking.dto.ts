@@ -139,19 +139,35 @@ export class CreateBookingDto {
   numberOfRooms?: number;
 
   @ApiPropertyOptional({ example: 2, description: 'Frontend-only guest count' })
-  @Allow()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
   @IsOptional()
   numberOfGuests?: number;
 
   @ApiPropertyOptional({ example: 2, description: 'Frontend-only adult guest count' })
-  @Allow()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
   @IsOptional()
   adults?: number;
 
   @ApiPropertyOptional({ example: 0, description: 'Frontend-only child guest count' })
-  @Allow()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
   @IsOptional()
   children?: number;
+
+  @ApiPropertyOptional({ example: [{ date: '2026-04-13', dayName: 'Sunday', appliedRate: 4000 }], description: 'Optional booking pricing breakdown from frontend' })
+  @Allow()
+  @IsOptional()
+  pricingBreakdown?: Record<string, any>;
+
+  @ApiPropertyOptional({ example: ['2026-04-13'], description: 'Optional holiday dates used for pricing override' })
+  @Allow()
+  @IsOptional()
+  holidayDates?: string[];
 
   @ApiPropertyOptional({ description: 'Frontend-selected property metadata' })
   @Allow()

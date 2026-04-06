@@ -177,6 +177,8 @@ export class RoomsService {
       );
     }
 
+    const childPricing = this.normalizeChildNoExtraChargeFields(createRoomDto);
+
     const data: Prisma.RoomCreateInput = {
       number: createRoomDto.number,
       type: createRoomDto.type,
@@ -189,18 +191,38 @@ export class RoomsService {
       ...(createRoomDto.bedType !== undefined && { bedType: createRoomDto.bedType }),
       ...(createRoomDto.size !== undefined && { size: createRoomDto.size }),
       ...(createRoomDto.amenities !== undefined && { amenities: createRoomDto.amenities }),
-      ...(createRoomDto.extraBedAllowed !== undefined && { extraBedAllowed: createRoomDto.extraBedAllowed }),
-      ...(createRoomDto.extraBedLimit !== undefined && { extraBedLimit: createRoomDto.extraBedLimit }),
-      ...(createRoomDto.extraBedPrice !== undefined && { extraBedPrice: new Prisma.Decimal(createRoomDto.extraBedPrice) }),
+      ...(createRoomDto.extraBedAllowed !== undefined && {
+        extraBedAllowed: createRoomDto.extraBedAllowed,
+      }),
+      ...(createRoomDto.extraBedLimit !== undefined && {
+        extraBedLimit: createRoomDto.extraBedLimit,
+      }),
+      ...(createRoomDto.extraBedPrice !== undefined && {
+        extraBedPrice: new Prisma.Decimal(createRoomDto.extraBedPrice),
+      }),
       ...(createRoomDto.description !== undefined && { description: createRoomDto.description }),
       ...(createRoomDto.images !== undefined && { images: createRoomDto.images }),
       // Dynamic Pricing
       ...(createRoomDto.weekendPrice !== undefined && { weekendPrice: createRoomDto.weekendPrice }),
-      ...(createRoomDto.holidayPriceEnabled !== undefined && { holidayPriceEnabled: createRoomDto.holidayPriceEnabled }),
-      ...(createRoomDto.holidayPriceType !== undefined && { holidayPriceType: createRoomDto.holidayPriceType }),
+      ...(createRoomDto.holidayPriceEnabled !== undefined && {
+        holidayPriceEnabled: createRoomDto.holidayPriceEnabled,
+      }),
+      ...(createRoomDto.holidayPriceType !== undefined && {
+        holidayPriceType: createRoomDto.holidayPriceType,
+      }),
       ...(createRoomDto.holidayPrice !== undefined && { holidayPrice: createRoomDto.holidayPrice }),
-      ...(createRoomDto.holidayPricePercent !== undefined && { holidayPricePercent: createRoomDto.holidayPricePercent }),
-      ...(createRoomDto.seasonalRates !== undefined && { seasonalRates: createRoomDto.seasonalRates as unknown as Prisma.InputJsonValue }),
+      ...(createRoomDto.holidayPricePercent !== undefined && {
+        holidayPricePercent: createRoomDto.holidayPricePercent,
+      }),
+      ...(createRoomDto.seasonalRates !== undefined && {
+        seasonalRates: createRoomDto.seasonalRates as unknown as Prisma.InputJsonValue,
+      }),
+      ...(childPricing.childNoExtraCharge !== undefined && {
+        childNoExtraCharge: childPricing.childNoExtraCharge,
+      }),
+      ...(childPricing.childNoExtraChargeNote !== undefined && {
+        childNoExtraChargeNote: childPricing.childNoExtraChargeNote,
+      }),
     };
     return this.prisma.room.create({
       data,
@@ -227,6 +249,11 @@ export class RoomsService {
       }
     }
 
+    const childPricing = this.normalizeChildNoExtraChargeFields(updateRoomDto, {
+      childNoExtraCharge: room.childNoExtraCharge,
+      childNoExtraChargeNote: room.childNoExtraChargeNote,
+    });
+
     const updateData: Prisma.RoomUpdateInput = {
       ...(updateRoomDto.number !== undefined && { number: updateRoomDto.number }),
       ...(updateRoomDto.type !== undefined && { type: updateRoomDto.type }),
@@ -237,18 +264,38 @@ export class RoomsService {
       ...(updateRoomDto.bedType !== undefined && { bedType: updateRoomDto.bedType }),
       ...(updateRoomDto.size !== undefined && { size: updateRoomDto.size }),
       ...(updateRoomDto.amenities !== undefined && { amenities: updateRoomDto.amenities }),
-      ...(updateRoomDto.extraBedAllowed !== undefined && { extraBedAllowed: updateRoomDto.extraBedAllowed }),
-      ...(updateRoomDto.extraBedLimit !== undefined && { extraBedLimit: updateRoomDto.extraBedLimit }),
-      ...(updateRoomDto.extraBedPrice !== undefined && { extraBedPrice: new Prisma.Decimal(updateRoomDto.extraBedPrice) }),
+      ...(updateRoomDto.extraBedAllowed !== undefined && {
+        extraBedAllowed: updateRoomDto.extraBedAllowed,
+      }),
+      ...(updateRoomDto.extraBedLimit !== undefined && {
+        extraBedLimit: updateRoomDto.extraBedLimit,
+      }),
+      ...(updateRoomDto.extraBedPrice !== undefined && {
+        extraBedPrice: new Prisma.Decimal(updateRoomDto.extraBedPrice),
+      }),
       ...(updateRoomDto.description !== undefined && { description: updateRoomDto.description }),
       ...(updateRoomDto.images !== undefined && { images: updateRoomDto.images }),
       // Dynamic Pricing
       ...(updateRoomDto.weekendPrice !== undefined && { weekendPrice: updateRoomDto.weekendPrice }),
-      ...(updateRoomDto.holidayPriceEnabled !== undefined && { holidayPriceEnabled: updateRoomDto.holidayPriceEnabled }),
-      ...(updateRoomDto.holidayPriceType !== undefined && { holidayPriceType: updateRoomDto.holidayPriceType }),
+      ...(updateRoomDto.holidayPriceEnabled !== undefined && {
+        holidayPriceEnabled: updateRoomDto.holidayPriceEnabled,
+      }),
+      ...(updateRoomDto.holidayPriceType !== undefined && {
+        holidayPriceType: updateRoomDto.holidayPriceType,
+      }),
       ...(updateRoomDto.holidayPrice !== undefined && { holidayPrice: updateRoomDto.holidayPrice }),
-      ...(updateRoomDto.holidayPricePercent !== undefined && { holidayPricePercent: updateRoomDto.holidayPricePercent }),
-      ...(updateRoomDto.seasonalRates !== undefined && { seasonalRates: updateRoomDto.seasonalRates as unknown as Prisma.InputJsonValue }),
+      ...(updateRoomDto.holidayPricePercent !== undefined && {
+        holidayPricePercent: updateRoomDto.holidayPricePercent,
+      }),
+      ...(updateRoomDto.seasonalRates !== undefined && {
+        seasonalRates: updateRoomDto.seasonalRates as unknown as Prisma.InputJsonValue,
+      }),
+      ...(childPricing.childNoExtraCharge !== undefined && {
+        childNoExtraCharge: childPricing.childNoExtraCharge,
+      }),
+      ...(childPricing.childNoExtraChargeNote !== undefined && {
+        childNoExtraChargeNote: childPricing.childNoExtraChargeNote,
+      }),
     };
     return this.prisma.room.update({
       where: { id },
@@ -334,5 +381,57 @@ export class RoomsService {
       }
       throw error;
     }
+  }
+
+  private normalizeChildNoExtraChargeFields(
+    dto: Pick<CreateRoomDto, 'childNoExtraCharge' | 'childNoExtraChargeNote'>,
+    current?: {
+      childNoExtraCharge?: boolean | null;
+      childNoExtraChargeNote?: string | null;
+    },
+  ): {
+    childNoExtraCharge?: boolean;
+    childNoExtraChargeNote?: string | null;
+  } {
+    const hasFlag = dto.childNoExtraCharge !== undefined;
+    const hasNote = dto.childNoExtraChargeNote !== undefined;
+
+    if (!hasFlag && !hasNote) {
+      return {};
+    }
+
+    const note = dto.childNoExtraChargeNote?.trim();
+    const effectiveFlag = dto.childNoExtraCharge ?? current?.childNoExtraCharge ?? false;
+    const effectiveNote = hasNote ? note : current?.childNoExtraChargeNote?.trim();
+
+    if (!effectiveFlag && hasNote) {
+      throw new BadRequestException(
+        'childNoExtraChargeNote can only be set when childNoExtraCharge is true',
+      );
+    }
+
+    if (effectiveFlag) {
+      if (!effectiveNote) {
+        throw new BadRequestException(
+          'childNoExtraChargeNote is required when childNoExtraCharge is true',
+        );
+      }
+
+      return {
+        ...(hasFlag && { childNoExtraCharge: true }),
+        ...(hasNote && { childNoExtraChargeNote: effectiveNote }),
+      };
+    }
+
+    if (dto.childNoExtraCharge === false) {
+      return {
+        childNoExtraCharge: false,
+        childNoExtraChargeNote: null,
+      };
+    }
+
+    return {
+      childNoExtraChargeNote: note ?? null,
+    };
   }
 }

@@ -10,7 +10,7 @@ import {
   IsEnum,
   ValidateNested,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class SeasonalRateDto {
@@ -39,7 +39,10 @@ export class SeasonalRateDto {
   @IsNumber()
   price?: number;
 
-  @ApiPropertyOptional({ example: 20, description: 'เปอร์เซ็นต์ปรับราคา (ใช้เมื่อ priceType = percent)' })
+  @ApiPropertyOptional({
+    example: 20,
+    description: 'เปอร์เซ็นต์ปรับราคา (ใช้เมื่อ priceType = percent)',
+  })
   @IsOptional()
   @IsNumber()
   percentAdjust?: number;
@@ -152,7 +155,11 @@ export class CreateRoomDto {
   @IsBoolean()
   holidayPriceEnabled?: boolean;
 
-  @ApiPropertyOptional({ enum: ['fixed', 'percent'], example: 'percent', description: 'ประเภทการคำนวณราคาวันหยุด' })
+  @ApiPropertyOptional({
+    enum: ['fixed', 'percent'],
+    example: 'percent',
+    description: 'ประเภทการคำนวณราคาวันหยุด',
+  })
   @IsOptional()
   @IsEnum(['fixed', 'percent'])
   holidayPriceType?: 'fixed' | 'percent';
@@ -173,4 +180,21 @@ export class CreateRoomDto {
   @ValidateNested({ each: true })
   @Type(() => SeasonalRateDto)
   seasonalRates?: SeasonalRateDto[];
+
+  @ApiPropertyOptional({
+    example: true,
+    description: 'เด็กเข้าพักฟรี ไม่คิดค่าบริการเพิ่มจากจำนวนเด็ก',
+  })
+  @IsOptional()
+  @IsBoolean()
+  childNoExtraCharge?: boolean;
+
+  @ApiPropertyOptional({
+    example: 'เด็กอายุ 1-10 ปี พักฟรีเมื่อใช้เตียงที่มีอยู่ในห้อง',
+    description: 'หมายเหตุแสดงเงื่อนไขกรณีเด็กไม่คิดเงินเพิ่ม',
+  })
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  childNoExtraChargeNote?: string;
 }

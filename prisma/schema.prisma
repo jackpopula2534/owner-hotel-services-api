@@ -25,25 +25,25 @@ model User {
   metadata      String?        @db.Text
   phone         String?
   status        String         @default("active")
-  tenantId      String?        // activeTenantId for current session context
+  tenantId      String? // activeTenantId for current session context
   timezone      String?
   refreshTokens RefreshToken[]
   notifications Notification[]
-  userTenants   UserTenant[]   // Junction table for multi-tenant support
+  userTenants   UserTenant[] // Junction table for multi-tenant support
 
   @@map("users")
 }
 
 model Admin {
-  id            String         @id @default(uuid()) @db.VarChar(36) 
-  firstName     String?        
-  lastName      String?        
-  email         String         @unique(map: "IDX_051db7d37d478a69a7432df147") 
-  password      String         
-  role          String         @default("platform_admin") 
-  status        String         @default("active") 
+  id            String         @id @default(uuid()) @db.VarChar(36)
+  firstName     String?
+  lastName      String?
+  email         String         @unique(map: "IDX_051db7d37d478a69a7432df147")
+  password      String
+  role          String         @default("platform_admin")
+  status        String         @default("active")
   lastLoginAt   DateTime?      @db.DateTime(0)
-  lastLoginIp   String?        
+  lastLoginIp   String?
   createdAt     DateTime       @default(now()) @db.DateTime(6)
   updatedAt     DateTime       @default(now()) @updatedAt @db.DateTime(6)
   refreshTokens RefreshToken[]
@@ -52,7 +52,7 @@ model Admin {
 }
 
 model RefreshToken {
-  id        String    @id @default(uuid()) @db.VarChar(36) 
+  id        String    @id @default(uuid()) @db.VarChar(36)
   token     String    @unique
   userId    String?   @db.VarChar(36)
   expiresAt DateTime
@@ -120,23 +120,23 @@ model Property {
   deletedAt   DateTime? @map("deleted_at")
 
   // Service Charge & VAT Settings
-  serviceChargeEnabled  Boolean @default(true)
-  serviceChargePercent  Float   @default(10)
-  vatEnabled            Boolean @default(true)
-  vatPercent            Float   @default(7)
-  taxDisplayMode        String  @default("breakdown")
+  serviceChargeEnabled Boolean @default(true)
+  serviceChargePercent Float   @default(10)
+  vatEnabled           Boolean @default(true)
+  vatPercent           Float   @default(7)
+  taxDisplayMode       String  @default("breakdown")
 
   // Check-in / Check-out Time Settings
-  standardCheckInTime    String   @default("14:00")   // HH:mm
-  standardCheckOutTime   String   @default("12:00")   // HH:mm
-  cleaningBufferMinutes  Int      @default(60)         // นาทีหลัง checkout ก่อนห้องพร้อม
-  earlyCheckInEnabled    Boolean  @default(false)
-  lateCheckOutEnabled    Boolean  @default(false)
-  earlyCheckInFeeType    String?  @default("fixed")   // "fixed" | "percentage"
-  earlyCheckInFeeAmount  Decimal? @db.Decimal(10, 2)
-  lateCheckOutFeeType    String?  @default("fixed")   // "fixed" | "percentage"
-  lateCheckOutFeeAmount  Decimal? @db.Decimal(10, 2)
-  timezone               String   @default("Asia/Bangkok")
+  standardCheckInTime   String   @default("14:00") // HH:mm
+  standardCheckOutTime  String   @default("12:00") // HH:mm
+  cleaningBufferMinutes Int      @default(60) // นาทีหลัง checkout ก่อนห้องพร้อม
+  earlyCheckInEnabled   Boolean  @default(false)
+  lateCheckOutEnabled   Boolean  @default(false)
+  earlyCheckInFeeType   String?  @default("fixed") // "fixed" | "percentage"
+  earlyCheckInFeeAmount Decimal? @db.Decimal(10, 2)
+  lateCheckOutFeeType   String?  @default("fixed") // "fixed" | "percentage"
+  lateCheckOutFeeAmount Decimal? @db.Decimal(10, 2)
+  timezone              String   @default("Asia/Bangkok")
 
   rooms            Room[]
   bookings         Booking[]
@@ -149,34 +149,36 @@ model Property {
 }
 
 model Room {
-  id           String    @id @default(uuid())
-  tenantId     String?
-  propertyId   String
-  number       String
-  type         String
-  floor        Int?
-  price        Decimal   @db.Decimal(10, 2)
-  status       String    @default("available")
-  maxOccupancy Int?      @default(2)
-  bedType      String?
-  size         Int?
+  id              String  @id @default(uuid())
+  tenantId        String?
+  propertyId      String
+  number          String
+  type            String
+  floor           Int?
+  price           Decimal @db.Decimal(10, 2)
+  status          String  @default("available")
+  maxOccupancy    Int?    @default(2)
+  bedType         String?
+  size            Int?
   amenities       Json?
-  extraBedAllowed Boolean  @default(false)
-  extraBedLimit   Int      @default(0)
-  extraBedPrice   Decimal  @default(0) @db.Decimal(10, 2)
+  extraBedAllowed Boolean @default(false)
+  extraBedLimit   Int     @default(0)
+  extraBedPrice   Decimal @default(0) @db.Decimal(10, 2)
   description     String?
   images          Json?
 
   // Dynamic Pricing
-  weekendPrice          Decimal? @db.Decimal(10, 2)
-  holidayPriceEnabled   Boolean  @default(false)
-  holidayPriceType      String?
-  holidayPrice          Decimal? @db.Decimal(10, 2)
-  holidayPricePercent   Float?
-  seasonalRates         Json?
+  weekendPrice           Decimal? @db.Decimal(10, 2)
+  holidayPriceEnabled    Boolean  @default(false)
+  holidayPriceType       String?
+  holidayPrice           Decimal? @db.Decimal(10, 2)
+  holidayPricePercent    Float?
+  seasonalRates          Json?
+  childNoExtraCharge     Boolean  @default(false)
+  childNoExtraChargeNote String?  @db.Text
 
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
   property          Property           @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   bookings          Booking[]
   housekeepingTasks HousekeepingTask[]
@@ -189,48 +191,62 @@ model Room {
 }
 
 model Booking {
-  id              String    @id @default(uuid())
-  tenantId        String?
-  propertyId      String
-  guestId         String?
-  roomId          String
-  guestFirstName  String
-  guestLastName   String
-  guestEmail      String?
-  guestPhone      String?
-  checkIn              DateTime
-  checkOut             DateTime
+  id                String    @id @default(uuid())
+  tenantId          String?
+  propertyId        String
+  guestId           String?
+  roomId            String
+  guestFirstName    String
+  guestLastName     String
+  guestEmail        String?
+  guestPhone        String?
+  adults            Int?      @default(1)
+  children          Int?      @default(0)
+  numberOfGuests    Int?      @default(1)
+  baseCapacity      Int?      @default(2)
+  extraBedCapacity  Int?      @default(0)
+  totalCapacity     Int?      @default(2)
+  extraBedGuests    Int?      @default(0)
+  standardBedGuests Int?      @default(1)
+  checkIn           DateTime
+  checkOut          DateTime
   // Scheduled times (date + standard property time)
-  scheduledCheckIn     DateTime?
-  scheduledCheckOut    DateTime?
-  actualCheckIn        DateTime?
-  actualCheckOut       DateTime?
+  scheduledCheckIn  DateTime?
+  scheduledCheckOut DateTime?
+  actualCheckIn     DateTime?
+  actualCheckOut    DateTime?
 
   // Early Check-in / Late Check-out
-  requestedEarlyCheckIn  Boolean?  @default(false)
-  approvedEarlyCheckIn   Boolean?  @default(false)
-  earlyCheckInFee        Decimal?  @db.Decimal(10, 2)
-  requestedLateCheckOut  Boolean?  @default(false)
-  approvedLateCheckOut   Boolean?  @default(false)
-  lateCheckOutFee        Decimal?  @db.Decimal(10, 2)
+  requestedEarlyCheckIn Boolean? @default(false)
+  approvedEarlyCheckIn  Boolean? @default(false)
+  earlyCheckInFee       Decimal? @db.Decimal(10, 2)
+  requestedLateCheckOut Boolean? @default(false)
+  approvedLateCheckOut  Boolean? @default(false)
+  lateCheckOutFee       Decimal? @db.Decimal(10, 2)
 
-  status          String    @default("pending")
-  totalPrice      Decimal   @db.Decimal(10, 2)
-  notes           String?
+  status              String   @default("pending")
+  totalPrice          Decimal  @db.Decimal(10, 2)
+  roomSubtotal        Decimal? @db.Decimal(10, 2)
+  serviceChargeAmount Decimal? @db.Decimal(10, 2)
+  vatAmount           Decimal? @db.Decimal(10, 2)
+  grandTotal          Decimal? @db.Decimal(10, 2)
+  pricingBreakdown    Json?
+  source              String?
+  notes               String?
 
   // Payment Fields
-  paymentMethod   String?
-  paymentStatus   String?   @default("pending")
-  amountPaid      Decimal?  @db.Decimal(10, 2)
-  paymentNote     String?
+  paymentMethod String?
+  paymentStatus String?  @default("pending")
+  amountPaid    Decimal? @db.Decimal(10, 2)
+  paymentNote   String?
 
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  channelId       String?
-  channel           Channel?          @relation(fields: [channelId], references: [id])
-  guest             Guest?            @relation(fields: [guestId], references: [id], onDelete: SetNull)
-  room              Room              @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  property          Property          @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  channelId         String?
+  channel           Channel?           @relation(fields: [channelId], references: [id])
+  guest             Guest?             @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  room              Room               @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  property          Property           @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   review            Review?
   housekeepingTasks HousekeepingTask[]
   addOns            BookingAddOn[]
@@ -289,7 +305,7 @@ model Employee {
   updatedAt    DateTime  @updatedAt
 
   // HR Add-on: reverse relation — one Employee can be linked to one Staff record
-  staff        Staff?    @relation("StaffEmployee")
+  staff Staff? @relation("StaffEmployee")
 
   @@index([tenantId])
   @@map("employees")
@@ -316,20 +332,20 @@ model Channel {
 }
 
 model billing_history {
-  id String @id @default(uuid()) @db.VarChar(36)
-  subscription_id   String                    
-  invoice_id        String?                   
+  id                String                    @id @default(uuid()) @db.VarChar(36)
+  subscription_id   String
+  invoice_id        String?
   eventType         billing_history_eventType
   description       String?                   @db.Text
-  old_plan_id       String?                   
-  new_plan_id       String?                   
-  old_billing_cycle String?                   
-  new_billing_cycle String?                   
+  old_plan_id       String?
+  new_plan_id       String?
+  old_billing_cycle String?
+  new_billing_cycle String?
   old_amount        Decimal?                  @db.Decimal(10, 2)
   new_amount        Decimal?                  @db.Decimal(10, 2)
   period_start      DateTime?                 @db.Date
   period_end        DateTime?                 @db.Date
-  created_by        String?                   
+  created_by        String?
   metadata          Json?
   created_at        DateTime                  @default(now()) @db.DateTime(6)
   subscriptions     subscriptions             @relation(fields: [subscription_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "FK_cf2c4c1d8fe13560a70057b4a0b")
@@ -340,9 +356,9 @@ model billing_history {
 }
 
 model features {
-  id String @id @default(uuid()) @db.VarChar(36)
-  code                  String                  @unique(map: "IDX_c0e1f5d0ba8027c186705d752b") 
-  name                  String                  
+  id                    String                  @id @default(uuid()) @db.VarChar(36)
+  code                  String                  @unique(map: "IDX_c0e1f5d0ba8027c186705d752b")
+  name                  String
   description           String?                 @db.Text
   type                  features_type
   price_monthly         Decimal                 @default(0.00) @db.Decimal(10, 2)
@@ -352,16 +368,16 @@ model features {
 }
 
 model invoice_adjustments {
-  id String @id @default(uuid()) @db.VarChar(36)
-  invoice_id           String                   
+  id                   String                   @id @default(uuid()) @db.VarChar(36)
+  invoice_id           String
   type                 invoice_adjustments_type
   amount               Decimal                  @db.Decimal(10, 2)
   original_amount      Decimal                  @db.Decimal(10, 2)
   new_amount           Decimal                  @db.Decimal(10, 2)
   reason               String?                  @db.Text
   notes                String?                  @db.Text
-  adjustment_reference String?                  
-  created_by           String?                  
+  adjustment_reference String?
+  created_by           String?
   created_at           DateTime                 @default(now()) @db.DateTime(6)
   invoices             invoices                 @relation(fields: [invoice_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "FK_7404e72e5be63d0d41859bf4f1d")
 
@@ -369,11 +385,11 @@ model invoice_adjustments {
 }
 
 model invoice_items {
-  id String @id @default(uuid()) @db.VarChar(36)
-  invoice_id      String             
+  id              String             @id @default(uuid()) @db.VarChar(36)
+  invoice_id      String
   type            invoice_items_type
-  ref_id          String?            
-  description     String             
+  ref_id          String?
+  description     String
   quantity        Int                @default(1)
   unit_price      Decimal            @db.Decimal(10, 2)
   amount          Decimal            @db.Decimal(10, 2)
@@ -387,10 +403,10 @@ model invoice_items {
 }
 
 model invoices {
-  id String @id @default(uuid()) @db.VarChar(36)
+  id                  String                @id @default(uuid()) @db.VarChar(36)
   tenant_id           String
   subscription_id     String?
-  booking_id          String?               // Link to booking for room reservations
+  booking_id          String? // Link to booking for room reservations
   invoice_no          String                @unique(map: "IDX_37669c562a2525929927d9d691")
   amount              Decimal               @db.Decimal(10, 2)
   original_amount     Decimal?              @db.Decimal(10, 2)
@@ -415,22 +431,22 @@ model invoices {
 }
 
 model payment_refunds {
-  id String @id @default(uuid()) @db.VarChar(36)
-  payment_id      String                 
-  refund_no       String                 @unique(map: "IDX_35175cde68c765c82603c2ad4e") 
+  id              String                 @id @default(uuid()) @db.VarChar(36)
+  payment_id      String
+  refund_no       String                 @unique(map: "IDX_35175cde68c765c82603c2ad4e")
   amount          Decimal                @db.Decimal(10, 2)
   status          payment_refunds_status @default(pending)
   method          payment_refunds_method @default(original_method)
   reason          String                 @db.Text
   notes           String?                @db.Text
-  bank_account    String?                
-  bank_name       String?                
-  account_holder  String?                
-  credit_id       String?                
+  bank_account    String?
+  bank_name       String?
+  account_holder  String?
+  credit_id       String?
   processed_at    DateTime?              @db.Timestamp(0)
-  processed_by    String?                
+  processed_by    String?
   rejected_reason String?                @db.Text
-  created_by      String?                
+  created_by      String?
   created_at      DateTime               @default(now()) @db.DateTime(6)
   payments        payments               @relation(fields: [payment_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "FK_a10d6c1918989353b79932a2bad")
 
@@ -438,7 +454,7 @@ model payment_refunds {
 }
 
 model payments {
-  id String @id @default(uuid()) @db.VarChar(36)
+  id              String            @id @default(uuid()) @db.VarChar(36)
   payment_no      String?           @unique(map: "IDX_8aaa54db3d9827cba0999b7fb2")
   invoice_id      String
   tenant_id       String?           @db.VarChar(36)
@@ -459,9 +475,9 @@ model payments {
 }
 
 model plan_features {
-  id String @id @default(uuid()) @db.VarChar(36)
-  plan_id    String   
-  feature_id String   
+  id         String   @id @default(uuid()) @db.VarChar(36)
+  plan_id    String
+  feature_id String
   features   features @relation(fields: [feature_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "FK_27e866bdf4c6f2cf5854b7d0e57")
   plans      plans    @relation(fields: [plan_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "FK_b51952483b18fa15334d714a838")
 
@@ -470,9 +486,9 @@ model plan_features {
 }
 
 model plans {
-  id String @id @default(uuid()) @db.VarChar(36)
-  code                                                String          @unique(map: "IDX_95f7ef3fc4c31a3545b4d825dd") 
-  name                                                String          
+  id                                                  String          @id @default(uuid()) @db.VarChar(36)
+  code                                                String          @unique(map: "IDX_95f7ef3fc4c31a3545b4d825dd")
+  name                                                String
   price_monthly                                       Decimal         @db.Decimal(10, 2)
   price_yearly                                        Decimal?        @db.Decimal(10, 2)
   yearly_discount_percent                             Int             @default(0)
@@ -496,11 +512,11 @@ model plans {
 }
 
 model subscription_feature_logs {
-  id String @id @default(uuid()) @db.VarChar(36)
-  subscription_feature_id String?                          
-  subscription_id         String                           
-  feature_id              String                           
-  feature_name            String                           
+  id                      String                           @id @default(uuid()) @db.VarChar(36)
+  subscription_feature_id String?
+  subscription_id         String
+  feature_id              String
+  feature_name            String
   action                  subscription_feature_logs_action
   old_price               Decimal?                         @db.Decimal(10, 2)
   new_price               Decimal?                         @db.Decimal(10, 2)
@@ -510,7 +526,7 @@ model subscription_feature_logs {
   credit_amount           Decimal?                         @db.Decimal(10, 2)
   reason                  String?                          @db.Text
   effective_date          DateTime?                        @db.Date
-  created_by              String?                          
+  created_by              String?
   created_at              DateTime                         @default(now()) @db.DateTime(6)
   subscription_features   subscription_features?           @relation(fields: [subscription_feature_id], references: [id], onUpdate: NoAction, map: "FK_490409e983f4d310ad3da4d8470")
 
@@ -518,9 +534,9 @@ model subscription_feature_logs {
 }
 
 model subscription_features {
-  id String @id @default(uuid()) @db.VarChar(36)
-  subscription_id           String                      
-  feature_id                String                      
+  id                        String                      @id @default(uuid()) @db.VarChar(36)
+  subscription_id           String
+  feature_id                String
   quantity                  Int?                        @default(1)
   price                     Decimal                     @db.Decimal(10, 2)
   is_active                 Int                         @default(1) @db.TinyInt
@@ -535,11 +551,11 @@ model subscription_features {
 }
 
 model subscriptions {
-  id String @id @default(uuid()) @db.VarChar(36)
-  subscription_code                           String?                     @unique(map: "IDX_616df085ddc496ef3609383682") 
-  tenant_id                                   String                      
-  plan_id                                     String                      
-  previous_plan_id                            String?                     
+  id                                          String                      @id @default(uuid()) @db.VarChar(36)
+  subscription_code                           String?                     @unique(map: "IDX_616df085ddc496ef3609383682")
+  tenant_id                                   String
+  plan_id                                     String
+  previous_plan_id                            String?
   status                                      subscriptions_status        @default(trial)
   billing_cycle                               subscriptions_billing_cycle @default(monthly)
   start_date                                  DateTime                    @db.Date
@@ -566,18 +582,18 @@ model subscriptions {
 }
 
 model tenant_credits {
-  id String @id @default(uuid()) @db.VarChar(36)
-  tenant_id        String                
+  id               String                @id @default(uuid()) @db.VarChar(36)
+  tenant_id        String
   type             tenant_credits_type   @default(manual)
   status           tenant_credits_status @default(available)
   original_amount  Decimal               @db.Decimal(10, 2)
   remaining_amount Decimal               @db.Decimal(10, 2)
   description      String?               @db.Text
-  reference_type   String?               
-  reference_id     String?               
+  reference_type   String?
+  reference_id     String?
   expires_at       DateTime?             @db.Timestamp(0)
   used_at          DateTime?             @db.Timestamp(0)
-  created_by       String?               
+  created_by       String?
   created_at       DateTime              @default(now()) @db.DateTime(6)
   tenants          tenants               @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "FK_1c75d0789feee398e6cd35df720")
 
@@ -594,8 +610,8 @@ model UserTenant {
   createdAt DateTime @default(now()) @db.DateTime(6)
   updatedAt DateTime @default(now()) @updatedAt @db.DateTime(6)
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tenant    tenants  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant tenants @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([userId, tenantId])
   @@index([userId])
@@ -604,7 +620,7 @@ model UserTenant {
 }
 
 model tenants {
-  id String @id @default(uuid()) @db.VarChar(36)
+  id             String           @id @default(uuid()) @db.VarChar(36)
   name           String
   room_count     Int              @default(0)
   name_en        String?
@@ -627,7 +643,7 @@ model tenants {
   invoices       invoices[]
   subscriptions  subscriptions[]
   tenant_credits tenant_credits[]
-  userTenants    UserTenant[]     // Junction table for multi-tenant support
+  userTenants    UserTenant[] // Junction table for multi-tenant support
   payments       payments[]
 }
 
@@ -643,7 +659,8 @@ model Notification {
   createdAt DateTime @default(now()) @db.DateTime(6)
   updatedAt DateTime @default(now()) @updatedAt @db.DateTime(6)
 
-  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@index([userId])
   @@index([tenantId])
   @@map("notifications")
@@ -913,19 +930,19 @@ model EmailLog {
 }
 
 model EmailPreference {
-  id                  String   @id @default(uuid())
+  id                  String    @id @default(uuid())
   tenantId            String?
   guestId             String?
   email               String
-  bookingConfirmation Boolean  @default(true)
-  checkInReminder     Boolean  @default(true)
-  checkOutReminder    Boolean  @default(true)
-  paymentReceipt      Boolean  @default(true)
-  promotionalEmails   Boolean  @default(false)
-  newsletter          Boolean  @default(false)
+  bookingConfirmation Boolean   @default(true)
+  checkInReminder     Boolean   @default(true)
+  checkOutReminder    Boolean   @default(true)
+  paymentReceipt      Boolean   @default(true)
+  promotionalEmails   Boolean   @default(false)
+  newsletter          Boolean   @default(false)
   unsubscribedAt      DateTime?
-  createdAt           DateTime @default(now()) @db.DateTime(6)
-  updatedAt           DateTime @default(now()) @updatedAt @db.DateTime(6)
+  createdAt           DateTime  @default(now()) @db.DateTime(6)
+  updatedAt           DateTime  @default(now()) @updatedAt @db.DateTime(6)
 
   @@unique([email, tenantId])
   @@index([tenantId])
@@ -945,19 +962,19 @@ enum EmailStatus {
 
 // ==================== Audit Logging ====================
 model AuditLog {
-  id           String   @id @default(uuid())
-  tenantId     String?
-  userId       String?
-  adminId      String?
-  action       String
-  resource     String
-  resourceId   String?
-  oldValues    Json?
-  newValues    Json?
-  ipAddress    String?
-  userAgent    String?
-  description  String?  @db.Text
-  createdAt    DateTime @default(now()) @db.DateTime(6)
+  id          String   @id @default(uuid())
+  tenantId    String?
+  userId      String?
+  adminId     String?
+  action      String
+  resource    String
+  resourceId  String?
+  oldValues   Json?
+  newValues   Json?
+  ipAddress   String?
+  userAgent   String?
+  description String?  @db.Text
+  createdAt   DateTime @default(now()) @db.DateTime(6)
 
   @@index([tenantId])
   @@index([userId])
@@ -1027,8 +1044,8 @@ model LineNotifyToken {
   userId        String
   accessToken   String   @db.Text
   targetName    String?
-  targetType    String?  // USER or GROUP
-  enabledEvents Json?    // Array of enabled event types
+  targetType    String? // USER or GROUP
+  enabledEvents Json? // Array of enabled event types
   isActive      Boolean  @default(true)
   createdAt     DateTime @default(now()) @db.DateTime(6)
   updatedAt     DateTime @default(now()) @updatedAt @db.DateTime(6)
@@ -1045,7 +1062,7 @@ model PushNotificationDevice {
   userId       String
   tenantId     String?
   deviceToken  String   @db.VarChar(512)
-  platform     String   // ios, android, web
+  platform     String // ios, android, web
   deviceModel  String?
   osVersion    String?
   appVersion   String?
@@ -1076,14 +1093,14 @@ model PushNotificationPreference {
 }
 
 model PushNotificationLog {
-  id        String   @id @default(uuid())
-  userId    String
-  title     String
-  body      String   @db.Text
-  type      String
-  data      Json?
-  sentAt    DateTime @default(now()) @db.DateTime(6)
-  readAt    DateTime?
+  id     String    @id @default(uuid())
+  userId String
+  title  String
+  body   String    @db.Text
+  type   String
+  data   Json?
+  sentAt DateTime  @default(now()) @db.DateTime(6)
+  readAt DateTime?
 
   @@index([userId])
   @@index([sentAt])
@@ -1093,28 +1110,28 @@ model PushNotificationLog {
 // ==================== Housekeeping Management ====================
 // ─── Staff ────────────────────────────────────────────────────────────────────
 model Staff {
-  id               String    @id @default(uuid())
+  id               String   @id @default(uuid())
   tenantId         String
   firstName        String
   lastName         String
   email            String
   phone            String?
-  role             String    // housekeeper | technician | supervisor | manager
-  department       String?   // housekeeping | maintenance | front_desk
+  role             String // housekeeper | technician | supervisor | manager
+  department       String? // housekeeping | maintenance | front_desk
   employeeCode     String?
-  status           String    @default("active") // active | inactive | on_leave
-  shiftType        String?   // morning | afternoon | night | flexible
-  maxTasksPerShift Int?      @default(8)
-  specializations  String?   @db.Text  // JSON: ["deep-cleaning","ac-repair"]
-  rating           Decimal?  @db.Decimal(3, 2)
-  efficiency       Int?      @default(100)
+  status           String   @default("active") // active | inactive | on_leave
+  shiftType        String? // morning | afternoon | night | flexible
+  maxTasksPerShift Int?     @default(8)
+  specializations  String?  @db.Text // JSON: ["deep-cleaning","ac-repair"]
+  rating           Decimal? @db.Decimal(3, 2)
+  efficiency       Int?     @default(100)
 
   // HR Add-on: optional link to Employee record (requires HR_MODULE add-on)
-  employeeId       String?   @unique
-  employee         Employee? @relation("StaffEmployee", fields: [employeeId], references: [id], onDelete: SetNull)
+  employeeId String?   @unique
+  employee   Employee? @relation("StaffEmployee", fields: [employeeId], references: [id], onDelete: SetNull)
 
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   housekeepingTasks    HousekeepingTask[] @relation("AssignedStaff")
   inspectedTasks       HousekeepingTask[] @relation("InspectorStaff")
@@ -1130,49 +1147,49 @@ model Staff {
 
 // ─── MaintenanceTask ──────────────────────────────────────────────────────────
 model MaintenanceTask {
-  id                String    @id @default(uuid())
-  tenantId          String
-  propertyId        String
-  roomId            String?
+  id         String  @id @default(uuid())
+  tenantId   String
+  propertyId String
+  roomId     String?
 
-  title             String
-  description       String?   @db.Text
-  category          String    // ac | plumbing | electrical | furniture | structural | pest | safety | other
-  priority          String    @default("medium") // low | medium | high | urgent
-  status            String    @default("pending") // pending | in_progress | completed | on_hold | cancelled
+  title       String
+  description String? @db.Text
+  category    String // ac | plumbing | electrical | furniture | structural | pest | safety | other
+  priority    String  @default("medium") // low | medium | high | urgent
+  status      String  @default("pending") // pending | in_progress | completed | on_hold | cancelled
 
   // Scheduling
   assignedToId      String?
   requestedDate     DateTime?
   scheduledDate     DateTime?
-  estimatedDuration Int?      // นาที
+  estimatedDuration Int? // นาที
 
   // Execution
-  startedAt         DateTime?
-  completedAt       DateTime?
-  actualDuration    Int?      // นาที
+  startedAt      DateTime?
+  completedAt    DateTime?
+  actualDuration Int? // นาที
 
   // Cost
-  estimatedCost     Decimal?  @db.Decimal(10, 2)
-  actualCost        Decimal?  @db.Decimal(10, 2)
-  partsUsed         String?   @db.Text  // JSON: [{name,qty,cost}]
+  estimatedCost Decimal? @db.Decimal(10, 2)
+  actualCost    Decimal? @db.Decimal(10, 2)
+  partsUsed     String?  @db.Text // JSON: [{name,qty,cost}]
 
   // QA
-  inspectedById     String?
-  inspectedAt       DateTime?
-  rating            Int?      // 1-5
-  inspectionNotes   String?   @db.Text
+  inspectedById   String?
+  inspectedAt     DateTime?
+  rating          Int? // 1-5
+  inspectionNotes String?   @db.Text
 
-  notes             String?   @db.Text
-  attachments       String?   @db.Text  // JSON: [urls]
+  notes       String? @db.Text
+  attachments String? @db.Text // JSON: [urls]
 
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  property     Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  room         Room?     @relation(fields: [roomId], references: [id], onDelete: SetNull)
-  assignedTo   Staff?    @relation("AssignedTechnician", fields: [assignedToId], references: [id], onDelete: SetNull)
-  inspectedBy  Staff?    @relation("InspectorTechnician", fields: [inspectedById], references: [id], onDelete: SetNull)
+  property    Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  room        Room?    @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  assignedTo  Staff?   @relation("AssignedTechnician", fields: [assignedToId], references: [id], onDelete: SetNull)
+  inspectedBy Staff?   @relation("InspectorTechnician", fields: [inspectedById], references: [id], onDelete: SetNull)
 
   @@index([tenantId])
   @@index([propertyId])
@@ -1185,19 +1202,19 @@ model MaintenanceTask {
 
 // ─── BookingAddOn ─────────────────────────────────────────────────────────────
 model BookingAddOn {
-  id          String   @id @default(uuid())
+  id          String  @id @default(uuid())
   bookingId   String
   tenantId    String
-  type        String   // early_checkin | late_checkout | extra_bed | breakfast | parking
+  type        String // early_checkin | late_checkout | extra_bed | breakfast | parking
   description String
-  quantity    Int      @default(1)
-  unitPrice   Decimal  @db.Decimal(10, 2)
-  amount      Decimal  @db.Decimal(10, 2)
+  quantity    Int     @default(1)
+  unitPrice   Decimal @db.Decimal(10, 2)
+  amount      Decimal @db.Decimal(10, 2)
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  booking     Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 
   @@index([bookingId])
   @@index([tenantId])
@@ -1206,49 +1223,49 @@ model BookingAddOn {
 
 // ─── HousekeepingTask ─────────────────────────────────────────────────────────
 model HousekeepingTask {
-  id                   String    @id @default(uuid())
-  tenantId             String
-  roomId               String
-  bookingId            String?   // link to checkout booking
+  id        String  @id @default(uuid())
+  tenantId  String
+  roomId    String
+  bookingId String? // link to checkout booking
 
-  type                 String    @default("daily")   // daily | checkout | deep | turndown | inspection | urgent
-  priority             String    @default("medium")  // low | medium | high | urgent
-  status               String    @default("pending") // pending | in_progress | completed | inspected
+  type     String @default("daily") // daily | checkout | deep | turndown | inspection | urgent
+  priority String @default("medium") // low | medium | high | urgent
+  status   String @default("pending") // pending | in_progress | completed | inspected
 
   // Scheduling
-  scheduledFor         DateTime? // เวลาที่ควรเริ่มทำ
-  estimatedDuration    Int       @default(30) // นาที
+  scheduledFor      DateTime? // เวลาที่ควรเริ่มทำ
+  estimatedDuration Int       @default(30) // นาที
 
   // Execution Tracking
-  actualStartTime      DateTime?
-  actualEndTime        DateTime?
-  actualDuration       Int?      // นาที (คำนวณจาก end - start)
-  startTime            DateTime? // legacy alias
-  endTime              DateTime? // legacy alias
+  actualStartTime DateTime?
+  actualEndTime   DateTime?
+  actualDuration  Int? // นาที (คำนวณจาก end - start)
+  startTime       DateTime? // legacy alias
+  endTime         DateTime? // legacy alias
 
   // Room Readiness
-  roomReadyAt          DateTime? // checkout + cleaningBufferMinutes
+  roomReadyAt DateTime? // checkout + cleaningBufferMinutes
 
   // Assignment
   assignedToId         String?
-  assignedToName       String?   // denormalized
+  assignedToName       String? // denormalized
   completionPercentage Int?
 
   // QA
-  inspectedById        String?
-  inspectedByName      String?   // denormalized
-  inspectedAt          DateTime?
-  rating               Int?      // 1-5
-  inspectionNotes      String?   @db.Text
-  notes                String?   @db.Text
+  inspectedById   String?
+  inspectedByName String? // denormalized
+  inspectedAt     DateTime?
+  rating          Int? // 1-5
+  inspectionNotes String?   @db.Text
+  notes           String?   @db.Text
 
-  createdAt            DateTime  @default(now()) @db.DateTime(6)
-  updatedAt            DateTime  @default(now()) @updatedAt @db.DateTime(6)
+  createdAt DateTime @default(now()) @db.DateTime(6)
+  updatedAt DateTime @default(now()) @updatedAt @db.DateTime(6)
 
-  room         Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  booking      Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
-  assignedTo   Staff?   @relation("AssignedStaff", fields: [assignedToId], references: [id], onDelete: SetNull)
-  inspectedBy  Staff?   @relation("InspectorStaff", fields: [inspectedById], references: [id], onDelete: SetNull)
+  room        Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  booking     Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  assignedTo  Staff?   @relation("AssignedStaff", fields: [assignedToId], references: [id], onDelete: SetNull)
+  inspectedBy Staff?   @relation("InspectorStaff", fields: [inspectedById], references: [id], onDelete: SetNull)
 
   @@index([roomId])
   @@index([bookingId])

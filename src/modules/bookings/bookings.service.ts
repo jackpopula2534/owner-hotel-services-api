@@ -32,6 +32,44 @@ function mapToPaymentsMethod(frontendMethod?: string): PaymentMethod | null {
   }
 }
 
+function toBookingStatusLabel(status?: string): string {
+  switch (status) {
+    case 'pending':
+      return 'รอยืนยัน';
+    case 'confirmed':
+      return 'ยืนยันแล้ว';
+    case 'checked_in':
+      return 'เช็คอินแล้ว';
+    case 'checked_out':
+      return 'เช็คเอาท์แล้ว';
+    case 'cancelled':
+      return 'ยกเลิก';
+    default:
+      return status ?? '-';
+  }
+}
+
+type NightlyPricingRow = {
+  date: string;
+  dayName: string;
+  baseRate: number;
+  appliedRate: number;
+  pricingType: 'base' | 'weekend' | 'holiday' | 'seasonal';
+  pricingLabel: string;
+  note?: string;
+};
+
+type BookingPricingSummary = {
+  nightlyRates: NightlyPricingRow[];
+  roomSubtotal: number;
+  serviceChargePercent: number;
+  serviceChargeAmount: number;
+  vatPercent: number;
+  vatAmount: number;
+  grandTotal: number;
+  currency: 'THB';
+};
+
 @Injectable()
 export class BookingsService {
   private readonly logger = new Logger(BookingsService.name);
@@ -61,9 +99,12 @@ export class BookingsService {
     }
 
     const [hours, minutes] = fallbackTime.split(':').map(Number);
-    const date = new Date(`${value}T00:00:00.000Z`);
-    date.setUTCHours(hours, minutes, 0, 0);
-    return date;
+    // Treat the time as Bangkok local time (UTC+7) by appending the offset.
+    // e.g. "2026-04-23" + "14:00" → "2026-04-23T14:00:00+07:00" = 07:00 UTC stored in DB,
+    // which renders correctly as 14:00 when displayed in Bangkok timezone.
+    const hh = String(hours).padStart(2, '0');
+    const mm = String(minutes).padStart(2, '0');
+    return new Date(`${value}T${hh}:${mm}:00+07:00`);
   }
 
   private asNonEmptyString(value: unknown): string | undefined {
@@ -73,6 +114,62 @@ export class BookingsService {
 
     const trimmed = value.trim();
     return trimmed.length > 0 ? trimmed : undefined;
+  }
+
+  private toFiniteNumber(value: unknown): number | undefined {
+    if (value === null || value === undefined || value === '') {
+      return undefined;
+    }
+
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+
+  private roundCurrency(value: number): number {
+    return Math.round((value + Number.EPSILON) * 100) / 100;
+  }
+
+  private toDateOnlyString(value: Date): string {
+    return value.toISOString().slice(0, 10);
+  }
+
+  private formatDateLabel(value: Date | string | null | undefined): string | null {
+    if (!value) {
+      return null;
+    }
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return null;
+    }
+
+    return new Intl.DateTimeFormat('th-TH', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      timeZone: 'Asia/Bangkok',
+    }).format(date);
+  }
+
+  private getDateRange(checkInDate: Date, checkOutDate: Date): Date[] {
+    const dates: Date[] = [];
+    const cursor = new Date(Date.UTC(
+      checkInDate.getUTCFullYear(),
+      checkInDate.getUTCMonth(),
+      checkInDate.getUTCDate(),
+    ));
+    const end = new Date(Date.UTC(
+      checkOutDate.getUTCFullYear(),
+      checkOutDate.getUTCMonth(),
+      checkOutDate.getUTCDate(),
+    ));
+
+    while (cursor < end) {
+      dates.push(new Date(cursor));
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+
+    return dates;
   }
 
   private normalizeCreateBookingDto(createBookingDto: CreateBookingDto): CreateBookingDto {
@@ -129,6 +226,21 @@ export class BookingsService {
       createBookingDto.propertyId ??
       this.asNonEmptyString(rawDto.property?.id);
 
+    createBookingDto.adults =
+      createBookingDto.adults ??
+      this.toFiniteNumber(rawDto.guestCounts?.adults) ??
+      this.toFiniteNumber(rawDto.occupancy?.adults);
+
+    createBookingDto.children =
+      createBookingDto.children ??
+      this.toFiniteNumber(rawDto.guestCounts?.children) ??
+      this.toFiniteNumber(rawDto.occupancy?.children);
+
+    createBookingDto.numberOfGuests =
+      createBookingDto.numberOfGuests ??
+      this.toFiniteNumber(rawDto.guestCounts?.total) ??
+      this.toFiniteNumber(rawDto.occupancy?.total);
+
     // 4. Initial validation (ensure core fields exist)
     if (!createBookingDto.checkIn) {
       throw new BadRequestException('checkIn is required');
@@ -152,6 +264,187 @@ export class BookingsService {
     return createBookingDto;
   }
 
+  private resolveOccupancy(createBookingDto: CreateBookingDto, room: any): {
+    adults: number;
+    children: number;
+    numberOfGuests: number;
+    baseCapacity: number;
+    extraBedCapacity: number;
+    totalCapacity: number;
+    standardBedGuests: number;
+    extraBedGuests: number;
+  } {
+    const adults = Math.max(0, Math.trunc(createBookingDto.adults ?? 1));
+    const children = Math.max(0, Math.trunc(createBookingDto.children ?? 0));
+    const fallbackGuestCount = adults + children > 0 ? adults + children : 1;
+    const numberOfGuests = Math.max(
+      1,
+      Math.trunc(createBookingDto.numberOfGuests ?? fallbackGuestCount),
+    );
+
+    const baseCapacity = Math.max(0, Number(room.maxOccupancy ?? 0));
+    const extraBedCapacity =
+      room.extraBedAllowed ? Math.max(0, Number(room.extraBedLimit ?? 0)) : 0;
+    const totalCapacity = baseCapacity + extraBedCapacity;
+    const standardBedGuests = baseCapacity > 0
+      ? Math.min(numberOfGuests, baseCapacity)
+      : numberOfGuests;
+    const extraBedGuests = Math.max(0, numberOfGuests - standardBedGuests);
+
+    if (totalCapacity > 0 && numberOfGuests > totalCapacity) {
+      throw new BadRequestException(
+        `Room capacity exceeded: supports ${totalCapacity} guests`,
+      );
+    }
+
+    return {
+      adults,
+      children,
+      numberOfGuests,
+      baseCapacity,
+      extraBedCapacity,
+      totalCapacity,
+      standardBedGuests,
+      extraBedGuests,
+    };
+  }
+
+  private calculateNightlyRate(
+    room: any,
+    date: Date,
+    holidayDates: Set<string>,
+  ): NightlyPricingRow {
+    const dateString = this.toDateOnlyString(date);
+    const baseRate = Number(room.price ?? 0);
+    let appliedRate = baseRate;
+    let pricingType: NightlyPricingRow['pricingType'] = 'base';
+    let pricingLabel = 'ราคาปกติ';
+    let note: string | undefined;
+
+    const seasonalRates = Array.isArray(room.seasonalRates) ? room.seasonalRates : [];
+    const seasonalMatch = seasonalRates
+      .filter((rate: any) => rate?.isActive !== false)
+      .find((rate: any) => {
+        const startDate = this.asNonEmptyString(rate?.startDate);
+        const endDate = this.asNonEmptyString(rate?.endDate);
+        return !!startDate && !!endDate && startDate <= dateString && dateString <= endDate;
+      });
+
+    if (seasonalMatch) {
+      if (seasonalMatch.priceType === 'fixed' && this.toFiniteNumber(seasonalMatch.price) !== undefined) {
+        appliedRate = this.toFiniteNumber(seasonalMatch.price) as number;
+      } else if (
+        seasonalMatch.priceType === 'percent' &&
+        this.toFiniteNumber(seasonalMatch.percentAdjust) !== undefined
+      ) {
+        appliedRate = baseRate * (1 + (this.toFiniteNumber(seasonalMatch.percentAdjust) as number) / 100);
+      }
+      pricingType = 'seasonal';
+      pricingLabel = seasonalMatch.name || 'Seasonal rate';
+      note = this.asNonEmptyString(seasonalMatch.note);
+    } else if (holidayDates.has(dateString) && room.holidayPriceEnabled) {
+      if (room.holidayPriceType === 'fixed' && room.holidayPrice !== null && room.holidayPrice !== undefined) {
+        appliedRate = Number(room.holidayPrice);
+      } else if (
+        room.holidayPriceType === 'percent' &&
+        room.holidayPricePercent !== null &&
+        room.holidayPricePercent !== undefined
+      ) {
+        appliedRate = baseRate * (1 + Number(room.holidayPricePercent) / 100);
+      } else if (room.holidayPrice !== null && room.holidayPrice !== undefined) {
+        appliedRate = Number(room.holidayPrice);
+      }
+      pricingType = 'holiday';
+      pricingLabel = 'วันหยุด';
+      note = 'Applied holiday pricing';
+    } else {
+      const utcDay = date.getUTCDay();
+      const isWeekend = utcDay === 0 || utcDay === 6;
+      if (isWeekend && room.weekendPrice !== null && room.weekendPrice !== undefined) {
+        appliedRate = Number(room.weekendPrice);
+        pricingType = 'weekend';
+        pricingLabel = 'วันหยุดสุดสัปดาห์';
+        note = 'Applied weekend pricing';
+      }
+    }
+
+    return {
+      date: dateString,
+      dayName: new Intl.DateTimeFormat('en-US', { weekday: 'long', timeZone: 'UTC' }).format(date),
+      baseRate: this.roundCurrency(baseRate),
+      appliedRate: this.roundCurrency(appliedRate),
+      pricingType,
+      pricingLabel,
+      ...(note && { note }),
+    };
+  }
+
+  private resolveBookingPricing(
+    createBookingDto: CreateBookingDto,
+    room: any,
+    property: any,
+    checkInDate: Date,
+    checkOutDate: Date,
+  ): BookingPricingSummary {
+    const holidayDates = new Set(
+      Array.isArray((createBookingDto as any).holidayDates)
+        ? ((createBookingDto as any).holidayDates as unknown[])
+            .map((value) => this.asNonEmptyString(value))
+            .filter((value): value is string => !!value)
+        : [],
+    );
+
+    const frontendBreakdown = (createBookingDto as any).pricingBreakdown;
+    if (frontendBreakdown && typeof frontendBreakdown === 'object' && Array.isArray(frontendBreakdown.nightlyRates)) {
+      return {
+        nightlyRates: frontendBreakdown.nightlyRates.map((row: any) => ({
+          date: String(row.date),
+          dayName: String(row.dayName ?? ''),
+          baseRate: this.roundCurrency(Number(row.baseRate ?? row.appliedRate ?? 0)),
+          appliedRate: this.roundCurrency(Number(row.appliedRate ?? row.rate ?? 0)),
+          pricingType: (row.pricingType ?? 'base') as NightlyPricingRow['pricingType'],
+          pricingLabel: String(row.pricingLabel ?? row.label ?? 'Custom pricing'),
+          ...(row.note ? { note: String(row.note) } : {}),
+        })),
+        roomSubtotal: this.roundCurrency(Number(frontendBreakdown.roomSubtotal ?? 0)),
+        serviceChargePercent: this.roundCurrency(Number(frontendBreakdown.serviceChargePercent ?? property.serviceChargePercent ?? 0)),
+        serviceChargeAmount: this.roundCurrency(Number(frontendBreakdown.serviceChargeAmount ?? 0)),
+        vatPercent: this.roundCurrency(Number(frontendBreakdown.vatPercent ?? property.vatPercent ?? 0)),
+        vatAmount: this.roundCurrency(Number(frontendBreakdown.vatAmount ?? 0)),
+        grandTotal: this.roundCurrency(Number(frontendBreakdown.grandTotal ?? frontendBreakdown.totalAmount ?? 0)),
+        currency: 'THB',
+      };
+    }
+
+    const nightlyRates = this.getDateRange(checkInDate, checkOutDate).map((date) =>
+      this.calculateNightlyRate(room, date, holidayDates),
+    );
+
+    const roomSubtotal = this.roundCurrency(
+      nightlyRates.reduce((sum, nightlyRate) => sum + nightlyRate.appliedRate, 0),
+    );
+
+    const serviceChargePercent = property.serviceChargeEnabled
+      ? Number(property.serviceChargePercent ?? 10)
+      : 0;
+    const serviceChargeAmount = this.roundCurrency(roomSubtotal * (serviceChargePercent / 100));
+
+    const vatBase = roomSubtotal + serviceChargeAmount;
+    const vatPercent = property.vatEnabled ? Number(property.vatPercent ?? 7) : 0;
+    const vatAmount = this.roundCurrency(vatBase * (vatPercent / 100));
+
+    return {
+      nightlyRates,
+      roomSubtotal,
+      serviceChargePercent: this.roundCurrency(serviceChargePercent),
+      serviceChargeAmount,
+      vatPercent: this.roundCurrency(vatPercent),
+      vatAmount,
+      grandTotal: this.roundCurrency(roomSubtotal + serviceChargeAmount + vatAmount),
+      currency: 'THB',
+    };
+  }
+
   /**
    * Transform raw Prisma booking record to the response shape expected by the frontend.
    * Adds alias fields (checkInDate, checkOutDate, totalAmount) and computed fields
@@ -169,13 +462,98 @@ export class BookingsService {
           )
         : 0;
 
+    const roomSubtotal = Number(booking.roomSubtotal ?? booking.totalPrice ?? 0);
+    const serviceChargeAmount = Number(booking.serviceChargeAmount ?? 0);
+    const vatAmount = Number(booking.vatAmount ?? 0);
+    const grandTotal = Number(
+      booking.grandTotal ?? roomSubtotal + serviceChargeAmount + vatAmount,
+    );
+    const amountPaid = Number(booking.amountPaid ?? 0);
+    const guestName = `${booking.guestFirstName ?? ''} ${booking.guestLastName ?? ''}`.trim();
+    const roomNumber = booking.room?.number ?? null;
+    const roomType = booking.room?.type ?? null;
+    const propertyName = booking.property?.name ?? null;
+    const propertyCode = booking.property?.code ?? null;
+    const pricingBreakdown = booking.pricingBreakdown ?? null;
+    const nightlyRates = Array.isArray(pricingBreakdown?.nightlyRates)
+      ? pricingBreakdown.nightlyRates
+      : [];
+    const source = booking.source ?? null;
+    const statusLabel = toBookingStatusLabel(booking.status);
+    const checkInLabel = this.formatDateLabel(booking.checkIn);
+    const checkOutLabel = this.formatDateLabel(booking.checkOut);
+    const roomLabel = roomNumber
+      ? `${roomNumber}${roomType ? ` · ${String(roomType).toUpperCase()}` : ''}`
+      : null;
+    const dateRangeLabel =
+      checkInLabel && checkOutLabel ? `${checkInLabel} - ${checkOutLabel}` : null;
+    const baseCapacity = Number(booking.baseCapacity ?? booking.room?.maxOccupancy ?? 0);
+    const extraBedCapacity = Number(
+      booking.extraBedCapacity ??
+      (booking.room?.extraBedAllowed ? booking.room?.extraBedLimit ?? 0 : 0),
+    );
+    const totalCapacity = Number(booking.totalCapacity ?? baseCapacity + extraBedCapacity);
+    const standardBedGuests = Number(
+      booking.standardBedGuests ??
+      Math.min(Number(booking.numberOfGuests ?? 1), baseCapacity || Number(booking.numberOfGuests ?? 1)),
+    );
+    const extraBedGuests = Number(
+      booking.extraBedGuests ?? Math.max(0, Number(booking.numberOfGuests ?? 1) - standardBedGuests),
+    );
+
     return {
       ...booking,
       // Alias fields — frontend uses checkInDate / checkOutDate
       checkInDate: booking.checkIn,
       checkOutDate: booking.checkOut,
-      // totalAmount — frontend field; convert Prisma Decimal to number
-      totalAmount: Number(booking.totalPrice ?? 0),
+      guestName,
+      roomNumber,
+      roomType,
+      roomLabel,
+      propertyName,
+      propertyCode,
+      source,
+      statusLabel,
+      checkInLabel,
+      checkOutLabel,
+      dateRangeLabel,
+      adults: Number(booking.adults ?? 1),
+      children: Number(booking.children ?? 0),
+      numberOfGuests: Number(booking.numberOfGuests ?? booking.adults ?? 1),
+      baseCapacity,
+      extraBedCapacity,
+      totalCapacity,
+      standardBedGuests,
+      extraBedGuests,
+      capacitySummary: {
+        baseCapacity,
+        extraBedCapacity,
+        totalCapacity,
+        standardBedGuests,
+        extraBedGuests,
+        extraBedAllowed: extraBedCapacity > 0,
+      },
+      roomSubtotal,
+      serviceChargeAmount,
+      vatAmount,
+      grandTotal,
+      pricingBreakdown,
+      nightlyRates,
+      paymentSummary: {
+        paymentMethod: booking.paymentMethod ?? null,
+        paymentStatus: booking.paymentStatus ?? null,
+        amountPaid,
+        balanceRemaining: this.roundCurrency(Math.max(0, grandTotal - amountPaid)),
+      },
+      staySummary: {
+        scheduledCheckIn: booking.scheduledCheckIn ?? null,
+        scheduledCheckOut: booking.scheduledCheckOut ?? null,
+        actualCheckIn: booking.actualCheckIn ?? null,
+        actualCheckOut: booking.actualCheckOut ?? null,
+        numberOfNights: nights,
+      },
+      // totalAmount — frontend field; use gross total when available
+      totalAmount: grandTotal,
       // Computed fields (current schema: 1 room per booking record)
       numberOfRooms: 1,
       numberOfNights: nights,
@@ -386,11 +764,14 @@ export class BookingsService {
       throw new BadRequestException('guestLastName is required');
     }
 
-    // Calculate total price
-    const nights = Math.ceil(
-      (checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24),
+    const occupancy = this.resolveOccupancy(createBookingDto, room);
+    const pricingSummary = this.resolveBookingPricing(
+      createBookingDto,
+      room,
+      property,
+      checkInDate,
+      checkOutDate,
     );
-    const totalPrice = Number(room.price) * nights;
 
     // Extract paymentMethod for booking record + Payment record creation
     const rawPaymentMethod: string | undefined = createBookingDto.paymentMethod;
@@ -409,6 +790,14 @@ export class BookingsService {
       guestLastName:  createBookingDto.guestLastName,
       guestEmail:     createBookingDto.guestEmail || undefined,
       guestPhone:     createBookingDto.guestPhone || undefined,
+      adults:         occupancy.adults,
+      children:       occupancy.children,
+      numberOfGuests: occupancy.numberOfGuests,
+      baseCapacity:   occupancy.baseCapacity,
+      extraBedCapacity: occupancy.extraBedCapacity,
+      totalCapacity:  occupancy.totalCapacity,
+      standardBedGuests: occupancy.standardBedGuests,
+      extraBedGuests: occupancy.extraBedGuests,
       checkIn:        toDateTime(createBookingDto.checkIn),
       checkOut:       toDateTime(createBookingDto.checkOut),
       scheduledCheckIn: this.buildScheduledDateTime(
@@ -424,11 +813,17 @@ export class BookingsService {
       channelId:      createBookingDto.channelId || undefined,
       paymentMethod:  rawPaymentMethod || undefined,
       paymentStatus:  rawPaymentMethod ? 'pending' : undefined,
-      totalPrice,
+      totalPrice:     pricingSummary.roomSubtotal,
+      roomSubtotal:   pricingSummary.roomSubtotal,
+      serviceChargeAmount: pricingSummary.serviceChargeAmount,
+      vatAmount:      pricingSummary.vatAmount,
+      grandTotal:     pricingSummary.grandTotal,
+      pricingBreakdown: pricingSummary as unknown as Prisma.InputJsonValue,
+      source:         createBookingDto.source || 'DIRECT',
       tenantId,
     };
 
-    const booking = await this.prisma.booking.create({
+    const booking: any = await this.prisma.booking.create({
       data,
       include: {
         guest: true,
@@ -463,6 +858,9 @@ export class BookingsService {
       checkInDate: booking.checkIn,
       checkOutDate: booking.checkOut,
       totalPrice: booking.totalPrice,
+      grandTotal: booking.grandTotal ?? pricingSummary.grandTotal,
+      adults: booking.adults ?? occupancy.adults,
+      children: booking.children ?? occupancy.children,
     }).catch((err) => {
       this.logger.error(`Failed to track booking_created event: ${err.message}`);
     });
@@ -722,7 +1120,12 @@ export class BookingsService {
     const stayDuration = Math.ceil((checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24));
 
     // Get room charges
-    const roomCharge = Number(booking.totalPrice);
+    const roomCharge = Number(booking.roomSubtotal ?? booking.totalPrice);
+    const serviceChargeAmount = Number(booking.serviceChargeAmount ?? 0);
+    const vatAmount = Number(booking.vatAmount ?? 0);
+    const baseBookingTotal = Number(
+      booking.grandTotal ?? roomCharge + serviceChargeAmount + vatAmount,
+    );
 
     // Fetch invoice with items and payments for actual charges
     const invoice = await this.prisma.invoices.findFirst({
@@ -738,9 +1141,8 @@ export class BookingsService {
 
     // Calculate subtotal and taxes
     const subtotal = roomCharge + additionalCharges;
-    const taxRate = 0.07; // 7% VAT
-    const taxes = Math.round(subtotal * taxRate * 100) / 100;
-    const totalAmount = subtotal + taxes;
+    const taxes = vatAmount;
+    const totalAmount = baseBookingTotal + additionalCharges;
 
     // Calculate amount paid from approved payments
     const amountPaid = invoice?.payments
@@ -769,6 +1171,7 @@ export class BookingsService {
       },
       charges: {
         roomCharge,
+        serviceChargeAmount,
         additionalCharges,
         subtotal,
         taxes,
@@ -822,7 +1225,7 @@ export class BookingsService {
         tenantId: booking.tenantId,
         bookingId: booking.id,
         invoiceNo,
-        amount: Number(booking.totalPrice),
+        amount: Number(booking.grandTotal ?? booking.totalPrice),
         status: InvoiceStatus.PENDING,
         dueDate,
       });
@@ -849,7 +1252,7 @@ export class BookingsService {
                 roomId: booking.roomId,
                 type: TaskType.INSPECTION,
                 priority: TaskPriority.HIGH,
-                notes: `Collect payment on check-in for booking ${booking.id.slice(0, 8)}. Guest: ${booking.guestFirstName} ${booking.guestLastName}. Amount: THB ${Number(booking.totalPrice).toLocaleString()}.`,
+                notes: `Collect payment on check-in for booking ${booking.id.slice(0, 8)}. Guest: ${booking.guestFirstName} ${booking.guestLastName}. Amount: THB ${Number(booking.grandTotal ?? booking.totalPrice).toLocaleString()}.`,
               },
               booking.tenantId,
             ).catch((e: Error) =>
@@ -912,7 +1315,11 @@ export class BookingsService {
         0,
       ) || 0;
 
-      const roomCharge = booking?.totalPrice ? Number(booking.totalPrice) : Number(invoice.amount);
+      const roomCharge = booking?.grandTotal
+        ? Number(booking.grandTotal)
+        : booking?.totalPrice
+          ? Number(booking.totalPrice)
+          : Number(invoice.amount);
       const totalAmount = roomCharge + additionalCharges;
 
       await this.prisma.invoices.update({
@@ -1015,12 +1422,26 @@ export class BookingsService {
       });
     }
 
-    // Calculate total price
-    const totalPrice = Number(room.price) * nights;
+    const pricingSummary = this.resolveBookingPricing(
+      {
+        propertyId: finalPropertyId,
+        roomId,
+        guestFirstName,
+        guestLastName,
+        checkIn: now.toISOString(),
+        checkOut: checkOutDate.toISOString(),
+        adults: 1,
+        children: 0,
+        numberOfGuests: 1,
+      } as CreateBookingDto,
+      room,
+      property,
+      now,
+      checkOutDate,
+    );
 
     // Create booking with checked-in status immediately
-    const booking = await this.prisma.booking.create({
-      data: {
+    const walkInBookingData: any = {
         guestFirstName,
         guestLastName,
         guestEmail: guestEmail || null,
@@ -1028,14 +1449,31 @@ export class BookingsService {
         guestId: guest.id,
         roomId,
         propertyId: finalPropertyId,
+        adults: 1,
+        children: 0,
+        numberOfGuests: 1,
+        baseCapacity: Number(room.maxOccupancy ?? 0),
+        extraBedCapacity: room.extraBedAllowed ? Number(room.extraBedLimit ?? 0) : 0,
+        totalCapacity: Number(room.maxOccupancy ?? 0) + (room.extraBedAllowed ? Number(room.extraBedLimit ?? 0) : 0),
+        standardBedGuests: 1,
+        extraBedGuests: 0,
         checkIn: now,
         checkOut: checkOutDate,
         actualCheckIn: now,
         status: 'checked_in',
-        totalPrice,
+        totalPrice: pricingSummary.roomSubtotal,
+        roomSubtotal: pricingSummary.roomSubtotal,
+        serviceChargeAmount: pricingSummary.serviceChargeAmount,
+        vatAmount: pricingSummary.vatAmount,
+        grandTotal: pricingSummary.grandTotal,
+        pricingBreakdown: pricingSummary as unknown as Prisma.InputJsonValue,
+        source: 'WALK_IN',
         notes: notes || null,
         tenantId,
-      },
+      };
+
+    const booking: any = await this.prisma.booking.create({
+      data: walkInBookingData,
       include: {
         guest: true,
         room: true,
@@ -1082,7 +1520,7 @@ export class BookingsService {
       roomNumber: booking.room?.number,
       actualCheckInTime: booking.actualCheckIn,
       nights,
-      totalPrice,
+      totalPrice: booking.grandTotal ?? pricingSummary.grandTotal,
     }).catch((err) => {
       this.logger.error(`Failed to track walk_in_checkin event: ${err.message}`);
     });
