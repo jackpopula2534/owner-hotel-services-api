@@ -55,7 +55,7 @@ export class RoomsController {
   }
 
   @Get('available')
-  @ApiOperation({ summary: 'Get available rooms for date range' })
+  @ApiOperation({ summary: 'Get available rooms for date range with optional time override' })
   @ApiResponse({ status: 200, description: 'List of available rooms' })
   @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
   async getAvailableRooms(
@@ -63,8 +63,17 @@ export class RoomsController {
     @Query('checkOut') checkOut: string,
     @CurrentUser() user: { tenantId?: string },
     @Query('propertyId') propertyId?: string,
+    @Query('checkInTime') checkInTime?: string,
+    @Query('checkOutTime') checkOutTime?: string,
   ) {
-    return this.roomsService.getAvailableRooms(checkIn, checkOut, propertyId, user?.tenantId);
+    return this.roomsService.getAvailableRooms(
+      checkIn,
+      checkOut,
+      propertyId,
+      user?.tenantId,
+      checkInTime,
+      checkOutTime,
+    );
   }
 
   @Get(':id')

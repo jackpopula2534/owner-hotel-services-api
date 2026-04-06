@@ -338,6 +338,8 @@ export class RoomsService {
     checkOut: string,
     propertyId?: string,
     tenantId?: string,
+    checkInTime?: string,
+    checkOutTime?: string,
   ) {
     // ถ้าไม่มี tenantId (ผู้ใช้ใหม่) ให้ส่ง empty array กลับไป
     if (!tenantId) {
@@ -345,8 +347,7 @@ export class RoomsService {
     }
 
     try {
-      // Get property settings for standard check-in/out times
-      // เพื่อ build DateTime ที่ถูกต้อง (ไม่ใช่แค่ date ที่เป็น midnight UTC)
+      // Get property settings for standard check-in/out times (fallback)
       let standardCheckInTime = '14:00';
       let standardCheckOutTime = '12:00';
 
@@ -361,14 +362,19 @@ export class RoomsService {
         }
       }
 
+      // ใช้เวลาที่ user ส่งมาก่อน ถ้าไม่มีค่อย fallback เป็น property standard time
+      // ตัวอย่าง: user เลือก checkIn 10:00 → ใช้ 10:00 แทน 14:00
+      // เพื่อให้ overlap check ถูกต้องตามเวลาที่ผู้จองต้องการเข้าพักจริง
+      const effectiveCheckInTime = checkInTime ?? standardCheckInTime;
+      const effectiveCheckOutTime = checkOutTime ?? standardCheckOutTime;
+
       // Build DateTime objects with proper check-in/out times in Bangkok timezone (UTC+7)
-      // e.g. "2026-04-15" + "14:00" → 2026-04-15T14:00:00+07:00 (Apr 15 07:00 UTC)
-      // แก้ bug เดิม: new Date("2026-04-15") = midnight UTC ≠ 14:00 Bangkok
-      const checkInDate = new Date(`${checkIn}T${standardCheckInTime}:00+07:00`);
-      const checkOutDate = new Date(`${checkOut}T${standardCheckOutTime}:00+07:00`);
+      // e.g. "2026-04-17" + "10:00" → 2026-04-17T10:00:00+07:00 (Apr 17 03:00 UTC)
+      const checkInDate = new Date(`${checkIn}T${effectiveCheckInTime}:00+07:00`);
+      const checkOutDate = new Date(`${checkOut}T${effectiveCheckOutTime}:00+07:00`);
 
       this.logger.debug(
-        `Checking availability: checkIn=${checkInDate.toISOString()}, checkOut=${checkOutDate.toISOString()}`,
+        `Availability check: ${checkIn} ${effectiveCheckInTime} → ${checkOut} ${effectiveCheckOutTime} (UTC: ${checkInDate.toISOString()} → ${checkOutDate.toISOString()})`,
       );
 
       // ใช้ scheduledCheckIn/scheduledCheckOut ซึ่งเก็บ date+time จริง
