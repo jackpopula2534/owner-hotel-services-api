@@ -286,14 +286,22 @@ export class BookingsService {
     const extraBedCapacity =
       room.extraBedAllowed ? Math.max(0, Number(room.extraBedLimit ?? 0)) : 0;
     const totalCapacity = baseCapacity + extraBedCapacity;
-    const standardBedGuests = baseCapacity > 0
-      ? Math.min(numberOfGuests, baseCapacity)
-      : numberOfGuests;
-    const extraBedGuests = Math.max(0, numberOfGuests - standardBedGuests);
 
-    if (totalCapacity > 0 && numberOfGuests > totalCapacity) {
+    // "Chargeable occupancy" logic:
+    // If children stay free, they do not count towards the occupancy calculation 
+    // that triggers extra bed needs or capacity limits.
+    const countableGuests = room.childNoExtraCharge ? adults : (adults + children);
+
+    const standardBedGuests = baseCapacity > 0
+      ? Math.min(countableGuests, baseCapacity)
+      : countableGuests;
+
+    const extraBedGuests = Math.max(0, countableGuests - standardBedGuests);
+
+    if (totalCapacity > 0 && countableGuests > totalCapacity) {
+      const guestLabel = room.childNoExtraCharge ? 'adults' : 'guests';
       throw new BadRequestException(
-        `Room capacity exceeded: supports ${totalCapacity} guests`,
+        `Room capacity exceeded: supports max ${totalCapacity} ${guestLabel}`,
       );
     }
 
@@ -709,24 +717,49 @@ export class BookingsService {
       throw new NotFoundException('Room not found in this property');
     }
 
+    // Build scheduled check-in/out datetimes with property standard times (Bangkok UTC+7)
+    // ใช้ buildScheduledDateTime แทน parseBookingDate ซึ่งจะ return midnight UTC สำหรับ date-only string
+    // เช่น "2026-04-15" + "14:00" → 2026-04-15T14:00:00+07:00 = 07:00 UTC
+    const scheduledCheckInForOverlap = this.buildScheduledDateTime(
+      checkIn,
+      createBookingDto.checkInTime ?? property.standardCheckInTime ?? '14:00',
+    );
+    const scheduledCheckOutForOverlap = this.buildScheduledDateTime(
+      checkOut,
+      createBookingDto.checkOutTime ?? property.standardCheckOutTime ?? '12:00',
+    );
+
+    this.logger.debug(
+      `Overlap check: scheduledCheckIn=${scheduledCheckInForOverlap.toISOString()}, scheduledCheckOut=${scheduledCheckOutForOverlap.toISOString()}`,
+    );
+
     // Check room availability — include pending so double-booking is blocked immediately
-    const bookingScope: any = {
-      roomId,
-      tenantId,
-      status: { in: ['pending', 'confirmed', 'checked_in'] },
-      OR: [
-        {
-          checkIn: { lte: checkOutDate },
-          checkOut: { gte: checkInDate },
+    // overlap condition: existing.scheduledCheckIn < newCheckOut AND existing.scheduledCheckOut > newCheckIn
+    const [existingBooking, existingBookingFallback] = await Promise.all([
+      // Primary check: ใช้ scheduledCheckIn/Out ซึ่งเก็บ time ถูกต้อง
+      this.prisma.booking.findFirst({
+        where: {
+          roomId,
+          tenantId,
+          status: { in: ['pending', 'confirmed', 'checked_in'] },
+          scheduledCheckIn: { lt: scheduledCheckOutForOverlap },
+          scheduledCheckOut: { gt: scheduledCheckInForOverlap },
         },
-      ],
-    };
+      }),
+      // Fallback: สำหรับ booking เก่าที่ไม่มี scheduledCheckIn
+      this.prisma.booking.findFirst({
+        where: {
+          roomId,
+          tenantId,
+          status: { in: ['pending', 'confirmed', 'checked_in'] },
+          scheduledCheckIn: null,
+          checkIn: { lt: scheduledCheckOutForOverlap },
+          checkOut: { gt: scheduledCheckInForOverlap },
+        },
+      }),
+    ]);
 
-    const existingBooking = await this.prisma.booking.findFirst({
-      where: bookingScope,
-    });
-
-    if (existingBooking) {
+    if (existingBooking || existingBookingFallback) {
       throw new BadRequestException('Room is not available for the selected dates');
     }
 
@@ -1379,26 +1412,37 @@ export class BookingsService {
       throw new NotFoundException('Room not found in this property');
     }
 
-    // Check room availability
+    // Check room availability (walk-in: check-in = now, check-out = now + nights days)
     const now = new Date();
     const checkOutDate = new Date();
     checkOutDate.setDate(checkOutDate.getDate() + nights);
 
-    const existingBooking = await this.prisma.booking.findFirst({
-      where: {
-        roomId,
-        tenantId,
-        status: { in: ['pending', 'confirmed', 'checked_in'] },
-        OR: [
-          {
-            checkIn: { lte: checkOutDate },
-            checkOut: { gte: now },
-          },
-        ],
-      },
-    });
+    // overlap condition: existing.scheduledCheckIn < newCheckOut AND existing.scheduledCheckOut > newCheckIn
+    const [existingBooking, existingBookingFallback] = await Promise.all([
+      // Primary: ใช้ scheduledCheckIn/Out (time-aware)
+      this.prisma.booking.findFirst({
+        where: {
+          roomId,
+          tenantId,
+          status: { in: ['pending', 'confirmed', 'checked_in'] },
+          scheduledCheckIn: { lt: checkOutDate },
+          scheduledCheckOut: { gt: now },
+        },
+      }),
+      // Fallback: booking เก่าที่ไม่มี scheduledCheckIn
+      this.prisma.booking.findFirst({
+        where: {
+          roomId,
+          tenantId,
+          status: { in: ['pending', 'confirmed', 'checked_in'] },
+          scheduledCheckIn: null,
+          checkIn: { lt: checkOutDate },
+          checkOut: { gt: now },
+        },
+      }),
+    ]);
 
-    if (existingBooking) {
+    if (existingBooking || existingBookingFallback) {
       throw new BadRequestException('Room is not available for the selected dates');
     }
 

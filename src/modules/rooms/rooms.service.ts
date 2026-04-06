@@ -345,22 +345,68 @@ export class RoomsService {
     }
 
     try {
-      const checkInDate = new Date(checkIn);
-      const checkOutDate = new Date(checkOut);
+      // Get property settings for standard check-in/out times
+      // เพื่อ build DateTime ที่ถูกต้อง (ไม่ใช่แค่ date ที่เป็น midnight UTC)
+      let standardCheckInTime = '14:00';
+      let standardCheckOutTime = '12:00';
 
+      if (propertyId) {
+        const property = await this.prisma.property.findFirst({
+          where: { id: propertyId, tenantId },
+          select: { standardCheckInTime: true, standardCheckOutTime: true },
+        });
+        if (property) {
+          standardCheckInTime = property.standardCheckInTime ?? '14:00';
+          standardCheckOutTime = property.standardCheckOutTime ?? '12:00';
+        }
+      }
+
+      // Build DateTime objects with proper check-in/out times in Bangkok timezone (UTC+7)
+      // e.g. "2026-04-15" + "14:00" → 2026-04-15T14:00:00+07:00 (Apr 15 07:00 UTC)
+      // แก้ bug เดิม: new Date("2026-04-15") = midnight UTC ≠ 14:00 Bangkok
+      const checkInDate = new Date(`${checkIn}T${standardCheckInTime}:00+07:00`);
+      const checkOutDate = new Date(`${checkOut}T${standardCheckOutTime}:00+07:00`);
+
+      this.logger.debug(
+        `Checking availability: checkIn=${checkInDate.toISOString()}, checkOut=${checkOutDate.toISOString()}`,
+      );
+
+      // ใช้ scheduledCheckIn/scheduledCheckOut ซึ่งเก็บ date+time จริง
+      // แทน checkIn/checkOut ที่อาจเป็นแค่ date โดยไม่มี time
+      // overlap condition: existing.scheduledCheckIn < newCheckOut AND existing.scheduledCheckOut > newCheckIn
       const bookingWhere: any = {
         tenantId,
         status: { in: ['pending', 'confirmed', 'checked_in'] },
-        OR: [{ checkIn: { lte: checkOutDate }, checkOut: { gte: checkInDate } }],
+        scheduledCheckIn: { lt: checkOutDate },
+        scheduledCheckOut: { gt: checkInDate },
       };
-      if (propertyId) bookingWhere.propertyId = propertyId;
 
-      const conflictingBookings = await this.prisma.booking.findMany({
-        where: bookingWhere,
-        select: { roomId: true },
-      });
+      // fallback: สำหรับ booking เก่าที่ไม่มี scheduledCheckIn/Out ให้ check จาก checkIn/checkOut ด้วย
+      const bookingWhereFallback: any = {
+        tenantId,
+        status: { in: ['pending', 'confirmed', 'checked_in'] },
+        scheduledCheckIn: null,
+        checkIn: { lt: checkOutDate },
+        checkOut: { gt: checkInDate },
+      };
 
-      const occupiedRoomIds = conflictingBookings.map((b) => b.roomId);
+      if (propertyId) {
+        bookingWhere.room = { propertyId };
+        bookingWhereFallback.room = { propertyId };
+      }
+
+      const [conflictingBookings, conflictingFallback] = await Promise.all([
+        this.prisma.booking.findMany({ where: bookingWhere, select: { roomId: true } }),
+        this.prisma.booking.findMany({ where: bookingWhereFallback, select: { roomId: true } }),
+      ]);
+
+      const occupiedRoomIds = [
+        ...new Set([
+          ...conflictingBookings.map((b) => b.roomId),
+          ...conflictingFallback.map((b) => b.roomId),
+        ]),
+      ];
+
       const roomWhere: any = { tenantId, status: 'available' };
       if (propertyId) roomWhere.propertyId = propertyId;
       if (occupiedRoomIds.length > 0) roomWhere.id = { notIn: occupiedRoomIds };
@@ -400,11 +446,23 @@ export class RoomsService {
       return {};
     }
 
+    // If explicitly setting to false, just return false and null note
+    if (dto.childNoExtraCharge === false) {
+      return {
+        childNoExtraCharge: false,
+        childNoExtraChargeNote: null,
+      };
+    }
+
     const note = dto.childNoExtraChargeNote?.trim();
-    const effectiveFlag = dto.childNoExtraCharge ?? current?.childNoExtraCharge ?? false;
+    const effectiveFlag =
+      dto.childNoExtraCharge !== undefined
+        ? dto.childNoExtraCharge
+        : (current?.childNoExtraCharge ?? false);
     const effectiveNote = hasNote ? note : current?.childNoExtraChargeNote?.trim();
 
-    if (!effectiveFlag && hasNote) {
+    // If it's false, and an ACTUAL non-empty note is provided, throw error
+    if (!effectiveFlag && hasNote && note) {
       throw new BadRequestException(
         'childNoExtraChargeNote can only be set when childNoExtraCharge is true',
       );
@@ -418,15 +476,8 @@ export class RoomsService {
       }
 
       return {
-        ...(hasFlag && { childNoExtraCharge: true }),
-        ...(hasNote && { childNoExtraChargeNote: effectiveNote }),
-      };
-    }
-
-    if (dto.childNoExtraCharge === false) {
-      return {
-        childNoExtraCharge: false,
-        childNoExtraChargeNote: null,
+        childNoExtraCharge: true,
+        childNoExtraChargeNote: effectiveNote,
       };
     }
 

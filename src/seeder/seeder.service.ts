@@ -972,7 +972,7 @@ export class SeederService {
           const totalPrice = Number(room.price) * nights;
 
           try {
-            await this.prisma.booking.create({
+            const createdBooking = await this.prisma.booking.create({
               data: {
                 id: uuidv4(),
                 tenantId: tenant.id,
@@ -991,6 +991,18 @@ export class SeederService {
               },
             });
             bookingCount++;
+
+            // Create Audit Log for Activity Feed (WOW moment for dashboard)
+            await this.prisma.auditLog.create({
+              data: {
+                tenantId: tenant.id,
+                action: 'BOOKING_CREATE',
+                resource: 'BOOKING',
+                resourceId: createdBooking.id,
+                description: `สร้างการจองใหม่สำหรับคุณ ${guest.firstName} ${guest.lastName}`,
+                createdAt: new Date(new Date().getTime() - Math.random() * 86400000 * 2), // Last 48 hours
+              }
+            }).catch(() => {});
           } catch (error) {
             this.logger.warn(`    ⚠️  Could not create booking: ${error.message}`);
           }

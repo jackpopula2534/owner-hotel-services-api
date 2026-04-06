@@ -310,7 +310,18 @@ export class DashboardService {
         },
       });
 
-      const inHouseGuests = occupiedBookings;
+      const guestsSum = await this.prisma.booking.aggregate({
+        where: {
+          ...whereBase,
+          status: 'checked-in',
+          checkIn: { lte: tomorrow },
+          checkOut: { gte: today },
+        },
+        _sum: {
+          numberOfGuests: true,
+        },
+      });
+      const inHouseGuests = guestsSum._sum.numberOfGuests || 0;
       const availableRooms = totalRooms - occupiedBookings;
 
       return {

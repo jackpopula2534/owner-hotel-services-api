@@ -62,6 +62,15 @@ export class Plan {
   })
   buttonText: string;
 
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  subtitle: string;
+
+  @Column({ name: 'target_audience', type: 'varchar', length: 255, nullable: true })
+  targetAudience: string;
+
+  @Column({ name: 'price_per_room', type: 'varchar', length: 100, nullable: true })
+  pricePerRoom: string;
+
   @OneToMany(() => PlanFeature, (planFeature) => planFeature.plan)
   planFeatures: PlanFeature[];
 
