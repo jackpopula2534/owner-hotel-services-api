@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { BookingsService } from './bookings.service';
@@ -15,13 +15,19 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @ApiTags('bookings')
 @ApiBearerAuth('JWT-auth')
-@Controller({ path: 'bookings', version: '1' })
+@Controller('bookings')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class BookingsController {
   constructor(
     private readonly bookingsService: BookingsService,
     private readonly folioService: GuestFolioService,
   ) {}
+
+  @Get('ping-test')
+  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
+  ping() {
+    return { message: 'pong' };
+  }
 
   @Get()
   @ApiOperation({ summary: 'Get all bookings' })
@@ -57,9 +63,20 @@ export class BookingsController {
 
   @Put(':id')
   @Throttle({ default: { limit: 20, ttl: 60 } })
-  @ApiOperation({ summary: 'Update booking' })
+  @ApiOperation({ summary: 'Update booking (Full)' })
   @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
-  async update(
+  async updatePut(
+    @Param('id') id: string,
+    @Body() updateBookingDto: any,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    return this.bookingsService.update(id, updateBookingDto, user?.tenantId);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Update booking (Partial)' })
+  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
+  async updatePatch(
     @Param('id') id: string,
     @Body() updateBookingDto: any,
     @CurrentUser() user: { tenantId?: string },
