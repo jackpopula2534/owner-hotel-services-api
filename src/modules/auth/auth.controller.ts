@@ -7,10 +7,12 @@ import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
+import { SkipSubscriptionCheck } from '../../common/decorators/skip-subscription-check.decorator';
 import { Throttle } from '@nestjs/throttler';
 
 @ApiTags('auth')
 @Controller({ path: 'auth', version: '1' })
+@SkipSubscriptionCheck()
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 

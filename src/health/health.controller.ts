@@ -2,10 +2,12 @@ import { Controller, Get, HttpStatus, HttpCode } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { HealthService } from './health.service';
 import { Public } from '../common/decorators/public.decorator';
+import { SkipSubscriptionCheck } from '../common/decorators/skip-subscription-check.decorator';
 import { SkipThrottle } from '@nestjs/throttler';
 
 @ApiTags('Health')
 @Controller({ path: 'health', version: '1' })
+@SkipSubscriptionCheck()
 export class HealthController {
   constructor(private readonly healthService: HealthService) {}
 

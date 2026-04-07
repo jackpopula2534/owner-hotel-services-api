@@ -18,6 +18,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { SkipSubscriptionCheck } from '../common/decorators/skip-subscription-check.decorator';
 import { TenantsService, TenantWithUserRole } from './tenants.service';
 import { HotelDetailService } from './hotel-detail.service';
 import { HotelManagementService } from './hotel-management.service';
@@ -33,6 +34,7 @@ import { InviteUserDto } from './dto/invite-user.dto';
 @ApiTags('tenants')
 @ApiBearerAuth('JWT-auth')
 @Controller({ path: 'tenants', version: '1' })
+@SkipSubscriptionCheck()
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class TenantsController {
   constructor(
@@ -73,7 +75,7 @@ export class TenantsController {
    * Get all companies/tenants for the current user
    */
   @Get('my-companies')
-  @Roles('tenant_admin', 'admin', 'manager', 'receptionist', 'staff', 'user')
+  @Roles('tenant_admin', 'admin', 'manager', 'hr', 'receptionist', 'staff', 'user')
   @ApiOperation({ summary: 'Get all tenants accessible to the current user' })
   @ApiResponse({
     status: 200,
@@ -96,7 +98,7 @@ export class TenantsController {
    * Switch the current user's active tenant
    */
   @Post('switch')
-  @Roles('tenant_admin', 'admin', 'manager', 'receptionist', 'staff', 'user')
+  @Roles('tenant_admin', 'admin', 'manager', 'hr', 'receptionist', 'staff', 'user')
   @ApiOperation({ summary: 'Switch the current active tenant' })
   @ApiResponse({
     status: 200,
@@ -201,7 +203,7 @@ export class TenantsController {
    * รองรับ search, filter, pagination
    */
   @Get('hotels')
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'receptionist', 'staff', 'user')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr', 'receptionist', 'staff', 'user')
   getHotelList(
     @Query() query: HotelListQueryDto,
     @CurrentUser() user: { tenantId?: string; role?: string },
@@ -223,7 +225,7 @@ export class TenantsController {
    * รวมข้อมูล: status, subscription, plan, features, invoices, alerts, permissions
    */
   @Get('hotels/:id')
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'receptionist', 'staff', 'user')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr', 'receptionist', 'staff', 'user')
   async getHotelDetail(
     @Param('id') id: string,
     @CurrentUser() user: { userId?: string; tenantId?: string; role?: string },
@@ -233,18 +235,32 @@ export class TenantsController {
       return this.hotelDetailService.getHotelDetail(id);
     }
 
-    // Check 1: user.tenantId matches the requested hotel (active tenant)
-    if (user?.tenantId && user.tenantId === id) {
-      return this.hotelDetailService.getHotelDetail(id);
+    // Resolve the effective tenantId — frontend passes either:
+    //   (a) a tenant ID  directly, OR
+    //   (b) a property ID (from /dashboard/hotels/[propertyId]/... URL pattern)
+    // We resolve (b) → tenantId by looking up the property table first.
+    let resolvedTenantId = id;
+
+    const property = await this.prisma.property.findUnique({
+      where: { id },
+      select: { tenantId: true },
+    });
+    if (property?.tenantId) {
+      resolvedTenantId = property.tenantId;
+    }
+
+    // Check 1: user.tenantId matches the resolved tenant
+    if (user?.tenantId && user.tenantId === resolvedTenantId) {
+      return this.hotelDetailService.getHotelDetail(resolvedTenantId);
     }
 
     // Check 2: Multi-tenant support — user might belong to this tenant via user_tenants table
     if (user?.userId) {
       const userTenant = await this.prisma.userTenant.findFirst({
-        where: { userId: user.userId, tenantId: id },
+        where: { userId: user.userId, tenantId: resolvedTenantId },
       });
       if (userTenant) {
-        return this.hotelDetailService.getHotelDetail(id);
+        return this.hotelDetailService.getHotelDetail(resolvedTenantId);
       }
     }
 
@@ -262,7 +278,7 @@ export class TenantsController {
   }
 
   @Get()
-  @Roles('platform_admin', 'tenant_admin', 'manager', 'receptionist', 'staff', 'user')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr', 'receptionist', 'staff', 'user')
   findAll(@CurrentUser() user: { tenantId?: string; role?: string }) {
     // Platform admin เห็นทั้งหมด, คนอื่นเห็นแค่ tenant ตัวเอง
     if (user?.role === 'platform_admin') {
@@ -275,7 +291,7 @@ export class TenantsController {
    * @deprecated Use GET /tenants/hotels/:id instead
    */
   @Get(':id/detail')
-  @Roles('platform_admin', 'tenant_admin', 'manager', 'receptionist', 'staff', 'user')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr', 'receptionist', 'staff', 'user')
   getHotelDetailLegacy(
     @Param('id') id: string,
     @CurrentUser() user: { tenantId?: string; role?: string },
@@ -288,7 +304,7 @@ export class TenantsController {
   }
 
   @Get(':id')
-  @Roles('platform_admin', 'tenant_admin', 'manager', 'receptionist', 'staff', 'user')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr', 'receptionist', 'staff', 'user')
   findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string; role?: string }) {
     // Platform admin ดูได้ทุก tenant, คนอื่นดูได้แค่ tenant ตัวเอง
     if (user?.role !== 'platform_admin' && user?.tenantId !== id) {

@@ -3,6 +3,7 @@ import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@ne
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
+import { SkipSubscriptionCheck } from '../common/decorators/skip-subscription-check.decorator';
 import { AdminSubscriptionsService } from './admin-subscriptions.service';
 import {
   AdminSubscriptionsQueryDto,
@@ -16,6 +17,7 @@ import {
 @ApiTags('Admin - Subscriptions Management')
 @ApiBearerAuth('JWT-auth')
 @Controller({ path: 'admin/subscriptions', version: '1' })
+@SkipSubscriptionCheck()
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('platform_admin')
 export class AdminSubscriptionsController {

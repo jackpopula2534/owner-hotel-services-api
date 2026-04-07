@@ -15,6 +15,7 @@ import {
   HotelListStatusBadge,
 } from './dto/hotel-list-response.dto';
 import { PrismaService } from '../prisma/prisma.service';
+import { TenantDefaultDataService } from './tenant-default-data.service';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 
@@ -32,6 +33,7 @@ export class HotelManagementService {
     @InjectRepository(Plan)
     private plansRepository: Repository<Plan>,
     private prisma: PrismaService,
+    private readonly tenantDefaultDataService: TenantDefaultDataService,
   ) {}
 
   // ===== ADD PROPERTY TO EXISTING TENANT =====
@@ -269,7 +271,16 @@ export class HotelManagementService {
       );
     }
 
-    // 8. Return formatted response
+    // 8. Seed default HR master data (departments, positions, leave types, shifts, etc.)
+    try {
+      await this.tenantDefaultDataService.seedDefaultData(savedTenant.id);
+    } catch (err) {
+      this.logger.warn(
+        `Failed to seed default data for tenant ${savedTenant.id}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    // 9. Return formatted response
     return {
       success: true,
       message: `Hotel "${dto.name}" created successfully with ${trialDays}-day trial`,

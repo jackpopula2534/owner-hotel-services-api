@@ -1,12 +1,14 @@
 import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { PlansService } from './plans.service';
+import { SkipSubscriptionCheck } from '../common/decorators/skip-subscription-check.decorator';
 import { CreatePlanDto } from './dto/create-plan.dto';
 import { UpdatePlanDto } from './dto/update-plan.dto';
 import { PublicPlansListDto, PublicPlanDto, PublicPlanFeatureDto } from './dto/public-plans.dto';
 
 @ApiTags('Public - Plans (Sales Page)')
 @Controller({ path: 'plans', version: '1' })
+@SkipSubscriptionCheck()
 export class PlansController {
   constructor(private readonly plansService: PlansService) {}
 

@@ -13,6 +13,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { SkipSubscriptionCheck } from '../common/decorators/skip-subscription-check.decorator';
 import { AdminInvoicesService } from './admin-invoices.service';
 import {
   AdminInvoicesQueryDto,
@@ -26,6 +27,7 @@ import {
 @ApiTags('Admin - Invoices Management')
 @ApiBearerAuth('JWT-auth')
 @Controller({ path: 'admin/invoices', version: '1' })
+@SkipSubscriptionCheck()
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('platform_admin')
 export class AdminInvoicesController {

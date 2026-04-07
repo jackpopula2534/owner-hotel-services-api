@@ -12,6 +12,7 @@ import {
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { SkipSubscriptionCheck } from '../common/decorators/skip-subscription-check.decorator';
 import { MobileApiService } from './mobile-api.service';
 import {
   MobilePaginationDto,
@@ -24,6 +25,7 @@ import {
 
 @ApiTags('Mobile API')
 @Controller('api/v1/mobile')
+@SkipSubscriptionCheck()
 export class MobileApiController {
   constructor(private readonly mobileApiService: MobileApiService) {}
 

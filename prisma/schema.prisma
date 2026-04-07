@@ -293,24 +293,272 @@ model Restaurant {
 }
 
 model Employee {
+  id             String    @id @default(uuid())
+  tenantId       String?
+  firstName      String
+  lastName       String
+  nickname       String?
+  email          String    @unique
+  employeeCode   String?   @unique
+  department     String?
+  position       String?
+  departmentId   String?
+  positionId     String?
+  phone          String?
+  dateOfBirth    DateTime?
+  nationalId     String?
+  gender         String?   // MALE | FEMALE | OTHER | NOT_SPECIFIED
+  employmentType String?   @default("FULLTIME") // FULLTIME | TEMPORARY | DAILY | CONTRACT
+  bankName       String?
+  notes          String?   @db.Text
+  status         String    @default("active") // active | inactive | terminated
+  baseSalary     Decimal?  @db.Decimal(12, 2)
+  bankAccount    String?
+  startDate      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  // HR Add-on: reverse relation — one Employee can be linked to one Staff record
+  staff         Staff?          @relation("StaffEmployee")
+  hrDepartment  HrDepartment?   @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  hrPosition    HrPosition?     @relation(fields: [positionId], references: [id], onDelete: SetNull)
+  attendances   HrAttendance[]
+  leaveRequests HrLeaveRequest[]
+  payrolls      HrPayroll[]
+
+  @@index([tenantId])
+  @@index([departmentId])
+  @@index([positionId])
+  @@map("employees")
+}
+
+model HrDepartment {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String
+  nameEn      String?
+  code        String
+  description String?  @db.Text
+  color       String?
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  positions HrPosition[]
+  employees Employee[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("hr_departments")
+}
+
+model HrPosition {
+  id           String   @id @default(uuid())
+  tenantId     String
+  departmentId String
+  name         String
+  nameEn       String?
+  code         String?
+  level        Int      @default(1)
+  description  String?  @db.Text
+  isActive     Boolean  @default(true)
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  department HrDepartment @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  employees  Employee[]
+
+  @@index([tenantId])
+  @@index([departmentId])
+  @@map("hr_positions")
+}
+
+model HrLeaveType {
+  id             String   @id @default(uuid())
+  tenantId       String
+  name           String
+  nameEn         String?
+  code           String
+  maxDaysPerYear Int?
+  isPaid         Boolean  @default(true)
+  requiresDoc    Boolean  @default(false)
+  isActive       Boolean  @default(true)
+  color          String?
+  description    String?  @db.Text
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("hr_leave_types")
+
+  leaveRequests HrLeaveRequest[]
+}
+
+model HrShiftType {
+  id           String   @id @default(uuid())
+  tenantId     String
+  name         String
+  nameEn       String?
+  code         String
+  startTime    String
+  endTime      String
+  breakMinutes Int      @default(60)
+  isActive     Boolean  @default(true)
+  color        String?
+  description  String?  @db.Text
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("hr_shift_types")
+}
+
+model HrAllowanceType {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String
+  nameEn      String?
+  code        String
+  isTaxable   Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  description String?  @db.Text
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("hr_allowance_types")
+}
+
+model HrDeductionType {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String
+  nameEn      String?
+  code        String
+  isRequired  Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  description String?  @db.Text
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("hr_deduction_types")
+}
+
+// ─── HR Attendance ───────────────────────────────────────────────────────────
+
+model HrAttendance {
+  id              String    @id @default(uuid())
+  tenantId        String
+  employeeId      String
+  date            DateTime  @db.Date
+  checkIn         DateTime?
+  checkOut        DateTime?
+  status          String    @default("present") // present | late | absent | on_leave | holiday
+  workMinutes     Int?
+  overtimeMinutes Int?
+  note            String?   @db.Text
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, date])
+  @@index([tenantId])
+  @@index([employeeId])
+  @@index([date])
+  @@map("hr_attendance")
+}
+
+// ─── HR Leave Request ─────────────────────────────────────────────────────────
+
+model HrLeaveRequest {
   id           String    @id @default(uuid())
-  tenantId     String?
-  firstName    String
-  lastName     String
-  email        String    @unique
-  employeeCode String?   @unique
-  department   String?
-  position     String?
-  startDate    DateTime?
+  tenantId     String
+  employeeId   String
+  leaveTypeId  String
+  startDate    DateTime  @db.Date
+  endDate      DateTime  @db.Date
+  totalDays    Float
+  reason       String?   @db.Text
+  status       String    @default("pending") // pending | approved | rejected | cancelled
+  approvedBy   String?
+  approvedAt   DateTime?
+  rejectedBy   String?
+  rejectedAt   DateTime?
+  rejectReason String?   @db.Text
+  substituteId String?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  // HR Add-on: reverse relation — one Employee can be linked to one Staff record
-  staff Staff? @relation("StaffEmployee")
+  employee  Employee    @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveType HrLeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
 
   @@index([tenantId])
-  @@map("employees")
+  @@index([employeeId])
+  @@index([leaveTypeId])
+  @@index([status])
+  @@map("hr_leave_requests")
 }
+
+// ─── HR Payroll ───────────────────────────────────────────────────────────────
+
+model HrPayroll {
+  id             String   @id @default(uuid())
+  tenantId       String
+  employeeId     String
+  month          Int
+  year           Int
+  baseSalary     Decimal  @db.Decimal(12, 2)
+  totalAllowance Decimal  @db.Decimal(12, 2) @default(0)
+  totalDeduction Decimal  @db.Decimal(12, 2) @default(0)
+  overtimePay    Decimal  @db.Decimal(12, 2) @default(0)
+  bonusPay       Decimal  @db.Decimal(12, 2) @default(0)
+  netSalary      Decimal  @db.Decimal(12, 2)
+  status         String   @default("draft") // draft | approved | paid | cancelled
+  approvedBy     String?
+  approvedAt     DateTime?
+  paidAt         DateTime?
+  note           String?  @db.Text
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  employee Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  items    HrPayrollItem[]
+
+  @@unique([employeeId, month, year])
+  @@index([tenantId])
+  @@index([employeeId])
+  @@index([month, year])
+  @@map("hr_payrolls")
+}
+
+model HrPayrollItem {
+  id        String   @id @default(uuid())
+  payrollId String
+  type      String   // allowance | deduction | overtime | bonus
+  name      String
+  amount    Decimal  @db.Decimal(12, 2)
+  note      String?  @db.Text
+  createdAt DateTime @default(now())
+
+  payroll HrPayroll @relation(fields: [payrollId], references: [id], onDelete: Cascade)
+
+  @@index([payrollId])
+  @@map("hr_payroll_items")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 model Channel {
   id          String    @id @default(uuid())

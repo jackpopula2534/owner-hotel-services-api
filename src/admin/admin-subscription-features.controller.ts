@@ -4,6 +4,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { SkipSubscriptionCheck } from '../common/decorators/skip-subscription-check.decorator';
 import { AdminSubscriptionFeaturesService } from './admin-subscription-features.service';
 import {
   UpdateSubscriptionFeatureDto,
@@ -19,6 +20,7 @@ import {
 @ApiTags('Admin - Add-on Management')
 @ApiBearerAuth('JWT-auth')
 @Controller({ path: 'admin/subscription-features', version: '1' })
+@SkipSubscriptionCheck()
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('platform_admin')
 export class AdminSubscriptionFeaturesController {

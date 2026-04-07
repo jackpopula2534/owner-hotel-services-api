@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { PaymentsService } from './payments.service';
+import { SkipSubscriptionCheck } from '../common/decorators/skip-subscription-check.decorator';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
 import { ApprovePaymentDto } from './dto/approve-payment.dto';
@@ -12,6 +13,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 @ApiTags('payments')
 @ApiBearerAuth('JWT-auth')
 @Controller({ path: 'payments', version: '1' })
+@SkipSubscriptionCheck()
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class PaymentsController {
   constructor(private readonly paymentsService: PaymentsService) {}
