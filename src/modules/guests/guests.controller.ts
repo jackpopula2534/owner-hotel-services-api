@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { GuestsService } from './guests.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -8,7 +8,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @ApiTags('guests')
 @ApiBearerAuth('JWT-auth')
-@Controller({ path: 'guests', version: '1' })
+@Controller({ path: 'guests' })
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class GuestsController {
   constructor(private readonly guestsService: GuestsService) {}
@@ -35,14 +35,33 @@ export class GuestsController {
   }
 
   @Put(':id')
-  @ApiOperation({ summary: 'Update guest' })
+  @ApiOperation({ summary: 'Update guest (PUT)' })
   @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
-  async update(
+  async updatePut(
     @Param('id') id: string,
     @Body() updateGuestDto: any,
     @CurrentUser() user: { tenantId?: string },
   ) {
+    console.log(`Update (PUT) called for ID: ${id}, tenantId: ${user?.tenantId}`);
     return this.guestsService.update(id, updateGuestDto, user?.tenantId);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Update guest (PATCH)' })
+  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
+  async updatePatch(
+    @Param('id') id: string,
+    @Body() updateGuestDto: any,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    console.log(`Update (PATCH) called for ID: ${id}, tenantId: ${user?.tenantId}`);
+    return this.guestsService.update(id, updateGuestDto, user?.tenantId);
+  }
+
+  @Patch('*')
+  async debugPatch(@Param() params: any, @Body() body: any) {
+    console.log('DEBUG: Wildcard PATCH caught', params, body);
+    return { success: true, debug: 'Wildcard caught' };
   }
 
   @Delete(':id')

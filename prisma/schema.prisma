@@ -94,11 +94,12 @@ model Guest {
   city           String?
   country        String?
   postalCode     String?
-  isVip          Boolean   @default(false)
-  vipLevel       String?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  bookings       Booking[]
+  isVip              Boolean   @default(false)
+  vipLevel           String?
+  vehiclePlateNumber String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  bookings           Booking[]
 
   @@index([tenantId])
   @@map("guests")

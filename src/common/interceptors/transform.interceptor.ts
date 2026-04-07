@@ -24,8 +24,18 @@ export class TransformInterceptor<T> implements NestInterceptor<T, Response<T>> 
         success: true,
         statusCode: context.switchToHttp().getResponse().statusCode,
         timestamp: new Date().toISOString(),
-        // Support pagination or raw data
-        ...(data && data.data ? data : { data }),
+        // Standardize pagination structure into 'meta'
+        ...(data && data.data
+          ? {
+              data: data.data,
+              meta: {
+                total: data.total,
+                page: data.page,
+                limit: data.limit,
+                ...(data.meta || {}),
+              },
+            }
+          : { data }),
       })),
     );
   }
