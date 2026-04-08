@@ -18,15 +18,19 @@ import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
 // to avoid NestJS route conflict where GET /hr/:id would intercept /hr/employee-code-config.
 // Static sub-routes must always be declared BEFORE parameterized routes (:id) in the
 // same controller to ensure correct resolution order.
+//
+// IMPORTANT: Sub-path controllers (hr/payroll, hr/leave, hr/attendance, hr/master-data)
+// MUST be registered BEFORE HrController so NestJS matches their specific paths
+// before HrController's @Get(':id') catches them as employee IDs.
 
 @Module({
   imports: [PrismaModule, AddonModule],
   controllers: [
-    HrController,
     HrMasterDataController,
     HrAttendanceController,
     HrLeaveController,
     HrPayrollController,
+    HrController,  // Must be LAST — its @Get(':id') would catch sub-paths otherwise
   ],
   providers: [
     HrService,

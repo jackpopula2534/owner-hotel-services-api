@@ -67,25 +67,36 @@ export class EmployeeCodeConfigService {
   }
 
   /**
-   * Generate the next employee code based on the tenant's configuration.
-   * Atomically increments the running number.
+   * Generate the next available employee code, unique within the same (tenantId, propertyId).
    *
-   * @param tenantId - The tenant ID
-   * @param departmentCode - Optional department code to include in the generated code
-   * @returns The generated employee code string
+   * Uniqueness rule: an employeeCode must not collide with any existing employee that shares
+   * BOTH the same tenantId AND the same propertyId (hotel). The same code may appear in
+   * different hotels of the same tenant — this is intentional.
+   *
+   * Flow:
+   *  1. Atomically fetch & increment the running counter (inside a DB transaction).
+   *  2. Build the candidate code from the configured pattern.
+   *  3. Check the employees table for a collision scoped to (tenantId, propertyId).
+   *  4. If colliding, advance the counter and retry (up to MAX_ATTEMPTS times).
+   *
+   * @param tenantId      - Tenant scope
+   * @param departmentCode - Optional dept code to embed in the pattern
+   * @param propertyId    - Hotel/property scope for collision detection (nullable — if null, only tenantId is used)
    */
-  async generateNextCode(tenantId: string, departmentCode?: string): Promise<string> {
+  async generateNextCode(
+    tenantId: string,
+    departmentCode?: string,
+    propertyId?: string,
+  ): Promise<string> {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID is required');
     }
 
-    // Use a transaction to ensure atomic read-and-increment
-    return this.prisma.$transaction(async (tx: any) => {
-      let config = await tx.employeeCodeConfig.findUnique({
-        where: { tenantId },
-      });
+    const MAX_ATTEMPTS = 50;
 
-      // If no config exists, use default pattern
+    return this.prisma.$transaction(async (tx: any) => {
+      let config = await tx.employeeCodeConfig.findUnique({ where: { tenantId } });
+
       if (!config) {
         config = await tx.employeeCodeConfig.create({
           data: {
@@ -105,22 +116,84 @@ export class EmployeeCodeConfigService {
         });
       }
 
-      // Check if we need to reset the counter
       const shouldReset = this.shouldResetCounter(config);
-      let currentNumber = shouldReset ? 1 : config.nextNumber;
+      const configNumber = shouldReset ? 1 : config.nextNumber;
 
-      // Build the code from pattern
-      const code = this.buildCodeFromPattern({
-        pattern: config.pattern,
-        prefix: config.prefix,
-        separator: config.separator,
-        digitLength: config.digitLength,
-        yearFormat: config.yearFormat,
-        departmentCode: departmentCode ?? '',
-        runningNumber: currentNumber,
+      // ─── Sync with actual DB ──────────────────────────────────────────────
+      // config.nextNumber อาจล้าหลังกว่าข้อมูลจริงในตาราง employees
+      // (เช่น มีการ import/seed ข้อมูลโดยไม่ผ่าน generateNextCode)
+      // จึงต้อง scan หา running number สูงสุดที่ใช้งานจริง แล้วเริ่มต่อจากนั้น
+      const existingEmployees = await tx.employee.findMany({
+        where: {
+          tenantId,
+          ...(propertyId ? { propertyId } : {}),
+          employeeCode: { not: null },
+        },
+        select: { employeeCode: true },
       });
 
-      // Increment the counter (or reset it)
+      let maxFoundNumber = 0;
+      for (const emp of existingEmployees) {
+        if (!emp.employeeCode) continue;
+        // ดึงตัวเลข suffix ท้ายสุดจาก code เช่น "EMP-0003" → 3, "HR-2026-005" → 5
+        const match = (emp.employeeCode as string).match(/(\d+)$/);
+        if (match) {
+          const num = parseInt(match[1], 10);
+          if (num > maxFoundNumber) maxFoundNumber = num;
+        }
+      }
+
+      // เริ่มจากตัวที่สูงกว่าระหว่าง config กับของจริงใน DB
+      let currentNumber = Math.max(configNumber, maxFoundNumber + 1);
+
+      if (maxFoundNumber > 0) {
+        this.logger.log(
+          `Synced running number: config=${configNumber}, maxInDB=${maxFoundNumber} → starting from ${currentNumber} (tenant ${tenantId} / property ${propertyId ?? 'any'})`,
+        );
+      }
+
+      let code: string;
+      let attempts = 0;
+
+      do {
+        if (attempts >= MAX_ATTEMPTS) {
+          this.logger.error(
+            `generateNextCode exceeded ${MAX_ATTEMPTS} attempts for tenant ${tenantId} property ${propertyId ?? 'any'} — counter severely out of sync`,
+          );
+          throw new BadRequestException(
+            'ไม่สามารถสร้างรหัสพนักงานอัตโนมัติได้ กรุณาระบุรหัสพนักงานด้วยตนเอง',
+          );
+        }
+
+        code = this.buildCodeFromPattern({
+          pattern: config.pattern,
+          prefix: config.prefix,
+          separator: config.separator,
+          digitLength: config.digitLength,
+          yearFormat: config.yearFormat,
+          departmentCode: departmentCode ?? '',
+          runningNumber: currentNumber,
+        });
+
+        // Scope collision check to (tenantId, propertyId) — mirrors the DB unique constraint
+        const existingWhere: Record<string, unknown> = { tenantId, employeeCode: code };
+        if (propertyId) existingWhere.propertyId = propertyId;
+
+        const existing = await tx.employee.findFirst({
+          where: existingWhere,
+          select: { id: true },
+        });
+
+        if (!existing) break;
+
+        this.logger.warn(
+          `Code "${code}" already used in tenant ${tenantId} / property ${propertyId ?? 'any'} — trying next (attempt ${attempts + 1})`,
+        );
+        currentNumber += 1;
+        attempts += 1;
+      } while (true);
+
+      // บันทึก nextNumber เป็น currentNumber+1 เสมอ (ครอบคลุมกรณี sync กับ DB แล้ว)
       await tx.employeeCodeConfig.update({
         where: { tenantId },
         data: {
@@ -129,7 +202,9 @@ export class EmployeeCodeConfigService {
         },
       });
 
-      this.logger.log(`Generated employee code for tenant ${tenantId}: ${code}`);
+      this.logger.log(
+        `Employee code "${code}" generated for tenant ${tenantId} / property ${propertyId ?? 'any'} (attempts: ${attempts + 1})`,
+      );
 
       return code;
     });
@@ -137,8 +212,18 @@ export class EmployeeCodeConfigService {
 
   /**
    * Preview what the next code would look like without actually incrementing.
+   *
+   * IMPORTANT: syncs with existing employees in DB to avoid showing a stale
+   * preview that would collide on actual creation. This mirrors the logic in
+   * generateNextCode() but does NOT update the counter — it is read-only.
+   *
+   * @param propertyId - Optional hotel/property scope for accurate sync
    */
-  async previewNextCode(tenantId: string, departmentCode?: string): Promise<string> {
+  async previewNextCode(
+    tenantId: string,
+    departmentCode?: string,
+    propertyId?: string,
+  ): Promise<string> {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID is required');
     }
@@ -147,27 +232,49 @@ export class EmployeeCodeConfigService {
       where: { tenantId },
     });
 
-    if (!config) {
-      return this.buildCodeFromPattern({
-        pattern: '{PREFIX}-{NNNN}',
-        prefix: 'EMP',
-        separator: '-',
-        digitLength: 4,
-        yearFormat: 'YYYY',
-        departmentCode: departmentCode ?? 'HR',
-        runningNumber: 1,
-      });
+    const effectiveConfig = config ?? {
+      pattern: '{PREFIX}-{NNNN}',
+      prefix: 'EMP',
+      separator: '-',
+      digitLength: 4,
+      yearFormat: 'YYYY',
+      resetCycle: 'NEVER',
+      nextNumber: 1,
+      lastResetDate: null,
+    };
+
+    const shouldReset = this.shouldResetCounter(effectiveConfig);
+    const configNumber = shouldReset ? 1 : effectiveConfig.nextNumber;
+
+    // ─── Sync with actual DB (read-only) ────────────────────────────────
+    // ดึง running number สูงสุดจาก employees จริงเพื่อ preview ที่ถูกต้อง
+    const existingEmployees = await (this.prisma as any).employee.findMany({
+      where: {
+        tenantId,
+        ...(propertyId ? { propertyId } : {}),
+        employeeCode: { not: null },
+      },
+      select: { employeeCode: true },
+    });
+
+    let maxFoundNumber = 0;
+    for (const emp of existingEmployees) {
+      if (!emp.employeeCode) continue;
+      const match = (emp.employeeCode as string).match(/(\d+)$/);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (num > maxFoundNumber) maxFoundNumber = num;
+      }
     }
 
-    const shouldReset = this.shouldResetCounter(config);
-    const currentNumber = shouldReset ? 1 : config.nextNumber;
+    const currentNumber = Math.max(configNumber, maxFoundNumber + 1);
 
     return this.buildCodeFromPattern({
-      pattern: config.pattern,
-      prefix: config.prefix,
-      separator: config.separator,
-      digitLength: config.digitLength,
-      yearFormat: config.yearFormat,
+      pattern: effectiveConfig.pattern,
+      prefix: effectiveConfig.prefix,
+      separator: effectiveConfig.separator,
+      digitLength: effectiveConfig.digitLength,
+      yearFormat: effectiveConfig.yearFormat,
       departmentCode: departmentCode ?? 'HR',
       runningNumber: currentNumber,
     });

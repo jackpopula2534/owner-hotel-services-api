@@ -50,8 +50,8 @@ export class SeederService {
       await this.seedDemoGuests();
       await this.seedDemoBookings();
       await this.seedDemoReviews();
-      await this.seedHotelStaff();
       await this.seedHrMasterData();
+      await this.seedHotelStaff();
       await this.seedPremiumHrData();
 
       this.logger.log('✅ Database seeding completed successfully!');
@@ -1189,15 +1189,15 @@ export class SeederService {
     const staffTemplates = [
       {
         role: 'manager',
-        position: 'General Manager',
-        department: 'Management',
+        positionNameEn: 'General Manager',
+        departmentCode: 'MGT',
         firstName: 'Michael',
         lastName: 'Manager',
       },
       {
         role: 'receptionist',
-        position: 'Front Desk Agent',
-        department: 'Front Office',
+        positionNameEn: 'Front Desk Agent (Day Shift)',
+        departmentCode: 'FO',
         firstName: 'Sarah',
         lastName: 'Reception',
       },
@@ -1220,6 +1220,10 @@ export class SeederService {
         .substring(0, 10);
 
       this.logger.log(`  🏨 ${tenant.name}:`);
+
+      const defaultProperty = await this.prisma.property.findFirst({
+        where: { tenantId: tenant.id },
+      });
 
       for (let i = 0; i < staffTemplates.length; i++) {
         const tpl = staffTemplates[i];
@@ -1254,24 +1258,45 @@ export class SeederService {
             // สร้าง Employee record ด้วย
             try {
               const empCode = `EMP-${String(staffCount + 1).padStart(4, '0')}`;
+              
+              // Fetch department and position properly from HR master data
+              let deptId = null;
+              let posId = null;
+              
+              const dept = await (this.prisma.hrDepartment as any).findFirst({
+                where: { tenantId: tenant.id, code: tpl.departmentCode },
+              });
+              if (dept) {
+                deptId = dept.id;
+                const pos = await (this.prisma.hrPosition as any).findFirst({
+                  where: { tenantId: tenant.id, departmentId: deptId, nameEn: tpl.positionNameEn },
+                });
+                if (pos) {
+                  posId = pos.id;
+                }
+              }
+
               await this.prisma.$executeRaw`
-                INSERT INTO employees (id, tenantId, firstName, lastName, email, employeeCode, department, position, startDate, createdAt, updatedAt)
+                INSERT INTO employees (id, tenantId, propertyId, firstName, lastName, email, employeeCode, department, position, departmentId, positionId, startDate, createdAt, updatedAt)
                 VALUES (
                   UUID(),
                   ${tenant.id},
+                  ${defaultProperty?.id || null},
                   ${firstName},
                   ${lastName},
                   ${email},
                   ${empCode},
-                  ${tpl.department},
-                  ${tpl.position},
+                  ${dept ? dept.name : tpl.departmentCode},
+                  ${posId ? tpl.positionNameEn : tpl.positionNameEn},
+                  ${deptId},
+                  ${posId},
                   '2024-01-01',
                   NOW(),
                   NOW()
                 )
               `;
-            } catch {
-              // employee อาจมีอยู่แล้ว
+            } catch (err: any) {
+              this.logger.warn(`    ⚠️  Could not create employee for staff (${email}): ${err.message}`);
             }
 
             staffCount++;
@@ -1607,6 +1632,10 @@ export class SeederService {
     }
     const tenantId = ownerUser.tenantId;
 
+    const property = await this.prisma.property.findFirst({
+      where: { tenantId },
+    });
+
     // ─── Look up HR master data for this tenant ───────────────────────────────
     const [deptFO, deptHK, deptFB, deptHR, deptENG, deptMGT] = await Promise.all([
       this.prisma.hrDepartment.findUnique({ where: { tenantId_code: { tenantId, code: 'FO' } } }),
@@ -1646,97 +1675,110 @@ export class SeederService {
         email: 'wichai.manee@mountain.hotel', phone: '081-234-5001',
         department: 'ฝ่ายบริหาร', departmentId: deptMGT?.id ?? deptFO!.id,
         position: 'ผู้จัดการทั่วไป', positionId: posGM?.id ?? null,
-        baseSalary: 85000, bankAccount: '123-4-56789-0', bankName: 'KBANK',
+        baseSalary: 85000, initialSalary: 65000, allowance: 10000, overtime: 0, positionBonus: 15000,
+        bankAccount: '123-4-56789-0', bankName: 'KBANK',
         gender: 'MALE', dateOfBirth: new Date('1975-03-15'), employmentType: 'FULLTIME',
-        nationalId: '1100500123456',
+        nationalId: '1100500123456', taxId: 'TX-1100500123456', socialSecurity: 'SS-1100500123456',
       },
       {
         code: 'PM-0002', firstName: 'นภาพร', lastName: 'ศรีสมบูรณ์', nickname: 'พร',
         email: 'napaporn.sri@mountain.hotel', phone: '081-234-5002',
         department: 'ฝ่ายต้อนรับ', departmentId: deptFO!.id,
         position: 'ผู้จัดการฝ่ายต้อนรับ', positionId: posFOM?.id ?? null,
-        baseSalary: 45000, bankAccount: '123-4-56789-1', bankName: 'SCB',
+        baseSalary: 45000, initialSalary: 35000, allowance: 5000, overtime: 0, positionBonus: 8000,
+        bankAccount: '123-4-56789-1', bankName: 'SCB',
         gender: 'FEMALE', dateOfBirth: new Date('1985-07-22'), employmentType: 'FULLTIME',
-        nationalId: '1100500234567',
+        nationalId: '1100500234567', taxId: 'TX-1100500234567', socialSecurity: 'SS-1100500234567',
       },
       {
         code: 'PM-0003', firstName: 'สมชาย', lastName: 'ใจดี', nickname: 'ชาย',
         email: 'somchai.jaidee@mountain.hotel', phone: '081-234-5003',
         department: 'ฝ่ายต้อนรับ', departmentId: deptFO!.id,
         position: 'พนักงานต้อนรับ (กะกลางวัน)', positionId: posFDA?.id ?? null,
-        baseSalary: 18000, bankAccount: '123-4-56789-2', bankName: 'BBL',
+        baseSalary: 18000, initialSalary: 15000, allowance: 2000, overtime: 1500, positionBonus: 0,
+        bankAccount: '123-4-56789-2', bankName: 'BBL',
         gender: 'MALE', dateOfBirth: new Date('1995-01-10'), employmentType: 'FULLTIME',
-        nationalId: '1100500345678',
+        nationalId: '1100500345678', taxId: 'TX-1100500345678', socialSecurity: 'SS-1100500345678',
       },
       {
         code: 'PM-0004', firstName: 'มาลี', lastName: 'รักษ์ดี', nickname: 'ลี',
         email: 'malee.rakdee@mountain.hotel', phone: '081-234-5004',
         department: 'ฝ่ายต้อนรับ', departmentId: deptFO!.id,
         position: 'พนักงานต้อนรับ (กะกลางวัน)', positionId: posFDA?.id ?? null,
-        baseSalary: 17500, bankAccount: '123-4-56789-3', bankName: 'KTB',
+        baseSalary: 17500, initialSalary: 15000, allowance: 2000, overtime: 1000, positionBonus: 0,
+        bankAccount: '123-4-56789-3', bankName: 'KTB',
         gender: 'FEMALE', dateOfBirth: new Date('1997-11-05'), employmentType: 'FULLTIME',
-        nationalId: '1100500456789',
+        nationalId: '1100500456789', taxId: 'TX-1100500456789', socialSecurity: 'SS-1100500456789',
       },
       {
         code: 'PM-0005', firstName: 'รัตนา', lastName: 'แม่บ้านดี', nickname: 'นา',
         email: 'rattana.maebaan@mountain.hotel', phone: '081-234-5005',
         department: 'ฝ่ายแม่บ้าน', departmentId: deptHK!.id,
         position: 'หัวหน้าแม่บ้าน', positionId: posEHK?.id ?? null,
-        baseSalary: 32000, bankAccount: '123-4-56789-4', bankName: 'KBANK',
+        baseSalary: 32000, initialSalary: 25000, allowance: 3000, overtime: 0, positionBonus: 5000,
+        bankAccount: '123-4-56789-4', bankName: 'KBANK',
         gender: 'FEMALE', dateOfBirth: new Date('1980-06-18'), employmentType: 'FULLTIME',
-        nationalId: '1100500567890',
+        nationalId: '1100500567890', taxId: 'TX-1100500567890', socialSecurity: 'SS-1100500567890',
       },
       {
         code: 'PM-0006', firstName: 'สุนันท์', lastName: 'ทำความสะอาด', nickname: 'นัน',
         email: 'sunun.tam@mountain.hotel', phone: '081-234-5006',
         department: 'ฝ่ายแม่บ้าน', departmentId: deptHK!.id,
         position: 'แม่บ้านห้องพัก', positionId: posRA?.id ?? null,
-        baseSalary: 13500, bankAccount: '123-4-56789-5', bankName: 'GSB',
+        baseSalary: 13500, initialSalary: 12000, allowance: 1500, overtime: 2000, positionBonus: 0,
+        bankAccount: '123-4-56789-5', bankName: 'GSB',
         gender: 'FEMALE', dateOfBirth: new Date('1992-09-28'), employmentType: 'FULLTIME',
-        nationalId: '1100500678901',
+        nationalId: '1100500678901', taxId: 'TX-1100500678901', socialSecurity: 'SS-1100500678901',
       },
       {
         code: 'PM-0007', firstName: 'ประภา', lastName: 'บุคลากรดี', nickname: 'ภา',
         email: 'prapa.hr@mountain.hotel', phone: '081-234-5007',
         department: 'ฝ่ายทรัพยากรบุคคล', departmentId: deptHR!.id,
         position: 'ผู้จัดการฝ่าย HR', positionId: posHRM?.id ?? null,
-        baseSalary: 38000, bankAccount: '123-4-56789-6', bankName: 'SCB',
+        baseSalary: 38000, initialSalary: 30000, allowance: 4000, overtime: 0, positionBonus: 6000,
+        bankAccount: '123-4-56789-6', bankName: 'SCB',
         gender: 'FEMALE', dateOfBirth: new Date('1988-04-12'), employmentType: 'FULLTIME',
-        nationalId: '1100500789012',
+        nationalId: '1100500789012', taxId: 'TX-1100500789012', socialSecurity: 'SS-1100500789012',
       },
       {
         code: 'PM-0008', firstName: 'อนุชา', lastName: 'อาหารดี', nickname: 'ชา',
         email: 'anucha.fb@mountain.hotel', phone: '081-234-5008',
         department: 'ฝ่ายอาหารและเครื่องดื่ม', departmentId: deptFB!.id,
         position: 'ผู้จัดการอาหารและเครื่องดื่ม', positionId: posFBM?.id ?? null,
-        baseSalary: 40000, bankAccount: '123-4-56789-7', bankName: 'BAY',
+        baseSalary: 40000, initialSalary: 32000, allowance: 5000, overtime: 0, positionBonus: 7000,
+        bankAccount: '123-4-56789-7', bankName: 'BAY',
         gender: 'MALE', dateOfBirth: new Date('1983-12-01'), employmentType: 'FULLTIME',
-        nationalId: '1100500890123',
+        nationalId: '1100500890123', taxId: 'TX-1100500890123', socialSecurity: 'SS-1100500890123',
       },
       {
         code: 'PM-0009', firstName: 'ไพศาล', lastName: 'ครัวเก่ง', nickname: 'ศาล',
         email: 'paisal.chef@mountain.hotel', phone: '081-234-5009',
         department: 'ฝ่ายอาหารและเครื่องดื่ม', departmentId: deptFB!.id,
         position: 'พ่อครัวแต่ละส่วน', positionId: posChef?.id ?? null,
-        baseSalary: 22000, bankAccount: '123-4-56789-8', bankName: 'KBANK',
+        baseSalary: 22000, initialSalary: 18000, allowance: 2500, overtime: 3000, positionBonus: 0,
+        bankAccount: '123-4-56789-8', bankName: 'KBANK',
         gender: 'MALE', dateOfBirth: new Date('1990-08-20'), employmentType: 'FULLTIME',
-        nationalId: '1100500901234',
+        nationalId: '1100500901234', taxId: 'TX-1100500901234', socialSecurity: 'SS-1100500901234',
       },
       {
         code: 'PM-0010', firstName: 'ธนกร', lastName: 'ช่างดี', nickname: 'กร',
         email: 'thanakorn.eng@mountain.hotel', phone: '081-234-5010',
         department: 'ฝ่ายวิศวกรรม', departmentId: deptENG?.id ?? deptFO!.id,
         position: 'หัวหน้าวิศวกร', positionId: posChiefEng?.id ?? null,
-        baseSalary: 35000, bankAccount: '123-4-56789-9', bankName: 'TMBThanachart',
+        baseSalary: 35000, initialSalary: 28000, allowance: 3500, overtime: 2000, positionBonus: 5000,
+        bankAccount: '123-4-56789-9', bankName: 'TMBThanachart',
         gender: 'MALE', dateOfBirth: new Date('1987-02-14'), employmentType: 'FULLTIME',
-        nationalId: '1100501012345',
+        nationalId: '1100501012345', taxId: 'TX-1100501012345', socialSecurity: 'SS-1100501012345',
       },
     ];
 
     // ─── Create employees (upsert by email) ───────────────────────────────────
     const createdEmployees: any[] = [];
     for (const emp of employeeTemplates) {
-      const existing = await this.prisma.employee.findUnique({ where: { email: emp.email } });
+      // Email is now unique per (tenantId, email) — must include tenantId in the lookup
+      const existing = await (this.prisma.employee as any).findFirst({
+        where: { tenantId, email: emp.email },
+      });
       if (existing) {
         const updated = await (this.prisma.employee as any).update({
           where: { id: existing.id },
@@ -1745,10 +1787,13 @@ export class SeederService {
             nickname: emp.nickname, phone: emp.phone,
             department: emp.department, position: emp.position,
             departmentId: emp.departmentId, positionId: emp.positionId,
-            baseSalary: emp.baseSalary, bankAccount: emp.bankAccount,
-            bankName: emp.bankName, gender: emp.gender,
-            dateOfBirth: emp.dateOfBirth, employmentType: emp.employmentType,
-            nationalId: emp.nationalId,
+            propertyId: property?.id || null,
+            baseSalary: emp.baseSalary, initialSalary: emp.initialSalary,
+            allowance: emp.allowance, overtime: emp.overtime, positionBonus: emp.positionBonus,
+            taxId: emp.taxId, socialSecurity: emp.socialSecurity,
+            bankAccount: emp.bankAccount, bankName: emp.bankName,
+            gender: emp.gender, dateOfBirth: emp.dateOfBirth,
+            employmentType: emp.employmentType, nationalId: emp.nationalId,
             status: 'ACTIVE', employeeCode: emp.code,
           },
         });
@@ -1760,10 +1805,13 @@ export class SeederService {
             nickname: emp.nickname, phone: emp.phone, employeeCode: emp.code,
             department: emp.department, position: emp.position,
             departmentId: emp.departmentId, positionId: emp.positionId,
-            baseSalary: emp.baseSalary, bankAccount: emp.bankAccount,
-            bankName: emp.bankName, gender: emp.gender,
-            dateOfBirth: emp.dateOfBirth, employmentType: emp.employmentType,
-            nationalId: emp.nationalId,
+            propertyId: property?.id || null,
+            baseSalary: emp.baseSalary, initialSalary: emp.initialSalary,
+            allowance: emp.allowance, overtime: emp.overtime, positionBonus: emp.positionBonus,
+            taxId: emp.taxId, socialSecurity: emp.socialSecurity,
+            bankAccount: emp.bankAccount, bankName: emp.bankName,
+            gender: emp.gender, dateOfBirth: emp.dateOfBirth,
+            employmentType: emp.employmentType, nationalId: emp.nationalId,
             status: 'ACTIVE', startDate: new Date('2024-01-01'),
           },
         });

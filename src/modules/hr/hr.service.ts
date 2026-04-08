@@ -27,12 +27,16 @@ export class HrService {
 
     const page = parseInt(query.page) || 1;
     const limit = parseInt(query.limit) || 10;
-    const { department, position, search } = query;
+    const { department, position, departmentId, positionId, search, propertyId, hotelId } = query;
     const skip = (page - 1) * limit;
 
     const where: Prisma.EmployeeWhereInput = { tenantId };
+    const finalPropertyId = propertyId || hotelId;
+    if (finalPropertyId) (where as any).propertyId = finalPropertyId;
     if (department) (where as any).department = department;
     if (position) (where as any).position = position;
+    if (departmentId) (where as any).departmentId = departmentId;
+    if (positionId) (where as any).positionId = positionId;
     if (search) {
       where.OR = [
         { firstName: { contains: search } },
@@ -49,7 +53,11 @@ export class HrService {
           skip,
           take: limit,
           orderBy: { createdAt: 'desc' },
-          include: { staff: { select: { id: true, role: true, status: true } } },
+          include: { 
+            staff: { select: { id: true, role: true, status: true } },
+            hrDepartment: true,
+            hrPosition: true
+          },
         }),
         this.prisma.employee.count({ where }),
       ]);
@@ -72,7 +80,11 @@ export class HrService {
 
     const employee = await (this.prisma.employee as any).findFirst({
       where: { id, tenantId },
-      include: { staff: { select: { id: true, role: true, status: true, department: true } } },
+      include: { 
+        staff: { select: { id: true, role: true, status: true, department: true } },
+        hrDepartment: true,
+        hrPosition: true
+      },
     });
 
     if (!employee) {
@@ -87,11 +99,14 @@ export class HrService {
       throw new BadRequestException('Tenant ID is required');
     }
 
-    // Auto-generate employee code if not provided
+    const { hotelId, propertyId, startDate, dateOfBirth, ...rest } = createEmployeeDto;
+    const finalPropertyId = propertyId || hotelId;
+
+    // Auto-generate employee code if not provided — pass propertyId so the generator
+    // skips codes already used in this specific hotel (unique per tenantId+propertyId)
     let employeeCode = createEmployeeDto.employeeCode;
     if (!employeeCode) {
       try {
-        // Resolve department code if departmentId is provided
         let departmentCode = '';
         if (createEmployeeDto.departmentId) {
           const dept = await (this.prisma as any).hrDepartment.findUnique({
@@ -104,29 +119,82 @@ export class HrService {
         employeeCode = await this.employeeCodeConfigService.generateNextCode(
           tenantId,
           departmentCode,
+          finalPropertyId, // scope collision check to this hotel
         );
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         this.logger.warn(`Auto-generate employee code failed, proceeding without: ${msg}`);
       }
+    } else {
+      // Caller supplied a code manually — verify it is not already taken in this hotel
+      const codeConflict = await (this.prisma.employee as any).findFirst({
+        where: {
+          tenantId,
+          employeeCode,
+          ...(finalPropertyId ? { propertyId: finalPropertyId } : {}),
+        },
+        select: { id: true },
+      });
+      if (codeConflict) {
+        throw new ConflictException(
+          `รหัสพนักงาน "${employeeCode}" มีอยู่ในระบบของโรงแรมนี้แล้ว กรุณาใช้รหัสอื่น`,
+        );
+      }
     }
 
-    return this.prisma.employee.create({
+    return (this.prisma.employee as any).create({
       data: {
-        ...createEmployeeDto,
+        ...rest,
+        ...(startDate ? { startDate: new Date(startDate) } : {}),
+        ...(dateOfBirth ? { dateOfBirth: new Date(dateOfBirth) } : {}),
+        propertyId: finalPropertyId,
         tenantId,
         ...(employeeCode ? { employeeCode } : {}),
       },
+      include: { hrDepartment: true, hrPosition: true },
     });
   }
 
   async update(id: string, updateEmployeeDto: UpdateEmployeeDto, tenantId?: string) {
     const employee = await this.findOne(id, tenantId);
 
+    const { hotelId, propertyId, startDate, dateOfBirth, ...rest } = updateEmployeeDto;
+    const finalPropertyId = propertyId || hotelId || (employee as any).propertyId;
+
+    // ── Conflict check when employeeCode is being changed ──────────────
+    if (
+      rest.employeeCode &&
+      rest.employeeCode !== (employee as any).employeeCode
+    ) {
+      const codeConflict = await (this.prisma.employee as any).findFirst({
+        where: {
+          tenantId,
+          employeeCode: rest.employeeCode,
+          ...(finalPropertyId ? { propertyId: finalPropertyId } : {}),
+          id: { not: id },
+        },
+        select: { id: true },
+      });
+      if (codeConflict) {
+        throw new ConflictException(
+          `รหัสพนักงาน "${rest.employeeCode}" มีอยู่ในระบบของโรงแรมนี้แล้ว กรุณาใช้รหัสอื่น`,
+        );
+      }
+    }
+
     const updated = await (this.prisma.employee as any).update({
       where: { id },
-      data: updateEmployeeDto,
-      include: { staff: true },
+      data: {
+        ...rest,
+        ...(startDate ? { startDate: new Date(startDate) } : {}),
+        ...(dateOfBirth ? { dateOfBirth: new Date(dateOfBirth) } : {}),
+        ...(finalPropertyId ? { propertyId: finalPropertyId } : {}),
+      },
+      include: {
+        staff: { select: { id: true, role: true, status: true } },
+        hrDepartment: true,
+        hrPosition: true,
+      },
     }) as any;
 
     // Auto-sync basic info to linked Staff record if one exists
@@ -138,6 +206,65 @@ export class HrService {
     }
 
     return updated;
+  }
+
+  /**
+   * Dashboard stats: total employees, today's attendance, on-leave, pending leave requests.
+   * All counts are scoped to tenantId and optionally filtered by propertyId (hotelId).
+   * Uses Promise.all for parallel queries — optimized for dashboard rendering.
+   */
+  async getDashboardStats(tenantId?: string, hotelId?: string) {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date(todayStart);
+    todayEnd.setDate(todayEnd.getDate() + 1);
+
+    const employeeWhere: { tenantId: string; propertyId?: string } = { tenantId };
+    if (hotelId) employeeWhere.propertyId = hotelId;
+
+    const [totalEmployees, todayAttendance, onLeave, pendingLeaveRequests] = await Promise.all([
+      // Total active employees
+      this.prisma.employee.count({ where: employeeWhere }),
+
+      // Today's check-ins (present or late)
+      (this.prisma.hrAttendance as any).count({
+        where: {
+          tenantId,
+          date: { gte: todayStart, lt: todayEnd },
+          status: { in: ['present', 'late'] },
+        },
+      }),
+
+      // Currently on approved leave (today is within leave date range)
+      (this.prisma.hrLeaveRequest as any).count({
+        where: {
+          tenantId,
+          status: 'approved',
+          startDate: { lte: todayStart },
+          endDate: { gte: todayStart },
+        },
+      }),
+
+      // Pending leave requests (awaiting approval)
+      (this.prisma.hrLeaveRequest as any).count({
+        where: { tenantId, status: 'pending' },
+      }),
+    ]);
+
+    const attendanceRate =
+      totalEmployees > 0 ? Math.round((todayAttendance / totalEmployees) * 100) : 0;
+
+    return {
+      totalEmployees,
+      todayAttendance,
+      onLeave,
+      pendingLeaveRequests,
+      attendanceRate,
+    };
   }
 
   async remove(id: string, tenantId?: string) {

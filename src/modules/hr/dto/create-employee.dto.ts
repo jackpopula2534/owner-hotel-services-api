@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, IsEmail, IsDateString, IsNumber, IsEnum } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsEmail, IsDateString, IsNumber, IsArray } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateEmployeeDto {
@@ -11,6 +11,11 @@ export class CreateEmployeeDto {
   @IsString()
   @IsNotEmpty()
   lastName: string;
+
+  @ApiPropertyOptional({ example: 'Johnny' })
+  @IsString()
+  @IsOptional()
+  nickname?: string;
 
   @ApiProperty({ example: 'john.doe@hotel.com' })
   @IsEmail()
@@ -67,6 +72,11 @@ export class CreateEmployeeDto {
   @IsOptional()
   baseSalary?: number;
 
+  @ApiPropertyOptional({ example: 20000, description: 'Initial salary when employee started' })
+  @IsNumber()
+  @IsOptional()
+  initialSalary?: number;
+
   @ApiPropertyOptional({ example: '123-4-56789-0' })
   @IsString()
   @IsOptional()
@@ -96,4 +106,64 @@ export class CreateEmployeeDto {
   @IsString()
   @IsOptional()
   notes?: string;
+
+  // New Fields
+  @ApiPropertyOptional({ description: 'Hotel ID (Property ID)' })
+  @IsString()
+  @IsOptional()
+  hotelId?: string;
+
+  @ApiPropertyOptional({ description: 'Property ID (Internal mapping)' })
+  @IsString()
+  @IsOptional()
+  propertyId?: string;
+
+  @ApiPropertyOptional({ example: 'TX12345678' })
+  @IsString()
+  @IsOptional()
+  taxId?: string;
+
+  @ApiPropertyOptional({ example: 'SS12345678' })
+  @IsString()
+  @IsOptional()
+  socialSecurity?: string;
+
+  @ApiPropertyOptional({ example: 1000 })
+  @IsNumber()
+  @IsOptional()
+  allowance?: number;
+
+  @ApiPropertyOptional({ example: 2000 })
+  @IsNumber()
+  @IsOptional()
+  overtime?: number;
+
+  @ApiPropertyOptional({ example: 3000 })
+  @IsNumber()
+  @IsOptional()
+  positionBonus?: number;
+
+  @ApiPropertyOptional({
+    description: 'Education history (JSON array)',
+    example: [{ level: 'BACHELOR', institution: 'มหาวิทยาลัยเชียงใหม่', major: 'การโรงแรม', graduationYear: '2020', gpa: '3.50' }],
+  })
+  @IsArray()
+  @IsOptional()
+  educations?: Record<string, unknown>[];
+
+  @ApiPropertyOptional({
+    description: 'Work experience history (JSON array)',
+    example: [{ company: 'Hotel XYZ', position: 'Receptionist', startYear: '2020', endYear: '2022' }],
+  })
+  @IsArray()
+  @IsOptional()
+  workExperiences?: Record<string, unknown>[];
+
+  @ApiPropertyOptional({
+    description: 'Emergency contact info (JSON array)',
+    example: [{ name: 'สมหญิง ใจดี', relation: 'ภรรยา', phone: '081-234-5678' }],
+  })
+  @IsArray()
+  @IsOptional()
+  emergencyContacts?: Record<string, unknown>[];
 }

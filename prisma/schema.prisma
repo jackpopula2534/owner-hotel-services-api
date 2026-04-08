@@ -142,6 +142,7 @@ model Property {
   rooms            Room[]
   bookings         Booking[]
   maintenanceTasks MaintenanceTask[]
+  employees        Employee[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -298,8 +299,8 @@ model Employee {
   firstName      String
   lastName       String
   nickname       String?
-  email          String    @unique
-  employeeCode   String?   @unique
+  email          String
+  employeeCode   String?
   department     String?
   position       String?
   departmentId   String?
@@ -313,22 +314,43 @@ model Employee {
   notes          String?   @db.Text
   status         String    @default("ACTIVE") // ACTIVE | ON_LEAVE | INACTIVE | SUSPENDED | TERMINATED | RESIGNED
   baseSalary     Decimal?  @db.Decimal(12, 2)
+  initialSalary  Decimal?  @db.Decimal(12, 2)
   bankAccount    String?
   startDate      DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
+  // NEW: HR Financial & Detailed Info
+  propertyId     String? // hotelId
+  taxId          String?
+  socialSecurity String?
+  allowance      Decimal?  @db.Decimal(12, 2)
+  overtime       Decimal?  @db.Decimal(12, 2)
+  positionBonus  Decimal?  @db.Decimal(12, 2)
+  educations     Json?
+  workExperiences Json?
+  emergencyContacts Json?
+
   // HR Add-on: reverse relation — one Employee can be linked to one Staff record
   staff         Staff?          @relation("StaffEmployee")
+  property      Property?       @relation(fields: [propertyId], references: [id], onDelete: SetNull)
   hrDepartment  HrDepartment?   @relation(fields: [departmentId], references: [id], onDelete: SetNull)
   hrPosition    HrPosition?     @relation(fields: [positionId], references: [id], onDelete: SetNull)
   attendances   HrAttendance[]
   leaveRequests HrLeaveRequest[]
   payrolls      HrPayroll[]
 
+  // employeeCode unique per hotel (property) within a tenant
+  // — same code can exist in different hotels of the same tenant
+  // NOTE: MySQL allows multiple NULLs in unique index; application layer enforces
+  //       propertyId-scoped check when propertyId is known at create time.
+  @@unique([tenantId, propertyId, employeeCode])
+  @@unique([tenantId, email])
   @@index([tenantId])
+  @@index([propertyId])
   @@index([departmentId])
   @@index([positionId])
+  @@index([employeeCode])
   @@map("employees")
 }
 

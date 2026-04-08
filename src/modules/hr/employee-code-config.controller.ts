@@ -60,6 +60,7 @@ export class EmployeeCodeConfigController {
     const code = await this.configService.previewNextCode(
       user?.tenantId,
       query.departmentCode,
+      query.propertyId,
     );
     return { code };
   }

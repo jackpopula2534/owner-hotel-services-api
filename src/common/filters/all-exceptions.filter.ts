@@ -182,7 +182,14 @@ export class AllExceptionsFilter implements ExceptionFilter {
   private getPrismaMessage(exception: Prisma.PrismaClientKnownRequestError): string {
     switch (exception.code) {
       case 'P2002': {
-        const target = (exception.meta?.target as string[])?.join(', ') || 'field';
+        // MySQL returns meta.target as a string (constraint name e.g. "employees_employeeCode_key")
+        // PostgreSQL returns it as string[] — handle both
+        const rawTarget = exception.meta?.target;
+        const target = Array.isArray(rawTarget)
+          ? rawTarget.join(', ')
+          : typeof rawTarget === 'string'
+            ? rawTarget
+            : 'field';
         return `ข้อมูลนี้มีอยู่ในระบบแล้ว (${target} already exists)`;
       }
       case 'P2025':

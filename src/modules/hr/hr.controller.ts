@@ -89,6 +89,37 @@ export class HrController {
 
   // ─── Employee CRUD routes ─────────────────────────────────────────────────
 
+  // IMPORTANT: Static routes (dashboard-stats) MUST be declared BEFORE @Get(':id')
+  // to prevent NestJS from treating "dashboard-stats" as an employee ID.
+
+  @Get('dashboard-stats')
+  @ApiOperation({
+    summary: 'Get HR dashboard statistics (requires HR add-on)',
+    description:
+      'Returns totalEmployees, todayAttendance, onLeave, pendingLeaveRequests, and attendanceRate. ' +
+      'Pass hotelId query param to filter by specific property.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Dashboard statistics',
+    schema: {
+      example: {
+        totalEmployees: 12,
+        todayAttendance: 8,
+        onLeave: 2,
+        pendingLeaveRequests: 1,
+        attendanceRate: 67,
+      },
+    },
+  })
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
+  async getDashboardStats(
+    @Query('hotelId') hotelId: string,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    return this.hrService.getDashboardStats(user?.tenantId, hotelId);
+  }
+
   @Get()
   @ApiOperation({ summary: 'Get all employees (requires HR add-on)' })
   @ApiResponse({ status: 200, description: 'List of employees' })

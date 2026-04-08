@@ -89,4 +89,9 @@ export class PreviewEmployeeCodeDto {
   @IsString()
   @IsOptional()
   departmentCode?: string;
+
+  @ApiPropertyOptional({ description: 'Property/hotel ID to scope the preview (avoids stale codes)', example: 'abc-123' })
+  @IsString()
+  @IsOptional()
+  propertyId?: string;
 }
