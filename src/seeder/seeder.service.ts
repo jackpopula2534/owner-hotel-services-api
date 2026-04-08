@@ -1749,7 +1749,7 @@ export class SeederService {
             bankName: emp.bankName, gender: emp.gender,
             dateOfBirth: emp.dateOfBirth, employmentType: emp.employmentType,
             nationalId: emp.nationalId,
-            status: 'active', employeeCode: emp.code,
+            status: 'ACTIVE', employeeCode: emp.code,
           },
         });
         createdEmployees.push(updated);
@@ -1764,7 +1764,7 @@ export class SeederService {
             bankName: emp.bankName, gender: emp.gender,
             dateOfBirth: emp.dateOfBirth, employmentType: emp.employmentType,
             nationalId: emp.nationalId,
-            status: 'active', startDate: new Date('2024-01-01'),
+            status: 'ACTIVE', startDate: new Date('2024-01-01'),
           },
         });
         createdEmployees.push(created);

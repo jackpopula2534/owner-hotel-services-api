@@ -70,27 +70,38 @@ export class AllExceptionsFilter implements ExceptionFilter {
       // ─── Prisma known errors ──────────────────────────────────────────────
     } else if (exception instanceof Prisma.PrismaClientKnownRequestError) {
       // Schema not yet migrated — return graceful empty payload (P2021/P2022)
+      // ONLY for GET requests; write operations (POST/PUT/PATCH/DELETE) must
+      // surface the error so the frontend knows data was NOT persisted.
       if (exception.code === 'P2021' || exception.code === 'P2022') {
-        this.logger.warn(`Database schema not ready (${exception.code}): returning empty data`);
-        const emptyPayload: Record<string, unknown> = {
-          success: true,
-          data: [],
-          meta: { total: 0, page: 1, limit: 10, totalPages: 0 },
-          timestamp: new Date().toISOString(),
-          path: request.url,
-        };
-        if (request.url.includes('/notifications')) {
-          emptyPayload.items = emptyPayload.data;
-          delete emptyPayload.data;
+        if (request.method === 'GET') {
+          this.logger.warn(`Database schema not ready (${exception.code}): returning empty data`);
+          const emptyPayload: Record<string, unknown> = {
+            success: true,
+            data: [],
+            meta: { total: 0, page: 1, limit: 10, totalPages: 0 },
+            timestamp: new Date().toISOString(),
+            path: request.url,
+          };
+          if (request.url.includes('/notifications')) {
+            emptyPayload.items = emptyPayload.data;
+            delete emptyPayload.data;
+          }
+          response.status(200).json(emptyPayload);
+          return;
         }
-        response.status(200).json(emptyPayload);
-        return;
+        // Non-GET: fall through to return a proper error so clients know the write failed
+        this.logger.error(
+          `Database schema not ready (${exception.code}) on ${request.method} ${request.url} — write operation failed`,
+        );
+        status = HttpStatus.SERVICE_UNAVAILABLE;
+        code = `SCHEMA_NOT_READY`;
+        message = 'ตารางข้อมูลยังไม่พร้อม กรุณา run migration ก่อนใช้งาน (Database table not found — please run prisma migrate)';
+      } else {
+        status = this.prismaStatus(exception.code);
+        code = `PRISMA_${exception.code}`;
+        message = this.getPrismaMessage(exception);
+        this.logger.error(`Prisma ${exception.code}: ${exception.message}`, undefined, requestId);
       }
-
-      status = this.prismaStatus(exception.code);
-      code = `PRISMA_${exception.code}`;
-      message = this.getPrismaMessage(exception);
-      this.logger.error(`Prisma ${exception.code}: ${exception.message}`, undefined, requestId);
 
       // ─── Prisma validation ────────────────────────────────────────────────
     } else if (exception instanceof Prisma.PrismaClientValidationError) {

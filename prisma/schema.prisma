@@ -311,7 +311,7 @@ model Employee {
   employmentType String?   @default("FULLTIME") // FULLTIME | TEMPORARY | DAILY | CONTRACT
   bankName       String?
   notes          String?   @db.Text
-  status         String    @default("active") // active | inactive | terminated
+  status         String    @default("ACTIVE") // ACTIVE | ON_LEAVE | INACTIVE | SUSPENDED | TERMINATED | RESIGNED
   baseSalary     Decimal?  @db.Decimal(12, 2)
   bankAccount    String?
   startDate      DateTime?
@@ -1524,4 +1524,33 @@ model HousekeepingTask {
   @@index([assignedToId])
   @@index([scheduledFor])
   @@map("housekeeping_tasks")
+}
+
+// ─── Employee Code Configuration ────────────────────────────────────────────
+// Each hotel (tenant) can define their own employee code pattern.
+// Pattern elements: {PREFIX}, {DEPT}, {YYYY}, {YY}, {MM}, {NNNN}, {NNN}, {NN}
+// Separator can be customised (-, /, .)
+// Example: {PREFIX}-{DEPT}-{YYYY}-{NNNN} → MV-HR-2026-0001
+
+model EmployeeCodeConfig {
+  id             String   @id @default(uuid())
+  tenantId       String   @unique
+  pattern        String   @default("{PREFIX}-{NNNN}") // e.g. {PREFIX}-{DEPT}-{YYYY}-{NNNN}
+  prefix         String   @default("EMP")             // custom prefix text
+  separator      String   @default("-")               // separator between elements
+  digitLength    Int      @default(4)                  // number of digits for running number
+  resetCycle     String   @default("NEVER")            // NEVER | YEARLY | MONTHLY
+  nextNumber     Int      @default(1)                  // current running number counter
+  lastResetDate  DateTime?                             // last time counter was reset
+  includeYear    Boolean  @default(false)              // include year in pattern
+  yearFormat     String   @default("YYYY")             // YYYY or YY
+  includeDept    Boolean  @default(false)              // include department code
+  deptSource     String   @default("CODE")             // CODE | NAME_SHORT (first 2-3 chars)
+  isActive       Boolean  @default(true)
+  sampleOutput   String?                               // cached preview e.g. "EMP-HR-2026-0001"
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([tenantId])
+  @@map("employee_code_configs")
 }

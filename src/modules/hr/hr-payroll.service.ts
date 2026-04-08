@@ -80,7 +80,7 @@ export class HrPayrollService {
     const { month, year, employeeIds, items } = dto;
 
     // Fetch target employees
-    const employeeWhere: Record<string, unknown> = { tenantId, status: 'active' };
+    const employeeWhere: Record<string, unknown> = { tenantId, status: 'ACTIVE' };
     if (employeeIds?.length) employeeWhere['id'] = { in: employeeIds };
 
     const employees = await (this.prisma.employee as any).findMany({ where: employeeWhere });

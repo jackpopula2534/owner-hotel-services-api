@@ -6,6 +6,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { EmployeeCodeConfigService } from './employee-code-config.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { Prisma } from '@prisma/client';
@@ -14,7 +15,10 @@ import { Prisma } from '@prisma/client';
 export class HrService {
   private readonly logger = new Logger(HrService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private employeeCodeConfigService: EmployeeCodeConfigService,
+  ) {}
 
   async findAll(query: any, tenantId?: string) {
     if (!tenantId) {
@@ -83,8 +87,36 @@ export class HrService {
       throw new BadRequestException('Tenant ID is required');
     }
 
+    // Auto-generate employee code if not provided
+    let employeeCode = createEmployeeDto.employeeCode;
+    if (!employeeCode) {
+      try {
+        // Resolve department code if departmentId is provided
+        let departmentCode = '';
+        if (createEmployeeDto.departmentId) {
+          const dept = await (this.prisma as any).hrDepartment.findUnique({
+            where: { id: createEmployeeDto.departmentId },
+            select: { code: true, name: true },
+          });
+          departmentCode = dept?.code ?? dept?.name?.substring(0, 3)?.toUpperCase() ?? '';
+        }
+
+        employeeCode = await this.employeeCodeConfigService.generateNextCode(
+          tenantId,
+          departmentCode,
+        );
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`Auto-generate employee code failed, proceeding without: ${msg}`);
+      }
+    }
+
     return this.prisma.employee.create({
-      data: { ...createEmployeeDto, tenantId },
+      data: {
+        ...createEmployeeDto,
+        tenantId,
+        ...(employeeCode ? { employeeCode } : {}),
+      },
     });
   }
 
