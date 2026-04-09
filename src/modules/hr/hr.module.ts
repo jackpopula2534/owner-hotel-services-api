@@ -9,6 +9,12 @@ import { HrLeaveController } from './hr-leave.controller';
 import { HrLeaveService } from './hr-leave.service';
 import { HrPayrollController } from './hr-payroll.controller';
 import { HrPayrollService } from './hr-payroll.service';
+import { HrPerformanceController } from './hr-performance.controller';
+import { HrPerformanceService } from './hr-performance.service';
+import { HrKpiTemplateController } from './hr-kpi-template.controller';
+import { HrKpiTemplateService } from './hr-kpi-template.service';
+import { HrEvaluationCycleController } from './hr-evaluation-cycle.controller';
+import { HrEvaluationCycleService } from './hr-evaluation-cycle.service';
 import { EmployeeCodeConfigService } from './employee-code-config.service';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { AddonModule } from '../addons/addon.module';
@@ -30,6 +36,9 @@ import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
     HrAttendanceController,
     HrLeaveController,
     HrPayrollController,
+    HrPerformanceController,
+    HrKpiTemplateController,      // NEW: KPI Template CRUD
+    HrEvaluationCycleController,  // NEW: Evaluation Cycle + auto-generate
     HrController,  // Must be LAST — its @Get(':id') would catch sub-paths otherwise
   ],
   providers: [
@@ -38,9 +47,16 @@ import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
     HrAttendanceService,
     HrLeaveService,
     HrPayrollService,
+    HrPerformanceService,
+    HrKpiTemplateService,         // NEW
+    HrEvaluationCycleService,     // NEW
     EmployeeCodeConfigService,
     HrAddonGuard,
   ],
-  exports: [HrService, HrMasterDataService, HrAttendanceService, HrLeaveService, HrPayrollService, EmployeeCodeConfigService],
+  exports: [
+    HrService, HrMasterDataService, HrAttendanceService, HrLeaveService,
+    HrPayrollService, HrPerformanceService, HrKpiTemplateService,
+    HrEvaluationCycleService, EmployeeCodeConfigService,
+  ],
 })
 export class HrModule {}

@@ -1,0 +1,1330 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>KPI System Flow Design — StaySync HR</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --purple: #9333ea;
+    --purple-light: #f3e8ff;
+    --purple-dark: #7e22ce;
+    --green: #10b981;
+    --green-light: #d1fae5;
+    --amber: #f59e0b;
+    --amber-light: #fef3c7;
+    --red: #ef4444;
+    --red-light: #fee2e2;
+    --blue: #3b82f6;
+    --blue-light: #dbeafe;
+    --gray: #6b7280;
+    --gray-light: #f9fafb;
+    --border: #e5e7eb;
+    --text: #111827;
+    --text-muted: #6b7280;
+  }
+
+  body {
+    font-family: 'Sarabun', sans-serif;
+    background: #f9fafb;
+    color: var(--text);
+    line-height: 1.6;
+  }
+
+  /* ── Header ── */
+  .header {
+    background: linear-gradient(135deg, #7e22ce 0%, #9333ea 50%, #a855f7 100%);
+    color: white;
+    padding: 48px 40px 40px;
+    position: relative;
+    overflow: hidden;
+  }
+  .header::before {
+    content: '';
+    position: absolute;
+    top: -80px; right: -80px;
+    width: 300px; height: 300px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 50%;
+  }
+  .header::after {
+    content: '';
+    position: absolute;
+    bottom: -60px; left: 200px;
+    width: 200px; height: 200px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 50%;
+  }
+  .header-inner { position: relative; z-index: 1; max-width: 1100px; margin: 0 auto; }
+  .header-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: rgba(255,255,255,0.2);
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 20px; padding: 4px 14px;
+    font-size: 12px; font-weight: 600; letter-spacing: 0.5px;
+    margin-bottom: 16px;
+  }
+  .header h1 { font-size: 32px; font-weight: 700; margin-bottom: 8px; }
+  .header p { font-size: 16px; opacity: 0.85; }
+  .header-meta { display: flex; gap: 24px; margin-top: 24px; }
+  .header-meta-item { display: flex; align-items: center; gap: 6px; font-size: 13px; opacity: 0.8; }
+
+  /* ── Container ── */
+  .container { max-width: 1100px; margin: 0 auto; padding: 40px 24px; }
+
+  /* ── Section ── */
+  .section { margin-bottom: 48px; }
+  .section-title {
+    font-size: 20px; font-weight: 700; color: var(--text);
+    margin-bottom: 20px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .section-title .icon {
+    width: 32px; height: 32px;
+    background: var(--purple-light);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px;
+  }
+
+  /* ── Problem Cards ── */
+  .problem-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .problem-card {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    border-left: 4px solid var(--red);
+  }
+  .problem-card h3 { font-size: 14px; font-weight: 700; color: var(--red); margin-bottom: 8px; }
+  .problem-card p { font-size: 13px; color: var(--text-muted); line-height: 1.6; }
+  .problem-card .fix {
+    margin-top: 12px;
+    padding: 8px 12px;
+    background: var(--green-light);
+    border-radius: 6px;
+    font-size: 12px;
+    color: #065f46;
+    font-weight: 600;
+  }
+
+  /* ── Flow Diagram ── */
+  .flow-wrapper {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 32px;
+    overflow-x: auto;
+  }
+
+  .flow-phases {
+    display: flex;
+    gap: 0;
+    align-items: stretch;
+    min-width: 900px;
+  }
+
+  .flow-phase {
+    flex: 1;
+    position: relative;
+    cursor: pointer;
+    transition: transform 0.2s;
+  }
+  .flow-phase:hover { transform: translateY(-2px); }
+
+  .flow-phase-header {
+    border-radius: 12px 12px 0 0;
+    padding: 16px 14px 12px;
+    text-align: center;
+    position: relative;
+  }
+
+  .flow-phase-number {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.3);
+    border: 2px solid rgba(255,255,255,0.6);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700; color: white;
+    margin: 0 auto 8px;
+  }
+  .flow-phase-header h3 { font-size: 13px; font-weight: 700; color: white; line-height: 1.3; }
+  .flow-phase-header .sub { font-size: 11px; color: rgba(255,255,255,0.8); margin-top: 3px; }
+
+  .flow-phase-body {
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 12px 12px;
+    padding: 14px;
+    background: white;
+    min-height: 200px;
+  }
+
+  .flow-step {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 8px 0;
+    border-bottom: 1px dashed var(--border);
+  }
+  .flow-step:last-child { border-bottom: none; }
+  .flow-step-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    margin-top: 6px;
+    flex-shrink: 0;
+  }
+  .flow-step p { font-size: 12px; color: var(--text); line-height: 1.5; }
+  .flow-step .note { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+  /* Phase arrows */
+  .flow-arrow {
+    display: flex; align-items: center; justify-content: center;
+    padding: 0 4px;
+    color: var(--gray);
+    font-size: 20px;
+    padding-top: 32px;
+  }
+
+  /* Phase colors */
+  .phase-setup .flow-phase-header { background: linear-gradient(135deg, #7e22ce, #9333ea); }
+  .phase-setup .flow-step-dot { background: #9333ea; }
+  .phase-setup .flow-phase-body { border-color: #e9d5ff; }
+
+  .phase-cycle .flow-phase-header { background: linear-gradient(135deg, #1d4ed8, #3b82f6); }
+  .phase-cycle .flow-step-dot { background: #3b82f6; }
+  .phase-cycle .flow-phase-body { border-color: #bfdbfe; }
+
+  .phase-eval .flow-phase-header { background: linear-gradient(135deg, #0891b2, #06b6d4); }
+  .phase-eval .flow-step-dot { background: #06b6d4; }
+  .phase-eval .flow-phase-body { border-color: #a5f3fc; }
+
+  .phase-approve .flow-phase-header { background: linear-gradient(135deg, #d97706, #f59e0b); }
+  .phase-approve .flow-step-dot { background: #f59e0b; }
+  .phase-approve .flow-phase-body { border-color: #fde68a; }
+
+  .phase-result .flow-phase-header { background: linear-gradient(135deg, #059669, #10b981); }
+  .phase-result .flow-step-dot { background: #10b981; }
+  .phase-result .flow-phase-body { border-color: #a7f3d0; }
+
+  /* ── Data Model ── */
+  .data-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+
+  .data-card {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .data-card-header {
+    padding: 12px 16px;
+    font-size: 13px; font-weight: 700;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .data-card-body { padding: 12px 16px; }
+  .data-field {
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 0;
+    border-bottom: 1px solid var(--gray-light);
+    font-size: 12px;
+  }
+  .data-field:last-child { border-bottom: none; }
+  .data-field .field-name { font-weight: 600; color: var(--text); min-width: 120px; }
+  .data-field .field-type { color: var(--text-muted); font-family: monospace; font-size: 11px; }
+  .data-field .badge-new {
+    margin-left: auto;
+    background: #fef3c7; color: #92400e;
+    border-radius: 4px; padding: 1px 6px;
+    font-size: 10px; font-weight: 700;
+  }
+  .data-field .badge-keep {
+    margin-left: auto;
+    background: #d1fae5; color: #065f46;
+    border-radius: 4px; padding: 1px 6px;
+    font-size: 10px; font-weight: 700;
+  }
+
+  /* ── UI Wireframe ── */
+  .wireframe-tabs {
+    display: flex; gap: 4px;
+    background: var(--gray-light);
+    border-radius: 10px;
+    padding: 4px;
+    margin-bottom: 20px;
+    border: 1px solid var(--border);
+  }
+  .wireframe-tab {
+    flex: 1; padding: 8px 12px;
+    border-radius: 7px;
+    font-size: 13px; font-weight: 600;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.2s;
+    color: var(--text-muted);
+    border: none; background: none;
+  }
+  .wireframe-tab.active {
+    background: white;
+    color: var(--purple);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  }
+
+  .wireframe-panel { display: none; }
+  .wireframe-panel.active { display: block; }
+
+  .wireframe-screen {
+    background: white;
+    border: 2px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .wireframe-topbar {
+    background: var(--purple);
+    padding: 10px 16px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .wireframe-topbar span { color: white; font-size: 13px; font-weight: 600; }
+  .wireframe-topbar .breadcrumb { color: rgba(255,255,255,0.7); font-size: 11px; }
+  .wireframe-content { padding: 20px; }
+
+  .wf-card {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 12px;
+  }
+  .wf-card-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .wf-card-title { font-size: 14px; font-weight: 700; }
+
+  .wf-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 16px; border-radius: 8px;
+    font-size: 12px; font-weight: 600;
+    border: none; cursor: pointer;
+  }
+  .wf-btn-primary { background: var(--purple); color: white; }
+  .wf-btn-outline { background: white; color: var(--purple); border: 1px solid var(--purple); }
+  .wf-btn-sm { padding: 4px 10px; font-size: 11px; border-radius: 5px; }
+
+  .wf-field-group {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+    margin-bottom: 12px;
+  }
+  .wf-field { margin-bottom: 10px; }
+  .wf-label { font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px; display: block; }
+  .wf-input {
+    width: 100%; padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px; font-size: 12px;
+    color: var(--text);
+    background: var(--gray-light);
+  }
+  .wf-input.has-value { background: white; border-color: var(--purple); }
+
+  .kpi-row {
+    display: grid; grid-template-columns: 1fr 80px 80px 36px;
+    gap: 8px; align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--gray-light);
+    font-size: 12px;
+  }
+  .kpi-row:last-child { border-bottom: none; }
+  .kpi-row .kpi-name { font-weight: 600; }
+  .kpi-weight-badge {
+    background: var(--purple-light);
+    color: var(--purple-dark);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 700;
+    text-align: center;
+  }
+  .kpi-score-input {
+    width: 100%; padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    font-size: 12px; text-align: center;
+    background: white;
+  }
+
+  .employee-row {
+    display: grid; grid-template-columns: 32px 1fr 100px 80px 80px;
+    gap: 8px; align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--gray-light);
+    font-size: 12px;
+  }
+  .employee-avatar {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; color: white;
+  }
+
+  .status-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 8px; border-radius: 20px;
+    font-size: 10px; font-weight: 700;
+  }
+  .status-pending { background: var(--amber-light); color: #92400e; }
+  .status-draft { background: #f3f4f6; color: #374151; }
+  .status-submitted { background: var(--blue-light); color: #1e40af; }
+  .status-approved { background: var(--green-light); color: #065f46; }
+
+  .weight-total {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 12px; font-weight: 600;
+    margin-top: 8px;
+  }
+  .weight-ok { background: var(--green-light); color: #065f46; }
+  .weight-err { background: var(--red-light); color: #991b1b; }
+
+  /* ── Summary box ── */
+  .summary-box {
+    background: linear-gradient(135deg, var(--purple-light), #ede9fe);
+    border: 1px solid #ddd6fe;
+    border-radius: 12px;
+    padding: 24px;
+    margin-top: 8px;
+  }
+  .summary-box h3 { font-size: 16px; font-weight: 700; color: var(--purple-dark); margin-bottom: 16px; }
+  .summary-row {
+    display: grid; grid-template-columns: 24px 1fr;
+    gap: 10px; align-items: flex-start;
+    margin-bottom: 10px;
+  }
+  .summary-row .num {
+    width: 24px; height: 24px;
+    background: var(--purple);
+    color: white; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700;
+    flex-shrink: 0;
+  }
+  .summary-row p { font-size: 13px; color: var(--text); }
+  .summary-row strong { color: var(--purple-dark); }
+
+  /* ── Comparison table ── */
+  .compare-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .compare-table th {
+    padding: 10px 14px; text-align: left;
+    background: var(--gray-light);
+    border: 1px solid var(--border);
+    font-size: 12px; font-weight: 700;
+  }
+  .compare-table td {
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .compare-table tr:nth-child(even) td { background: #fafafa; }
+  .bad { color: var(--red); font-weight: 600; }
+  .good { color: var(--green); font-weight: 600; }
+  .tag {
+    display: inline-block;
+    padding: 2px 8px; border-radius: 4px;
+    font-size: 11px; font-weight: 700;
+    margin-right: 4px;
+  }
+  .tag-red { background: var(--red-light); color: #991b1b; }
+  .tag-green { background: var(--green-light); color: #065f46; }
+
+  /* ── Responsive ── */
+  @media (max-width: 768px) {
+    .header { padding: 32px 20px; }
+    .header h1 { font-size: 24px; }
+    .container { padding: 24px 16px; }
+    .flow-phases { flex-direction: column; min-width: unset; }
+    .flow-arrow { display: none; }
+    .wf-field-group { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ════════════════ HEADER ════════════════ -->
+<div class="header">
+  <div class="header-inner">
+    <div class="header-badge">🎯 UX / System Flow Design</div>
+    <h1>KPI Performance System — Flow Design</h1>
+    <p>ออกแบบ flow ระบบประเมินผล KPI แบบมืออาชีพ สำหรับ StaySync HR Module</p>
+    <div class="header-meta">
+      <div class="header-meta-item">📅 April 2026</div>
+      <div class="header-meta-item">🏨 StaySync Hotel SaaS</div>
+      <div class="header-meta-item">⚙️ NestJS + Next.js</div>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- ════════════════ SECTION 1: PROBLEMS ════════════════ -->
+  <div class="section">
+    <div class="section-title">
+      <div class="icon">🚨</div>
+      ปัญหาของระบบปัจจุบัน (Current Pain Points)
+    </div>
+    <div class="problem-grid">
+      <div class="problem-card">
+        <h3>❌ ไม่มี Template — KPI Hardcoded</h3>
+        <p>น้ำหนัก KPI ถูก hardcode ทั้งใน Frontend (5 ตัว) และ Backend (4 ตัว) แต่ไม่ตรงกัน ทำให้ user ไม่รู้ว่าควรกรอกอะไร และไม่สามารถ customize KPI ตามแผนก/ตำแหน่งได้</p>
+        <div class="fix">✅ แก้: สร้าง KPI Template ที่ configurable ได้</div>
+      </div>
+      <div class="problem-card">
+        <h3>❌ ไม่มี Evaluation Cycle — ต้อง Add ทีละคน</h3>
+        <p>ปัจจุบัน user ต้องกด "+ เพิ่มการประเมิน" แล้วเลือกพนักงานทีละคน ทำให้ถ้ามี 50 คน ต้องทำ 50 ครั้ง ไม่มีระบบ batch generation ให้</p>
+        <div class="fix">✅ แก้: เปิด "รอบประเมิน" ครั้งเดียว — auto-generate ให้ทุกคน</div>
+      </div>
+      <div class="problem-card">
+        <h3>❌ Slider ใช้งานยาก และ งง</h3>
+        <p>ใช้ slider (0-100) โดยไม่มี guidance ว่าแต่ละ score หมายถึงอะไร ผู้ใช้ไม่รู้ว่า 70 คือ "ดี" หรือ "แย่" ทำให้คะแนนไม่สอดคล้องกันระหว่างผู้ประเมิน</p>
+        <div class="fix">✅ แก้: ใช้ rating scale พร้อม label (1-5 หรือ 1-10 ที่มีคำอธิบาย)</div>
+      </div>
+      <div class="problem-card">
+        <h3>❌ "Invalid Date" + "undefined" ใน List</h3>
+        <p>รายการ performance แสดง "Invalid Date" และ "undefined" เพราะ period format ไม่ตรงกับที่ backend ส่งมา และ department field map ไม่ถูก</p>
+        <div class="fix">✅ แก้: fix date format + type mapping ระหว่าง frontend-backend</div>
+      </div>
+      <div class="problem-card">
+        <h3>❌ ไม่มีขั้นตอน Approval ที่ชัดเจน</h3>
+        <p>ปัจจุบัน status มีทั้ง draft/submitted/approved/rejected แต่ไม่มี UI workflow ที่ชัดเจนว่า "ใครทำอะไรในขั้นตอนไหน" manager จะ approve ได้อย่างไร?</p>
+        <div class="fix">✅ แก้: สร้าง approval workflow พร้อม role-based action</div>
+      </div>
+      <div class="problem-card">
+        <h3>❌ ไม่มี KPI Summary / Report</h3>
+        <p>ไม่มีหน้าสรุปผลที่แสดง grade distribution, แนวโน้ม, top/bottom performers ทำให้ผู้จัดการไม่สามารถใช้ข้อมูลนี้ในการบริหารได้จริง</p>
+        <div class="fix">✅ แก้: เพิ่ม Dashboard summary + Export PDF/Excel</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════ SECTION 2: FLOW ════════════════ -->
+  <div class="section">
+    <div class="section-title">
+      <div class="icon">🔄</div>
+      KPI System Flow ที่ถูกต้อง (5 ขั้นตอน)
+    </div>
+    <div class="flow-wrapper">
+      <div class="flow-phases">
+
+        <!-- PHASE 1: SETUP -->
+        <div class="flow-phase phase-setup">
+          <div class="flow-phase-header">
+            <div class="flow-phase-number">1</div>
+            <h3>Setup Template</h3>
+            <div class="sub">ตั้งค่า KPI</div>
+          </div>
+          <div class="flow-phase-body">
+            <div class="flow-step">
+              <div class="flow-step-dot" style="background:#9333ea"></div>
+              <div>
+                <p><strong>สร้าง KPI Template</strong></p>
+                <p class="note">ทำครั้งเดียว หรือต่อ department</p>
+              </div>
+            </div>
+            <div class="flow-step">
+              <div class="flow-step-dot" style="background:#9333ea"></div>
+              <div>
+                <p><strong>กำหนด KPI Criteria</strong></p>
+                <p class="note">เพิ่มรายการ + น้ำหนัก % (รวม = 100%)</p>
+              </div>
+            </div>
+            <div class="flow-step">
+              <div class="flow-step-dot" style="background:#9333ea"></div>
+              <div>
+                <p><strong>กำหนด Rating Scale</strong></p>
+                <p class="note">1-5 พร้อม label แต่ละระดับ</p>
+              </div>
+            </div>
+            <div class="flow-step">
+              <div class="flow-step-dot" style="background:#9333ea"></div>
+              <div>
+                <p><strong>กำหนด Target Dept</strong></p>
+                <p class="note">ใช้กับ department / position ใด</p>
+              </div>
+            </div>
+            <div style="margin-top:12px; padding:8px; background:#f3e8ff; border-radius:6px;">
+              <p style="font-size:11px; color:#7e22ce; font-weight:700;">👤 ทำโดย: HR Admin / Manager</p>
+              <p style="font-size:11px; color:#7e22ce;">⏱ ความถี่: ครั้งเดียว หรือปรับปรุงปีละครั้ง</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="flow-arrow">→</div>
+
+        <!-- PHASE 2: CYCLE -->
+        <div class="flow-phase phase-cycle">
+          <div class="flow-phase-header">
+            <div class="flow-phase-number">2</div>
+            <h3>เปิดรอบประเมิน</h3>
+            <div class="sub">Evaluation Cycle</div>
+          </div>
+          <div class="flow-phase-body">
+            <div class="flow-step">
+              <div class="flow-step-dot" style="background:#3b82f6"></div>
+              <div>
+                <p><strong>เลือก KPI Template</strong></p>
+                <p class="note">Front Desk / Housekeeping / etc.</p>
+              </div>
+            </div>
+            <div class="flow-step">
+              <div class="flow-step-dot" style="background:#3b82f6"></div>
+              <div>
+                <p><strong>กำหนด Period</strong></p>
+                <p class="note">Q1 2568 / ครึ่งปีแรก / รายปี</p>
+              </div>
+            </div>
+            <div class="flow-step">
+              <div class="flow-step-dot" style="background:#3b82f6"></div>
+              <div>
+                <p><strong>เลือก Employees</strong></p>
+                <p class="note">ทั้ง dept หรือเลือกรายบุคคล</p>
+              </div>
+            </div>
+            <div class="flow-step">
+              <div class="flow-step-dot" style="background:#3b82f6"></div>
+              <div>
+                <p><strong>Auto-Generate Records</strong></p>
+                <p class="note">ระบบสร้าง performance record ทุกคน (status: pending)</p>
+              </div>
+            </div>
+            <div style="margin-top:12px; padding:8px; background:#dbeafe; border-radius:6px;">
+              <p style="font-size:11px; color:#1e40af; font-weight:700;">👤 ทำโดย: HR Manager</p>
+              <p style="font-size:11px; color:#1e40af;">⏱ ความถี่: ต่อรอบประเมิน (Q/6M/Y)</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="flow-arrow">→</div>
+
+        <!-- PHASE 3: EVALUATION -->
+        <div class="flow-phase phase-eval">
+          <div class="flow-phase-header">
+            <div class="flow-phase-number">3</div>
+            <h3>กรอกคะแนน</h3>
+            <div class="sub">Evaluation</div>
+          </div>
+          <div class="flow-phase-body">
+            <div class="flow-step">
+              <div class="flow-step-dot" style="background:#06b6d4"></div>
+              <div>
+                <p><strong>เลือก Employee ที่รอประเมิน</strong></p>
+                <p class="note">จาก list ที่ระบบสร้างให้</p>
+              </div>
+            </div>
+            <div class="flow-step">
+              <div class="flow-step-dot" style="background:#06b6d4"></div>
+              <div>
+                <p><strong>กรอกคะแนนตาม KPI Template</strong></p>
+                <p class="note">Rating 1-5 พร้อม comment ต่อรายการ</p>
+              </div>
+            </div>
+            <div class="flow-step">
+              <div class="flow-step-dot" style="background:#06b6d4"></div>
+              <div>
+                <p><strong>ระบบคำนวณคะแนนรวมอัตโนมัติ</strong></p>
+                <p class="note">Weighted average + Letter Grade</p>
+              </div>
+            </div>
+            <div class="flow-step">
+              <div class="flow-step-dot" style="background:#06b6d4"></div>
+              <div>
+                <p><strong>Save Draft → Submit</strong></p>
+                <p class="note">บันทึกร่างก่อน แล้วส่งเมื่อพร้อม</p>
+              </div>
+            </div>
+            <div style="margin-top:12px; padding:8px; background:#cffafe; border-radius:6px;">
+              <p style="font-size:11px; color:#0e7490; font-weight:700;">👤 ทำโดย: Supervisor / HR</p>
+              <p style="font-size:11px; color:#0e7490;">⏱ ภายในระยะเวลาที่กำหนดต่อรอบ</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="flow-arrow">→</div>
+
+        <!-- PHASE 4: APPROVE -->
+        <div class="flow-phase phase-approve">
+          <div class="flow-phase-header">
+            <div class="flow-phase-number">4</div>
+            <h3>อนุมัติผล</h3>
+            <div class="sub">Approval</div>
+          </div>
+          <div class="flow-phase-body">
+            <div class="flow-step">
+              <div class="flow-step-dot" style="background:#f59e0b"></div>
+              <div>
+                <p><strong>Review รายการที่ submitted</strong></p>
+                <p class="note">Manager ดูคะแนน + comment ของทีม</p>
+              </div>
+            </div>
+            <div class="flow-step">
+              <div class="flow-step-dot" style="background:#f59e0b"></div>
+              <div>
+                <p><strong>Approve หรือ Reject</strong></p>
+                <p class="note">Reject ต้องแนบ comment เหตุผล</p>
+              </div>
+            </div>
+            <div class="flow-step">
+              <div class="flow-step-dot" style="background:#f59e0b"></div>
+              <div>
+                <p><strong>Bulk Approve</strong></p>
+                <p class="note">อนุมัติทีละหลายคนได้พร้อมกัน</p>
+              </div>
+            </div>
+            <div class="flow-step">
+              <div class="flow-step-dot" style="background:#f59e0b"></div>
+              <div>
+                <p><strong>แจ้งผลให้พนักงาน</strong></p>
+                <p class="note">Notification + สามารถดูผลตัวเองได้</p>
+              </div>
+            </div>
+            <div style="margin-top:12px; padding:8px; background:#fef3c7; border-radius:6px;">
+              <p style="font-size:11px; color:#92400e; font-weight:700;">👤 ทำโดย: Department Manager / GM</p>
+              <p style="font-size:11px; color:#92400e;">⏱ หลัง HR submit ครบ</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="flow-arrow">→</div>
+
+        <!-- PHASE 5: RESULT -->
+        <div class="flow-phase phase-result">
+          <div class="flow-phase-header">
+            <div class="flow-phase-number">5</div>
+            <h3>ดูผลการประเมิน</h3>
+            <div class="sub">Results & Reports</div>
+          </div>
+          <div class="flow-phase-body">
+            <div class="flow-step">
+              <div class="flow-step-dot" style="background:#10b981"></div>
+              <div>
+                <p><strong>Dashboard Summary</strong></p>
+                <p class="note">Grade distribution, avg score, trend</p>
+              </div>
+            </div>
+            <div class="flow-step">
+              <div class="flow-step-dot" style="background:#10b981"></div>
+              <div>
+                <p><strong>Department Comparison</strong></p>
+                <p class="note">เปรียบเทียบผลระหว่าง department</p>
+              </div>
+            </div>
+            <div class="flow-step">
+              <div class="flow-step-dot" style="background:#10b981"></div>
+              <div>
+                <p><strong>Top/Bottom Performers</strong></p>
+                <p class="note">ระบุ talent ที่ควร develop หรือ support</p>
+              </div>
+            </div>
+            <div class="flow-step">
+              <div class="flow-step-dot" style="background:#10b981"></div>
+              <div>
+                <p><strong>Export PDF / Excel</strong></p>
+                <p class="note">สรุปผลสำหรับ HR archive</p>
+              </div>
+            </div>
+            <div style="margin-top:12px; padding:8px; background:#d1fae5; border-radius:6px;">
+              <p style="font-size:11px; color:#065f46; font-weight:700;">👤 ทำโดย: HR Manager / Owner</p>
+              <p style="font-size:11px; color:#065f46;">⏱ หลัง approve ครบทุกคน</p>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- end flow-phases -->
+    </div><!-- end flow-wrapper -->
+  </div>
+
+  <!-- ════════════════ SECTION 3: DATA MODEL ════════════════ -->
+  <div class="section">
+    <div class="section-title">
+      <div class="icon">🗃️</div>
+      Data Model ที่ต้องการ (Prisma Schema)
+    </div>
+    <div class="data-grid">
+
+      <div class="data-card">
+        <div class="data-card-header" style="background:#f3e8ff; color:#7e22ce;">
+          📋 KpiTemplate <span style="font-size:10px; background:#9333ea; color:white; border-radius:4px; padding:1px 6px; margin-left:6px;">NEW</span>
+        </div>
+        <div class="data-card-body">
+          <div class="data-field"><span class="field-name">id</span><span class="field-type">String (uuid)</span></div>
+          <div class="data-field"><span class="field-name">tenantId</span><span class="field-type">String</span></div>
+          <div class="data-field"><span class="field-name">name</span><span class="field-type">String</span><span class="badge-new">NEW</span></div>
+          <div class="data-field"><span class="field-name">description</span><span class="field-type">String?</span><span class="badge-new">NEW</span></div>
+          <div class="data-field"><span class="field-name">department</span><span class="field-type">String?</span><span class="badge-new">NEW</span></div>
+          <div class="data-field"><span class="field-name">periodType</span><span class="field-type">Enum</span><span class="badge-new">NEW</span></div>
+          <div class="data-field"><span class="field-name">isActive</span><span class="field-type">Boolean</span><span class="badge-new">NEW</span></div>
+          <div class="data-field"><span class="field-name">criteria[]</span><span class="field-type">KpiCriteria[]</span><span class="badge-new">NEW</span></div>
+        </div>
+      </div>
+
+      <div class="data-card">
+        <div class="data-card-header" style="background:#f3e8ff; color:#7e22ce;">
+          📊 KpiCriteria <span style="font-size:10px; background:#9333ea; color:white; border-radius:4px; padding:1px 6px; margin-left:6px;">NEW</span>
+        </div>
+        <div class="data-card-body">
+          <div class="data-field"><span class="field-name">id</span><span class="field-type">String (uuid)</span></div>
+          <div class="data-field"><span class="field-name">templateId</span><span class="field-type">String (FK)</span><span class="badge-new">NEW</span></div>
+          <div class="data-field"><span class="field-name">name</span><span class="field-type">String</span><span class="badge-new">NEW</span></div>
+          <div class="data-field"><span class="field-name">description</span><span class="field-type">String?</span><span class="badge-new">NEW</span></div>
+          <div class="data-field"><span class="field-name">weight</span><span class="field-type">Int (% รวม=100)</span><span class="badge-new">NEW</span></div>
+          <div class="data-field"><span class="field-name">maxScore</span><span class="field-type">Int (default:5)</span><span class="badge-new">NEW</span></div>
+          <div class="data-field"><span class="field-name">scale1Label</span><span class="field-type">String?</span><span class="badge-new">NEW</span></div>
+          <div class="data-field"><span class="field-name">scale5Label</span><span class="field-type">String?</span><span class="badge-new">NEW</span></div>
+          <div class="data-field"><span class="field-name">order</span><span class="field-type">Int</span><span class="badge-new">NEW</span></div>
+        </div>
+      </div>
+
+      <div class="data-card">
+        <div class="data-card-header" style="background:#dbeafe; color:#1e40af;">
+          🔄 EvaluationCycle <span style="font-size:10px; background:#3b82f6; color:white; border-radius:4px; padding:1px 6px; margin-left:6px;">NEW</span>
+        </div>
+        <div class="data-card-body">
+          <div class="data-field"><span class="field-name">id</span><span class="field-type">String (uuid)</span></div>
+          <div class="data-field"><span class="field-name">tenantId</span><span class="field-type">String</span></div>
+          <div class="data-field"><span class="field-name">templateId</span><span class="field-type">String (FK)</span><span class="badge-new">NEW</span></div>
+          <div class="data-field"><span class="field-name">name</span><span class="field-type">String (เช่น Q1-2568)</span><span class="badge-new">NEW</span></div>
+          <div class="data-field"><span class="field-name">period</span><span class="field-type">String</span><span class="badge-new">NEW</span></div>
+          <div class="data-field"><span class="field-name">periodType</span><span class="field-type">Enum</span><span class="badge-new">NEW</span></div>
+          <div class="data-field"><span class="field-name">startDate</span><span class="field-type">DateTime</span><span class="badge-new">NEW</span></div>
+          <div class="data-field"><span class="field-name">endDate</span><span class="field-type">DateTime</span><span class="badge-new">NEW</span></div>
+          <div class="data-field"><span class="field-name">status</span><span class="field-type">open|closed|archived</span><span class="badge-new">NEW</span></div>
+          <div class="data-field"><span class="field-name">performances[]</span><span class="field-type">HrPerformance[]</span></div>
+        </div>
+      </div>
+
+      <div class="data-card">
+        <div class="data-card-header" style="background:#d1fae5; color:#065f46;">
+          📝 HrPerformance <span style="font-size:10px; background:#10b981; color:white; border-radius:4px; padding:1px 6px; margin-left:6px;">UPDATED</span>
+        </div>
+        <div class="data-card-body">
+          <div class="data-field"><span class="field-name">id</span><span class="field-type">String</span><span class="badge-keep">KEEP</span></div>
+          <div class="data-field"><span class="field-name">tenantId</span><span class="field-type">String</span><span class="badge-keep">KEEP</span></div>
+          <div class="data-field"><span class="field-name">employeeId</span><span class="field-type">String (FK)</span><span class="badge-keep">KEEP</span></div>
+          <div class="data-field"><span class="field-name">cycleId</span><span class="field-type">String (FK)</span><span class="badge-new">NEW</span></div>
+          <div class="data-field"><span class="field-name">templateId</span><span class="field-type">String (FK)</span><span class="badge-new">NEW</span></div>
+          <div class="data-field"><span class="field-name">period</span><span class="field-type">String</span><span class="badge-keep">KEEP</span></div>
+          <div class="data-field"><span class="field-name">scoreOverall</span><span class="field-type">Decimal</span><span class="badge-keep">KEEP</span></div>
+          <div class="data-field"><span class="field-name">grade</span><span class="field-type">String</span><span class="badge-keep">KEEP</span></div>
+          <div class="data-field"><span class="field-name">status</span><span class="field-type">Enum (updated)</span><span class="badge-new">UPD</span></div>
+          <div class="data-field"><span class="field-name">scores[]</span><span class="field-type">KpiScore[]</span><span class="badge-new">NEW</span></div>
+        </div>
+      </div>
+
+      <div class="data-card">
+        <div class="data-card-header" style="background:#fef3c7; color:#92400e;">
+          🏆 KpiScore <span style="font-size:10px; background:#f59e0b; color:white; border-radius:4px; padding:1px 6px; margin-left:6px;">NEW</span>
+        </div>
+        <div class="data-card-body">
+          <div class="data-field"><span class="field-name">id</span><span class="field-type">String (uuid)</span></div>
+          <div class="data-field"><span class="field-name">performanceId</span><span class="field-type">String (FK)</span><span class="badge-new">NEW</span></div>
+          <div class="data-field"><span class="field-name">criteriaId</span><span class="field-type">String (FK)</span><span class="badge-new">NEW</span></div>
+          <div class="data-field"><span class="field-name">criteriaName</span><span class="field-type">String (snapshot)</span><span class="badge-new">NEW</span></div>
+          <div class="data-field"><span class="field-name">weight</span><span class="field-type">Int (snapshot)</span><span class="badge-new">NEW</span></div>
+          <div class="data-field"><span class="field-name">score</span><span class="field-type">Decimal (1-5)</span><span class="badge-new">NEW</span></div>
+          <div class="data-field"><span class="field-name">comment</span><span class="field-type">String?</span><span class="badge-new">NEW</span></div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Status flow -->
+    <div style="margin-top:20px; background:white; border:1px solid var(--border); border-radius:12px; padding:20px;">
+      <div style="font-size:14px; font-weight:700; margin-bottom:12px;">🔁 Status Flow ของ HrPerformance</div>
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <span class="status-badge status-pending">⏳ pending</span>
+        <span style="color:var(--gray); font-size:13px;">→ กรอกคะแนนแล้ว →</span>
+        <span class="status-badge status-draft">📝 draft</span>
+        <span style="color:var(--gray); font-size:13px;">→ Submit →</span>
+        <span class="status-badge status-submitted">📤 submitted</span>
+        <span style="color:var(--gray); font-size:13px;">→ Manager Review →</span>
+        <span class="status-badge status-approved">✅ approved</span>
+        <span style="color:var(--gray); font-size:13px;">หรือ</span>
+        <span class="status-badge" style="background:#fee2e2; color:#991b1b;">❌ rejected → กลับไป draft</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════ SECTION 4: UI WIREFRAME ════════════════ -->
+  <div class="section">
+    <div class="section-title">
+      <div class="icon">🖥️</div>
+      UI Wireframe — แต่ละขั้นตอน
+    </div>
+
+    <div class="wireframe-tabs">
+      <button class="wireframe-tab active" onclick="showTab('tab-template')">1. สร้าง Template</button>
+      <button class="wireframe-tab" onclick="showTab('tab-cycle')">2. เปิดรอบประเมิน</button>
+      <button class="wireframe-tab" onclick="showTab('tab-eval')">3. กรอกคะแนน</button>
+      <button class="wireframe-tab" onclick="showTab('tab-approve')">4. อนุมัติ</button>
+      <button class="wireframe-tab" onclick="showTab('tab-result')">5. ดูผล</button>
+    </div>
+
+    <!-- TAB 1: Template -->
+    <div class="wireframe-panel active" id="tab-template">
+      <div class="wireframe-screen">
+        <div class="wireframe-topbar">
+          <span>⚙️ ตั้งค่า KPI Template</span>
+          <span class="breadcrumb" style="margin-left:auto;">HR › ตั้งค่า › KPI Template</span>
+        </div>
+        <div class="wireframe-content">
+          <div class="wf-card">
+            <div class="wf-card-header">
+              <span class="wf-card-title">ข้อมูล Template</span>
+            </div>
+            <div class="wf-field-group">
+              <div class="wf-field">
+                <label class="wf-label">ชื่อ Template *</label>
+                <input class="wf-input has-value" value="Front Desk Standard KPI" />
+              </div>
+              <div class="wf-field">
+                <label class="wf-label">แผนก / ตำแหน่ง</label>
+                <input class="wf-input has-value" value="แผนก Front Office" />
+              </div>
+              <div class="wf-field">
+                <label class="wf-label">ประเภทรอบประเมิน *</label>
+                <input class="wf-input has-value" value="รายไตรมาส (Quarterly)" />
+              </div>
+              <div class="wf-field">
+                <label class="wf-label">สถานะ</label>
+                <input class="wf-input has-value" value="✅ ใช้งาน (Active)" />
+              </div>
+            </div>
+          </div>
+
+          <div class="wf-card">
+            <div class="wf-card-header">
+              <span class="wf-card-title">เกณฑ์การประเมิน KPI</span>
+              <button class="wf-btn wf-btn-outline wf-btn-sm">+ เพิ่มเกณฑ์</button>
+            </div>
+            <div style="font-size:11px; color:var(--text-muted); margin-bottom:8px; display:grid; grid-template-columns:1fr 80px 80px 36px; gap:8px; padding: 0 0 4px;">
+              <span>ชื่อเกณฑ์</span><span>น้ำหนัก %</span><span>คะแนนสูงสุด</span><span></span>
+            </div>
+            <div class="kpi-row">
+              <span class="kpi-name">คุณภาพงาน (Work Quality)</span>
+              <span class="kpi-weight-badge">30%</span>
+              <span class="kpi-weight-badge" style="background:#dbeafe; color:#1e40af;">5 คะแนน</span>
+              <span style="color:var(--red); cursor:pointer; font-size:16px;">×</span>
+            </div>
+            <div class="kpi-row">
+              <span class="kpi-name">ความตรงต่อเวลา (Punctuality)</span>
+              <span class="kpi-weight-badge">20%</span>
+              <span class="kpi-weight-badge" style="background:#dbeafe; color:#1e40af;">5 คะแนน</span>
+              <span style="color:var(--red); cursor:pointer; font-size:16px;">×</span>
+            </div>
+            <div class="kpi-row">
+              <span class="kpi-name">ทัศนคติและความร่วมมือ</span>
+              <span class="kpi-weight-badge">20%</span>
+              <span class="kpi-weight-badge" style="background:#dbeafe; color:#1e40af;">5 คะแนน</span>
+              <span style="color:var(--red); cursor:pointer; font-size:16px;">×</span>
+            </div>
+            <div class="kpi-row">
+              <span class="kpi-name">การบริการลูกค้า (Guest Service)</span>
+              <span class="kpi-weight-badge">20%</span>
+              <span class="kpi-weight-badge" style="background:#dbeafe; color:#1e40af;">5 คะแนน</span>
+              <span style="color:var(--red); cursor:pointer; font-size:16px;">×</span>
+            </div>
+            <div class="kpi-row">
+              <span class="kpi-name">การพัฒนาตนเอง</span>
+              <span class="kpi-weight-badge">10%</span>
+              <span class="kpi-weight-badge" style="background:#dbeafe; color:#1e40af;">5 คะแนน</span>
+              <span style="color:var(--red); cursor:pointer; font-size:16px;">×</span>
+            </div>
+            <div class="weight-total weight-ok">
+              <span>น้ำหนักรวม</span>
+              <span>✅ 100% — ถูกต้อง</span>
+            </div>
+          </div>
+
+          <div style="display:flex; gap:8px; justify-content:flex-end;">
+            <button class="wf-btn wf-btn-outline">ยกเลิก</button>
+            <button class="wf-btn wf-btn-primary">💾 บันทึก Template</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 2: Cycle -->
+    <div class="wireframe-panel" id="tab-cycle">
+      <div class="wireframe-screen">
+        <div class="wireframe-topbar">
+          <span>🔄 เปิดรอบประเมิน</span>
+          <span class="breadcrumb" style="margin-left:auto;">HR › ผลการปฏิบัติงาน › เปิดรอบใหม่</span>
+        </div>
+        <div class="wireframe-content">
+          <div class="wf-card">
+            <div class="wf-card-header"><span class="wf-card-title">ข้อมูลรอบประเมิน</span></div>
+            <div class="wf-field-group">
+              <div class="wf-field">
+                <label class="wf-label">ชื่อรอบประเมิน *</label>
+                <input class="wf-input has-value" value="ประเมินผล Q2 — ปี 2568" />
+              </div>
+              <div class="wf-field">
+                <label class="wf-label">KPI Template *</label>
+                <input class="wf-input has-value" value="Front Desk Standard KPI ▼" />
+              </div>
+              <div class="wf-field">
+                <label class="wf-label">ช่วงเวลาประเมิน *</label>
+                <input class="wf-input has-value" value="1 เม.ย. 2568 – 30 มิ.ย. 2568" />
+              </div>
+              <div class="wf-field">
+                <label class="wf-label">วันสิ้นสุดการกรอก *</label>
+                <input class="wf-input has-value" value="15 ก.ค. 2568" />
+              </div>
+            </div>
+          </div>
+          <div class="wf-card">
+            <div class="wf-card-header">
+              <span class="wf-card-title">เลือกพนักงาน (5 คน)</span>
+              <div style="display:flex; gap:6px;">
+                <button class="wf-btn wf-btn-outline wf-btn-sm">เลือกทั้ง Dept</button>
+                <button class="wf-btn wf-btn-outline wf-btn-sm">เลือกรายบุคคล</button>
+              </div>
+            </div>
+            <div style="background:#f0fdf4; border:1px dashed #10b981; border-radius:8px; padding:12px; font-size:12px; color:#065f46;">
+              ✅ เลือกแล้ว: แผนก Front Office ทั้งหมด 5 คน — ระบบจะสร้าง record ให้อัตโนมัติ
+            </div>
+          </div>
+          <div style="display:flex; gap:8px; justify-content:flex-end;">
+            <button class="wf-btn wf-btn-outline">ยกเลิก</button>
+            <button class="wf-btn wf-btn-primary">🚀 เปิดรอบประเมิน (สร้าง 5 records)</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 3: Evaluation -->
+    <div class="wireframe-panel" id="tab-eval">
+      <div class="wireframe-screen">
+        <div class="wireframe-topbar">
+          <span>📝 กรอกคะแนน — ธนกร ช่างดี</span>
+          <span class="breadcrumb" style="margin-left:auto;">Q2-2568 › Front Desk Standard</span>
+        </div>
+        <div class="wireframe-content">
+          <div style="display:grid; grid-template-columns:1fr 200px; gap:16px;">
+            <div>
+              <div class="wf-card">
+                <div class="wf-card-header"><span class="wf-card-title">เกณฑ์การประเมิน KPI</span></div>
+                <div style="font-size:11px; color:var(--text-muted); display:grid; grid-template-columns:1fr 70px 120px; gap:8px; padding:0 0 8px; border-bottom:1px solid var(--border); margin-bottom:8px;">
+                  <span>เกณฑ์</span><span>น้ำหนัก</span><span>คะแนน (1-5)</span>
+                </div>
+                <!-- KPI items with rating scale -->
+                <div style="padding:8px 0; border-bottom:1px dashed var(--border);">
+                  <div style="display:grid; grid-template-columns:1fr 70px 120px; gap:8px; align-items:center; font-size:12px;">
+                    <span style="font-weight:600;">คุณภาพงาน</span>
+                    <span class="kpi-weight-badge">30%</span>
+                    <div style="display:flex; gap:4px;">
+                      <span style="width:22px; height:22px; background:#9333ea; color:white; border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700;">4</span>
+                      <span style="width:22px; height:22px; background:#f3e8ff; color:#9333ea; border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:10px; cursor:pointer;">1</span>
+                      <span style="width:22px; height:22px; background:#f3e8ff; color:#9333ea; border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:10px; cursor:pointer;">2</span>
+                      <span style="width:22px; height:22px; background:#f3e8ff; color:#9333ea; border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:10px; cursor:pointer;">3</span>
+                      <span style="width:22px; height:22px; background:#f3e8ff; color:#9333ea; border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:10px; cursor:pointer;">5</span>
+                    </div>
+                  </div>
+                  <div style="font-size:11px; color:#7e22ce; margin-top:4px;">4 = ดีมาก (ทำงานได้ตามมาตรฐาน มีข้อผิดพลาดน้อย)</div>
+                  <input class="wf-input" style="margin-top:6px; font-size:11px;" placeholder="ความเห็นเพิ่มเติม (ไม่บังคับ)" />
+                </div>
+                <div style="padding:8px 0; border-bottom:1px dashed var(--border);">
+                  <div style="display:grid; grid-template-columns:1fr 70px 120px; gap:8px; align-items:center; font-size:12px;">
+                    <span style="font-weight:600;">ความตรงต่อเวลา</span>
+                    <span class="kpi-weight-badge">20%</span>
+                    <div style="display:flex; gap:4px;">
+                      <span style="width:22px; height:22px; background:#f3e8ff; color:#9333ea; border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:10px; cursor:pointer;">1</span>
+                      <span style="width:22px; height:22px; background:#f3e8ff; color:#9333ea; border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:10px; cursor:pointer;">2</span>
+                      <span style="width:22px; height:22px; background:#9333ea; color:white; border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700;">3</span>
+                      <span style="width:22px; height:22px; background:#f3e8ff; color:#9333ea; border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:10px; cursor:pointer;">4</span>
+                      <span style="width:22px; height:22px; background:#f3e8ff; color:#9333ea; border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:10px; cursor:pointer;">5</span>
+                    </div>
+                  </div>
+                  <div style="font-size:11px; color:#7e22ce; margin-top:4px;">3 = ปานกลาง (มาสายบ้างแต่ไม่บ่อย)</div>
+                </div>
+                <div style="padding:8px 0; color:#d1d5db; font-size:12px;">ทัศนคติและความร่วมมือ · ความรับผิดชอบ · การพัฒนาตนเอง — (รอกรอก)</div>
+              </div>
+            </div>
+            <!-- Right panel: preview score -->
+            <div>
+              <div class="wf-card" style="background:#f9fafb;">
+                <div class="wf-card-title" style="margin-bottom:10px; font-size:13px;">📊 สรุปคะแนน</div>
+                <div style="text-align:center; margin-bottom:12px;">
+                  <div style="font-size:36px; font-weight:700; color:#9333ea;">3.6</div>
+                  <div style="font-size:12px; color:var(--text-muted);">คะแนนรวม (weighted)</div>
+                  <div style="font-size:24px; font-weight:700; color:#f59e0b; margin-top:4px;">B</div>
+                  <div style="font-size:11px; color:var(--text-muted);">เกรด</div>
+                </div>
+                <div style="font-size:11px; color:var(--text-muted); margin-bottom:6px;">กรอกแล้ว 2/5 เกณฑ์</div>
+                <div style="background:#e5e7eb; border-radius:4px; height:6px; margin-bottom:12px;">
+                  <div style="background:#9333ea; width:40%; height:100%; border-radius:4px;"></div>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:6px;">
+                  <button class="wf-btn wf-btn-outline" style="width:100%; justify-content:center; font-size:12px;">💾 บันทึกร่าง</button>
+                  <button class="wf-btn wf-btn-primary" style="width:100%; justify-content:center; font-size:12px; opacity:0.5;" disabled>📤 ส่งให้อนุมัติ</button>
+                </div>
+                <div style="font-size:10px; color:var(--text-muted); text-align:center; margin-top:6px;">กรอกครบทุกเกณฑ์ก่อนส่ง</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 4: Approve -->
+    <div class="wireframe-panel" id="tab-approve">
+      <div class="wireframe-screen">
+        <div class="wireframe-topbar">
+          <span>✅ รออนุมัติ — Q2 2568</span>
+          <span class="breadcrumb" style="margin-left:auto;">HR › ผลการปฏิบัติงาน › รออนุมัติ</span>
+        </div>
+        <div class="wireframe-content">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;">
+            <div style="font-size:13px; font-weight:700;">5 รายการ รอการอนุมัติ</div>
+            <button class="wf-btn wf-btn-primary wf-btn-sm">✅ อนุมัติทั้งหมด (Bulk Approve)</button>
+          </div>
+          <div class="wf-card" style="padding:0; overflow:hidden;">
+            <div style="font-size:11px; color:var(--text-muted); padding:10px 16px; background:var(--gray-light); display:grid; grid-template-columns:32px 1fr 100px 80px 100px; gap:8px; font-weight:600; border-bottom:1px solid var(--border);">
+              <span></span><span>พนักงาน</span><span>เกณฑ์</span><span>คะแนน</span><span>Action</span>
+            </div>
+            <div class="employee-row" style="padding:10px 16px;">
+              <div class="employee-avatar" style="background:#9333ea;">ธ</div>
+              <div>
+                <div style="font-weight:600; font-size:12px;">ธนกร ช่างดี</div>
+                <div style="font-size:11px; color:var(--text-muted);">PM-0010 · Front Desk</div>
+              </div>
+              <div style="font-size:11px;">Front Desk Standard</div>
+              <div>
+                <div style="font-size:14px; font-weight:700; color:#9333ea;">82.5</div>
+                <div class="kpi-weight-badge" style="display:inline-block; margin-top:2px;">B+</div>
+              </div>
+              <div style="display:flex; gap:4px;">
+                <button class="wf-btn wf-btn-primary wf-btn-sm">✅</button>
+                <button class="wf-btn wf-btn-sm" style="background:#fee2e2; color:#991b1b; border:none;">❌</button>
+              </div>
+            </div>
+            <div class="employee-row" style="padding:10px 16px; background:#f9fafb;">
+              <div class="employee-avatar" style="background:#3b82f6;">ไ</div>
+              <div>
+                <div style="font-weight:600; font-size:12px;">ไพศาล ศรีวเก่ง</div>
+                <div style="font-size:11px; color:var(--text-muted);">PM-0009 · Front Desk</div>
+              </div>
+              <div style="font-size:11px;">Front Desk Standard</div>
+              <div>
+                <div style="font-size:14px; font-weight:700; color:#10b981;">91.0</div>
+                <div class="kpi-weight-badge" style="display:inline-block; margin-top:2px; background:#d1fae5; color:#065f46;">A</div>
+              </div>
+              <div style="display:flex; gap:4px;">
+                <button class="wf-btn wf-btn-primary wf-btn-sm">✅</button>
+                <button class="wf-btn wf-btn-sm" style="background:#fee2e2; color:#991b1b; border:none;">❌</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 5: Results -->
+    <div class="wireframe-panel" id="tab-result">
+      <div class="wireframe-screen">
+        <div class="wireframe-topbar">
+          <span>📊 สรุปผลการประเมิน — Q2 2568</span>
+          <span class="breadcrumb" style="margin-left:auto;">HR › ผลการปฏิบัติงาน › สรุปผล</span>
+        </div>
+        <div class="wireframe-content">
+          <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:16px;">
+            <div style="background:white; border:1px solid var(--border); border-radius:8px; padding:12px; text-align:center;">
+              <div style="font-size:24px; font-weight:700; color:#9333ea;">12</div>
+              <div style="font-size:11px; color:var(--text-muted);">ผู้ถูกประเมินทั้งหมด</div>
+            </div>
+            <div style="background:white; border:1px solid var(--border); border-radius:8px; padding:12px; text-align:center;">
+              <div style="font-size:24px; font-weight:700; color:#10b981;">78.5</div>
+              <div style="font-size:11px; color:var(--text-muted);">คะแนนเฉลี่ย</div>
+            </div>
+            <div style="background:white; border:1px solid var(--border); border-radius:8px; padding:12px; text-align:center;">
+              <div style="font-size:24px; font-weight:700; color:#f59e0b;">B+</div>
+              <div style="font-size:11px; color:var(--text-muted);">เกรดเฉลี่ย</div>
+            </div>
+            <div style="background:white; border:1px solid var(--border); border-radius:8px; padding:12px; text-align:center;">
+              <div style="font-size:24px; font-weight:700; color:#3b82f6;">3</div>
+              <div style="font-size:11px; color:var(--text-muted);">ได้เกรด A (ดีเยี่ยม)</div>
+            </div>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+            <div class="wf-card">
+              <div class="wf-card-title" style="margin-bottom:12px; font-size:13px;">Grade Distribution</div>
+              <div style="display:flex; flex-direction:column; gap:8px;">
+                <div style="display:flex; align-items:center; gap:8px; font-size:12px;">
+                  <span style="width:24px; font-weight:700; color:#10b981;">A</span>
+                  <div style="flex:1; background:#f3f4f6; border-radius:4px; height:20px; position:relative;">
+                    <div style="background:#10b981; width:25%; height:100%; border-radius:4px;"></div>
+                    <span style="position:absolute; right:8px; top:2px; font-size:11px; color:#374151;">3 คน (25%)</span>
+                  </div>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px; font-size:12px;">
+                  <span style="width:24px; font-weight:700; color:#3b82f6;">B+</span>
+                  <div style="flex:1; background:#f3f4f6; border-radius:4px; height:20px; position:relative;">
+                    <div style="background:#3b82f6; width:42%; height:100%; border-radius:4px;"></div>
+                    <span style="position:absolute; right:8px; top:2px; font-size:11px; color:#374151;">5 คน (42%)</span>
+                  </div>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px; font-size:12px;">
+                  <span style="width:24px; font-weight:700; color:#9333ea;">B</span>
+                  <div style="flex:1; background:#f3f4f6; border-radius:4px; height:20px; position:relative;">
+                    <div style="background:#9333ea; width:25%; height:100%; border-radius:4px;"></div>
+                    <span style="position:absolute; right:8px; top:2px; font-size:11px; color:#374151;">3 คน (25%)</span>
+                  </div>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px; font-size:12px;">
+                  <span style="width:24px; font-weight:700; color:#ef4444;">D</span>
+                  <div style="flex:1; background:#f3f4f6; border-radius:4px; height:20px; position:relative;">
+                    <div style="background:#ef4444; width:8%; height:100%; border-radius:4px;"></div>
+                    <span style="position:absolute; right:8px; top:2px; font-size:11px; color:#374151;">1 คน (8%)</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="wf-card">
+              <div class="wf-card-title" style="margin-bottom:12px; font-size:13px;">Top Performers 🏆</div>
+              <div style="display:flex; flex-direction:column; gap:8px;">
+                <div style="display:flex; align-items:center; gap:10px; font-size:12px;">
+                  <span style="font-size:18px;">🥇</span>
+                  <div>
+                    <div style="font-weight:700;">ไพศาล ศรีวเก่ง</div>
+                    <div style="color:var(--text-muted); font-size:11px;">Front Desk · 91.0 คะแนน</div>
+                  </div>
+                  <span style="margin-left:auto;" class="kpi-weight-badge" style="background:#d1fae5; color:#065f46;">A</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:10px; font-size:12px;">
+                  <span style="font-size:18px;">🥈</span>
+                  <div>
+                    <div style="font-weight:700;">อนุชา อาหารดี</div>
+                    <div style="color:var(--text-muted); font-size:11px;">Restaurant · 88.5 คะแนน</div>
+                  </div>
+                  <span style="margin-left:auto;" class="kpi-weight-badge" style="background:#d1fae5; color:#065f46;">A</span>
+                </div>
+              </div>
+              <div style="margin-top:12px; display:flex; gap:6px; justify-content:flex-end;">
+                <button class="wf-btn wf-btn-outline wf-btn-sm">📥 Export Excel</button>
+                <button class="wf-btn wf-btn-primary wf-btn-sm">📄 Export PDF</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ════════════════ SECTION 5: BEFORE/AFTER ════════════════ -->
+  <div class="section">
+    <div class="section-title">
+      <div class="icon">⚖️</div>
+      เปรียบเทียบ: ก่อน vs หลัง Redesign
+    </div>
+    <div style="background:white; border:1px solid var(--border); border-radius:12px; overflow:hidden;">
+      <table class="compare-table">
+        <thead>
+          <tr>
+            <th>จุด</th>
+            <th>❌ ระบบเดิม (ปัญหา)</th>
+            <th>✅ ระบบใหม่ (แก้แล้ว)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>จุดเริ่มต้น</strong></td>
+            <td class="bad">กด "+ เพิ่มการประเมิน" แล้วกรอกทีละคน ทีละรอบ</td>
+            <td class="good">ตั้ง Template → เปิดรอบ → ระบบ auto-generate ให้ทุกคน</td>
+          </tr>
+          <tr>
+            <td><strong>KPI Criteria</strong></td>
+            <td class="bad">Hardcode 4-5 รายการ ปรับไม่ได้ frontend-backend ไม่ตรงกัน</td>
+            <td class="good">Configurable ผ่าน Template น้ำหนักรวม validated = 100%</td>
+          </tr>
+          <tr>
+            <td><strong>Input Method</strong></td>
+            <td class="bad">Slider (0-100) ไม่มี guidance ใช้งานยาก</td>
+            <td class="good">Rating 1-5 พร้อม label คำอธิบายแต่ละระดับ</td>
+          </tr>
+          <tr>
+            <td><strong>Approval</strong></td>
+            <td class="bad">ไม่มี workflow ชัดเจน status เปลี่ยนได้เองโดยไม่มี role control</td>
+            <td class="good">Role-based: HR กรอก → Submit → Manager Approve/Reject</td>
+          </tr>
+          <tr>
+            <td><strong>Invalid Date bug</strong></td>
+            <td class="bad">"Invalid Date" และ "undefined" ใน list</td>
+            <td class="good">Fix format mapping + ใช้ cycle period แทน manual period string</td>
+          </tr>
+          <tr>
+            <td><strong>Batch Operations</strong></td>
+            <td class="bad">ต้อง add ทีละคน ถ้า 50 คน ทำ 50 ครั้ง</td>
+            <td class="good">เปิด Cycle ครั้งเดียว auto-generate 50 records พร้อมกัน</td>
+          </tr>
+          <tr>
+            <td><strong>Reports</strong></td>
+            <td class="bad">ไม่มี summary, ดูได้แค่ list รายคน</td>
+            <td class="good">Grade distribution, Top performers, Export PDF/Excel</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ════════════════ SECTION 6: SUMMARY / NEXT STEPS ════════════════ -->
+  <div class="section">
+    <div class="section-title">
+      <div class="icon">🚀</div>
+      สรุปสิ่งที่ต้องสร้าง (Implementation Roadmap)
+    </div>
+    <div class="summary-box">
+      <h3>📌 ตอบคำถาม: "ต้อง Set Template ก่อนไหม?"</h3>
+      <p style="font-size:13px; color:#3b0764; margin-bottom:16px; line-height:1.7;">
+        <strong>ใช่ครับ</strong> — ลำดับที่ถูกต้องคือ <strong>Template ก่อน → เปิด Cycle → กรอกคะแนน → Approve → ดูผล</strong><br>
+        Template ทำครั้งเดียว แต่ Cycle เปิดทุกรอบ (Q, ครึ่งปี, ปี) ไม่ต้องกรอก KPI criteria ซ้ำทุกครั้ง
+      </p>
+
+      <div class="summary-row">
+        <div class="num">1</div>
+        <p><strong>Backend:</strong> สร้าง Prisma models ใหม่ — <code>KpiTemplate</code>, <code>KpiCriteria</code>, <code>EvaluationCycle</code>, <code>KpiScore</code> + migrate <code>HrPerformance</code></p>
+      </div>
+      <div class="summary-row">
+        <div class="num">2</div>
+        <p><strong>Backend:</strong> สร้าง NestJS modules: <code>kpi-template</code>, <code>evaluation-cycle</code> พร้อม endpoint สำหรับ auto-generate performance records</p>
+      </div>
+      <div class="summary-row">
+        <div class="num">3</div>
+        <p><strong>Frontend:</strong> สร้าง UI "ตั้งค่า KPI Template" — form + drag-reorder criteria + weight validator (รวม = 100%)</p>
+      </div>
+      <div class="summary-row">
+        <div class="num">4</div>
+        <p><strong>Frontend:</strong> Redesign หน้า "ผลการปฏิบัติงาน" — เปลี่ยน flow เป็น Cycle-based, ใช้ Rating 1-5 แทน Slider</p>
+      </div>
+      <div class="summary-row">
+        <div class="num">5</div>
+        <p><strong>Frontend:</strong> สร้างหน้า "รออนุมัติ" สำหรับ Manager พร้อม Bulk Approve + Comment on Reject</p>
+      </div>
+      <div class="summary-row">
+        <div class="num">6</div>
+        <p><strong>Frontend:</strong> สร้างหน้า "สรุปผล" — Grade chart, Top performers, Export PDF/Excel</p>
+      </div>
+    </div>
+  </div>
+
+</div><!-- end container -->
+
+<script>
+function showTab(id) {
+  document.querySelectorAll('.wireframe-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.wireframe-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  event.target.classList.add('active');
+}
+</script>
+
+</body>
+</html>

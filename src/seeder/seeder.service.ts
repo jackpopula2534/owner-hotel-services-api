@@ -51,8 +51,10 @@ export class SeederService {
       await this.seedDemoBookings();
       await this.seedDemoReviews();
       await this.seedHrMasterData();
+      await this.seedKpiTemplates();
       await this.seedHotelStaff();
       await this.seedPremiumHrData();
+      await this.seedHrPerformanceData();
 
       this.logger.log('✅ Database seeding completed successfully!');
     } catch (error) {
@@ -1923,6 +1925,281 @@ export class SeederService {
     }
 
     this.logger.log('✅ Premium HR Data seeded successfully!');
+  }
+
+  /**
+   * Seed HR Performance reviews for premium.test@email.com (Mountain View Resort).
+   * Creates one review per employee for the most recent completed quarter with
+   * realistic Thai-hotel scoring data.
+   */
+  private async seedHrPerformanceData(): Promise<void> {
+    this.logger.log('📊 Seeding HR Performance Data (Mountain View Resort)...');
+
+    const ownerUser = await this.prisma.user.findUnique({
+      where: { email: 'premium.test@email.com' },
+    });
+    if (!ownerUser?.tenantId) {
+      this.logger.warn('  ⚠️  premium.test@email.com not found — skipping performance seed');
+      return;
+    }
+    const tenantId = ownerUser.tenantId;
+
+    const employees = await (this.prisma as any).employee.findMany({
+      where: { tenantId },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, firstName: true, lastName: true },
+    });
+
+    if (employees.length === 0) {
+      this.logger.warn('  ⚠️  No employees found — skipping performance seed');
+      return;
+    }
+
+    // Determine the most-recently completed quarter
+    const now = new Date();
+    const curQ = Math.floor(now.getMonth() / 3) + 1;  // 1-4
+    let targetQ = curQ - 1;
+    let targetYear = now.getFullYear();
+    if (targetQ === 0) { targetQ = 4; targetYear -= 1; }
+    const period = `${targetYear}-Q${targetQ}`;
+
+    // Quarter end dates for reviewDate
+    const qEndMonths: Record<number, number> = { 1: 2, 2: 5, 3: 8, 4: 11 }; // 0-indexed months
+    const reviewDate = new Date(targetYear, qEndMonths[targetQ], 28);
+
+    // Per-employee score profiles (cycling if more employees than profiles)
+    const scoreProfiles = [
+      { work: 92, attendance: 95, teamwork: 88, service: 90, status: 'approved', strengths: 'ทำงานได้ดีเยี่ยม มีความรับผิดชอบสูง บริการแขกได้อย่างมืออาชีพ', improvements: 'ควรพัฒนาทักษะภาษาอังกฤษเพิ่มเติม', goals: 'เป้าหมาย UPSELL rate 15% ในไตรมาสหน้า' },
+      { work: 78, attendance: 82, teamwork: 85, service: 80, status: 'approved', strengths: 'ทำงานเป็นทีมได้ดี มีความสามัคคี', improvements: 'ควรพัฒนาความรวดเร็วในการทำงาน', goals: 'เพิ่มคะแนน guest satisfaction 5%' },
+      { work: 88, attendance: 90, teamwork: 92, service: 86, status: 'approved', strengths: 'สื่อสารกับแขกได้ดี ยิ้มแย้มแจ่มใสเสมอ', improvements: 'ควรเรียนรู้ระบบ PMS เพิ่มเติม', goals: 'ผ่านการอบรม front desk excellence' },
+      { work: 65, attendance: 70, teamwork: 72, service: 68, status: 'submitted', strengths: 'มีความพยายามและตั้งใจทำงาน', improvements: 'ควรปรับปรุงเรื่องเวลาการทำงาน ลดการมาสาย', goals: 'ลดอัตราการมาสายให้เหลือ 0% ในไตรมาสหน้า' },
+      { work: 95, attendance: 98, teamwork: 94, service: 96, status: 'approved', strengths: 'พนักงานดีเด่น ทำงานได้ครบถ้วน รวดเร็ว และถูกต้อง', improvements: 'สามารถพัฒนาทักษะผู้นำทีมได้มากขึ้น', goals: 'เป็น mentor ให้พนักงานใหม่' },
+      { work: 75, attendance: 80, teamwork: 78, service: 76, status: 'approved', strengths: 'มีความรู้ด้านอาหารและเครื่องดื่มดี', improvements: 'ควรพัฒนาการสื่อสารกับแขกต่างชาติ', goals: 'เรียนภาษาอังกฤษอย่างน้อย 1 คอร์ส' },
+      { work: 82, attendance: 85, teamwork: 80, service: 84, status: 'submitted', strengths: 'ทักษะเทคนิคดี รู้จักระบบดี', improvements: 'ควรพัฒนา soft skill การบริการ', goals: 'ผ่านการอบรม customer excellence' },
+      { work: 70, attendance: 75, teamwork: 73, service: 72, status: 'draft', strengths: 'มีความอดทนในการทำงาน', improvements: 'ควรปรับปรุงคุณภาพงาน', goals: 'เพิ่มคะแนนคุณภาพงาน 10%' },
+      { work: 88, attendance: 92, teamwork: 87, service: 89, status: 'approved', strengths: 'บริการแขกได้อย่างยอดเยี่ยม มีทักษะการขายดี', improvements: 'ควรพัฒนาทักษะด้าน IT', goals: 'เพิ่มยอดขาย in-room dining 20%' },
+      { work: 80, attendance: 83, teamwork: 82, service: 81, status: 'approved', strengths: 'ทำงานสม่ำเสมอและน่าเชื่อถือ', improvements: 'ควรริเริ่มสิ่งใหม่มากขึ้น', goals: 'เสนอโปรเจ็กต์ใหม่อย่างน้อย 1 อย่าง' },
+    ];
+
+    function deriveGrade(score: number): string {
+      if (score >= 90) return 'A';
+      if (score >= 80) return 'B+';
+      if (score >= 70) return 'B';
+      if (score >= 60) return 'C+';
+      if (score >= 50) return 'C';
+      return 'D';
+    }
+
+    let createdCount = 0;
+    for (let i = 0; i < employees.length; i++) {
+      const emp = employees[i];
+      const profile = scoreProfiles[i % scoreProfiles.length];
+      const scoreOverall = Math.round(
+        (profile.work * 0.3 + profile.attendance * 0.2 + profile.teamwork * 0.2 + profile.service * 0.3) * 100,
+      ) / 100;
+      const grade = deriveGrade(scoreOverall);
+
+      // ตรวจสอบ unique constraint ใหม่: (employeeId, period, cycleId=null) สำหรับ legacy records
+      const existing = await (this.prisma as any).hrPerformance.findFirst({
+        where: { tenantId, employeeId: emp.id, period, cycleId: null },
+      });
+      if (!existing) {
+        await (this.prisma as any).hrPerformance.create({
+          data: {
+            tenantId,
+            employeeId:      emp.id,
+            cycleId:         null,   // legacy record — ไม่ผ่าน Cycle
+            templateId:      null,   // legacy record — ใช้ fixed scores
+            period,
+            periodType:      'quarterly',
+            reviewDate,
+            reviewerName:    'ผู้จัดการ HR',
+            scoreWork:       profile.work,
+            scoreAttendance: profile.attendance,
+            scoreTeamwork:   profile.teamwork,
+            scoreService:    profile.service,
+            scoreOverall,
+            grade,
+            status:          profile.status,
+            strengths:       profile.strengths,
+            improvements:    profile.improvements,
+            goals:           profile.goals,
+            ...(profile.status === 'approved' ? { approvedAt: new Date() } : {}),
+          },
+        });
+        createdCount++;
+      }
+    }
+    this.logger.log(`  ✓ ${createdCount} performance records created for period ${period}`);
+    this.logger.log('✅ HR Performance Data seeded successfully!');
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  /**
+   * Seed KPI Templates (system defaults — isDefault = true, tenantId = null)
+   * ครอบคลุม 6 แผนกหลักของโรงแรม:
+   *   Front Desk / Housekeeping / F&B / Kitchen / Maintenance / HR
+   * แต่ละ template มี 5 KPI items ที่น้ำหนักรวม = 100%
+   * idempotent: ข้ามถ้า template ชื่อเดิมมีอยู่แล้ว (isDefault = true)
+   */
+  private async seedKpiTemplates(): Promise<void> {
+    this.logger.log('🎯 Seeding KPI Templates...');
+
+    interface KpiItemSeed {
+      name: string;
+      nameEn: string;
+      description: string;
+      weight: number;
+      sortOrder: number;
+    }
+
+    interface KpiTemplateSeed {
+      name: string;
+      nameEn: string;
+      departmentCode: string;
+      periodType: string;
+      description: string;
+      items: KpiItemSeed[];
+    }
+
+    const templates: KpiTemplateSeed[] = [
+      // ── Front Desk ──────────────────────────────────────────────────────────
+      {
+        name: 'พนักงานต้อนรับ (Front Desk)',
+        nameEn: 'Front Desk KPI',
+        departmentCode: 'FD',
+        periodType: 'quarterly',
+        description: 'เกณฑ์ประเมินสำหรับพนักงานต้อนรับ เน้นการบริการแขกและความรวดเร็ว',
+        items: [
+          { name: 'คุณภาพการบริการแขก', nameEn: 'Guest Service Quality', description: 'ความพึงพอใจของแขกจาก feedback และ guest score', weight: 30, sortOrder: 1 },
+          { name: 'ความตรงต่อเวลา', nameEn: 'Punctuality & Attendance', description: 'อัตราการมาทำงานตรงเวลา ไม่ขาดงานโดยไม่มีเหตุผล', weight: 20, sortOrder: 2 },
+          { name: 'ความรู้ด้านระบบ PMS', nameEn: 'PMS & System Knowledge', description: 'ความสามารถใช้ระบบ PMS check-in/out, booking management', weight: 20, sortOrder: 3 },
+          { name: 'ทักษะสื่อสาร', nameEn: 'Communication Skills', description: 'ทักษะภาษาและการสื่อสารกับแขกชาวไทยและต่างชาติ', weight: 20, sortOrder: 4 },
+          { name: 'การทำงานเป็นทีม', nameEn: 'Teamwork & Collaboration', description: 'ความร่วมมือกับเพื่อนร่วมงาน ส่งต่องานได้อย่างราบรื่น', weight: 10, sortOrder: 5 },
+        ],
+      },
+      // ── Housekeeping ────────────────────────────────────────────────────────
+      {
+        name: 'แม่บ้าน (Housekeeping)',
+        nameEn: 'Housekeeping KPI',
+        departmentCode: 'HK',
+        periodType: 'quarterly',
+        description: 'เกณฑ์ประเมินสำหรับแม่บ้านและหัวหน้าแม่บ้าน เน้นคุณภาพและความเร็ว',
+        items: [
+          { name: 'คุณภาพการทำความสะอาด', nameEn: 'Cleaning Quality', description: 'ผลการตรวจห้องพักโดย supervisor มาตรฐาน 5 stars', weight: 35, sortOrder: 1 },
+          { name: 'ความเร็วในการทำห้อง', nameEn: 'Room Turnaround Speed', description: 'เวลาเฉลี่ยการทำห้องเทียบกับมาตรฐาน SLA', weight: 25, sortOrder: 2 },
+          { name: 'ความตรงต่อเวลา', nameEn: 'Punctuality & Attendance', description: 'อัตราการมาทำงานตรงเวลา ไม่ขาดงานโดยไม่มีเหตุผล', weight: 20, sortOrder: 3 },
+          { name: 'การใช้สินค้าคงคลัง', nameEn: 'Inventory Management', description: 'การใช้ amenities และ supplies อย่างประหยัดและถูกต้อง', weight: 10, sortOrder: 4 },
+          { name: 'ทัศนคติและความร่วมมือ', nameEn: 'Attitude & Teamwork', description: 'ความสุภาพต่อแขก ทัศนคติดี ทำงานร่วมกับทีมได้ดี', weight: 10, sortOrder: 5 },
+        ],
+      },
+      // ── F&B Service ─────────────────────────────────────────────────────────
+      {
+        name: 'พนักงานเสิร์ฟ (F&B Service)',
+        nameEn: 'F&B Service KPI',
+        departmentCode: 'FB',
+        periodType: 'quarterly',
+        description: 'เกณฑ์ประเมินสำหรับพนักงานร้านอาหารและบาร์',
+        items: [
+          { name: 'การบริการลูกค้า', nameEn: 'Customer Service', description: 'คะแนน feedback จากลูกค้า ความรวดเร็ว ความสุภาพ', weight: 30, sortOrder: 1 },
+          { name: 'ความรู้เมนูและเครื่องดื่ม', nameEn: 'Menu & Beverage Knowledge', description: 'ความสามารถแนะนำเมนู อธิบาย ingredients ได้ถูกต้อง', weight: 25, sortOrder: 2 },
+          { name: 'ความตรงต่อเวลา', nameEn: 'Punctuality & Attendance', description: 'อัตราการมาทำงานตรงเวลา ไม่ขาดงานโดยไม่มีเหตุผล', weight: 20, sortOrder: 3 },
+          { name: 'ยอดขาย Upsell', nameEn: 'Upsell Performance', description: 'ยอดขาย upsell เครื่องดื่มพรีเมียมและ dessert เทียบกับ target', weight: 15, sortOrder: 4 },
+          { name: 'มาตรฐานความสะอาด', nameEn: 'Hygiene Standards', description: 'การรักษาความสะอาดสถานที่ อุปกรณ์ และ uniform', weight: 10, sortOrder: 5 },
+        ],
+      },
+      // ── Kitchen ─────────────────────────────────────────────────────────────
+      {
+        name: 'ครัว (Kitchen)',
+        nameEn: 'Kitchen / Chef KPI',
+        departmentCode: 'KT',
+        periodType: 'quarterly',
+        description: 'เกณฑ์ประเมินสำหรับพ่อครัวและผู้ช่วย',
+        items: [
+          { name: 'คุณภาพอาหาร', nameEn: 'Food Quality', description: 'มาตรฐานรสชาติ การจัดจาน ตรงกับ recipe specification', weight: 35, sortOrder: 1 },
+          { name: 'มาตรฐานสุขอนามัย', nameEn: 'Food Safety & Hygiene', description: 'การปฏิบัติตาม food safety standard HACCP', weight: 25, sortOrder: 2 },
+          { name: 'ความเร็วในการปรุงอาหาร', nameEn: 'Cooking Speed', description: 'เวลาส่งอาหารเทียบกับ SLA ของร้าน', weight: 20, sortOrder: 3 },
+          { name: 'การจัดการวัตถุดิบ', nameEn: 'Ingredient Management', description: 'การใช้วัตถุดิบอย่างประหยัด ลด food waste', weight: 10, sortOrder: 4 },
+          { name: 'การทำงานเป็นทีม', nameEn: 'Teamwork', description: 'ความร่วมมือในครัว รับผิดชอบหน้าที่ของตัวเอง', weight: 10, sortOrder: 5 },
+        ],
+      },
+      // ── Maintenance ─────────────────────────────────────────────────────────
+      {
+        name: 'ซ่อมบำรุง (Maintenance)',
+        nameEn: 'Maintenance KPI',
+        departmentCode: 'MT',
+        periodType: 'quarterly',
+        description: 'เกณฑ์ประเมินสำหรับช่างซ่อมบำรุงและทีม engineering',
+        items: [
+          { name: 'ความเร็วในการซ่อม', nameEn: 'Repair Response Time', description: 'เวลาตั้งแต่รับ work order ถึงเสร็จเทียบกับ SLA', weight: 30, sortOrder: 1 },
+          { name: 'คุณภาพงานซ่อม', nameEn: 'Repair Quality', description: 'อัตราการกลับมาซ่อมซ้ำ (ต่ำ = ดี) และคุณภาพผลงาน', weight: 30, sortOrder: 2 },
+          { name: 'ความตรงต่อเวลา', nameEn: 'Punctuality & Attendance', description: 'อัตราการมาทำงานตรงเวลา พร้อมรับ on-call', weight: 20, sortOrder: 3 },
+          { name: 'การบำรุงรักษาเชิงป้องกัน', nameEn: 'Preventive Maintenance', description: 'ความสม่ำเสมอในการทำ PM schedule ตามแผน', weight: 10, sortOrder: 4 },
+          { name: 'ความปลอดภัย', nameEn: 'Safety Compliance', description: 'การปฏิบัติตามมาตรฐานความปลอดภัยในการทำงาน', weight: 10, sortOrder: 5 },
+        ],
+      },
+      // ── HR / Admin ──────────────────────────────────────────────────────────
+      {
+        name: 'HR และธุรการ',
+        nameEn: 'HR & Administration KPI',
+        departmentCode: 'HR',
+        periodType: 'quarterly',
+        description: 'เกณฑ์ประเมินสำหรับทีม HR และธุรการ',
+        items: [
+          { name: 'ความถูกต้องของเอกสาร', nameEn: 'Documentation Accuracy', description: 'ความถูกต้องครบถ้วนของเอกสาร HR สัญญาจ้าง payroll', weight: 30, sortOrder: 1 },
+          { name: 'ความตรงต่อเวลา', nameEn: 'Punctuality & Attendance', description: 'อัตราการมาทำงานตรงเวลา ไม่ขาดงานโดยไม่มีเหตุผล', weight: 20, sortOrder: 2 },
+          { name: 'การพัฒนาบุคลากร', nameEn: 'Employee Development', description: 'จัดการฝึกอบรม orientation และ development program ได้ตามแผน', weight: 20, sortOrder: 3 },
+          { name: 'ความพึงพอใจพนักงาน', nameEn: 'Employee Satisfaction', description: 'ผลสำรวจ engagement score ของทีม', weight: 20, sortOrder: 4 },
+          { name: 'การทำงานเชิงรุก', nameEn: 'Proactiveness', description: 'ริเริ่มปรับปรุง process หรือเสนอ initiative ใหม่', weight: 10, sortOrder: 5 },
+        ],
+      },
+    ];
+
+    let templatesCreated = 0;
+    let itemsCreated = 0;
+
+    for (const tpl of templates) {
+      // idempotent check — ข้ามถ้ามีชื่อเดิมอยู่แล้วใน system defaults
+      const existing = await (this.prisma as any).hrKpiTemplate.findFirst({
+        where: { name: tpl.name, tenantId: null, isDefault: true },
+      });
+
+      if (existing) {
+        this.logger.log(`  ↷ Skipped (already exists): ${tpl.name}`);
+        continue;
+      }
+
+      await (this.prisma as any).hrKpiTemplate.create({
+        data: {
+          tenantId:       null,
+          name:           tpl.name,
+          nameEn:         tpl.nameEn,
+          departmentCode: tpl.departmentCode,
+          periodType:     tpl.periodType,
+          description:    tpl.description,
+          isDefault:      true,
+          isActive:       true,
+          sortOrder:      templatesCreated,
+          items: {
+            create: tpl.items.map((item) => ({
+              name:        item.name,
+              nameEn:      item.nameEn,
+              description: item.description,
+              weight:      item.weight,
+              minScore:    0,
+              maxScore:    100,
+              sortOrder:   item.sortOrder,
+            })),
+          },
+        },
+      });
+
+      templatesCreated++;
+      itemsCreated += tpl.items.length;
+      this.logger.log(`  ✓ ${tpl.name} (${tpl.items.length} KPI items)`);
+    }
+
+    this.logger.log(`✅ KPI Templates seeded: ${templatesCreated} templates, ${itemsCreated} items`);
   }
 
   /**

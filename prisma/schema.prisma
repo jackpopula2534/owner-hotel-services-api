@@ -339,6 +339,7 @@ model Employee {
   attendances   HrAttendance[]
   leaveRequests HrLeaveRequest[]
   payrolls      HrPayroll[]
+  performances  HrPerformance[]
 
   // employeeCode unique per hotel (property) within a tenant
   // — same code can exist in different hotels of the same tenant
@@ -578,6 +579,148 @@ model HrPayrollItem {
 
   @@index([payrollId])
   @@map("hr_payroll_items")
+}
+
+// ─── HR Performance Review ────────────────────────────────────────────────────
+
+model HrPerformance {
+  id              String   @id @default(uuid())
+  tenantId        String
+  employeeId      String
+  cycleId         String?  // FK → HrEvaluationCycle (null = legacy record)
+  templateId      String?  // FK → HrKpiTemplate (snapshot reference)
+  period          String   // e.g. "2025-Q1", "2025-H1", "2025"
+  periodType      String   @default("quarterly") // quarterly | half_yearly | yearly
+  reviewDate      DateTime? @db.Date
+  reviewerId      String?  // User ID of reviewer
+  reviewerName    String?
+
+  // Legacy fixed scores (kept for backward compat — prefer kpiScores[] for new records)
+  scoreWork       Decimal  @db.Decimal(5, 2) @default(0)
+  scoreAttendance Decimal  @db.Decimal(5, 2) @default(0)
+  scoreTeamwork   Decimal  @db.Decimal(5, 2) @default(0)
+  scoreService    Decimal  @db.Decimal(5, 2) @default(0)
+  scoreOverall    Decimal  @db.Decimal(5, 2) @default(0) // Weighted overall (calculated)
+
+  grade           String?  // A | B+ | B | C+ | C | D
+  status          String   @default("pending") // pending | draft | submitted | approved | rejected
+  strengths       String?  @db.Text
+  improvements    String?  @db.Text
+  goals           String?  @db.Text
+  note            String?  @db.Text
+
+  approvedBy      String?
+  approvedAt      DateTime?
+  rejectionReason String?  @db.Text
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  employee  Employee              @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  cycle     HrEvaluationCycle?   @relation(fields: [cycleId], references: [id], onDelete: SetNull)
+  kpiScores HrKpiScore[]
+
+  @@unique([employeeId, period, cycleId])
+  @@index([tenantId])
+  @@index([employeeId])
+  @@index([cycleId])
+  @@index([period])
+  @@index([status])
+  @@map("hr_performances")
+}
+
+// ─── Evaluation Cycle — รอบการประเมิน (เปิดครั้งเดียว สร้าง records ทุกคน) ─────
+
+model HrEvaluationCycle {
+  id           String   @id @default(uuid())
+  tenantId     String
+  templateId   String
+  name         String   // "ประเมินผล Q2 2568"
+  period       String   // "2568-Q2"
+  periodType   String   @default("quarterly") // quarterly | half_yearly | yearly
+  startDate    DateTime @db.Date
+  endDate      DateTime @db.Date
+  dueDate      DateTime @db.Date  // วันสิ้นสุดการกรอก
+  status       String   @default("open") // open | closed | archived
+  description  String?  @db.Text
+  createdBy    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  template     HrKpiTemplate   @relation(fields: [templateId], references: [id])
+  performances HrPerformance[]
+
+  @@index([tenantId])
+  @@index([templateId])
+  @@index([status])
+  @@map("hr_evaluation_cycles")
+}
+
+// ─── KPI Score — คะแนนแต่ละ criteria ต่อ performance record ──────────────────
+
+model HrKpiScore {
+  id              String   @id @default(uuid())
+  performanceId   String
+  criteriaId      String   // FK → HrKpiTemplateItem.id
+  criteriaName    String   // snapshot ณ เวลาประเมิน (เผื่อ template เปลี่ยน)
+  weight          Decimal  @db.Decimal(5, 2)  // snapshot weight
+  score           Decimal  @db.Decimal(5, 2)  // 1-5 scale
+  comment         String?  @db.Text
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  performance HrPerformance      @relation(fields: [performanceId], references: [id], onDelete: Cascade)
+  criteria    HrKpiTemplateItem  @relation(fields: [criteriaId], references: [id])
+
+  @@unique([performanceId, criteriaId])
+  @@index([performanceId])
+  @@map("hr_kpi_scores")
+}
+
+// KPI Template — ชุด KPI สำหรับแต่ละแผนก / ตำแหน่ง ใช้ซ้ำได้ข้ามการประเมิน
+model HrKpiTemplate {
+  id           String   @id @default(uuid())
+  tenantId     String?  // null = system default (ใช้ได้ทุก tenant)
+  name         String   // ชื่อ template เช่น "Front Desk KPI", "แม่บ้านห้องพัก"
+  nameEn       String?
+  departmentCode String? // เชื่อมกับ HrDepartment.code (soft-link เพื่อไม่ผูก FK ข้าม tenant)
+  positionCode   String? // optional: เชื่อมกับ HrPosition.code
+  periodType   String   @default("quarterly") // quarterly | half_yearly | yearly
+  description  String?  @db.Text
+  isDefault    Boolean  @default(false) // template default ของระบบ (ไม่ลบได้)
+  isActive     Boolean  @default(true)
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  items  HrKpiTemplateItem[]
+  cycles HrEvaluationCycle[]
+
+  @@index([tenantId])
+  @@index([departmentCode])
+  @@index([isDefault])
+  @@map("hr_kpi_templates")
+}
+
+// รายการ KPI แต่ละข้อใน template
+model HrKpiTemplateItem {
+  id           String   @id @default(uuid())
+  templateId   String
+  name         String   // ชื่อ KPI เช่น "คุณภาพงาน"
+  nameEn       String?
+  description  String?  @db.Text
+  weight       Decimal  @db.Decimal(5, 2) @default(20) // น้ำหนัก % (รวมทุกข้อใน template = 100)
+  minScore     Decimal  @db.Decimal(5, 2) @default(0)
+  maxScore     Decimal  @db.Decimal(5, 2) @default(100)
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  template  HrKpiTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  kpiScores HrKpiScore[]
+
+  @@index([templateId])
+  @@map("hr_kpi_template_items")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
