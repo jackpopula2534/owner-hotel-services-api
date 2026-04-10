@@ -18,10 +18,19 @@ export enum AuditAction {
 
   // Booking
   BOOKING_CREATE = 'booking_create',
+  BOOKING_CONFIRM = 'booking_confirm',
   BOOKING_UPDATE = 'booking_update',
   BOOKING_CANCEL = 'booking_cancel',
   BOOKING_CHECKIN = 'booking_checkin',
   BOOKING_CHECKOUT = 'booking_checkout',
+  BOOKING_EARLY_CHECKIN_REQUEST = 'booking_early_checkin_request',
+  BOOKING_EARLY_CHECKIN_APPROVE = 'booking_early_checkin_approve',
+  BOOKING_LATE_CHECKOUT_REQUEST = 'booking_late_checkout_request',
+  BOOKING_LATE_CHECKOUT_APPROVE = 'booking_late_checkout_approve',
+  BOOKING_FOLIO_CHARGE = 'booking_folio_charge',
+  BOOKING_FOLIO_FINALIZE = 'booking_folio_finalize',
+  BOOKING_PAYMENT = 'booking_payment',
+  BOOKING_NOTE_UPDATE = 'booking_note_update',
   HOUSEKEEPING_TASK_COMPLETE = 'housekeeping_task_complete',
 
   // Payment

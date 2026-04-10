@@ -14,6 +14,29 @@ import { PaymentsService } from '../../payments/payments.service';
 import { PaymentMethod, PaymentStatus } from '../../payments/entities/payment.entity';
 import { Prisma } from '@prisma/client';
 
+// ─── Activity Types ───────────────────────────────────────────────────────────
+
+export interface ActivityPerformer {
+  id: string;
+  name: string;
+  role: string;
+}
+
+export interface BookingActivityItem {
+  id: string;
+  action: string;
+  actionLabel: string;
+  description: string;
+  performedBy: ActivityPerformer;
+  timestamp: string;
+  changes: Record<string, { from: unknown; to: unknown }> | null;
+  category: string;
+  icon: string;
+  color: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 /** Map frontend booking payment options to the payments module enum. */
 function mapToPaymentsMethod(frontendMethod?: string): PaymentMethod | null {
   switch (frontendMethod) {
@@ -872,7 +895,7 @@ export class BookingsService {
 
     // Log booking creation (async, non-blocking)
     this.auditLogService
-      .logBookingCreate(booking, 'system', undefined)
+      .logBookingCreate(booking, (createBookingDto as any)._performedByUserId || 'system', undefined)
       .catch((err) => {
         this.logger.error(`Failed to log booking creation: ${err.message}`);
       });
@@ -901,8 +924,8 @@ export class BookingsService {
     return this.mapBookingResponse(booking);
   }
 
-  async update(id: string, updateBookingDto: any, tenantId?: string) {
-    await this.findOne(id, tenantId);
+  async update(id: string, updateBookingDto: any, tenantId?: string, userId?: string) {
+    const oldBooking = await this.findOne(id, tenantId);
 
     const updated = await this.prisma.booking.update({
       where: { id },
@@ -913,6 +936,48 @@ export class BookingsService {
         property: true,
       },
     });
+
+    // Detect if this is a status confirm or general update
+    const oldStatus = oldBooking.status;
+    const newStatus = updated.status;
+    const isConfirm = oldStatus === 'pending' && newStatus === 'confirmed';
+    const isNoteUpdate = updateBookingDto.notes !== undefined && Object.keys(updateBookingDto).length === 1;
+
+    let auditAction = AuditAction.BOOKING_UPDATE;
+    let auditDescription = `Booking updated for ${updated.guestFirstName} ${updated.guestLastName}`;
+
+    if (isConfirm) {
+      auditAction = AuditAction.BOOKING_CONFIRM;
+      auditDescription = `Booking confirmed for ${updated.guestFirstName} ${updated.guestLastName}`;
+    } else if (isNoteUpdate) {
+      auditAction = AuditAction.BOOKING_NOTE_UPDATE;
+      auditDescription = `Booking notes updated for ${updated.guestFirstName} ${updated.guestLastName}`;
+    }
+
+    this.auditLogService
+      .log({
+        action: auditAction,
+        resource: AuditResource.BOOKING,
+        resourceId: id,
+        oldValues: {
+          status: oldStatus,
+          notes: oldBooking.notes,
+          checkIn: oldBooking.checkIn,
+          checkOut: oldBooking.checkOut,
+        },
+        newValues: {
+          status: newStatus,
+          notes: updated.notes,
+          checkIn: updated.checkIn,
+          checkOut: updated.checkOut,
+        },
+        userId: userId || 'system',
+        tenantId,
+        description: auditDescription,
+      })
+      .catch((err) => {
+        this.logger.error(`Failed to log booking update: ${err.message}`);
+      });
 
     return this.mapBookingResponse(updated);
   }
@@ -1184,22 +1249,24 @@ export class BookingsService {
 
     const balanceRemaining = totalAmount - amountPaid;
 
-    // Prepare summary object
+    // Prepare summary object (all fields use defensive fallbacks)
     const summary = {
       booking: {
         id: booking.id,
-        guestName: `${booking.guestFirstName} ${booking.guestLastName}`,
-        guestEmail: booking.guestEmail,
-        guestPhone: booking.guestPhone,
-        roomNumber: booking.room?.number,
-        roomType: booking.room?.type,
+        roomId: booking.roomId ?? null,
+        guestName: `${booking.guestFirstName ?? ''} ${booking.guestLastName ?? ''}`.trim() || 'ไม่ระบุ',
+        guestEmail: booking.guestEmail ?? null,
+        guestPhone: booking.guestPhone ?? null,
+        // mapBookingResponse already populates roomNumber/roomType as computed aliases
+        roomNumber: booking.room?.number ?? (booking as any).roomNumber ?? 'N/A',
+        roomType: booking.room?.type ?? (booking as any).roomType ?? null,
       },
       stay: {
         checkInDate: booking.checkIn,
         checkOutDate: booking.checkOut,
-        actualCheckInDate: booking.actualCheckIn,
-        actualCheckOutDate: booking.actualCheckOut,
-        stayDuration: `${stayDuration} nights`,
+        actualCheckInDate: booking.actualCheckIn ?? null,
+        actualCheckOutDate: booking.actualCheckOut ?? null,
+        stayDuration: `${stayDuration} คืน`,
         nightCount: stayDuration,
       },
       charges: {
@@ -1211,7 +1278,7 @@ export class BookingsService {
         totalAmount,
       },
       payment: {
-        status: booking.status === 'checked_out' ? 'pending' : 'pending',
+        status: booking.paymentStatus ?? 'pending',
         amountPaid,
         balanceRemaining: Math.max(0, balanceRemaining),
       },
@@ -1220,7 +1287,7 @@ export class BookingsService {
     return summary;
   }
 
-  async remove(id: string, tenantId?: string) {
+  async remove(id: string, tenantId?: string, userId?: string) {
     const booking = await this.findOne(id, tenantId);
 
     const cancelledBooking = await this.prisma.booking.update({
@@ -1236,6 +1303,22 @@ export class BookingsService {
     this.emailEventsService.onBookingCancelled(cancelledBooking).catch((err) => {
       this.logger.error(`Failed to send cancellation email: ${err.message}`);
     });
+
+    // Log cancellation (async, non-blocking)
+    this.auditLogService
+      .log({
+        action: AuditAction.BOOKING_CANCEL,
+        resource: AuditResource.BOOKING,
+        resourceId: id,
+        oldValues: { status: booking.status },
+        newValues: { status: 'cancelled' },
+        userId: userId || 'system',
+        tenantId,
+        description: `Booking cancelled for ${booking.guestFirstName} ${booking.guestLastName} (Room ${booking.room?.number || 'N/A'})`,
+      })
+      .catch((err) => {
+        this.logger.error(`Failed to log booking cancellation: ${err.message}`);
+      });
 
     return this.mapBookingResponse(cancelledBooking);
   }
@@ -1661,13 +1744,32 @@ export class BookingsService {
       `Early check-in ${approve ? 'approved' : 'requested'} for booking ${id} | fee: ${feeAmount}`,
     );
 
+    // Audit log (async, non-blocking)
+    this.auditLogService
+      .log({
+        action: approve ? AuditAction.BOOKING_EARLY_CHECKIN_APPROVE : AuditAction.BOOKING_EARLY_CHECKIN_REQUEST,
+        resource: AuditResource.BOOKING,
+        resourceId: id,
+        newValues: {
+          requestedEarlyCheckIn: true,
+          ...(approve && { approvedEarlyCheckIn: true, earlyCheckInFee: feeAmount }),
+        },
+        tenantId,
+        description: approve
+          ? `Early check-in approved for ${booking.guestFirstName} ${booking.guestLastName} | Fee: ฿${feeAmount}`
+          : `Early check-in requested for ${booking.guestFirstName} ${booking.guestLastName}`,
+      })
+      .catch((err) => {
+        this.logger.error(`Failed to log early check-in: ${err.message}`);
+      });
+
     return this.mapBookingResponse(updated);
   }
 
   /**
    * Manager/admin approves a pending early check-in request.
    */
-  async approveEarlyCheckIn(id: string, tenantId: string | undefined): Promise<unknown> {
+  async approveEarlyCheckIn(id: string, tenantId: string | undefined, userId?: string): Promise<unknown> {
     if (!tenantId) throw new BadRequestException('Tenant ID is required');
 
     const booking = await this.findOne(id, tenantId);
@@ -1698,6 +1800,21 @@ export class BookingsService {
     });
 
     this.logger.log(`Early check-in approved for booking ${id} | fee: ${feeAmount}`);
+
+    // Audit log (async, non-blocking)
+    this.auditLogService
+      .log({
+        action: AuditAction.BOOKING_EARLY_CHECKIN_APPROVE,
+        resource: AuditResource.BOOKING,
+        resourceId: id,
+        newValues: { approvedEarlyCheckIn: true, earlyCheckInFee: feeAmount },
+        userId: userId || 'system',
+        tenantId,
+        description: `Early check-in approved for ${booking.guestFirstName} ${booking.guestLastName} | Fee: ฿${feeAmount}`,
+      })
+      .catch((err) => {
+        this.logger.error(`Failed to log early check-in approval: ${err.message}`);
+      });
 
     return this.mapBookingResponse(updated);
   }
@@ -1765,13 +1882,32 @@ export class BookingsService {
       `Late check-out ${approve ? 'approved' : 'requested'} for booking ${id} | fee: ${feeAmount}`,
     );
 
+    // Audit log (async, non-blocking)
+    this.auditLogService
+      .log({
+        action: approve ? AuditAction.BOOKING_LATE_CHECKOUT_APPROVE : AuditAction.BOOKING_LATE_CHECKOUT_REQUEST,
+        resource: AuditResource.BOOKING,
+        resourceId: id,
+        newValues: {
+          requestedLateCheckOut: true,
+          ...(approve && { approvedLateCheckOut: true, lateCheckOutFee: feeAmount }),
+        },
+        tenantId,
+        description: approve
+          ? `Late check-out approved for ${booking.guestFirstName} ${booking.guestLastName} | Fee: ฿${feeAmount}`
+          : `Late check-out requested for ${booking.guestFirstName} ${booking.guestLastName}`,
+      })
+      .catch((err) => {
+        this.logger.error(`Failed to log late check-out: ${err.message}`);
+      });
+
     return this.mapBookingResponse(updated);
   }
 
   /**
    * Manager/admin approves a pending late check-out request.
    */
-  async approveLateCheckOut(id: string, tenantId: string | undefined): Promise<unknown> {
+  async approveLateCheckOut(id: string, tenantId: string | undefined, userId?: string): Promise<unknown> {
     if (!tenantId) throw new BadRequestException('Tenant ID is required');
 
     const booking = await this.findOne(id, tenantId);
@@ -1803,6 +1939,216 @@ export class BookingsService {
 
     this.logger.log(`Late check-out approved for booking ${id} | fee: ${feeAmount}`);
 
+    // Audit log (async, non-blocking)
+    this.auditLogService
+      .log({
+        action: AuditAction.BOOKING_LATE_CHECKOUT_APPROVE,
+        resource: AuditResource.BOOKING,
+        resourceId: id,
+        newValues: { approvedLateCheckOut: true, lateCheckOutFee: feeAmount },
+        userId: userId || 'system',
+        tenantId,
+        description: `Late check-out approved for ${booking.guestFirstName} ${booking.guestLastName} | Fee: ฿${feeAmount}`,
+      })
+      .catch((err) => {
+        this.logger.error(`Failed to log late check-out approval: ${err.message}`);
+      });
+
     return this.mapBookingResponse(updated);
+  }
+
+  // ─── Booking Activity Timeline ────────────────────────────────────────────
+
+  /**
+   * Get activity timeline for a booking.
+   * Returns all audit log entries related to this booking, enriched with user info,
+   * formatted for display in the booking detail page.
+   */
+  async getBookingActivities(
+    bookingId: string,
+    tenantId: string | undefined,
+    page = 1,
+    limit = 50,
+  ): Promise<{
+    activities: BookingActivityItem[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
+    // Verify booking exists and belongs to tenant
+    await this.findOne(bookingId, tenantId);
+
+    const skip = (page - 1) * limit;
+
+    const [logs, total] = await Promise.all([
+      this.prisma.auditLog.findMany({
+        where: {
+          resource: AuditResource.BOOKING,
+          resourceId: bookingId,
+          tenantId,
+        },
+        orderBy: { createdAt: 'asc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.auditLog.count({
+        where: {
+          resource: AuditResource.BOOKING,
+          resourceId: bookingId,
+          tenantId,
+        },
+      }),
+    ]);
+
+    // Collect unique userIds to enrich with user names
+    const userIds = [...new Set(logs.map((l) => l.userId).filter((uid): uid is string => !!uid))];
+    const users =
+      userIds.length > 0
+        ? await this.prisma.user
+            .findMany({
+              where: { id: { in: userIds } },
+              select: { id: true, firstName: true, lastName: true, email: true, role: true },
+            })
+            .catch(() => [])
+        : [];
+
+    const userMap = new Map(users.map((u: any) => [u.id, u]));
+
+    const activities = logs.map((log) =>
+      this.mapLogToActivity(log, userMap),
+    );
+
+    return { activities, total, page, limit };
+  }
+
+  private mapLogToActivity(
+    log: any,
+    userMap: Map<string, any>,
+  ): BookingActivityItem {
+    const user = log.userId ? userMap.get(log.userId) : null;
+    const performedBy: ActivityPerformer = user
+      ? {
+          id: user.id,
+          name:
+            [user.firstName, user.lastName].filter(Boolean).join(' ').trim() ||
+            user.email ||
+            'ผู้ใช้',
+          role: user.role || 'staff',
+        }
+      : { id: 'system', name: 'ระบบอัตโนมัติ', role: 'system' };
+
+    const changes = this.buildActivityChanges(log.oldValues as Record<string, unknown> | null, log.newValues as Record<string, unknown> | null);
+
+    return {
+      id: log.id,
+      action: log.action,
+      actionLabel: this.getActivityActionLabel(log.action),
+      description: log.description || '',
+      performedBy,
+      timestamp: log.createdAt.toISOString(),
+      changes: Object.keys(changes).length > 0 ? changes : null,
+      category: log.resource,
+      icon: this.getActivityIcon(log.action),
+      color: this.getActivityColor(log.action),
+    };
+  }
+
+  private buildActivityChanges(
+    oldValues: Record<string, unknown> | null,
+    newValues: Record<string, unknown> | null,
+  ): Record<string, { from: unknown; to: unknown }> {
+    const changes: Record<string, { from: unknown; to: unknown }> = {};
+    if (!oldValues && !newValues) return changes;
+
+    const allKeys = new Set([
+      ...Object.keys(oldValues ?? {}),
+      ...Object.keys(newValues ?? {}),
+    ]);
+
+    for (const key of allKeys) {
+      const from = oldValues?.[key] ?? null;
+      const to = newValues?.[key] ?? null;
+      if (from !== to) {
+        changes[key] = { from, to };
+      }
+    }
+
+    return changes;
+  }
+
+  private getActivityActionLabel(action: string): string {
+    const labels: Record<string, string> = {
+      booking_create: 'สร้างการจอง',
+      booking_confirm: 'ยืนยันการจอง',
+      booking_update: 'แก้ไขการจอง',
+      booking_cancel: 'ยกเลิกการจอง',
+      booking_checkin: 'เช็คอิน',
+      booking_checkout: 'เช็คเอาท์',
+      booking_early_checkin_request: 'ขอ Early Check-in',
+      booking_early_checkin_approve: 'อนุมัติ Early Check-in',
+      booking_late_checkout_request: 'ขอ Late Check-out',
+      booking_late_checkout_approve: 'อนุมัติ Late Check-out',
+      booking_folio_charge: 'เพิ่มค่าใช้จ่าย',
+      booking_folio_finalize: 'ปิดยอดใบเสร็จ',
+      booking_payment: 'ชำระเงิน',
+      booking_note_update: 'อัปเดตหมายเหตุ',
+      payment_create: 'สร้างรายการชำระเงิน',
+      payment_approve: 'อนุมัติการชำระเงิน',
+      housekeeping_task_complete: 'แม่บ้านทำความสะอาดเสร็จ',
+      room_status_change: 'เปลี่ยนสถานะห้อง',
+    };
+    return labels[action] || action;
+  }
+
+  private getActivityIcon(action: string): string {
+    const icons: Record<string, string> = {
+      booking_create: 'plus-circle',
+      booking_confirm: 'check-circle',
+      booking_update: 'edit',
+      booking_cancel: 'x-circle',
+      booking_checkin: 'log-in',
+      booking_checkout: 'log-out',
+      booking_early_checkin_request: 'clock',
+      booking_early_checkin_approve: 'check-square',
+      booking_late_checkout_request: 'clock',
+      booking_late_checkout_approve: 'check-square',
+      booking_folio_charge: 'receipt',
+      booking_folio_finalize: 'file-check',
+      booking_payment: 'credit-card',
+      booking_note_update: 'message-square',
+      payment_create: 'credit-card',
+      payment_approve: 'badge-check',
+      housekeeping_task_complete: 'sparkles',
+      room_status_change: 'door-open',
+    };
+    return icons[action] || 'activity';
+  }
+
+  private getActivityColor(action: string): string {
+    const colors: Record<string, string> = {
+      booking_create: 'blue',
+      booking_confirm: 'green',
+      booking_update: 'amber',
+      booking_cancel: 'red',
+      booking_checkin: 'indigo',
+      booking_checkout: 'gray',
+      booking_early_checkin_request: 'amber',
+      booking_early_checkin_approve: 'green',
+      booking_late_checkout_request: 'amber',
+      booking_late_checkout_approve: 'green',
+      booking_folio_charge: 'purple',
+      booking_folio_finalize: 'teal',
+      booking_payment: 'emerald',
+      booking_note_update: 'slate',
+      payment_create: 'emerald',
+      payment_approve: 'green',
+      housekeeping_task_complete: 'teal',
+      room_status_change: 'cyan',
+    };
+    return colors[action] || 'gray';
   }
 }

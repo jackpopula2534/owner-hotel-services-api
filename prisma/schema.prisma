@@ -278,19 +278,319 @@ model Review {
   @@map("reviews")
 }
 
+// ─── Restaurant Enums ────────────────────────────────────────────────────────
+
+enum RestaurantType {
+  FINE_DINING
+  CASUAL
+  BUFFET
+  BAR
+  CAFE
+  POOL_BAR
+  ROOM_SERVICE
+}
+
+enum TableShape {
+  RECTANGLE
+  SQUARE
+  ROUND
+  OVAL
+}
+
+enum TableStatus {
+  AVAILABLE
+  RESERVED
+  OCCUPIED
+  CLEANING
+  OUT_OF_SERVICE
+}
+
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  SEATED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum OrderType {
+  DINE_IN
+  TAKEAWAY
+  DELIVERY
+  ROOM_SERVICE
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PREPARING
+  READY
+  SERVED
+  COMPLETED
+  CANCELLED
+}
+
+enum OrderPaymentStatus {
+  UNPAID
+  PARTIAL
+  PAID
+  REFUNDED
+}
+
+enum OrderItemStatus {
+  PENDING
+  SENT
+  PREPARING
+  READY
+  SERVED
+  CANCELLED
+}
+
+enum KitchenPriority {
+  LOW
+  NORMAL
+  HIGH
+  RUSH
+}
+
+// ─── Restaurant Core ─────────────────────────────────────────────────────────
+
 model Restaurant {
-  id          String   @id @default(uuid())
+  id          String         @id @default(uuid())
   tenantId    String?
   name        String
-  code        String   @unique
+  code        String         @unique
+  type        RestaurantType @default(CASUAL)
   description String?
   location    String?
   capacity    Int?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  openTime    String?
+  closeTime   String?
+  isActive    Boolean        @default(true)
+  layoutData  Json?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  tables       RestaurantTable[]
+  menuCategories MenuCategory[]
+  orders       Order[]
 
   @@index([tenantId])
   @@map("restaurants")
+}
+
+model RestaurantTable {
+  id           String      @id @default(uuid())
+  tenantId     String?
+  restaurantId String
+  tableNumber  String
+  capacity     Int
+  shape        TableShape  @default(RECTANGLE)
+  status       TableStatus @default(AVAILABLE)
+  positionX    Float?
+  positionY    Float?
+  width        Float?
+  height       Float?
+  rotation     Float?      @default(0)
+  zone         String?
+  isActive     Boolean     @default(true)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  restaurant   Restaurant        @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  reservations TableReservation[]
+  orders       Order[]
+
+  @@unique([restaurantId, tableNumber])
+  @@index([tenantId])
+  @@index([restaurantId])
+  @@index([status])
+  @@map("restaurant_tables")
+}
+
+model TableReservation {
+  id              String            @id @default(uuid())
+  tenantId        String?
+  restaurantId    String
+  tableId         String
+  guestName       String
+  guestPhone      String?
+  guestEmail      String?
+  partySize       Int
+  reservationDate DateTime          @db.Date
+  startTime       String
+  endTime         String?
+  status          ReservationStatus @default(PENDING)
+  specialRequests String?
+  notes           String?           @db.Text
+  confirmedAt     DateTime?
+  seatedAt        DateTime?
+  completedAt     DateTime?
+  cancelledAt     DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  table RestaurantTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([restaurantId])
+  @@index([tableId])
+  @@index([reservationDate])
+  @@index([status])
+  @@map("table_reservations")
+}
+
+// ─── Menu ────────────────────────────────────────────────────────────────────
+
+model MenuCategory {
+  id           String   @id @default(uuid())
+  tenantId     String?
+  restaurantId String
+  name         String
+  description  String?
+  image        String?
+  displayOrder Int      @default(0)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  items      MenuItem[]
+
+  @@index([tenantId])
+  @@index([restaurantId])
+  @@map("menu_categories")
+}
+
+model MenuItem {
+  id              String   @id @default(uuid())
+  tenantId        String?
+  restaurantId    String
+  categoryId      String
+  name            String
+  description     String?  @db.Text
+  price           Decimal  @db.Decimal(10, 2)
+  cost            Decimal? @db.Decimal(10, 2)
+  image           String?
+  preparationTime Int?
+  calories        Int?
+  allergens       Json?
+  isVegetarian    Boolean  @default(false)
+  isVegan         Boolean  @default(false)
+  isGlutenFree    Boolean  @default(false)
+  isSpicy         Boolean  @default(false)
+  spicyLevel      Int?
+  isAvailable     Boolean  @default(true)
+  displayOrder    Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  category   MenuCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  orderItems OrderItem[]
+
+  @@index([tenantId])
+  @@index([restaurantId])
+  @@index([categoryId])
+  @@index([isAvailable])
+  @@map("menu_items")
+}
+
+// ─── Orders / POS ────────────────────────────────────────────────────────────
+
+model Order {
+  id            String             @id @default(uuid())
+  tenantId      String?
+  restaurantId  String
+  tableId       String?
+  orderNumber   String             @unique
+  orderType     OrderType          @default(DINE_IN)
+  status        OrderStatus        @default(PENDING)
+  waiterId      String?
+  guestName     String?
+  guestRoom     String?
+  partySize     Int?
+  subtotal      Decimal            @default(0) @db.Decimal(10, 2)
+  taxRate       Decimal            @default(7) @db.Decimal(5, 2)
+  taxAmount     Decimal            @default(0) @db.Decimal(10, 2)
+  serviceRate   Decimal            @default(10) @db.Decimal(5, 2)
+  serviceCharge Decimal            @default(0) @db.Decimal(10, 2)
+  discount      Decimal            @default(0) @db.Decimal(10, 2)
+  total         Decimal            @default(0) @db.Decimal(10, 2)
+  paymentStatus OrderPaymentStatus @default(UNPAID)
+  paymentMethod String?
+  paidAmount    Decimal?           @db.Decimal(10, 2)
+  changeAmount  Decimal?           @db.Decimal(10, 2)
+  notes         String?            @db.Text
+  confirmedAt   DateTime?
+  completedAt   DateTime?
+  cancelledAt   DateTime?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  restaurant    Restaurant      @relation(fields: [restaurantId], references: [id])
+  table         RestaurantTable? @relation(fields: [tableId], references: [id])
+  items         OrderItem[]
+  kitchenOrders KitchenOrder[]
+
+  @@index([tenantId])
+  @@index([restaurantId])
+  @@index([tableId])
+  @@index([status])
+  @@index([paymentStatus])
+  @@index([orderNumber])
+  @@map("orders")
+}
+
+model OrderItem {
+  id           String          @id @default(uuid())
+  tenantId     String?
+  orderId      String
+  menuItemId   String
+  quantity     Int
+  unitPrice    Decimal         @db.Decimal(10, 2)
+  totalPrice   Decimal         @db.Decimal(10, 2)
+  status       OrderItemStatus @default(PENDING)
+  notes        String?
+  modifiers    Json?
+  sentToKitchen Boolean        @default(false)
+  sentAt       DateTime?
+  preparedAt   DateTime?
+  servedAt     DateTime?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  order    Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItem MenuItem @relation(fields: [menuItemId], references: [id])
+
+  @@index([orderId])
+  @@index([menuItemId])
+  @@index([status])
+  @@map("order_items")
+}
+
+// ─── Kitchen ─────────────────────────────────────────────────────────────────
+
+model KitchenOrder {
+  id          String          @id @default(uuid())
+  tenantId    String?
+  orderId     String
+  priority    KitchenPriority @default(NORMAL)
+  status      OrderItemStatus @default(PENDING)
+  stationName String?
+  notes       String?         @db.Text
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([orderId])
+  @@index([status])
+  @@index([priority])
+  @@map("kitchen_orders")
 }
 
 model Employee {

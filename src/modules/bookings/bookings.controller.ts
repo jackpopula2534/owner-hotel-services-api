@@ -1,9 +1,10 @@
-import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, UseGuards, DefaultValuePipe, ParseIntPipe } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { BookingsService } from './bookings.service';
 import { GuestFolioService } from './guest-folio.service';
 import { AddFolioChargeDto } from './dto/add-folio-charge.dto';
+import { AddFolioPaymentDto } from './dto/add-folio-payment.dto';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { WalkInDto } from './dto/walk-in.dto';
 import { RequestEarlyCheckInDto } from './dto/request-early-checkin.dto';
@@ -68,9 +69,9 @@ export class BookingsController {
   async updatePut(
     @Param('id') id: string,
     @Body() updateBookingDto: any,
-    @CurrentUser() user: { tenantId?: string },
+    @CurrentUser() user: { tenantId?: string; id?: string },
   ) {
-    return this.bookingsService.update(id, updateBookingDto, user?.tenantId);
+    return this.bookingsService.update(id, updateBookingDto, user?.tenantId, user?.id);
   }
 
   @Patch(':id')
@@ -79,9 +80,9 @@ export class BookingsController {
   async updatePatch(
     @Param('id') id: string,
     @Body() updateBookingDto: any,
-    @CurrentUser() user: { tenantId?: string },
+    @CurrentUser() user: { tenantId?: string; id?: string },
   ) {
-    return this.bookingsService.update(id, updateBookingDto, user?.tenantId);
+    return this.bookingsService.update(id, updateBookingDto, user?.tenantId, user?.id);
   }
 
   @Post(':id/checkin')
@@ -113,8 +114,8 @@ export class BookingsController {
   @Throttle({ default: { limit: 10, ttl: 60 } })
   @ApiOperation({ summary: 'Cancel booking' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'receptionist')
-  async remove(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
-    return this.bookingsService.remove(id, user?.tenantId);
+  async remove(@Param('id') id: string, @CurrentUser() user: { tenantId?: string; id?: string }) {
+    return this.bookingsService.remove(id, user?.tenantId, user?.id);
   }
 
   @Get(':id/folio')
@@ -140,6 +141,38 @@ export class BookingsController {
   @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin')
   async finalizeFolio(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.folioService.finalizeFolio(id, user?.tenantId);
+  }
+
+  @Post(':id/folio/payments')
+  @ApiOperation({ summary: 'Record a payment against guest folio' })
+  @ApiResponse({ status: 201, description: 'Payment recorded successfully' })
+  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin')
+  async addFolioPayment(
+    @Param('id') id: string,
+    @Body() dto: AddFolioPaymentDto,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    return this.folioService.addPayment(id, user?.tenantId, dto);
+  }
+
+  @Get(':id/folio/receipt')
+  @ApiOperation({ summary: 'Get receipt data for guest folio' })
+  @ApiResponse({ status: 200, description: 'Receipt data' })
+  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff')
+  async getFolioReceipt(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
+    return this.folioService.getReceiptData(id, user?.tenantId);
+  }
+
+  @Delete(':id/folio/charges/:itemId')
+  @ApiOperation({ summary: 'Delete a charge from guest folio' })
+  @ApiResponse({ status: 200, description: 'Charge deleted, updated folio returned' })
+  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin')
+  async deleteFolioCharge(
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    return this.folioService.deleteCharge(id, user?.tenantId, itemId);
   }
 
   // ─── Early Check-In / Late Check-Out ─────────────────────────────────────
@@ -173,9 +206,9 @@ export class BookingsController {
   @Roles('admin', 'manager', 'tenant_admin', 'platform_admin')
   async approveEarlyCheckIn(
     @Param('id') id: string,
-    @CurrentUser() user: { tenantId?: string },
+    @CurrentUser() user: { tenantId?: string; id?: string },
   ) {
-    return this.bookingsService.approveEarlyCheckIn(id, user?.tenantId);
+    return this.bookingsService.approveEarlyCheckIn(id, user?.tenantId, user?.id);
   }
 
   @Post(':id/request-late-checkout')
@@ -207,8 +240,36 @@ export class BookingsController {
   @Roles('admin', 'manager', 'tenant_admin', 'platform_admin')
   async approveLateCheckOut(
     @Param('id') id: string,
+    @CurrentUser() user: { tenantId?: string; id?: string },
+  ) {
+    return this.bookingsService.approveLateCheckOut(id, user?.tenantId, user?.id);
+  }
+
+  // ─── Activity Timeline ────────────────────────────────────────────────────
+
+  @Get(':id/activities')
+  @ApiOperation({
+    summary: 'Get booking activity timeline',
+    description: 'Returns all activity log entries for this booking — who did what and when, ordered oldest to newest.',
+  })
+  @ApiResponse({ status: 200, description: 'Activity timeline returned successfully' })
+  @ApiResponse({ status: 404, description: 'Booking not found' })
+  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
+  async getActivities(
+    @Param('id') id: string,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(50), ParseIntPipe) limit: number,
     @CurrentUser() user: { tenantId?: string },
   ) {
-    return this.bookingsService.approveLateCheckOut(id, user?.tenantId);
+    const result = await this.bookingsService.getBookingActivities(id, user?.tenantId, page, limit);
+    return {
+      success: true,
+      data: result,
+      meta: {
+        page: result.page,
+        limit: result.limit,
+        total: result.total,
+      },
+    };
   }
 }
