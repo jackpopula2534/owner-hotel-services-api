@@ -26,10 +26,15 @@ export class CreateRestaurantDto {
   @IsNotEmpty()
   name: string;
 
-  @ApiProperty({ example: 'REST001' })
+  @ApiProperty({ example: '358ac78f-7f4e-4a01-bfbf-65c69d7dfe03' })
   @IsString()
-  @IsNotEmpty()
-  code: string;
+  @IsOptional()
+  propertyId?: string;
+
+  @ApiPropertyOptional({ example: 'REST001' })
+  @IsString()
+  @IsOptional()
+  code?: string;
 
   @ApiPropertyOptional({ enum: RestaurantTypeEnum, example: RestaurantTypeEnum.CASUAL })
   @IsEnum(RestaurantTypeEnum)

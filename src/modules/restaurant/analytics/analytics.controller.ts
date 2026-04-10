@@ -16,12 +16,15 @@ import {
 import { RestaurantAnalyticsService } from './analytics.service';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../../common/guards/roles.guard';
+import { AddonGuard } from '../../../common/guards/addon.guard';
 import { Roles } from '../../../common/decorators/roles.decorator';
+import { RequireAddon } from '../../../common/decorators/require-addon.decorator';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 
 @ApiTags('Restaurant Analytics')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, AddonGuard)
+@RequireAddon('RESTAURANT_MODULE')
 @Controller('restaurants/:restaurantId/analytics')
 export class RestaurantAnalyticsController {
   constructor(private readonly analyticsService: RestaurantAnalyticsService) {}

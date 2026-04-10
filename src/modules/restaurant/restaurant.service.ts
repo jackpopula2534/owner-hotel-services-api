@@ -16,17 +16,30 @@ export class RestaurantService {
   constructor(private readonly prisma: PrismaService) {}
 
   async findAll(
-    query: { page?: number; limit?: number; search?: string; isActive?: string },
+    query: { 
+      page?: number; 
+      limit?: number; 
+      search?: string; 
+      isActive?: string;
+      propertyId?: string;
+      hotelId?: string;
+    },
     tenantId?: string,
   ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID is required');
     }
 
-    const { page = 1, limit = 10, search, isActive } = query;
+    const { page = 1, limit = 10, search, isActive, propertyId, hotelId } = query;
     const skip = (Number(page) - 1) * Number(limit);
 
-    const where: Record<string, unknown> = { tenantId };
+    const where: Record<string, any> = { tenantId };
+
+    // Support both propertyId and hotelId (frontend uses hotelId)
+    const pId = propertyId || hotelId;
+    if (pId) {
+      where.propertyId = pId;
+    }
 
     if (isActive !== undefined) {
       where.isActive = isActive === 'true';
@@ -49,6 +62,7 @@ export class RestaurantService {
         orderBy: { createdAt: 'desc' },
         include: {
           _count: { select: { tables: true, menuCategories: true, orders: true } },
+          property: { select: { id: true, name: true } },
         },
       }),
       this.prisma.restaurant.count({ where }),
@@ -65,6 +79,7 @@ export class RestaurantService {
     const restaurant = await (this.prisma.restaurant as any).findFirst({
       where: { id, tenantId },
       include: {
+        property: { select: { id: true, name: true } },
         tables: {
           where: { isActive: true },
           orderBy: { tableNumber: 'asc' },
@@ -94,6 +109,12 @@ export class RestaurantService {
       throw new BadRequestException('Tenant ID is required');
     }
 
+    // Auto-generate code if not provided
+    if (!createRestaurantDto.code) {
+      const count = await this.prisma.restaurant.count({ where: { tenantId } });
+      createRestaurantDto.code = `RES-${String(count + 1).padStart(3, '0')}`;
+    }
+
     const existing = await this.prisma.restaurant.findFirst({
       where: { code: createRestaurantDto.code, tenantId },
     });
@@ -106,7 +127,7 @@ export class RestaurantService {
 
     const { layoutData, ...rest } = createRestaurantDto;
 
-    return this.prisma.restaurant.create({
+    return (this.prisma.restaurant as any).create({
       data: {
         ...rest,
         tenantId,

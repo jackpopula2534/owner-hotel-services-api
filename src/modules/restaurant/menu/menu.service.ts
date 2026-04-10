@@ -10,6 +10,7 @@ import { UpdateMenuCategoryDto } from './dto/update-menu-category.dto';
 import { ReorderCategoriesDto } from './dto/reorder-categories.dto';
 import { CreateMenuItemDto } from './dto/create-menu-item.dto';
 import { UpdateMenuItemDto } from './dto/update-menu-item.dto';
+import { CreateRecipeDto } from './dto/create-recipe.dto';
 
 @Injectable()
 export class MenuService {
@@ -139,7 +140,12 @@ export class MenuService {
       this.prisma.menuItem.count({ where }),
     ]);
 
-    return { data, total, page: Number(page), limit: Number(limit) };
+    return {
+      data: data.map(item => this.parseItemAllergens(item)),
+      total,
+      page: Number(page),
+      limit: Number(limit),
+    };
   }
 
   async findOneItem(restaurantId: string, itemId: string, tenantId: string) {
@@ -152,7 +158,7 @@ export class MenuService {
       throw new NotFoundException(`Menu item with ID ${itemId} not found`);
     }
 
-    return item;
+    return this.parseItemAllergens(item);
   }
 
   async createItem(restaurantId: string, dto: CreateMenuItemDto, tenantId: string) {
@@ -166,18 +172,21 @@ export class MenuService {
 
     const displayOrder = dto.displayOrder ?? (maxOrder._max.displayOrder ?? -1) + 1;
 
-    return this.prisma.menuItem.create({
+    const item = await this.prisma.menuItem.create({
       data: {
         ...dto,
         price: dto.price,
         cost: dto.cost,
-        allergens: dto.allergens ? JSON.stringify(dto.allergens) : undefined,
+        // allergens is a Json? column — pass the array directly, no stringify needed
+        allergens: dto.allergens ?? undefined,
         displayOrder,
         restaurantId,
         tenantId,
       },
       include: { category: { select: { id: true, name: true } } },
     });
+
+    return this.parseItemAllergens(item);
   }
 
   async updateItem(
@@ -192,14 +201,17 @@ export class MenuService {
       await this.findCategoryOrFail(dto.categoryId, restaurantId, tenantId);
     }
 
-    return this.prisma.menuItem.update({
+    const item = await this.prisma.menuItem.update({
       where: { id: itemId },
       data: {
         ...dto,
-        allergens: dto.allergens ? JSON.stringify(dto.allergens) : undefined,
+        // allergens is a Json? column — pass the array directly, no stringify needed
+        allergens: dto.allergens !== undefined ? dto.allergens : undefined,
       },
       include: { category: { select: { id: true, name: true } } },
     });
+
+    return this.parseItemAllergens(item);
   }
 
   async toggleAvailability(
@@ -222,6 +234,76 @@ export class MenuService {
     await this.prisma.menuItem.delete({ where: { id: itemId } });
   }
 
+  // ─── Recipe ───────────────────────────────────────────────────────────────
+
+  async getRecipe(restaurantId: string, itemId: string, tenantId: string) {
+    await this.findOneItem(restaurantId, itemId, tenantId);
+
+    return this.prisma.menuItemRecipe.findUnique({
+      where: { menuItemId: itemId },
+      include: {
+        ingredients: { orderBy: { displayOrder: 'asc' } },
+      },
+    });
+  }
+
+  async upsertRecipe(
+    restaurantId: string,
+    itemId: string,
+    dto: CreateRecipeDto,
+    tenantId: string,
+  ) {
+    await this.findOneItem(restaurantId, itemId, tenantId);
+
+    const { ingredients, ...recipeData } = dto;
+
+    return this.prisma.$transaction(async (tx) => {
+      const recipe = await tx.menuItemRecipe.upsert({
+        where: { menuItemId: itemId },
+        create: { ...recipeData, menuItemId: itemId },
+        update: recipeData,
+      });
+
+      if (ingredients !== undefined) {
+        // Replace all existing ingredients on every save
+        await tx.recipeIngredient.deleteMany({ where: { recipeId: recipe.id } });
+
+        if (ingredients.length > 0) {
+          await tx.recipeIngredient.createMany({
+            data: ingredients.map((ing, idx) => ({
+              recipeId: recipe.id,
+              name: ing.name,
+              quantity: ing.quantity ?? null,
+              unit: ing.unit ?? null,
+              notes: ing.notes ?? null,
+              displayOrder: ing.displayOrder ?? idx,
+            })),
+          });
+        }
+      }
+
+      return tx.menuItemRecipe.findUnique({
+        where: { id: recipe.id },
+        include: { ingredients: { orderBy: { displayOrder: 'asc' } } },
+      });
+    });
+  }
+
+  async deleteRecipe(restaurantId: string, itemId: string, tenantId: string) {
+    await this.findOneItem(restaurantId, itemId, tenantId);
+
+    const recipe = await this.prisma.menuItemRecipe.findUnique({
+      where: { menuItemId: itemId },
+      select: { id: true },
+    });
+
+    if (!recipe) {
+      throw new NotFoundException(`No recipe found for menu item ${itemId}`);
+    }
+
+    await this.prisma.menuItemRecipe.delete({ where: { id: recipe.id } });
+  }
+
   // ─── Full Menu ────────────────────────────────────────────────────────────
 
   async getFullMenu(restaurantId: string, tenantId: string) {
@@ -240,6 +322,31 @@ export class MenuService {
   }
 
   // ─── Private Helpers ──────────────────────────────────────────────────────
+
+  /**
+   * Allergens are stored as a JSON string in MySQL (e.g. '["SHELLFISH","FISH"]').
+   * Parse them back to a string array before returning to callers so the API
+   * always exposes a consistent array type.
+   */
+  private parseItemAllergens<T extends { allergens: unknown }>(
+    item: T,
+  ): Omit<T, 'allergens'> & { allergens: string[] } {
+    const raw = item.allergens;
+    let parsed: string[] = [];
+
+    if (Array.isArray(raw)) {
+      parsed = raw as string[];
+    } else if (typeof raw === 'string' && raw.length > 0) {
+      try {
+        const result = JSON.parse(raw);
+        parsed = Array.isArray(result) ? result : [];
+      } catch {
+        this.logger.warn(`Failed to parse allergens JSON: ${raw}`);
+      }
+    }
+
+    return { ...item, allergens: parsed };
+  }
 
   private async validateRestaurant(restaurantId: string, tenantId: string) {
     const restaurant = await this.prisma.restaurant.findFirst({

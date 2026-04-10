@@ -26,13 +26,16 @@ import { UpdateTableStatusDto } from './dto/update-table-status.dto';
 import { SaveLayoutDto } from './dto/save-layout.dto';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../../common/guards/roles.guard';
+import { AddonGuard } from '../../../common/guards/addon.guard';
 import { Roles } from '../../../common/decorators/roles.decorator';
+import { RequireAddon } from '../../../common/decorators/require-addon.decorator';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 
 @ApiTags('restaurant / tables')
 @ApiBearerAuth('JWT-auth')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Controller({ path: 'restaurant/:restaurantId/tables', version: '1' })
+@UseGuards(JwtAuthGuard, RolesGuard, AddonGuard)
+@RequireAddon('RESTAURANT_MODULE')
+@Controller({ path: 'restaurants/:restaurantId/tables', version: '1' })
 export class TableController {
   constructor(private readonly tableService: TableService) {}
 

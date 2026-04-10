@@ -55,6 +55,7 @@ export class SeederService {
       await this.seedHotelStaff();
       await this.seedPremiumHrData();
       await this.seedHrPerformanceData();
+      await this.seedRestaurantData();
 
       this.logger.log('✅ Database seeding completed successfully!');
     } catch (error) {
@@ -297,6 +298,44 @@ export class SeederService {
         priceMonthly: 1200,
         isActive: true,
       },
+      {
+        // Restaurant Add-on: F&B management with table reservations and menu management
+        code: 'RESTAURANT_MODULE',
+        name: 'Restaurant & F&B Module',
+        description:
+          'ระบบจัดการร้านอาหาร F&B: เมนู หมวดหมู่ จองโต๊ะ และเชื่อม Folio แขก',
+        type: FeatureType.MODULE,
+        priceMonthly: 990,
+        isActive: true,
+      },
+      {
+        // POS Add-on: full POS system with kitchen display and cashier
+        code: 'POS_MODULE',
+        name: 'POS System',
+        description:
+          'ระบบ POS ครบวงจร: รับออเดอร์ ส่งครัว (KDS) ชำระเงิน และจัดการ User POS',
+        type: FeatureType.MODULE,
+        priceMonthly: 790,
+        isActive: true,
+      },
+      {
+        // Channel Manager Add-on
+        code: 'CHANNEL_MANAGER',
+        name: 'Channel Manager',
+        description: 'เชื่อมต่อกับ OTA อัตโนมัติ sync ราคาและห้องพักแบบ real-time',
+        type: FeatureType.MODULE,
+        priceMonthly: 1490,
+        isActive: true,
+      },
+      {
+        // Loyalty Module Add-on
+        code: 'LOYALTY_MODULE',
+        name: 'Loyalty & Rewards',
+        description: 'โปรแกรมสะสมแต้มแขกประจำ ส่วนลด และ reward tiers',
+        type: FeatureType.MODULE,
+        priceMonthly: 590,
+        isActive: true,
+      },
     ];
 
     for (const featureData of features) {
@@ -464,6 +503,8 @@ export class SeederService {
     const advancedReport = await this.featuresService.findByCode('advanced_report');
     const housekeeping = await this.featuresService.findByCode('housekeeping');
     const hrModule = await this.featuresService.findByCode('HR_MODULE');
+    const restaurantModule = await this.featuresService.findByCode('RESTAURANT_MODULE');
+    const posModule = await this.featuresService.findByCode('POS_MODULE');
 
     // ข้อมูลโรงแรมตาม UI Screenshot
     const allFeatures = [
@@ -561,8 +602,10 @@ export class SeederService {
           { feature: advancedReport, price: 500 },
           { feature: housekeeping, price: 500 },
           { feature: hrModule, price: 1200 },
+          { feature: restaurantModule, price: 990 },
+          { feature: posModule, price: 790 },
         ],
-        invoices: [{ amount: 17940, status: InvoiceStatus.PAID, daysAgo: 0 }],
+        invoices: [{ amount: 19720, status: InvoiceStatus.PAID, daysAgo: 0 }],
       },
       {
         // SUB-003: บ้านพักริมทะเล - Starter (Trial)
@@ -2200,6 +2243,413 @@ export class SeederService {
     }
 
     this.logger.log(`✅ KPI Templates seeded: ${templatesCreated} templates, ${itemsCreated} items`);
+  }
+
+  /**
+   * 15️⃣ Seed Restaurant & POS demo data for Mountain View Resort (premium.test@email.com)
+   *
+   * Creates:
+   *  - 1 Restaurant (Main Restaurant — CASUAL)
+   *  - 1 Bar (Lobby Bar — BAR)
+   *  - Tables for both venues (numbered, with zone layout)
+   *  - Menu categories: อาหารเช้า, อาหารจานหลัก, ของหวาน, เครื่องดื่ม, ค็อกเทล
+   *  - ~25 menu items with realistic Thai prices
+   *
+   * All records are idempotent — safe to run multiple times via db:refresh.
+   */
+  private async seedRestaurantData(): Promise<void> {
+    this.logger.log('🍽️  Seeding Restaurant & POS demo data (Mountain View Resort)...');
+
+    // ── Look up premium tenant ─────────────────────────────────────────────
+    const ownerUser = await this.prisma.user.findUnique({
+      where: { email: 'premium.test@email.com' },
+    });
+    if (!ownerUser?.tenantId) {
+      this.logger.warn('  ⚠️  premium.test@email.com not found, skipping restaurant seed');
+      return;
+    }
+    const tenantId = ownerUser.tenantId;
+
+    const property = await this.prisma.property.findFirst({ where: { tenantId } });
+    const propertyId = property?.id ?? null;
+
+    // ── Helper: upsert restaurant by code ────────────────────────────────────
+    const upsertRestaurant = async (data: {
+      code: string;
+      name: string;
+      type: string;
+      description?: string;
+      location?: string;
+      capacity?: number;
+      openTime?: string;
+      closeTime?: string;
+    }) => {
+      const existing = await this.prisma.restaurant.findUnique({ where: { code: data.code } });
+      if (existing) return existing;
+      return this.prisma.restaurant.create({
+        data: {
+          tenantId,
+          propertyId,
+          code: data.code,
+          name: data.name,
+          type: data.type as any,
+          description: data.description,
+          location: data.location,
+          capacity: data.capacity,
+          openTime: data.openTime,
+          closeTime: data.closeTime,
+          isActive: true,
+        },
+      });
+    };
+
+    // ── 1. Create venues ──────────────────────────────────────────────────────
+    const mainRestaurant = await upsertRestaurant({
+      code: 'MVR-MAIN',
+      name: 'Mountain View Restaurant',
+      type: 'CASUAL',
+      description: 'ร้านอาหารหลักของ Mountain View Resort เสิร์ฟอาหารไทยและนานาชาติ',
+      location: 'ชั้น 1 อาคารหลัก',
+      capacity: 80,
+      openTime: '06:00',
+      closeTime: '22:00',
+    });
+
+    const lobbyBar = await upsertRestaurant({
+      code: 'MVR-BAR',
+      name: 'Summit Lobby Bar',
+      type: 'BAR',
+      description: 'บาร์บรรยากาศสบาย วิวภูเขา เครื่องดื่มคัดสรร',
+      location: 'ล็อบบี้ ชั้น 1',
+      capacity: 30,
+      openTime: '10:00',
+      closeTime: '00:00',
+    });
+
+    // ── 2. Create tables ──────────────────────────────────────────────────────
+    const existingTables = await this.prisma.restaurantTable.count({
+      where: { tenantId, restaurantId: mainRestaurant.id },
+    });
+
+    if (existingTables === 0) {
+      const mainTables = [
+        // Zone: Indoor
+        { tableNumber: 'A1', capacity: 2, zone: 'Indoor', shape: 'SQUARE', positionX: 1, positionY: 1 },
+        { tableNumber: 'A2', capacity: 2, zone: 'Indoor', shape: 'SQUARE', positionX: 2, positionY: 1 },
+        { tableNumber: 'A3', capacity: 4, zone: 'Indoor', shape: 'RECTANGLE', positionX: 3, positionY: 1 },
+        { tableNumber: 'A4', capacity: 4, zone: 'Indoor', shape: 'RECTANGLE', positionX: 4, positionY: 1 },
+        { tableNumber: 'B1', capacity: 6, zone: 'Indoor', shape: 'RECTANGLE', positionX: 1, positionY: 2 },
+        { tableNumber: 'B2', capacity: 6, zone: 'Indoor', shape: 'RECTANGLE', positionX: 2, positionY: 2 },
+        { tableNumber: 'B3', capacity: 8, zone: 'Indoor', shape: 'RECTANGLE', positionX: 3, positionY: 2 },
+        // Zone: Terrace
+        { tableNumber: 'T1', capacity: 2, zone: 'Terrace', shape: 'ROUND', positionX: 1, positionY: 4 },
+        { tableNumber: 'T2', capacity: 2, zone: 'Terrace', shape: 'ROUND', positionX: 2, positionY: 4 },
+        { tableNumber: 'T3', capacity: 4, zone: 'Terrace', shape: 'ROUND', positionX: 3, positionY: 4 },
+        { tableNumber: 'T4', capacity: 4, zone: 'Terrace', shape: 'ROUND', positionX: 4, positionY: 4 },
+        // Zone: Private Dining
+        { tableNumber: 'P1', capacity: 10, zone: 'Private', shape: 'OVAL', positionX: 1, positionY: 6 },
+      ];
+
+      await this.prisma.restaurantTable.createMany({
+        data: mainTables.map((t) => ({
+          id: uuidv4(),
+          tenantId,
+          restaurantId: mainRestaurant.id,
+          tableNumber: t.tableNumber,
+          capacity: t.capacity,
+          zone: t.zone,
+          shape: t.shape as any,
+          positionX: t.positionX,
+          positionY: t.positionY,
+          isActive: true,
+        })),
+      });
+      this.logger.log(`  ✓ Created ${mainTables.length} tables for ${mainRestaurant.name}`);
+    } else {
+      this.logger.log(`  ⊙ Tables already exist for ${mainRestaurant.name}, skipping`);
+    }
+
+    const existingBarTables = await this.prisma.restaurantTable.count({
+      where: { tenantId, restaurantId: lobbyBar.id },
+    });
+
+    if (existingBarTables === 0) {
+      const barTables = [
+        { tableNumber: 'BAR1', capacity: 2, zone: 'Bar Counter', shape: 'RECTANGLE' },
+        { tableNumber: 'BAR2', capacity: 2, zone: 'Bar Counter', shape: 'RECTANGLE' },
+        { tableNumber: 'L1', capacity: 4, zone: 'Lounge', shape: 'ROUND' },
+        { tableNumber: 'L2', capacity: 4, zone: 'Lounge', shape: 'ROUND' },
+        { tableNumber: 'L3', capacity: 2, zone: 'Lounge', shape: 'ROUND' },
+      ];
+
+      await this.prisma.restaurantTable.createMany({
+        data: barTables.map((t) => ({
+          id: uuidv4(),
+          tenantId,
+          restaurantId: lobbyBar.id,
+          tableNumber: t.tableNumber,
+          capacity: t.capacity,
+          zone: t.zone,
+          shape: t.shape as any,
+          isActive: true,
+        })),
+      });
+      this.logger.log(`  ✓ Created ${barTables.length} tables for ${lobbyBar.name}`);
+    } else {
+      this.logger.log(`  ⊙ Tables already exist for ${lobbyBar.name}, skipping`);
+    }
+
+    // ── 3. Create Menu Categories ─────────────────────────────────────────────
+    const existingCats = await this.prisma.menuCategory.count({
+      where: { tenantId, restaurantId: mainRestaurant.id },
+    });
+
+    if (existingCats > 0) {
+      this.logger.log(`  ⊙ Menu categories already exist, skipping`);
+      return;
+    }
+
+    const categorySeed = [
+      {
+        name: 'อาหารเช้า',
+        description: 'เมนูอาหารเช้าเสิร์ฟเวลา 06:00-10:30 น.',
+        displayOrder: 1,
+        items: [
+          { name: 'ข้าวต้มปลา', description: 'ข้าวต้มปลาช่อนสด ขิง ต้นหอม น้ำปลา', price: 120, preparationTime: 10, isAvailable: true },
+          { name: 'โจ๊กหมูสับ', description: 'โจ๊กข้าวหอมมะลิ หมูสับนุ่ม ขิง ต้นหอม', price: 110, preparationTime: 8, isAvailable: true },
+          { name: 'ไข่กระทะ', description: 'ไข่ดาว 2 ฟอง เสิร์ฟพร้อมขนมปังปิ้ง แยม เนย', price: 90, preparationTime: 7, isAvailable: true },
+          { name: 'American Breakfast', description: 'ไข่คน เบคอน ไส้กรอก มะเขือเทศ เห็ด ถั่วอบ', price: 280, preparationTime: 15, isAvailable: true },
+          { name: 'Continental Breakfast', description: 'ขนมปังปิ้ง ครัวซองต์ ผลไม้ โยเกิร์ต', price: 220, preparationTime: 5, isAvailable: true },
+        ],
+      },
+      {
+        name: 'อาหารจานหลัก',
+        description: 'อาหารไทยและนานาชาติ',
+        displayOrder: 2,
+        items: [
+          { name: 'ผัดไทยกุ้งสด', description: 'ผัดไทยกุ้งแม่น้ำสด เส้นจันทร์ ถั่วงอก ต้นหอม', price: 220, preparationTime: 15, isSpicy: false, isAvailable: true },
+          { name: 'ต้มยำกุ้ง', description: 'ต้มยำกุ้งน้ำข้น กุ้งแม่น้ำ เห็ดฟาง ตะไคร้ ใบมะกรูด', price: 280, preparationTime: 20, isSpicy: true, spicyLevel: 3, isAvailable: true },
+          { name: 'แกงเขียวหวานไก่', description: 'แกงเขียวหวานไก่บ้าน กะทิสด มะเขือเปราะ', price: 180, preparationTime: 20, isSpicy: true, spicyLevel: 2, isAvailable: true },
+          { name: 'ข้าวมันไก่', description: 'ข้าวมันไก่ต้มซอสขิง น้ำซุปใส แตงกวา ต้นหอม', price: 160, preparationTime: 12, isAvailable: true },
+          { name: 'สเต็กเนื้อออสเตรเลีย', description: 'เนื้อออสเตรเลีย 200g ย่างตามสั่ง มันฝรั่งบด ผักย่าง', price: 580, preparationTime: 25, isAvailable: true },
+          { name: 'Grilled Salmon', description: 'แซลมอนย่าง ซอส Lemon Dill เสิร์ฟพร้อมผักนึ่ง', price: 420, preparationTime: 20, isGlutenFree: true, isAvailable: true },
+        ],
+      },
+      {
+        name: 'ของหวาน',
+        description: 'ขนมหวานไทยและเดสเสิร์ตนานาชาติ',
+        displayOrder: 3,
+        items: [
+          { name: 'ข้าวเหนียวมะม่วง', description: 'ข้าวเหนียวมะม่วงน้ำดอกไม้ กะทิสด งาขาว', price: 160, preparationTime: 5, isVegetarian: true, isAvailable: true },
+          { name: 'ทับทิมกรอบ', description: 'ทับทิมกรอบในน้ำกะทิ น้ำแข็ง', price: 120, preparationTime: 5, isVegetarian: true, isAvailable: true },
+          { name: 'Chocolate Lava Cake', description: 'เค้กช็อกโกแลตหน้าละลาย ไอศกรีมวนิลา', price: 190, preparationTime: 15, isVegetarian: true, isAvailable: true },
+          { name: 'Crème Brûlée', description: 'คัสตาร์ดวนิลาหน้าน้ำตาลไหม้', price: 175, preparationTime: 3, isVegetarian: true, isGlutenFree: true, isAvailable: true },
+        ],
+      },
+      {
+        name: 'เครื่องดื่ม',
+        description: 'เครื่องดื่มร้อน เย็น และผลไม้ปั่น',
+        displayOrder: 4,
+        restaurantId: mainRestaurant.id,
+        items: [
+          { name: 'ชาไทยเย็น', description: 'ชาไทยเข้มข้น นมข้น น้ำแข็ง', price: 80, preparationTime: 3, isVegetarian: true, isAvailable: true },
+          { name: 'กาแฟดำร้อน', description: 'เอสเปรสโซ่คัดพิเศษจากดอยช้าง', price: 90, preparationTime: 5, isVegetarian: true, isAvailable: true },
+          { name: 'Latte', description: 'เอสเปรสโซ่ + นมสด ตามสั่งร้อน/เย็น', price: 120, preparationTime: 5, isVegetarian: true, isAvailable: true },
+          { name: 'น้ำผลไม้ปั่นสด', description: 'เลือกได้: สตรอว์เบอรี่ มะม่วง ฝรั่ง ส้ม', price: 110, preparationTime: 5, isVegetarian: true, isVegan: true, isGlutenFree: true, isAvailable: true },
+          { name: 'มะพร้าวน้ำหอม', description: 'มะพร้าวน้ำหอมสด เนื้อมะพร้าวอ่อน', price: 90, preparationTime: 2, isVegetarian: true, isVegan: true, isGlutenFree: true, isAvailable: true },
+        ],
+      },
+    ];
+
+    let categoryCount = 0;
+    let itemCount = 0;
+
+    for (const catData of categorySeed) {
+      const category = await this.prisma.menuCategory.create({
+        data: {
+          tenantId,
+          restaurantId: mainRestaurant.id,
+          name: catData.name,
+          description: catData.description,
+          displayOrder: catData.displayOrder,
+          isActive: true,
+        },
+      });
+      categoryCount++;
+
+      for (let i = 0; i < catData.items.length; i++) {
+        const item = catData.items[i];
+        await this.prisma.menuItem.create({
+          data: {
+            tenantId,
+            restaurantId: mainRestaurant.id,
+            categoryId: category.id,
+            name: item.name,
+            description: item.description,
+            price: item.price,
+            preparationTime: item.preparationTime,
+            isVegetarian: (item as any).isVegetarian ?? false,
+            isVegan: (item as any).isVegan ?? false,
+            isGlutenFree: (item as any).isGlutenFree ?? false,
+            isSpicy: (item as any).isSpicy ?? false,
+            spicyLevel: (item as any).spicyLevel ?? null,
+            isAvailable: item.isAvailable,
+            displayOrder: i + 1,
+          },
+        });
+        itemCount++;
+      }
+    }
+
+    // ── Bar menu ──────────────────────────────────────────────────────────────
+    const existingBarCats = await this.prisma.menuCategory.count({
+      where: { tenantId, restaurantId: lobbyBar.id },
+    });
+
+    if (existingBarCats === 0) {
+      const barCocktails = await this.prisma.menuCategory.create({
+        data: {
+          tenantId,
+          restaurantId: lobbyBar.id,
+          name: 'ค็อกเทลและเครื่องดื่มแอลกอฮอล์',
+          description: 'ค็อกเทลทำสด ไวน์ เบียร์ สปิริต',
+          displayOrder: 1,
+          isActive: true,
+        },
+      });
+      categoryCount++;
+
+      const barItems = [
+        { name: 'Mountain Breeze', description: 'Vodka, Blue Curacao, Lime Juice, Soda', price: 280, preparationTime: 5 },
+        { name: 'Thai Mojito', description: 'White Rum, Mint, Lime, Lemongrass, Soda', price: 260, preparationTime: 7 },
+        { name: 'Sunset Spritz', description: 'Aperol, Prosecco, Orange Slice', price: 320, preparationTime: 5 },
+        { name: 'เบียร์สด (Chang / Singha)', description: 'เบียร์สดแก้วใหญ่ เย็นสดชื่น', price: 120, preparationTime: 2 },
+        { name: 'House Wine (แดง/ขาว)', description: 'House wine แก้ว เลือกแดงหรือขาว', price: 220, preparationTime: 1 },
+      ];
+
+      for (let i = 0; i < barItems.length; i++) {
+        const item = barItems[i];
+        await this.prisma.menuItem.create({
+          data: {
+            tenantId,
+            restaurantId: lobbyBar.id,
+            categoryId: barCocktails.id,
+            name: item.name,
+            description: item.description,
+            price: item.price,
+            preparationTime: item.preparationTime,
+            isAvailable: true,
+            displayOrder: i + 1,
+          },
+        });
+        itemCount++;
+      }
+    }
+
+    // ── POS staff accounts ────────────────────────────────────────────────────
+    // Each staff member gets allowedSystems scoped to their role:
+    //   waiter / chef / cashier → ["pos"] only
+    //   manager (restaurant manager) → ["main","pos"]
+    const posStaff = [
+      {
+        email: 'waiter1@mountainviewresort.test',
+        firstName: 'สมชาย',
+        lastName: 'ใจดี',
+        role: 'waiter',
+        employeeId: 'MVR-W001',
+        allowedSystems: '["pos"]',
+      },
+      {
+        email: 'waiter2@mountainviewresort.test',
+        firstName: 'สมหญิง',
+        lastName: 'รักงาน',
+        role: 'waiter',
+        employeeId: 'MVR-W002',
+        allowedSystems: '["pos"]',
+      },
+      {
+        email: 'chef1@mountainviewresort.test',
+        firstName: 'วิชัย',
+        lastName: 'ฝีมือดี',
+        role: 'chef',
+        employeeId: 'MVR-C001',
+        allowedSystems: '["pos"]',
+      },
+      {
+        email: 'cashier1@mountainviewresort.test',
+        firstName: 'นภา',
+        lastName: 'คล่องแคล่ว',
+        role: 'cashier',
+        employeeId: 'MVR-CA001',
+        allowedSystems: '["pos"]',
+      },
+      {
+        email: 'restaurant.manager@mountainviewresort.test',
+        firstName: 'ประสิทธิ์',
+        lastName: 'บริหารเก่ง',
+        role: 'manager',
+        employeeId: 'MVR-M001',
+        allowedSystems: '["main","pos"]',
+      },
+    ];
+
+    const hashedPosPassword = await bcrypt.hash('pos123456', 10);
+    let posCreated = 0;
+    let posUpdated = 0;
+
+    for (const staff of posStaff) {
+      const existing = await this.prisma.user.findUnique({ where: { email: staff.email } });
+      if (!existing) {
+        await this.prisma.user.create({
+          data: {
+            email: staff.email,
+            password: hashedPosPassword,
+            firstName: staff.firstName,
+            lastName: staff.lastName,
+            role: staff.role,
+            employeeId: staff.employeeId,
+            tenantId,
+            status: 'active',
+            allowedSystems: staff.allowedSystems,
+          } as any,
+        });
+        posCreated++;
+      } else {
+        // Ensure allowedSystems is correct on re-seed
+        await this.prisma.user.update({
+          where: { id: existing.id },
+          data: {
+            tenantId,
+            allowedSystems: staff.allowedSystems,
+            password: hashedPosPassword,
+          } as any,
+        });
+        posUpdated++;
+      }
+    }
+
+    this.logger.log(
+      `  ✓ POS staff: ${posCreated} created, ${posUpdated} updated` +
+      ` (password: pos123456, systems: waiter/chef/cashier → POS only, manager → main+POS)`,
+    );
+
+    // ── Backfill allowedSystems for existing hotel owner/admins ───────────────
+    // tenant_admin and manager (non-restaurant) who were created before this migration
+    // should be allowed into both systems.
+    await (this.prisma.user.updateMany as any)({
+      where: {
+        tenantId,
+        role: { in: ['tenant_admin', 'manager', 'receptionist'] },
+        allowedSystems: '["main"]', // only update users still on default
+      },
+      data: { allowedSystems: '["main","pos"]' },
+    }).catch(() => {
+      // allowedSystems column may not exist yet — ignore (will work after db:refresh)
+    });
+
+    this.logger.log(
+      `✅ Restaurant seed complete: 2 venues, ${categoryCount} categories, ${itemCount} menu items`,
+    );
   }
 
   /**

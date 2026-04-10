@@ -25,11 +25,17 @@ model User {
   metadata      String?        @db.Text
   phone         String?
   status        String         @default("active")
-  tenantId      String? // activeTenantId for current session context
-  timezone      String?
-  refreshTokens RefreshToken[]
-  notifications Notification[]
-  userTenants   UserTenant[] // Junction table for multi-tenant support
+  tenantId       String? // activeTenantId for current session context
+  timezone       String?
+  // ── System Access Control ─────────────────────────────────────────────────
+  // JSON-encoded array: ["main"] | ["pos"] | ["main","pos"]
+  // Controls which system(s) this user may log into.
+  // main = hotel management dashboard, pos = Point-of-Sale terminal
+  allowedSystems String         @default("[\"main\"]") @db.VarChar(255)
+  // ─────────────────────────────────────────────────────────────────────────
+  refreshTokens  RefreshToken[]
+  notifications  Notification[]
+  userTenants    UserTenant[] // Junction table for multi-tenant support
 
   @@map("users")
 }
@@ -52,19 +58,33 @@ model Admin {
 }
 
 model RefreshToken {
-  id        String    @id @default(uuid()) @db.VarChar(36)
-  token     String    @unique
-  userId    String?   @db.VarChar(36)
-  expiresAt DateTime
-  createdAt DateTime  @default(now())
-  revokedAt DateTime?
-  adminId   String?   @db.VarChar(36)
-  admin     Admin?    @relation(fields: [adminId], references: [id], onDelete: Cascade)
-  user      User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id          String    @id @default(uuid()) @db.VarChar(36)
+  token       String    @unique
+  userId      String?   @db.VarChar(36)
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+  revokedAt   DateTime?
+  adminId     String?   @db.VarChar(36)
+  // ── Device Fingerprint (session management) ──────────────────────────────
+  deviceName  String?   @db.VarChar(255)
+  deviceType  String?   @db.VarChar(50)
+  ipAddress   String?   @db.VarChar(45)
+  userAgent   String?   @db.Text
+  lastUsedAt    DateTime?
+  lastUsedIp    String?   @db.VarChar(45)
+  // ── System Context ────────────────────────────────────────────────────────
+  // Identifies which system issued this token: 'main' | 'pos'
+  // Logout from POS only revokes tokens where systemContext = 'pos'
+  systemContext String    @default("main") @db.VarChar(20)
+  // ─────────────────────────────────────────────────────────────────────────
+  admin         Admin?    @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  user          User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([token])
   @@index([userId])
   @@index([adminId])
+  @@index([userId, lastUsedAt])
+  @@index([userId, systemContext])
   @@map("refresh_tokens")
 }
 
@@ -143,6 +163,7 @@ model Property {
   bookings         Booking[]
   maintenanceTasks MaintenanceTask[]
   employees        Employee[]
+  restaurants      Restaurant[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -359,6 +380,7 @@ enum KitchenPriority {
 model Restaurant {
   id          String         @id @default(uuid())
   tenantId    String?
+  propertyId  String?
   name        String
   code        String         @unique
   type        RestaurantType @default(CASUAL)
@@ -372,11 +394,13 @@ model Restaurant {
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
+  property     Property?       @relation(fields: [propertyId], references: [id], onDelete: SetNull)
   tables       RestaurantTable[]
   menuCategories MenuCategory[]
   orders       Order[]
 
   @@index([tenantId])
+  @@index([propertyId])
   @@map("restaurants")
 }
 
@@ -472,7 +496,7 @@ model MenuItem {
   description     String?  @db.Text
   price           Decimal  @db.Decimal(10, 2)
   cost            Decimal? @db.Decimal(10, 2)
-  image           String?
+  image           String?  @db.LongText
   preparationTime Int?
   calories        Int?
   allergens       Json?
@@ -486,14 +510,47 @@ model MenuItem {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  category   MenuCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  category   MenuCategory   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   orderItems OrderItem[]
+  recipe     MenuItemRecipe?
 
   @@index([tenantId])
   @@index([restaurantId])
   @@index([categoryId])
   @@index([isAvailable])
   @@map("menu_items")
+}
+
+// ─── Recipes ──────────────────────────────────────────────────────────────────
+
+model MenuItemRecipe {
+  id           String             @id @default(uuid())
+  menuItemId   String             @unique
+  servings     Int?
+  instructions String?            @db.Text
+  notes        String?            @db.Text
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  menuItem     MenuItem           @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  ingredients  RecipeIngredient[]
+
+  @@map("menu_item_recipes")
+}
+
+model RecipeIngredient {
+  id           String         @id @default(uuid())
+  recipeId     String
+  name         String
+  quantity     Decimal?       @db.Decimal(10, 3)
+  unit         String?
+  notes        String?
+  displayOrder Int            @default(0)
+
+  recipe       MenuItemRecipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+
+  @@index([recipeId])
+  @@map("recipe_ingredients")
 }
 
 // ─── Orders / POS ────────────────────────────────────────────────────────────

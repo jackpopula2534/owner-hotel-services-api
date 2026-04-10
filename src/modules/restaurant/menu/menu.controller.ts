@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Patch,
   Delete,
   Body,
@@ -25,15 +26,19 @@ import { UpdateMenuCategoryDto } from './dto/update-menu-category.dto';
 import { ReorderCategoriesDto } from './dto/reorder-categories.dto';
 import { CreateMenuItemDto } from './dto/create-menu-item.dto';
 import { UpdateMenuItemDto } from './dto/update-menu-item.dto';
+import { CreateRecipeDto } from './dto/create-recipe.dto';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../../common/guards/roles.guard';
+import { AddonGuard } from '../../../common/guards/addon.guard';
 import { Roles } from '../../../common/decorators/roles.decorator';
+import { RequireAddon } from '../../../common/decorators/require-addon.decorator';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 
 @ApiTags('restaurant / menu')
 @ApiBearerAuth('JWT-auth')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Controller({ path: 'restaurant/:restaurantId', version: '1' })
+@UseGuards(JwtAuthGuard, RolesGuard, AddonGuard)
+@RequireAddon('RESTAURANT_MODULE')
+@Controller({ path: 'restaurants/:restaurantId', version: '1' })
 export class MenuController {
   constructor(private readonly menuService: MenuService) {}
 
@@ -215,5 +220,51 @@ export class MenuController {
     @CurrentUser() user: { tenantId: string },
   ) {
     return this.menuService.removeItem(restaurantId, itemId, user.tenantId);
+  }
+
+  // ─── Recipe ───────────────────────────────────────────────────────────────
+
+  @Get('menu-items/:itemId/recipe')
+  @ApiOperation({ summary: 'Get recipe for a menu item (null if not defined)' })
+  @ApiParam({ name: 'restaurantId' })
+  @ApiParam({ name: 'itemId' })
+  @ApiResponse({ status: 200, description: 'Recipe with ingredients, or null' })
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'waiter', 'staff')
+  async getRecipe(
+    @Param('restaurantId') restaurantId: string,
+    @Param('itemId') itemId: string,
+    @CurrentUser() user: { tenantId: string },
+  ) {
+    return this.menuService.getRecipe(restaurantId, itemId, user.tenantId);
+  }
+
+  @Put('menu-items/:itemId/recipe')
+  @ApiOperation({ summary: 'Create or update recipe for a menu item (upsert)' })
+  @ApiParam({ name: 'restaurantId' })
+  @ApiParam({ name: 'itemId' })
+  @ApiResponse({ status: 200, description: 'Recipe saved with ingredients' })
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef')
+  async upsertRecipe(
+    @Param('restaurantId') restaurantId: string,
+    @Param('itemId') itemId: string,
+    @Body() dto: CreateRecipeDto,
+    @CurrentUser() user: { tenantId: string },
+  ) {
+    return this.menuService.upsertRecipe(restaurantId, itemId, dto, user.tenantId);
+  }
+
+  @Delete('menu-items/:itemId/recipe')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete recipe for a menu item' })
+  @ApiParam({ name: 'restaurantId' })
+  @ApiParam({ name: 'itemId' })
+  @ApiResponse({ status: 204, description: 'Recipe deleted' })
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef')
+  async deleteRecipe(
+    @Param('restaurantId') restaurantId: string,
+    @Param('itemId') itemId: string,
+    @CurrentUser() user: { tenantId: string },
+  ) {
+    return this.menuService.deleteRecipe(restaurantId, itemId, user.tenantId);
   }
 }

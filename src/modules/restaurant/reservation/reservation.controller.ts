@@ -24,13 +24,16 @@ import { CreateReservationDto } from './dto/create-reservation.dto';
 import { UpdateReservationDto } from './dto/update-reservation.dto';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../../common/guards/roles.guard';
+import { AddonGuard } from '../../../common/guards/addon.guard';
 import { Roles } from '../../../common/decorators/roles.decorator';
+import { RequireAddon } from '../../../common/decorators/require-addon.decorator';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 
 @ApiTags('restaurant / reservations')
 @ApiBearerAuth('JWT-auth')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Controller({ path: 'restaurant/:restaurantId/reservations', version: '1' })
+@UseGuards(JwtAuthGuard, RolesGuard, AddonGuard)
+@RequireAddon('RESTAURANT_MODULE')
+@Controller({ path: 'restaurants/:restaurantId/reservations', version: '1' })
 export class ReservationController {
   constructor(private readonly reservationService: ReservationService) {}
 
