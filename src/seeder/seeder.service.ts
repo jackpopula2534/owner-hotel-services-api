@@ -51,6 +51,7 @@ export class SeederService {
       await this.seedDemoBookings();
       await this.seedDemoReviews();
       await this.seedHrMasterData();
+      await this.seedEmployeesForAllTenants();
       await this.seedKpiTemplates();
       await this.seedHotelStaff();
       await this.seedPremiumHrData();
@@ -1420,7 +1421,7 @@ export class SeederService {
     // ─── ข้อมูลแผนก (Hotel Department Master Data) ─────────────────────────
     const departmentTemplates = [
       { name: 'ฝ่ายต้อนรับ', nameEn: 'Front Office', code: 'FO', color: '#8B5CF6', sortOrder: 1, description: 'บริการต้อนรับแขก เช็คอิน/เช็คเอาท์ คอนเซียจ' },
-      { name: 'ฝ่ายแม่บ้าน', nameEn: 'Housekeeping', code: 'HK', color: '#10B981', sortOrder: 2, description: 'ทำความสะอาดห้องพัก พื้นที่ส่วนกลาง ซักรีด' },
+      { name: 'ฝ่ายซ่อมบำรุง / ทำความสะอาด', nameEn: 'Housekeeping & Maintenance', code: 'HK', color: '#10B981', sortOrder: 2, description: 'ทำความสะอาดห้องพัก พื้นที่ส่วนกลาง ซักรีด และซ่อมบำรุงทั่วไป' },
       { name: 'ฝ่ายอาหารและเครื่องดื่ม', nameEn: 'Food & Beverage', code: 'FB', color: '#F59E0B', sortOrder: 3, description: 'ร้านอาหาร บาร์ รูมเซอร์วิส จัดเลี้ยง' },
       { name: 'ฝ่ายวิศวกรรม', nameEn: 'Engineering', code: 'ENG', color: '#EF4444', sortOrder: 4, description: 'บำรุงรักษา ระบบไฟฟ้า ประปา HVAC ไอที' },
       { name: 'ฝ่ายทรัพยากรบุคคล', nameEn: 'Human Resources', code: 'HR', color: '#EC4899', sortOrder: 5, description: 'สรรหา ฝึกอบรม เงินเดือน สวัสดิการ' },
@@ -1968,6 +1969,398 @@ export class SeederService {
     }
 
     this.logger.log('✅ Premium HR Data seeded successfully!');
+  }
+
+  /**
+   * Seed Employee records for every tenant across all departments.
+   * สร้างพนักงานตัวอย่างครบทุกแผนก (Front Office, Housekeeping, F&B, Engineering,
+   * HR, Finance, Sales, Security, Spa, Management) พร้อมข้อมูลตำแหน่งและช่าง (ENG)
+   * หลายประเภท เพื่อให้ demo ระบบ HR ได้อย่างสมบูรณ์
+   */
+  private async seedEmployeesForAllTenants(): Promise<void> {
+    this.logger.log('👨‍💼 Seeding Employees for all tenants...');
+
+    const allTenants = await this.tenantsService.findAll();
+    if (allTenants.length === 0) {
+      this.logger.warn('  ⚠️ No tenants found, skipping employee seeding');
+      return;
+    }
+
+    // Employee templates per department code
+    // Each template uses nameEn to look up the position from seedHrMasterData
+    const employeeTemplatesByDept: Record<string, Array<{
+      codePrefix: string;
+      firstName: string;
+      lastName: string;
+      nickname: string;
+      emailPrefix: string;
+      positionNameEn: string;
+      gender: string;
+      dateOfBirth: Date;
+      employmentType: string;
+      baseSalary: number;
+      initialSalary: number;
+      allowance: number;
+      overtime: number;
+      positionBonus: number;
+      bankName: string;
+    }>> = {
+      MGT: [
+        {
+          codePrefix: 'MGT-001', firstName: 'ธีระพล', lastName: 'วิชาการ', nickname: 'เติ้ล',
+          emailPrefix: 'teeraphol.gm', positionNameEn: 'General Manager',
+          gender: 'MALE', dateOfBirth: new Date('1972-04-10'), employmentType: 'FULLTIME',
+          baseSalary: 95000, initialSalary: 70000, allowance: 12000, overtime: 0, positionBonus: 18000, bankName: 'KBANK',
+        },
+        {
+          codePrefix: 'MGT-002', firstName: 'ศิริพร', lastName: 'บริหารดี', nickname: 'อ้อม',
+          emailPrefix: 'siriporn.agm', positionNameEn: 'Assistant General Manager',
+          gender: 'FEMALE', dateOfBirth: new Date('1978-09-25'), employmentType: 'FULLTIME',
+          baseSalary: 72000, initialSalary: 55000, allowance: 8000, overtime: 0, positionBonus: 12000, bankName: 'SCB',
+        },
+      ],
+      FO: [
+        {
+          codePrefix: 'FO-001', firstName: 'กนกวรรณ', lastName: 'ต้อนรับดี', nickname: 'กนก',
+          emailPrefix: 'kanokwan.fom', positionNameEn: 'Front Office Manager',
+          gender: 'FEMALE', dateOfBirth: new Date('1983-06-12'), employmentType: 'FULLTIME',
+          baseSalary: 45000, initialSalary: 35000, allowance: 5000, overtime: 0, positionBonus: 8000, bankName: 'SCB',
+        },
+        {
+          codePrefix: 'FO-002', firstName: 'พีรพัฒน์', lastName: 'เวรกลางวัน', nickname: 'เพชร',
+          emailPrefix: 'peeraphat.fd', positionNameEn: 'Front Desk Agent (Day Shift)',
+          gender: 'MALE', dateOfBirth: new Date('1996-03-20'), employmentType: 'FULLTIME',
+          baseSalary: 18000, initialSalary: 15000, allowance: 2000, overtime: 1500, positionBonus: 0, bankName: 'KTB',
+        },
+        {
+          codePrefix: 'FO-003', firstName: 'ณิชา', lastName: 'กลางคืนดี', nickname: 'นิค',
+          emailPrefix: 'nicha.night', positionNameEn: 'Night Auditor',
+          gender: 'FEMALE', dateOfBirth: new Date('1994-11-08'), employmentType: 'FULLTIME',
+          baseSalary: 19000, initialSalary: 16000, allowance: 2500, overtime: 2500, positionBonus: 0, bankName: 'BBL',
+        },
+        {
+          codePrefix: 'FO-004', firstName: 'สุเมธ', lastName: 'คอนเซียจ', nickname: 'เมธ',
+          emailPrefix: 'sumet.concierge', positionNameEn: 'Concierge',
+          gender: 'MALE', dateOfBirth: new Date('1990-07-15'), employmentType: 'FULLTIME',
+          baseSalary: 22000, initialSalary: 18000, allowance: 2000, overtime: 1000, positionBonus: 0, bankName: 'KBANK',
+        },
+        {
+          codePrefix: 'FO-005', firstName: 'วรรณิกา', lastName: 'รับจอง', nickname: 'ว่าน',
+          emailPrefix: 'wannika.res', positionNameEn: 'Reservation Agent',
+          gender: 'FEMALE', dateOfBirth: new Date('1998-02-28'), employmentType: 'FULLTIME',
+          baseSalary: 17500, initialSalary: 15000, allowance: 1500, overtime: 800, positionBonus: 0, bankName: 'GSB',
+        },
+        {
+          codePrefix: 'FO-006', firstName: 'ชลธิชา', lastName: 'เกสต์รีเลชัน', nickname: 'ชล',
+          emailPrefix: 'cholticha.gro', positionNameEn: 'Guest Relations Officer',
+          gender: 'FEMALE', dateOfBirth: new Date('1995-05-19'), employmentType: 'FULLTIME',
+          baseSalary: 21000, initialSalary: 18000, allowance: 2000, overtime: 500, positionBonus: 0, bankName: 'BAY',
+        },
+      ],
+      HK: [
+        {
+          codePrefix: 'HK-001', firstName: 'จินตนา', lastName: 'ดูแลห้อง', nickname: 'จิ๋ว',
+          emailPrefix: 'jintana.ehk', positionNameEn: 'Executive Housekeeper',
+          gender: 'FEMALE', dateOfBirth: new Date('1979-08-30'), employmentType: 'FULLTIME',
+          baseSalary: 32000, initialSalary: 25000, allowance: 3000, overtime: 0, positionBonus: 5000, bankName: 'KBANK',
+        },
+        {
+          codePrefix: 'HK-002', firstName: 'สุภาวดี', lastName: 'ชั้นหนึ่ง', nickname: 'พิ',
+          emailPrefix: 'supawadee.sup', positionNameEn: 'Floor Supervisor',
+          gender: 'FEMALE', dateOfBirth: new Date('1987-01-14'), employmentType: 'FULLTIME',
+          baseSalary: 22000, initialSalary: 18000, allowance: 2000, overtime: 500, positionBonus: 2000, bankName: 'SCB',
+        },
+        {
+          codePrefix: 'HK-003', firstName: 'ลำดวน', lastName: 'ทำห้อง', nickname: 'ดวน',
+          emailPrefix: 'lamduan.ra', positionNameEn: 'Room Attendant',
+          gender: 'FEMALE', dateOfBirth: new Date('1993-10-05'), employmentType: 'FULLTIME',
+          baseSalary: 13500, initialSalary: 12000, allowance: 1500, overtime: 2000, positionBonus: 0, bankName: 'GSB',
+        },
+        {
+          codePrefix: 'HK-004', firstName: 'อรวรรณ', lastName: 'ซักรีด', nickname: 'อ้อ',
+          emailPrefix: 'orawan.laundry', positionNameEn: 'Laundry Attendant',
+          gender: 'FEMALE', dateOfBirth: new Date('1991-04-22'), employmentType: 'FULLTIME',
+          baseSalary: 13000, initialSalary: 11500, allowance: 1200, overtime: 1800, positionBonus: 0, bankName: 'KTB',
+        },
+        {
+          codePrefix: 'HK-005', firstName: 'ปรีดา', lastName: 'พื้นที่กลาง', nickname: 'ดา',
+          emailPrefix: 'preeda.pa', positionNameEn: 'Public Area Cleaner',
+          gender: 'MALE', dateOfBirth: new Date('1989-12-11'), employmentType: 'FULLTIME',
+          baseSalary: 12500, initialSalary: 11000, allowance: 1000, overtime: 2200, positionBonus: 0, bankName: 'BBL',
+        },
+      ],
+      FB: [
+        {
+          codePrefix: 'FB-001', firstName: 'นิรันดร์', lastName: 'อาหารเลิศ', nickname: 'ดร',
+          emailPrefix: 'niran.fbm', positionNameEn: 'F&B Manager',
+          gender: 'MALE', dateOfBirth: new Date('1980-03-17'), employmentType: 'FULLTIME',
+          baseSalary: 42000, initialSalary: 33000, allowance: 5000, overtime: 0, positionBonus: 7000, bankName: 'SCB',
+        },
+        {
+          codePrefix: 'FB-002', firstName: 'ชาญชัย', lastName: 'ครัวเชฟ', nickname: 'ชาญ',
+          emailPrefix: 'chanchai.chef', positionNameEn: 'Head Chef',
+          gender: 'MALE', dateOfBirth: new Date('1977-11-22'), employmentType: 'FULLTIME',
+          baseSalary: 55000, initialSalary: 42000, allowance: 6000, overtime: 0, positionBonus: 8000, bankName: 'KBANK',
+        },
+        {
+          codePrefix: 'FB-003', firstName: 'สุชาติ', lastName: 'เชฟส่วน', nickname: 'ติ',
+          emailPrefix: 'suchat.cdp', positionNameEn: 'Chef de Partie',
+          gender: 'MALE', dateOfBirth: new Date('1988-07-09'), employmentType: 'FULLTIME',
+          baseSalary: 24000, initialSalary: 19000, allowance: 2500, overtime: 3000, positionBonus: 0, bankName: 'BAY',
+        },
+        {
+          codePrefix: 'FB-004', firstName: 'พัชรา', lastName: 'บาริสต้า', nickname: 'แพท',
+          emailPrefix: 'patchara.barista', positionNameEn: 'Barista',
+          gender: 'FEMALE', dateOfBirth: new Date('1999-06-30'), employmentType: 'FULLTIME',
+          baseSalary: 15500, initialSalary: 14000, allowance: 1500, overtime: 1200, positionBonus: 0, bankName: 'GSB',
+        },
+        {
+          codePrefix: 'FB-005', firstName: 'ปัณณ์', lastName: 'เสิร์ฟดี', nickname: 'ปัน',
+          emailPrefix: 'pan.waiter', positionNameEn: 'Waiter / Waitress',
+          gender: 'MALE', dateOfBirth: new Date('2000-09-14'), employmentType: 'FULLTIME',
+          baseSalary: 14000, initialSalary: 12500, allowance: 1500, overtime: 1500, positionBonus: 0, bankName: 'KTB',
+        },
+        {
+          codePrefix: 'FB-006', firstName: 'สิริกาญจน์', lastName: 'รูมเซอร์วิส', nickname: 'เกด',
+          emailPrefix: 'sirikarn.rs', positionNameEn: 'Room Service Attendant',
+          gender: 'FEMALE', dateOfBirth: new Date('1997-01-03'), employmentType: 'FULLTIME',
+          baseSalary: 14500, initialSalary: 13000, allowance: 1500, overtime: 1800, positionBonus: 0, bankName: 'SCB',
+        },
+      ],
+      ENG: [
+        {
+          codePrefix: 'ENG-001', firstName: 'ประกิต', lastName: 'ช่างใหญ่', nickname: 'กิต',
+          emailPrefix: 'prakit.chief', positionNameEn: 'Chief Engineer',
+          gender: 'MALE', dateOfBirth: new Date('1975-05-28'), employmentType: 'FULLTIME',
+          baseSalary: 45000, initialSalary: 36000, allowance: 5000, overtime: 0, positionBonus: 7000, bankName: 'KBANK',
+        },
+        {
+          codePrefix: 'ENG-002', firstName: 'พิสิฐ', lastName: 'ช่างรอง', nickname: 'พิ',
+          emailPrefix: 'pisit.aeng', positionNameEn: 'Assistant Engineer',
+          gender: 'MALE', dateOfBirth: new Date('1984-02-19'), employmentType: 'FULLTIME',
+          baseSalary: 35000, initialSalary: 28000, allowance: 4000, overtime: 1500, positionBonus: 4000, bankName: 'SCB',
+        },
+        {
+          codePrefix: 'ENG-003', firstName: 'อาทิตย์', lastName: 'ช่างไฟฟ้า', nickname: 'ท้า',
+          emailPrefix: 'artit.elec', positionNameEn: 'Electrician',
+          gender: 'MALE', dateOfBirth: new Date('1990-08-14'), employmentType: 'FULLTIME',
+          baseSalary: 22000, initialSalary: 18000, allowance: 2500, overtime: 3500, positionBonus: 0, bankName: 'KTB',
+        },
+        {
+          codePrefix: 'ENG-004', firstName: 'วันชัย', lastName: 'ช่างประปา', nickname: 'ชัย',
+          emailPrefix: 'wanchai.plumb', positionNameEn: 'Plumber',
+          gender: 'MALE', dateOfBirth: new Date('1988-11-30'), employmentType: 'FULLTIME',
+          baseSalary: 21000, initialSalary: 17500, allowance: 2500, overtime: 3000, positionBonus: 0, bankName: 'BBL',
+        },
+        {
+          codePrefix: 'ENG-005', firstName: 'สุรศักดิ์', lastName: 'ช่างแอร์', nickname: 'ศักดิ์',
+          emailPrefix: 'surasak.hvac', positionNameEn: 'HVAC Technician',
+          gender: 'MALE', dateOfBirth: new Date('1986-04-07'), employmentType: 'FULLTIME',
+          baseSalary: 23000, initialSalary: 19000, allowance: 2500, overtime: 4000, positionBonus: 0, bankName: 'GSB',
+        },
+        {
+          codePrefix: 'ENG-006', firstName: 'ปรเมศร์', lastName: 'ช่างไอที', nickname: 'เมศ',
+          emailPrefix: 'paramet.it', positionNameEn: 'IT Technician',
+          gender: 'MALE', dateOfBirth: new Date('1993-01-25'), employmentType: 'FULLTIME',
+          baseSalary: 26000, initialSalary: 22000, allowance: 3000, overtime: 2000, positionBonus: 0, bankName: 'SCB',
+        },
+        {
+          codePrefix: 'ENG-007', firstName: 'บุญยง', lastName: 'ช่างทั่วไป', nickname: 'บุญ',
+          emailPrefix: 'bunyong.maint', positionNameEn: 'General Maintenance',
+          gender: 'MALE', dateOfBirth: new Date('1991-06-18'), employmentType: 'FULLTIME',
+          baseSalary: 14500, initialSalary: 12500, allowance: 1500, overtime: 3500, positionBonus: 0, bankName: 'KTB',
+        },
+      ],
+      HR: [
+        {
+          codePrefix: 'HR-001', firstName: 'ดวงฤดี', lastName: 'บุคลากร', nickname: 'ดวง',
+          emailPrefix: 'duangrudee.hrm', positionNameEn: 'HR Manager',
+          gender: 'FEMALE', dateOfBirth: new Date('1982-09-03'), employmentType: 'FULLTIME',
+          baseSalary: 38000, initialSalary: 30000, allowance: 4000, overtime: 0, positionBonus: 6000, bankName: 'SCB',
+        },
+        {
+          codePrefix: 'HR-002', firstName: 'ภัทรพล', lastName: 'เจ้าหน้าที่ HR', nickname: 'แฝด',
+          emailPrefix: 'pattarapon.hr', positionNameEn: 'HR Officer',
+          gender: 'MALE', dateOfBirth: new Date('1996-12-15'), employmentType: 'FULLTIME',
+          baseSalary: 20000, initialSalary: 17000, allowance: 2000, overtime: 500, positionBonus: 0, bankName: 'KBANK',
+        },
+        {
+          codePrefix: 'HR-003', firstName: 'ธัญญา', lastName: 'เงินเดือน', nickname: 'ญา',
+          emailPrefix: 'tanya.payroll', positionNameEn: 'Payroll Officer',
+          gender: 'FEMALE', dateOfBirth: new Date('1990-03-27'), employmentType: 'FULLTIME',
+          baseSalary: 22000, initialSalary: 18500, allowance: 2000, overtime: 0, positionBonus: 0, bankName: 'BBL',
+        },
+      ],
+      FIN: [
+        {
+          codePrefix: 'FIN-001', firstName: 'ชัชพล', lastName: 'ผู้ควบคุมการเงิน', nickname: 'ชัช',
+          emailPrefix: 'chatchapon.fc', positionNameEn: 'Financial Controller',
+          gender: 'MALE', dateOfBirth: new Date('1973-07-11'), employmentType: 'FULLTIME',
+          baseSalary: 70000, initialSalary: 55000, allowance: 8000, overtime: 0, positionBonus: 12000, bankName: 'KBANK',
+        },
+        {
+          codePrefix: 'FIN-002', firstName: 'ฉันทนา', lastName: 'บัญชีดี', nickname: 'ฉัน',
+          emailPrefix: 'chantana.acc', positionNameEn: 'Accountant',
+          gender: 'FEMALE', dateOfBirth: new Date('1986-10-20'), employmentType: 'FULLTIME',
+          baseSalary: 25000, initialSalary: 20000, allowance: 2500, overtime: 0, positionBonus: 0, bankName: 'SCB',
+        },
+        {
+          codePrefix: 'FIN-003', firstName: 'วิโรจน์', lastName: 'จัดซื้อ', nickname: 'โรจน์',
+          emailPrefix: 'wiroj.purchase', positionNameEn: 'Purchasing Officer',
+          gender: 'MALE', dateOfBirth: new Date('1991-08-05'), employmentType: 'FULLTIME',
+          baseSalary: 20000, initialSalary: 16500, allowance: 2000, overtime: 1000, positionBonus: 0, bankName: 'KTB',
+        },
+      ],
+      SM: [
+        {
+          codePrefix: 'SM-001', firstName: 'ณัฐวุฒิ', lastName: 'ขายดี', nickname: 'วุฒิ',
+          emailPrefix: 'nattawut.sm', positionNameEn: 'Sales Manager',
+          gender: 'MALE', dateOfBirth: new Date('1981-05-16'), employmentType: 'FULLTIME',
+          baseSalary: 48000, initialSalary: 38000, allowance: 6000, overtime: 0, positionBonus: 10000, bankName: 'SCB',
+        },
+        {
+          codePrefix: 'SM-002', firstName: 'ทิพวรรณ', lastName: 'การตลาด', nickname: 'ทิพ',
+          emailPrefix: 'thipwan.mkt', positionNameEn: 'Marketing Executive',
+          gender: 'FEMALE', dateOfBirth: new Date('1993-02-08'), employmentType: 'FULLTIME',
+          baseSalary: 26000, initialSalary: 22000, allowance: 3000, overtime: 0, positionBonus: 0, bankName: 'KBANK',
+        },
+        {
+          codePrefix: 'SM-003', firstName: 'สัญญา', lastName: 'รายได้ดี', nickname: 'ยา',
+          emailPrefix: 'sanya.rev', positionNameEn: 'Revenue Manager',
+          gender: 'MALE', dateOfBirth: new Date('1985-09-21'), employmentType: 'FULLTIME',
+          baseSalary: 38000, initialSalary: 30000, allowance: 4000, overtime: 0, positionBonus: 6000, bankName: 'BBL',
+        },
+      ],
+      SEC: [
+        {
+          codePrefix: 'SEC-001', firstName: 'ศิลปิน', lastName: 'รปภ.ใหญ่', nickname: 'ศิล',
+          emailPrefix: 'sillapin.secm', positionNameEn: 'Security Manager',
+          gender: 'MALE', dateOfBirth: new Date('1976-12-04'), employmentType: 'FULLTIME',
+          baseSalary: 32000, initialSalary: 26000, allowance: 3500, overtime: 0, positionBonus: 4000, bankName: 'KTB',
+        },
+        {
+          codePrefix: 'SEC-002', firstName: 'สงกรานต์', lastName: 'รักษาความปลอดภัย', nickname: 'กรานต์',
+          emailPrefix: 'songkran.sec', positionNameEn: 'Security Officer',
+          gender: 'MALE', dateOfBirth: new Date('1995-04-13'), employmentType: 'FULLTIME',
+          baseSalary: 14000, initialSalary: 12500, allowance: 1500, overtime: 3000, positionBonus: 0, bankName: 'GSB',
+        },
+        {
+          codePrefix: 'SEC-003', firstName: 'มนัส', lastName: 'ดู CCTV', nickname: 'นัส',
+          emailPrefix: 'manas.cctv', positionNameEn: 'CCTV Operator',
+          gender: 'MALE', dateOfBirth: new Date('1993-07-29'), employmentType: 'FULLTIME',
+          baseSalary: 16000, initialSalary: 14000, allowance: 1500, overtime: 2500, positionBonus: 0, bankName: 'SCB',
+        },
+      ],
+      SPA: [
+        {
+          codePrefix: 'SPA-001', firstName: 'ศิริลักษณ์', lastName: 'สปาดี', nickname: 'ลักษณ์',
+          emailPrefix: 'sirilak.spam', positionNameEn: 'Spa Manager',
+          gender: 'FEMALE', dateOfBirth: new Date('1984-11-17'), employmentType: 'FULLTIME',
+          baseSalary: 36000, initialSalary: 28000, allowance: 4000, overtime: 0, positionBonus: 5000, bankName: 'SCB',
+        },
+        {
+          codePrefix: 'SPA-002', firstName: 'นวลพรรณ', lastName: 'นวดบำบัด', nickname: 'นวล',
+          emailPrefix: 'nuanpan.ther', positionNameEn: 'Therapist',
+          gender: 'FEMALE', dateOfBirth: new Date('1992-03-12'), employmentType: 'FULLTIME',
+          baseSalary: 20000, initialSalary: 17000, allowance: 2000, overtime: 1500, positionBonus: 0, bankName: 'KBANK',
+        },
+        {
+          codePrefix: 'SPA-003', firstName: 'เอกชัย', lastName: 'ฟิตเนสโค้ช', nickname: 'เอก',
+          emailPrefix: 'ekkachai.fit', positionNameEn: 'Fitness Instructor',
+          gender: 'MALE', dateOfBirth: new Date('1989-06-04'), employmentType: 'FULLTIME',
+          baseSalary: 21000, initialSalary: 17500, allowance: 2000, overtime: 1000, positionBonus: 0, bankName: 'BBL',
+        },
+        {
+          codePrefix: 'SPA-004', firstName: 'พิมพ์ชนก', lastName: 'รับสปา', nickname: 'พิม',
+          emailPrefix: 'pimchanok.rec', positionNameEn: 'Spa Receptionist',
+          gender: 'FEMALE', dateOfBirth: new Date('1998-08-22'), employmentType: 'FULLTIME',
+          baseSalary: 15000, initialSalary: 13500, allowance: 1500, overtime: 800, positionBonus: 0, bankName: 'GSB',
+        },
+      ],
+    };
+
+    const deptCodes = Object.keys(employeeTemplatesByDept);
+    let totalCreated = 0;
+
+    for (const tenant of allTenants) {
+      this.logger.log(`  🏨 Seeding employees for tenant: ${tenant.name}`);
+
+      const property = await this.prisma.property.findFirst({ where: { tenantId: tenant.id } });
+
+      // Find all departments for this tenant
+      const departments = await this.prisma.hrDepartment.findMany({
+        where: { tenantId: tenant.id, code: { in: deptCodes } },
+      });
+
+      if (departments.length === 0) {
+        this.logger.warn(`    ⚠️ No HR departments found for ${tenant.name}, run seedHrMasterData first`);
+        continue;
+      }
+
+      const deptMap = new Map(departments.map((d) => [d.code, d]));
+      let tenantCount = 0;
+
+      for (const [deptCode, templates] of Object.entries(employeeTemplatesByDept)) {
+        const dept = deptMap.get(deptCode);
+        if (!dept) continue;
+
+        for (const tmpl of templates) {
+          const email = `${tmpl.emailPrefix}@${tenant.id.slice(0, 8)}.hotel`;
+
+          // Look up position
+          const position = await this.prisma.hrPosition.findFirst({
+            where: { tenantId: tenant.id, departmentId: dept.id, nameEn: tmpl.positionNameEn },
+          });
+
+          // Upsert employee (unique on tenantId + email)
+          const existing = await (this.prisma as any).employee.findFirst({
+            where: { tenantId: tenant.id, email },
+          });
+
+          const employeeData = {
+            tenantId: tenant.id,
+            firstName: tmpl.firstName,
+            lastName: tmpl.lastName,
+            nickname: tmpl.nickname,
+            phone: `08${Math.floor(Math.random() * 10)}-${Math.floor(100 + Math.random() * 900)}-${Math.floor(1000 + Math.random() * 9000)}`,
+            email,
+            employeeCode: `${tmpl.codePrefix}`,
+            department: dept.name,
+            position: position?.name ?? tmpl.positionNameEn,
+            departmentId: dept.id,
+            positionId: position?.id ?? null,
+            propertyId: property?.id ?? null,
+            baseSalary: tmpl.baseSalary,
+            initialSalary: tmpl.initialSalary,
+            allowance: tmpl.allowance,
+            overtime: tmpl.overtime,
+            positionBonus: tmpl.positionBonus,
+            bankName: tmpl.bankName,
+            gender: tmpl.gender,
+            dateOfBirth: tmpl.dateOfBirth,
+            employmentType: tmpl.employmentType,
+            status: 'ACTIVE',
+          };
+
+          if (existing) {
+            await (this.prisma as any).employee.update({
+              where: { id: existing.id },
+              data: employeeData,
+            });
+          } else {
+            await (this.prisma as any).employee.create({
+              data: { ...employeeData, startDate: new Date('2024-01-01') },
+            });
+            tenantCount++;
+            totalCreated++;
+          }
+        }
+      }
+
+      this.logger.log(`    ✓ ${tenantCount} new employees created for ${tenant.name}`);
+    }
+
+    this.logger.log(`✅ Employee seeding complete — ${totalCreated} new employees across all tenants`);
   }
 
   /**

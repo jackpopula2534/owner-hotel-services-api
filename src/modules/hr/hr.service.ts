@@ -277,9 +277,13 @@ export class HrService {
   /**
    * Create a Staff record linked to an existing Employee (HR Add-on bridge).
    * The Staff inherits first/last name, email, department and employeeCode.
-   * The role defaults to 'housekeeper' — caller can update via Staff CRUD.
+   * The role defaults to 'housekeeper' — pass `dto.role` to override (e.g. 'technician' for ช่าง).
    */
-  async createStaffFromEmployee(employeeId: string, tenantId?: string) {
+  async createStaffFromEmployee(
+    employeeId: string,
+    tenantId?: string,
+    dto?: { role?: string; department?: string },
+  ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID is required');
     }
@@ -296,6 +300,12 @@ export class HrService {
       );
     }
 
+    // Resolve role and department: caller-supplied > inferred from employee dept code > defaults
+    const resolvedRole = dto?.role ?? 'housekeeper';
+    const resolvedDepartment =
+      dto?.department ??
+      (resolvedRole === 'technician' ? 'maintenance' : 'housekeeping');
+
     const staff = await (this.prisma.staff as any).create({
       data: {
         tenantId,
@@ -303,15 +313,15 @@ export class HrService {
         lastName: employee.lastName,
         email: employee.email,
         employeeCode: employee.employeeCode ?? undefined,
-        department: employee.department ?? 'housekeeping',
-        role: 'housekeeper',
+        department: resolvedDepartment,
+        role: resolvedRole,
         status: 'active',
-        employeeId: employee.id,  // new field from latest migration
+        employeeId: employee.id,
       },
     });
 
     this.logger.log(
-      `Staff ${staff.id} created and linked to Employee ${employee.id} (tenant: ${tenantId})`,
+      `Staff ${staff.id} (${resolvedRole}) created and linked to Employee ${employee.id} (tenant: ${tenantId})`,
     );
 
     return {
@@ -324,6 +334,102 @@ export class HrService {
         email: employee.email,
       },
     };
+  }
+
+  /**
+   * Bulk create Staff records for all HR employees that are not yet linked.
+   * Safe to run multiple times — already-linked employees are skipped.
+   */
+  async bulkCreateStaffFromEmployees(tenantId: string): Promise<{
+    created: number;
+    skipped: number;
+    results: Array<{
+      employeeId: string;
+      employeeName: string;
+      staffId?: string;
+      status: 'created' | 'skipped';
+      reason?: string;
+    }>;
+  }> {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
+    // Fetch all employees for this tenant
+    const employees = await this.prisma.employee.findMany({
+      where: { tenantId },
+    });
+
+    // Find which employees already have a linked Staff record
+    const existingLinks = await (this.prisma.staff as any).findMany({
+      where: { tenantId, employeeId: { not: null } },
+      select: { employeeId: true, id: true },
+    });
+    const linkedEmployeeIds = new Set<string>(existingLinks.map((s: any) => s.employeeId));
+
+    const results: Array<{
+      employeeId: string;
+      employeeName: string;
+      staffId?: string;
+      status: 'created' | 'skipped';
+      reason?: string;
+    }> = [];
+    let created = 0;
+    let skipped = 0;
+
+    for (const employee of employees) {
+      const employeeName = `${employee.firstName} ${employee.lastName}`;
+
+      if (linkedEmployeeIds.has(employee.id)) {
+        results.push({
+          employeeId: employee.id,
+          employeeName,
+          status: 'skipped',
+          reason: 'Already linked to a Staff record',
+        });
+        skipped++;
+        continue;
+      }
+
+      try {
+        const staff = await (this.prisma.staff as any).create({
+          data: {
+            tenantId,
+            firstName: employee.firstName,
+            lastName: employee.lastName,
+            email: employee.email,
+            employeeCode: (employee as any).employeeCode ?? undefined,
+            department: 'housekeeping',
+            role: 'housekeeper',
+            status: 'active',
+            employeeId: employee.id,
+          },
+        });
+        results.push({
+          employeeId: employee.id,
+          employeeName,
+          staffId: staff.id,
+          status: 'created',
+        });
+        created++;
+        this.logger.log(
+          `Bulk sync: Staff ${staff.id} created and linked to Employee ${employee.id}`,
+        );
+      } catch (error: unknown) {
+        const reason = error instanceof Error ? error.message : 'Unknown error';
+        results.push({ employeeId: employee.id, employeeName, status: 'skipped', reason });
+        skipped++;
+        this.logger.warn(
+          `Bulk sync: skipped Employee ${employee.id} — ${reason}`,
+        );
+      }
+    }
+
+    this.logger.log(
+      `Bulk Staff sync complete for tenant ${tenantId}: ${created} created, ${skipped} skipped`,
+    );
+
+    return { created, skipped, results };
   }
 
   // ─── Private helpers ────────────────────────────────────────────────────────

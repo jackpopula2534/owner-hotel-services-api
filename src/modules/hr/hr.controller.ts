@@ -18,12 +18,14 @@ import {
   ApiBearerAuth,
   ApiResponse,
   ApiParam,
+  ApiBody,
 } from '@nestjs/swagger';
 import { HrService } from './hr.service';
 import { EmployeeCodeConfigService } from './employee-code-config.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { UpsertEmployeeCodeConfigDto, PreviewEmployeeCodeDto } from './dto/employee-code-config.dto';
+import { CreateStaffFromEmployeeDto } from './dto/create-staff-from-employee.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -174,6 +176,40 @@ export class HrController {
   }
 
   /**
+   * HR Add-on bridge: bulk-create Staff records for ALL unlinked Employees.
+   * Idempotent — employees already linked to a Staff record are skipped.
+   * This endpoint MUST be declared before @Post(':id/create-staff') so NestJS
+   * does not mistake "bulk-create-staff" for an employee ID.
+   */
+  @Post('bulk-create-staff')
+  @ApiOperation({
+    summary: 'Bulk-create Staff records from all unlinked HR employees (requires HR add-on)',
+    description:
+      'Creates a linked Staff entry for every Employee that does not yet have one. ' +
+      'Safe to run multiple times — already-linked employees are skipped.',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Sync complete — returns created/skipped counts and per-employee results',
+    schema: {
+      example: {
+        created: 2,
+        skipped: 1,
+        results: [
+          { employeeId: 'emp-1', employeeName: 'รัตนา แม่บ้านดี', staffId: 'staff-123', status: 'created' },
+          { employeeId: 'emp-2', employeeName: 'สุนันท์ ทำความสะอาด', status: 'skipped', reason: 'Already linked to a Staff record' },
+        ],
+      },
+    },
+  })
+  @ApiResponse({ status: 403, description: 'HR add-on not active' })
+  @HttpCode(HttpStatus.CREATED)
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
+  async bulkCreateStaffFromEmployees(@CurrentUser() user: { tenantId?: string }) {
+    return this.hrService.bulkCreateStaffFromEmployees(user?.tenantId ?? '');
+  }
+
+  /**
    * HR Add-on bridge: create a Staff record from an existing Employee.
    * The new Staff is linked to this Employee via staffEmployee FK.
    */
@@ -181,9 +217,11 @@ export class HrController {
   @ApiOperation({
     summary: 'Create Staff record from Employee (requires HR add-on)',
     description:
-      'Provisions a linked Staff entry for this Employee so they appear in housekeeping/maintenance scheduling.',
+      'Provisions a linked Staff entry for this Employee so they appear in housekeeping/maintenance scheduling. ' +
+      'Pass `role` to choose between housekeeper (แม่บ้าน) and technician (ช่าง). Defaults to housekeeper.',
   })
   @ApiParam({ name: 'id', description: 'Employee ID' })
+  @ApiBody({ type: CreateStaffFromEmployeeDto, required: false })
   @ApiResponse({ status: 201, description: 'Staff record created and linked' })
   @ApiResponse({ status: 409, description: 'Employee already has a linked Staff record' })
   @ApiResponse({ status: 403, description: 'HR add-on not active' })
@@ -191,8 +229,9 @@ export class HrController {
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
   async createStaffFromEmployee(
     @Param('id') id: string,
+    @Body() body: CreateStaffFromEmployeeDto,
     @CurrentUser() user: { tenantId?: string },
   ) {
-    return this.hrService.createStaffFromEmployee(id, user?.tenantId);
+    return this.hrService.createStaffFromEmployee(id, user?.tenantId, body);
   }
 }
