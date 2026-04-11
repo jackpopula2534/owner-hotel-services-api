@@ -39,6 +39,7 @@
     "prisma:format": "prisma format"
   },
   "dependencies": {
+    "@internal/http-client": "file:../GitHub/internal-http-client",
     "@nestjs-modules/mailer": "^2.3.0",
     "@nestjs/bull": "^11.0.4",
     "@nestjs/cache-manager": "^3.1.0",
@@ -56,11 +57,9 @@
     "@nestjs/typeorm": "^10.0.0",
     "@nestjs/websockets": "^10.4.22",
     "@prisma/client": "^5.0.0",
-    "prisma": "^5.0.0",
     "@types/cache-manager": "^4.0.6",
     "@types/json2csv": "^5.0.7",
     "@types/speakeasy": "^2.0.10",
-    "axios": "^1.13.6",
     "bcrypt": "^5.1.1",
     "bull": "^4.16.5",
     "cache-manager": "^7.2.8",
@@ -76,6 +75,7 @@
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "pdfkit": "^0.18.0",
+    "prisma": "^5.0.0",
     "qrcode": "^1.5.4",
     "redis": "^5.11.0",
     "reflect-metadata": "^0.1.13",
