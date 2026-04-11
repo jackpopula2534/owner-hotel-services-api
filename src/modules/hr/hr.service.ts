@@ -45,6 +45,10 @@ export class HrService {
         { employeeCode: { contains: search } },
       ];
     }
+    // Filter to only employees NOT yet linked to a Staff record
+    if (query.unlinkedOnly === 'true') {
+      (where as any).staff = { is: null };
+    }
 
     try {
       const [data, total] = await Promise.all([
@@ -278,6 +282,10 @@ export class HrService {
    * Create a Staff record linked to an existing Employee (HR Add-on bridge).
    * The Staff inherits first/last name, email, department and employeeCode.
    * The role defaults to 'housekeeper' — pass `dto.role` to override (e.g. 'technician' for ช่าง).
+   *
+   * Wrapped in a Prisma transaction so the existence-check + create are atomic.
+   * If any step fails the transaction is automatically rolled back — no orphaned
+   * Staff record is left behind.
    */
   async createStaffFromEmployee(
     employeeId: string,
@@ -290,55 +298,75 @@ export class HrService {
 
     const employee = await this.findOne(employeeId, tenantId);
 
-    // Guard: already linked (cast to any — employeeId added in latest migration)
-    const existingStaff = await (this.prisma.staff as any).findUnique({
-      where: { employeeId },
-    });
-    if (existingStaff) {
-      throw new ConflictException(
-        `Employee ${employeeId} already has a linked Staff record (${existingStaff.id})`,
-      );
-    }
-
     // Resolve role and department: caller-supplied > inferred from employee dept code > defaults
     const resolvedRole = dto?.role ?? 'housekeeper';
     const resolvedDepartment =
       dto?.department ??
       (resolvedRole === 'technician' ? 'maintenance' : 'housekeeping');
 
-    const staff = await (this.prisma.staff as any).create({
-      data: {
-        tenantId,
-        firstName: employee.firstName,
-        lastName: employee.lastName,
-        email: employee.email,
-        employeeCode: employee.employeeCode ?? undefined,
-        department: resolvedDepartment,
-        role: resolvedRole,
-        status: 'active',
-        employeeId: employee.id,
-      },
-    });
+    try {
+      // Atomic: guard check + Staff creation in a single transaction.
+      // If the DB fails mid-way, Prisma rolls back automatically.
+      const staff = await this.prisma.$transaction(async (tx) => {
+        // Re-check inside transaction to prevent race conditions
+        const existingStaff = await (tx.staff as any).findUnique({
+          where: { employeeId },
+        });
+        if (existingStaff) {
+          throw new ConflictException(
+            `Employee ${employeeId} already has a linked Staff record (${existingStaff.id})`,
+          );
+        }
 
-    this.logger.log(
-      `Staff ${staff.id} (${resolvedRole}) created and linked to Employee ${employee.id} (tenant: ${tenantId})`,
-    );
+        return (tx.staff as any).create({
+          data: {
+            tenantId,
+            firstName: employee.firstName,
+            lastName: employee.lastName,
+            email: employee.email,
+            employeeCode: (employee as any).employeeCode ?? undefined,
+            department: resolvedDepartment,
+            role: resolvedRole,
+            status: 'active',
+            employeeId: employee.id,
+          },
+        });
+      });
 
-    return {
-      success: true,
-      data: staff,
-      linkedEmployee: {
-        id: employee.id,
-        firstName: employee.firstName,
-        lastName: employee.lastName,
-        email: employee.email,
-      },
-    };
+      this.logger.log(
+        `Staff ${staff.id} (${resolvedRole}) created and linked to Employee ${employee.id} (tenant: ${tenantId})`,
+      );
+
+      return {
+        success: true,
+        data: staff,
+        linkedEmployee: {
+          id: employee.id,
+          firstName: employee.firstName,
+          lastName: employee.lastName,
+          email: employee.email,
+        },
+      };
+    } catch (error: unknown) {
+      // Re-throw NestJS HTTP exceptions (ConflictException, NotFoundException, etc.) directly
+      if (error instanceof ConflictException || error instanceof BadRequestException || error instanceof NotFoundException) {
+        throw error;
+      }
+      this.logger.error(
+        `Transaction rolled back — failed to create Staff from Employee ${employeeId}: ${(error as Error).message}`,
+      );
+      throw error;
+    }
   }
 
   /**
    * Bulk create Staff records for all HR employees that are not yet linked.
    * Safe to run multiple times — already-linked employees are skipped.
+   *
+   * Each employee's creation is wrapped in its own Prisma transaction so a failure
+   * for one employee does not affect others (partial-success is intentional here).
+   * The per-item transaction also prevents races: the linked-check and create are
+   * atomic for each employee.
    */
   async bulkCreateStaffFromEmployees(tenantId: string): Promise<{
     created: number;
@@ -355,17 +383,10 @@ export class HrService {
       throw new BadRequestException('Tenant ID is required');
     }
 
-    // Fetch all employees for this tenant
+    // Fetch all employees for this tenant (server-side check, not client-side)
     const employees = await this.prisma.employee.findMany({
       where: { tenantId },
     });
-
-    // Find which employees already have a linked Staff record
-    const existingLinks = await (this.prisma.staff as any).findMany({
-      where: { tenantId, employeeId: { not: null } },
-      select: { employeeId: true, id: true },
-    });
-    const linkedEmployeeIds = new Set<string>(existingLinks.map((s: any) => s.employeeId));
 
     const results: Array<{
       employeeId: string;
@@ -380,31 +401,36 @@ export class HrService {
     for (const employee of employees) {
       const employeeName = `${employee.firstName} ${employee.lastName}`;
 
-      if (linkedEmployeeIds.has(employee.id)) {
-        results.push({
-          employeeId: employee.id,
-          employeeName,
-          status: 'skipped',
-          reason: 'Already linked to a Staff record',
-        });
-        skipped++;
-        continue;
-      }
-
       try {
-        const staff = await (this.prisma.staff as any).create({
-          data: {
-            tenantId,
-            firstName: employee.firstName,
-            lastName: employee.lastName,
-            email: employee.email,
-            employeeCode: (employee as any).employeeCode ?? undefined,
-            department: 'housekeeping',
-            role: 'housekeeper',
-            status: 'active',
-            employeeId: employee.id,
-          },
+        // Each employee gets its own transaction:
+        // - If the employee is already linked → ConflictException is caught below → skipped
+        // - If create fails mid-way → transaction rolls back automatically → no orphan record
+        const staff = await this.prisma.$transaction(async (tx) => {
+          // Atomic guard: check + create (prevents duplicate on concurrent calls)
+          const existingStaff = await (tx.staff as any).findUnique({
+            where: { employeeId: employee.id },
+          });
+          if (existingStaff) {
+            throw new ConflictException(
+              `Already linked to Staff record ${existingStaff.id}`,
+            );
+          }
+
+          return (tx.staff as any).create({
+            data: {
+              tenantId,
+              firstName: employee.firstName,
+              lastName: employee.lastName,
+              email: employee.email,
+              employeeCode: (employee as any).employeeCode ?? undefined,
+              department: 'housekeeping',
+              role: 'housekeeper',
+              status: 'active',
+              employeeId: employee.id,
+            },
+          });
         });
+
         results.push({
           employeeId: employee.id,
           employeeName,
@@ -416,12 +442,19 @@ export class HrService {
           `Bulk sync: Staff ${staff.id} created and linked to Employee ${employee.id}`,
         );
       } catch (error: unknown) {
-        const reason = error instanceof Error ? error.message : 'Unknown error';
+        const reason = error instanceof ConflictException
+          ? 'Already linked to a Staff record'
+          : (error instanceof Error ? error.message : 'Unknown error');
+
         results.push({ employeeId: employee.id, employeeName, status: 'skipped', reason });
         skipped++;
-        this.logger.warn(
-          `Bulk sync: skipped Employee ${employee.id} — ${reason}`,
-        );
+
+        if (!(error instanceof ConflictException)) {
+          // Unexpected error (not a duplicate) — transaction already rolled back
+          this.logger.warn(
+            `Bulk sync: transaction rolled back for Employee ${employee.id} — ${reason}`,
+          );
+        }
       }
     }
 
