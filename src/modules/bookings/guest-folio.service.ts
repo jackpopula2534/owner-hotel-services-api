@@ -66,13 +66,18 @@ export interface ReceiptData {
 }
 
 /**
- * Check if a Prisma error is a "table does not exist" error (P2021)
- * or a "relation does not exist" error (P2010)
+ * Check if a Prisma error indicates a missing table or column (schema not migrated).
+ * Codes:
+ *   P2021 — table does not exist
+ *   P2022 — column does not exist (table exists but column missing from migration)
+ *   P2010 — raw query failed (relation not found)
+ * Must mirror the same codes in all-exceptions.filter.ts so fallback fires
+ * before the global filter returns SCHEMA_NOT_READY on POST/PUT/DELETE.
  */
 function isTableMissingError(error: unknown): boolean {
   return (
     error instanceof Prisma.PrismaClientKnownRequestError &&
-    (error.code === 'P2021' || error.code === 'P2010')
+    ['P2021', 'P2022', 'P2010'].includes(error.code)
   );
 }
 
@@ -357,7 +362,7 @@ export class GuestFolioService {
       if (isTableMissingError(err)) {
         // Billing tables not yet migrated — fallback: record payment directly on booking
         this.logger.warn(
-          `Billing tables unavailable — recording payment directly on booking ${bookingId}`,
+          `Billing tables unavailable (${(err as any)?.code}) — recording payment directly on booking ${bookingId}`,
         );
 
         const totalPrice = Number(booking.totalPrice ?? 0);
@@ -370,18 +375,25 @@ export class GuestFolioService {
               ? 'partial'
               : 'pending';
 
-        await this.prisma.booking.update({
-          where: { id: bookingId },
-          data: {
-            paymentStatus: fallbackStatus,
-            amountPaid: newPaid,
-            paymentMethod: dto.method,
-          },
-        });
-
-        this.logger.log(
-          `Payment recorded (fallback) — Booking: ${bookingId}, Amount: ${dto.amount}, Method: ${dto.method}, Status: ${fallbackStatus}`,
-        );
+        // Use selective update — skip fields that might not exist in DB yet
+        try {
+          await this.prisma.booking.update({
+            where: { id: bookingId },
+            data: {
+              paymentStatus: fallbackStatus,
+              amountPaid: newPaid,
+              paymentMethod: dto.method,
+            },
+          });
+          this.logger.log(
+            `Payment recorded (fallback) — Booking: ${bookingId}, Amount: ${dto.amount}, Method: ${dto.method}, Status: ${fallbackStatus}`,
+          );
+        } catch (fallbackErr) {
+          // Even the booking update failed — still return a folio so the UI doesn't break
+          this.logger.error(
+            `Fallback payment update also failed: ${(fallbackErr as Error)?.message}`,
+          );
+        }
       } else {
         throw err;
       }

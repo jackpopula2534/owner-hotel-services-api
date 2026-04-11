@@ -39,7 +39,7 @@
     "prisma:format": "prisma format"
   },
   "dependencies": {
-    "@internal/http-client": "file:../GitHub/internal-http-client",
+    "@internal/http-client": "file:../internal-http-client",
     "@nestjs-modules/mailer": "^2.3.0",
     "@nestjs/bull": "^11.0.4",
     "@nestjs/cache-manager": "^3.1.0",
