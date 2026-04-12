@@ -144,6 +144,34 @@ export class MaintenanceService {
   }
 
   /**
+   * Resolve propertyId — ถ้าไม่ส่งมาให้ใช้ property แรกของ tenant
+   */
+  private async resolvePropertyId(
+    propertyId: string | undefined,
+    tenantId: string,
+  ): Promise<string> {
+    if (propertyId) {
+      const property = await this.prisma.property.findFirst({
+        where: { id: propertyId, tenantId },
+      });
+      if (!property) {
+        throw new NotFoundException(`Property with ID ${propertyId} not found`);
+      }
+      return property.id;
+    }
+
+    // auto-resolve: ดึง property แรกของ tenant
+    const defaultProperty = await this.prisma.property.findFirst({
+      where: { tenantId },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (!defaultProperty) {
+      throw new NotFoundException('No property found for this tenant');
+    }
+    return defaultProperty.id;
+  }
+
+  /**
    * Create a new maintenance task
    */
   async create(dto: CreateMaintenanceTaskDto, tenantId: string): Promise<any> {
@@ -151,23 +179,18 @@ export class MaintenanceService {
       throw new BadRequestException('Tenant ID is required');
     }
 
-    // Verify property exists
-    const property = await this.prisma.property.findFirst({
-      where: { id: dto.propertyId, tenantId },
-    });
+    // Resolve propertyId (optional field — fall back to tenant default)
+    const resolvedPropertyId = await this.resolvePropertyId(dto.propertyId, tenantId);
 
-    if (!property) {
-      throw new NotFoundException(`Property with ID ${dto.propertyId} not found`);
-    }
-
-    // Verify room exists (if provided)
+    // Verify room exists and belongs to property (if provided)
     if (dto.roomId) {
       const room = await this.prisma.room.findFirst({
-        where: { id: dto.roomId, propertyId: dto.propertyId },
+        where: { id: dto.roomId, propertyId: resolvedPropertyId },
       });
-
       if (!room) {
-        throw new NotFoundException(`Room with ID ${dto.roomId} not found in this property`);
+        throw new NotFoundException(
+          `Room with ID ${dto.roomId} not found in this property`,
+        );
       }
     }
 
@@ -175,7 +198,7 @@ export class MaintenanceService {
       const task = await this.prisma.maintenanceTask.create({
         data: {
           tenantId,
-          propertyId: dto.propertyId,
+          propertyId: resolvedPropertyId,
           roomId: dto.roomId,
           title: dto.title,
           description: dto.description,
@@ -186,7 +209,11 @@ export class MaintenanceService {
           scheduledDate: dto.scheduledDate ? new Date(dto.scheduledDate) : undefined,
           estimatedDuration: dto.estimatedDuration,
           estimatedCost: dto.estimatedCost ? parseFloat(dto.estimatedCost) : undefined,
-          notes: dto.notes,
+          notes: dto.notes
+            ? `${dto.notes}${dto.location ? ` | สถานที่: ${dto.location}` : ''}`
+            : dto.location
+            ? `สถานที่: ${dto.location}`
+            : undefined,
         },
         include: {
           property: true,
