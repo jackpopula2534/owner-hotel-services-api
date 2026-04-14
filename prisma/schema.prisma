@@ -398,6 +398,7 @@ model Restaurant {
   tables       RestaurantTable[]
   menuCategories MenuCategory[]
   orders       Order[]
+  staffCalls   StaffCall[]
 
   @@index([tenantId])
   @@index([propertyId])
@@ -425,6 +426,7 @@ model RestaurantTable {
   restaurant   Restaurant        @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   reservations TableReservation[]
   orders       Order[]
+  staffCalls   StaffCall[]
 
   @@unique([restaurantId, tableNumber])
   @@index([tenantId])
@@ -1740,6 +1742,7 @@ model AuditLog {
   action      String
   resource    String
   resourceId  String?
+  category    String?  @default("general") // Tag: rooms, guests, bookings, restaurant, housekeeping, maintenance, payments, hr, staff, properties, auth, settings, general
   oldValues   Json?
   newValues   Json?
   ipAddress   String?
@@ -1752,6 +1755,7 @@ model AuditLog {
   @@index([adminId])
   @@index([action])
   @@index([resource])
+  @@index([category])
   @@index([createdAt])
   @@map("audit_logs")
 }
@@ -2075,4 +2079,64 @@ model EmployeeCodeConfig {
 
   @@index([tenantId])
   @@map("employee_code_configs")
+}
+
+// ─── StaffCall ────────────────────────────────────────────────────────────────
+// Calls from customers (via QR scan) or POS staff requesting attention at a table.
+// Real-time via WebSocket + LINE Notify to on-duty staff.
+
+enum StaffCallType {
+  SERVICE     // General service request
+  PAYMENT     // Request bill / payment
+  WATER       // Refill water
+  ASSISTANCE  // Need help
+  CLEANUP     // Table cleanup
+  CUSTOM      // Custom message
+}
+
+enum StaffCallStatus {
+  PENDING       // Just created, waiting for staff
+  ACKNOWLEDGED  // Staff has seen it / on the way
+  RESOLVED      // Completed
+  CANCELLED     // Cancelled by customer or staff
+}
+
+enum StaffCallSource {
+  CUSTOMER  // Created via QR scan public page
+  POS       // Created by POS staff on behalf of observation
+}
+
+model StaffCall {
+  id           String          @id @default(uuid())
+  tenantId     String
+  restaurantId String
+  tableId      String
+  callType     StaffCallType   @default(SERVICE)
+  status       StaffCallStatus @default(PENDING)
+  source       StaffCallSource @default(CUSTOMER)
+  message      String?         @db.Text
+  customerName String?         // Name from QR scan (optional)
+
+  // Assignment
+  assignedToId String?         // Staff member who acknowledged
+  assignedAt   DateTime?
+
+  // Resolution
+  resolvedAt   DateTime?
+  resolvedById String?         // Staff member who resolved
+  resolution   String?         @db.Text
+
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  // Relations
+  restaurant   Restaurant      @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  table        RestaurantTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([restaurantId])
+  @@index([tableId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("staff_calls")
 }

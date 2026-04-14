@@ -6,6 +6,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { AuditLogService } from '../../../audit-log/audit-log.service';
 import { CreateReservationDto } from './dto/create-reservation.dto';
 import { UpdateReservationDto, ReservationStatusEnum } from './dto/update-reservation.dto';
 
@@ -13,7 +14,10 @@ import { UpdateReservationDto, ReservationStatusEnum } from './dto/update-reserv
 export class ReservationService {
   private readonly logger = new Logger(ReservationService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditLogService: AuditLogService,
+  ) {}
 
   async findAll(
     restaurantId: string,
@@ -67,7 +71,7 @@ export class ReservationService {
     return reservation;
   }
 
-  async create(restaurantId: string, dto: CreateReservationDto, tenantId: string) {
+  async create(restaurantId: string, dto: CreateReservationDto, tenantId: string, userId?: string) {
     // Validate table belongs to restaurant
     const table = await this.prisma.restaurantTable.findFirst({
       where: { id: dto.tableId, restaurantId, tenantId, isActive: true },
@@ -103,7 +107,7 @@ export class ReservationService {
       );
     }
 
-    return this.prisma.tableReservation.create({
+    const created = await this.prisma.tableReservation.create({
       data: {
         ...dto,
         reservationDate,
@@ -112,6 +116,18 @@ export class ReservationService {
       },
       include: { table: true },
     });
+
+    this.auditLogService.log({
+      action: 'create' as any,
+      resource: 'reservation' as any,
+      category: 'restaurant' as any,
+      resourceId: created.id,
+      userId,
+      tenantId,
+      description: `สร้างการจองโต๊ะ: ${dto.guestName}`,
+    });
+
+    return created;
   }
 
   async update(
@@ -119,6 +135,7 @@ export class ReservationService {
     reservationId: string,
     dto: UpdateReservationDto,
     tenantId: string,
+    userId?: string,
   ) {
     const reservation = await this.findOne(restaurantId, reservationId, tenantId);
 
@@ -160,27 +177,51 @@ export class ReservationService {
       }
     }
 
-    return this.prisma.tableReservation.update({
+    const updated = await this.prisma.tableReservation.update({
       where: { id: reservationId },
       data: { ...dto, ...timestamps },
       include: { table: true },
     });
+
+    this.auditLogService.log({
+      action: 'update' as any,
+      resource: 'reservation' as any,
+      category: 'restaurant' as any,
+      resourceId: reservationId,
+      userId,
+      tenantId,
+      description: 'แก้ไขการจองโต๊ะ',
+    });
+
+    return updated;
   }
 
-  async markAsNoShow(restaurantId: string, reservationId: string, tenantId: string) {
+  async markAsNoShow(restaurantId: string, reservationId: string, tenantId: string, userId?: string) {
     const reservation = await this.findOne(restaurantId, reservationId, tenantId);
 
     if (!['PENDING', 'CONFIRMED'].includes(reservation.status)) {
       throw new BadRequestException(`Cannot mark a ${reservation.status} reservation as no-show`);
     }
 
-    return this.prisma.tableReservation.update({
+    const updated = await this.prisma.tableReservation.update({
       where: { id: reservationId },
       data: { status: 'NO_SHOW', cancelledAt: new Date() },
     });
+
+    this.auditLogService.log({
+      action: 'update' as any,
+      resource: 'reservation' as any,
+      category: 'restaurant' as any,
+      resourceId: reservationId,
+      userId,
+      tenantId,
+      description: 'บันทึกลูกค้าไม่มา (No Show)',
+    });
+
+    return updated;
   }
 
-  async remove(restaurantId: string, reservationId: string, tenantId: string) {
+  async remove(restaurantId: string, reservationId: string, tenantId: string, userId?: string) {
     const reservation = await this.findOne(restaurantId, reservationId, tenantId);
 
     if (['SEATED', 'COMPLETED'].includes(reservation.status)) {
@@ -188,5 +229,15 @@ export class ReservationService {
     }
 
     await this.prisma.tableReservation.delete({ where: { id: reservationId } });
+
+    this.auditLogService.log({
+      action: 'delete' as any,
+      resource: 'reservation' as any,
+      category: 'restaurant' as any,
+      resourceId: reservationId,
+      userId,
+      tenantId,
+      description: 'ลบการจองโต๊ะ',
+    });
   }
 }

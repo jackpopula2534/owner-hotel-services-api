@@ -5,13 +5,17 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { AuditLogService } from '../../../audit-log/audit-log.service';
 import { OrderItemStatus, KitchenPriority } from '@prisma/client';
 
 @Injectable()
 export class KitchenService {
   private readonly logger = new Logger(KitchenService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditLogService: AuditLogService,
+  ) {}
 
   // ─── Kitchen Queue ────────────────────────────────────────────────────────
 
@@ -63,7 +67,7 @@ export class KitchenService {
     }));
   }
 
-  async startOrder(restaurantId: string, kitchenOrderId: string, tenantId: string) {
+  async startOrder(restaurantId: string, kitchenOrderId: string, tenantId: string, userId?: string) {
     const kitchenOrder = await this.findKitchenOrderOrFail(
       kitchenOrderId,
       restaurantId,
@@ -85,10 +89,20 @@ export class KitchenService {
       }),
     ]);
 
+    this.auditLogService.log({
+      action: 'update' as any,
+      resource: 'order' as any,
+      category: 'restaurant' as any,
+      resourceId: kitchenOrderId,
+      userId,
+      tenantId,
+      description: 'เริ่มทำออเดอร์ครัว',
+    });
+
     return updated;
   }
 
-  async completeOrder(restaurantId: string, kitchenOrderId: string, tenantId: string) {
+  async completeOrder(restaurantId: string, kitchenOrderId: string, tenantId: string, userId?: string) {
     const kitchenOrder = await this.findKitchenOrderOrFail(
       kitchenOrderId,
       restaurantId,
@@ -116,6 +130,16 @@ export class KitchenService {
       }),
     ]);
 
+    this.auditLogService.log({
+      action: 'update' as any,
+      resource: 'order' as any,
+      category: 'restaurant' as any,
+      resourceId: kitchenOrderId,
+      userId,
+      tenantId,
+      description: 'ออเดอร์ครัวเสร็จสิ้น',
+    });
+
     return this.prisma.kitchenOrder.findUnique({ where: { id: kitchenOrderId } });
   }
 
@@ -124,6 +148,7 @@ export class KitchenService {
     itemId: string,
     status: OrderItemStatus,
     tenantId: string,
+    userId?: string,
   ) {
     const item = await this.prisma.orderItem.findFirst({
       where: { id: itemId },
@@ -144,10 +169,22 @@ export class KitchenService {
     if (status === 'READY') timestamps.preparedAt = now;
     if (status === 'SERVED') timestamps.servedAt = now;
 
-    return this.prisma.orderItem.update({
+    const updated = await this.prisma.orderItem.update({
       where: { id: itemId },
       data: { status, ...timestamps },
     });
+
+    this.auditLogService.log({
+      action: 'update' as any,
+      resource: 'order' as any,
+      category: 'restaurant' as any,
+      resourceId: itemId,
+      userId,
+      tenantId,
+      description: 'อัพเดทสถานะรายการอาหาร',
+    });
+
+    return updated;
   }
 
   async setPriority(
@@ -155,13 +192,26 @@ export class KitchenService {
     kitchenOrderId: string,
     priority: KitchenPriority,
     tenantId: string,
+    userId?: string,
   ) {
     await this.findKitchenOrderOrFail(kitchenOrderId, restaurantId, tenantId);
 
-    return this.prisma.kitchenOrder.update({
+    const updated = await this.prisma.kitchenOrder.update({
       where: { id: kitchenOrderId },
       data: { priority },
     });
+
+    this.auditLogService.log({
+      action: 'update' as any,
+      resource: 'order' as any,
+      category: 'restaurant' as any,
+      resourceId: kitchenOrderId,
+      userId,
+      tenantId,
+      description: 'เปลี่ยนความสำคัญออเดอร์',
+    });
+
+    return updated;
   }
 
   async getStats(restaurantId: string, tenantId: string) {

@@ -74,9 +74,9 @@ export class ReservationController {
   async create(
     @Param('restaurantId') restaurantId: string,
     @Body() dto: CreateReservationDto,
-    @CurrentUser() user: { tenantId: string },
+    @CurrentUser() user: { tenantId: string; id?: string },
   ) {
-    return this.reservationService.create(restaurantId, dto, user.tenantId);
+    return this.reservationService.create(restaurantId, dto, user.tenantId, user?.id);
   }
 
   @Patch(':reservationId')
@@ -88,9 +88,9 @@ export class ReservationController {
     @Param('restaurantId') restaurantId: string,
     @Param('reservationId') reservationId: string,
     @Body() dto: UpdateReservationDto,
-    @CurrentUser() user: { tenantId: string },
+    @CurrentUser() user: { tenantId: string; id?: string },
   ) {
-    return this.reservationService.update(restaurantId, reservationId, dto, user.tenantId);
+    return this.reservationService.update(restaurantId, reservationId, dto, user.tenantId, user?.id);
   }
 
   @Patch(':reservationId/no-show')
@@ -101,9 +101,9 @@ export class ReservationController {
   async markAsNoShow(
     @Param('restaurantId') restaurantId: string,
     @Param('reservationId') reservationId: string,
-    @CurrentUser() user: { tenantId: string },
+    @CurrentUser() user: { tenantId: string; id?: string },
   ) {
-    return this.reservationService.markAsNoShow(restaurantId, reservationId, user.tenantId);
+    return this.reservationService.markAsNoShow(restaurantId, reservationId, user.tenantId, user?.id);
   }
 
   @Delete(':reservationId')
@@ -116,8 +116,8 @@ export class ReservationController {
   async remove(
     @Param('restaurantId') restaurantId: string,
     @Param('reservationId') reservationId: string,
-    @CurrentUser() user: { tenantId: string },
+    @CurrentUser() user: { tenantId: string; id?: string },
   ) {
-    return this.reservationService.remove(restaurantId, reservationId, user.tenantId);
+    return this.reservationService.remove(restaurantId, reservationId, user.tenantId, user?.id);
   }
 }

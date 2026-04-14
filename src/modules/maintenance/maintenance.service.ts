@@ -8,6 +8,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CreateMaintenanceTaskDto } from './dto/create-maintenance-task.dto';
 import { UpdateMaintenanceTaskDto, MaintenanceTaskStatus } from './dto/update-maintenance-task.dto';
 import { normalizePagination } from '../../common/utils/pagination.util';
+import { AuditLogService } from '../../audit-log/audit-log.service';
 
 interface MaintenanceQuery {
   status?: string;
@@ -36,7 +37,7 @@ interface DashboardData {
 export class MaintenanceService {
   private readonly logger = new Logger(MaintenanceService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private auditLogService: AuditLogService) {}
 
   /**
    * Get all maintenance tasks with filtering and pagination
@@ -174,7 +175,7 @@ export class MaintenanceService {
   /**
    * Create a new maintenance task
    */
-  async create(dto: CreateMaintenanceTaskDto, tenantId: string): Promise<any> {
+  async create(dto: CreateMaintenanceTaskDto, tenantId: string, userId?: string): Promise<any> {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID is required');
     }
@@ -230,6 +231,7 @@ export class MaintenanceService {
         });
       }
 
+      this.auditLogService.logMaintenanceCreate(task, userId, tenantId);
       this.logger.log(`Created maintenance task ${task.id} (${task.title})`);
       return task;
     } catch (error) {
@@ -241,7 +243,7 @@ export class MaintenanceService {
   /**
    * Update a maintenance task
    */
-  async update(id: string, dto: UpdateMaintenanceTaskDto, tenantId: string): Promise<any> {
+  async update(id: string, dto: UpdateMaintenanceTaskDto, tenantId: string, userId?: string): Promise<any> {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID is required');
     }
@@ -293,6 +295,7 @@ export class MaintenanceService {
         });
       }
 
+      this.auditLogService.logMaintenanceUpdate(id, existing, task, userId, tenantId);
       this.logger.log(`Updated maintenance task ${id}`);
       return task;
     } catch (error) {

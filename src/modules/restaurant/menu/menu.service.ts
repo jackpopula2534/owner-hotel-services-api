@@ -5,6 +5,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { AuditLogService } from '../../../audit-log/audit-log.service';
 import { CreateMenuCategoryDto } from './dto/create-menu-category.dto';
 import { UpdateMenuCategoryDto } from './dto/update-menu-category.dto';
 import { ReorderCategoriesDto } from './dto/reorder-categories.dto';
@@ -16,7 +17,10 @@ import { CreateRecipeDto } from './dto/create-recipe.dto';
 export class MenuService {
   private readonly logger = new Logger(MenuService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditLogService: AuditLogService,
+  ) {}
 
   // ─── Menu Categories ──────────────────────────────────────────────────────
 
@@ -36,6 +40,7 @@ export class MenuService {
     restaurantId: string,
     dto: CreateMenuCategoryDto,
     tenantId: string,
+    userId?: string,
   ) {
     await this.validateRestaurant(restaurantId, tenantId);
 
@@ -46,9 +51,21 @@ export class MenuService {
 
     const displayOrder = dto.displayOrder ?? (maxOrder._max.displayOrder ?? -1) + 1;
 
-    return this.prisma.menuCategory.create({
+    const result = await this.prisma.menuCategory.create({
       data: { ...dto, displayOrder, restaurantId, tenantId },
     });
+
+    this.auditLogService.log({
+      action: 'menu_create' as any,
+      resource: 'menu' as any,
+      category: 'restaurant' as any,
+      resourceId: result.id,
+      userId,
+      tenantId,
+      description: 'สร้างหมวดหมู่เมนู: ' + dto.name,
+    });
+
+    return result;
   }
 
   async updateCategory(
@@ -56,16 +73,29 @@ export class MenuService {
     categoryId: string,
     dto: UpdateMenuCategoryDto,
     tenantId: string,
+    userId?: string,
   ) {
     await this.findCategoryOrFail(categoryId, restaurantId, tenantId);
 
-    return this.prisma.menuCategory.update({
+    const result = await this.prisma.menuCategory.update({
       where: { id: categoryId },
       data: dto,
     });
+
+    this.auditLogService.log({
+      action: 'menu_update' as any,
+      resource: 'menu' as any,
+      category: 'restaurant' as any,
+      resourceId: categoryId,
+      userId,
+      tenantId,
+      description: 'แก้ไขหมวดหมู่เมนู',
+    });
+
+    return result;
   }
 
-  async removeCategory(restaurantId: string, categoryId: string, tenantId: string) {
+  async removeCategory(restaurantId: string, categoryId: string, tenantId: string, userId?: string) {
     await this.findCategoryOrFail(categoryId, restaurantId, tenantId);
 
     const itemCount = await this.prisma.menuItem.count({
@@ -79,6 +109,16 @@ export class MenuService {
     }
 
     await this.prisma.menuCategory.delete({ where: { id: categoryId } });
+
+    this.auditLogService.log({
+      action: 'menu_delete' as any,
+      resource: 'menu' as any,
+      category: 'restaurant' as any,
+      resourceId: categoryId,
+      userId,
+      tenantId,
+      description: 'ลบหมวดหมู่เมนู',
+    });
   }
 
   async reorderCategories(
@@ -161,7 +201,7 @@ export class MenuService {
     return this.parseItemAllergens(item);
   }
 
-  async createItem(restaurantId: string, dto: CreateMenuItemDto, tenantId: string) {
+  async createItem(restaurantId: string, dto: CreateMenuItemDto, tenantId: string, userId?: string) {
     await this.validateRestaurant(restaurantId, tenantId);
     await this.findCategoryOrFail(dto.categoryId, restaurantId, tenantId);
 
@@ -186,6 +226,16 @@ export class MenuService {
       include: { category: { select: { id: true, name: true } } },
     });
 
+    this.auditLogService.log({
+      action: 'menu_create' as any,
+      resource: 'menu' as any,
+      category: 'restaurant' as any,
+      resourceId: item.id,
+      userId,
+      tenantId,
+      description: 'สร้างรายการเมนู: ' + dto.name,
+    });
+
     return this.parseItemAllergens(item);
   }
 
@@ -194,6 +244,7 @@ export class MenuService {
     itemId: string,
     dto: UpdateMenuItemDto,
     tenantId: string,
+    userId?: string,
   ) {
     await this.findOneItem(restaurantId, itemId, tenantId);
 
@@ -211,6 +262,16 @@ export class MenuService {
       include: { category: { select: { id: true, name: true } } },
     });
 
+    this.auditLogService.log({
+      action: 'menu_update' as any,
+      resource: 'menu' as any,
+      category: 'restaurant' as any,
+      resourceId: itemId,
+      userId,
+      tenantId,
+      description: 'แก้ไขรายการเมนู',
+    });
+
     return this.parseItemAllergens(item);
   }
 
@@ -219,19 +280,42 @@ export class MenuService {
     itemId: string,
     isAvailable: boolean,
     tenantId: string,
+    userId?: string,
   ) {
     await this.findOneItem(restaurantId, itemId, tenantId);
 
-    return this.prisma.menuItem.update({
+    const result = await this.prisma.menuItem.update({
       where: { id: itemId },
       data: { isAvailable },
     });
+
+    this.auditLogService.log({
+      action: 'menu_update' as any,
+      resource: 'menu' as any,
+      category: 'restaurant' as any,
+      resourceId: itemId,
+      userId,
+      tenantId,
+      description: 'เปลี่ยนสถานะเมนู: ' + (isAvailable ? 'พร้อมขาย' : 'หยุดขาย'),
+    });
+
+    return result;
   }
 
-  async removeItem(restaurantId: string, itemId: string, tenantId: string) {
+  async removeItem(restaurantId: string, itemId: string, tenantId: string, userId?: string) {
     await this.findOneItem(restaurantId, itemId, tenantId);
 
     await this.prisma.menuItem.delete({ where: { id: itemId } });
+
+    this.auditLogService.log({
+      action: 'menu_delete' as any,
+      resource: 'menu' as any,
+      category: 'restaurant' as any,
+      resourceId: itemId,
+      userId,
+      tenantId,
+      description: 'ลบรายการเมนู',
+    });
   }
 
   // ─── Recipe ───────────────────────────────────────────────────────────────
@@ -252,12 +336,13 @@ export class MenuService {
     itemId: string,
     dto: CreateRecipeDto,
     tenantId: string,
+    userId?: string,
   ) {
     await this.findOneItem(restaurantId, itemId, tenantId);
 
     const { ingredients, ...recipeData } = dto;
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const recipe = await tx.menuItemRecipe.upsert({
         where: { menuItemId: itemId },
         create: { ...recipeData, menuItemId: itemId },
@@ -287,9 +372,21 @@ export class MenuService {
         include: { ingredients: { orderBy: { displayOrder: 'asc' } } },
       });
     });
+
+    this.auditLogService.log({
+      action: 'menu_update' as any,
+      resource: 'menu' as any,
+      category: 'restaurant' as any,
+      resourceId: itemId,
+      userId,
+      tenantId,
+      description: 'บันทึกสูตรเมนู',
+    });
+
+    return result;
   }
 
-  async deleteRecipe(restaurantId: string, itemId: string, tenantId: string) {
+  async deleteRecipe(restaurantId: string, itemId: string, tenantId: string, userId?: string) {
     await this.findOneItem(restaurantId, itemId, tenantId);
 
     const recipe = await this.prisma.menuItemRecipe.findUnique({
@@ -302,6 +399,16 @@ export class MenuService {
     }
 
     await this.prisma.menuItemRecipe.delete({ where: { id: recipe.id } });
+
+    this.auditLogService.log({
+      action: 'menu_delete' as any,
+      resource: 'menu' as any,
+      category: 'restaurant' as any,
+      resourceId: itemId,
+      userId,
+      tenantId,
+      description: 'ลบสูตรเมนู',
+    });
   }
 
   // ─── Full Menu ────────────────────────────────────────────────────────────

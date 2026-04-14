@@ -10,6 +10,7 @@ import { CreateStaffDto, StaffStatus } from './dto/create-staff.dto';
 import { UpdateStaffDto } from './dto/update-staff.dto';
 import { normalizePagination } from '../../common/utils/pagination.util';
 import { LinkEmployeeDto } from './dto/link-employee.dto';
+import { AuditLogService } from '../../audit-log/audit-log.service';
 
 interface PaginationQuery {
   page?: number;
@@ -55,7 +56,7 @@ interface PerformanceData {
 export class StaffService {
   private readonly logger = new Logger(StaffService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private auditLogService: AuditLogService) {}
 
   /**
    * Get all staff with pagination and optional filtering
@@ -201,7 +202,7 @@ export class StaffService {
   /**
    * Create a new staff member
    */
-  async create(dto: CreateStaffDto, tenantId: string): Promise<any> {
+  async create(dto: CreateStaffDto, tenantId: string, userId?: string): Promise<any> {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID is required');
     }
@@ -237,6 +238,7 @@ export class StaffService {
         },
       });
 
+      this.auditLogService.logStaffCreate(staff, userId, tenantId);
       this.logger.log(`Created staff member ${staff.id} (${staff.firstName} ${staff.lastName})`);
       return staff;
     } catch (error) {
@@ -248,7 +250,7 @@ export class StaffService {
   /**
    * Update a staff member
    */
-  async update(id: string, dto: UpdateStaffDto, tenantId: string): Promise<any> {
+  async update(id: string, dto: UpdateStaffDto, tenantId: string, userId?: string): Promise<any> {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID is required');
     }
@@ -295,6 +297,7 @@ export class StaffService {
         },
       });
 
+      this.auditLogService.logStaffUpdate(id, existing, updated, userId, tenantId);
       this.logger.log(`Updated staff member ${id}`);
       return updated;
     } catch (error) {

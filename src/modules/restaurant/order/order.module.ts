@@ -4,10 +4,12 @@ import { OrderPublicController } from './order-public.controller';
 import { OrderService } from './order.service';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { KitchenModule } from '../kitchen/kitchen.module';
+import { MenuModule } from '../menu/menu.module';
+import { TableModule } from '../table/table.module';
 import { AddonModule } from '../../addons/addon.module';
 
 @Module({
-  imports: [PrismaModule, forwardRef(() => KitchenModule), AddonModule],
+  imports: [PrismaModule, forwardRef(() => KitchenModule), MenuModule, TableModule, AddonModule],
   controllers: [OrderController, OrderPublicController],
   providers: [OrderService],
   exports: [OrderService],

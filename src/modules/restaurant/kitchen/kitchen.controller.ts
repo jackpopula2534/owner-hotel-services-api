@@ -64,9 +64,9 @@ export class KitchenController {
   async startOrder(
     @Param('restaurantId') restaurantId: string,
     @Param('kitchenOrderId') kitchenOrderId: string,
-    @CurrentUser() user: { tenantId: string },
+    @CurrentUser() user: { tenantId: string; id?: string },
   ) {
-    return this.kitchenService.startOrder(restaurantId, kitchenOrderId, user.tenantId);
+    return this.kitchenService.startOrder(restaurantId, kitchenOrderId, user.tenantId, user?.id);
   }
 
   @Patch('orders/:kitchenOrderId/complete')
@@ -77,9 +77,9 @@ export class KitchenController {
   async completeOrder(
     @Param('restaurantId') restaurantId: string,
     @Param('kitchenOrderId') kitchenOrderId: string,
-    @CurrentUser() user: { tenantId: string },
+    @CurrentUser() user: { tenantId: string; id?: string },
   ) {
-    return this.kitchenService.completeOrder(restaurantId, kitchenOrderId, user.tenantId);
+    return this.kitchenService.completeOrder(restaurantId, kitchenOrderId, user.tenantId, user?.id);
   }
 
   @Patch('items/:itemId/status')
@@ -102,9 +102,9 @@ export class KitchenController {
     @Param('restaurantId') restaurantId: string,
     @Param('itemId') itemId: string,
     @Body('status') status: string,
-    @CurrentUser() user: { tenantId: string },
+    @CurrentUser() user: { tenantId: string; id?: string },
   ) {
-    return this.kitchenService.updateItemStatus(restaurantId, itemId, status as OrderItemStatus, user.tenantId);
+    return this.kitchenService.updateItemStatus(restaurantId, itemId, status as OrderItemStatus, user.tenantId, user?.id);
   }
 
   @Patch('orders/:kitchenOrderId/priority')
@@ -123,8 +123,8 @@ export class KitchenController {
     @Param('restaurantId') restaurantId: string,
     @Param('kitchenOrderId') kitchenOrderId: string,
     @Body('priority') priority: string,
-    @CurrentUser() user: { tenantId: string },
+    @CurrentUser() user: { tenantId: string; id?: string },
   ) {
-    return this.kitchenService.setPriority(restaurantId, kitchenOrderId, priority as KitchenPriority, user.tenantId);
+    return this.kitchenService.setPriority(restaurantId, kitchenOrderId, priority as KitchenPriority, user.tenantId, user?.id);
   }
 }

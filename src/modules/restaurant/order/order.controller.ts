@@ -40,6 +40,20 @@ import { OrderStatus } from '@prisma/client';
 export class OrderController {
   constructor(private readonly orderService: OrderService) {}
 
+  @Get('booked-rooms')
+  @ApiOperation({ summary: 'Get rooms with active bookings today (for Room Service)' })
+  @ApiParam({ name: 'restaurantId' })
+  @ApiQuery({ name: 'search', required: false, description: 'Search by room number or guest name' })
+  @ApiResponse({ status: 200, description: 'List of booked rooms' })
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'waiter', 'staff')
+  async getBookedRooms(
+    @Param('restaurantId') restaurantId: string,
+    @Query('search') search: string | undefined,
+    @CurrentUser() user: { tenantId: string },
+  ) {
+    return this.orderService.getBookedRooms(restaurantId, user.tenantId, search);
+  }
+
   @Get()
   @ApiOperation({ summary: 'Get all orders (paginated, with filters)' })
   @ApiParam({ name: 'restaurantId' })
@@ -88,9 +102,9 @@ export class OrderController {
   async create(
     @Param('restaurantId') restaurantId: string,
     @Body() dto: CreateOrderDto,
-    @CurrentUser() user: { tenantId: string },
+    @CurrentUser() user: { tenantId: string; id?: string },
   ) {
-    return this.orderService.create(restaurantId, dto, user.tenantId);
+    return this.orderService.create(restaurantId, dto, user.tenantId, user.id);
   }
 
   @Post(':orderId/items')
@@ -147,9 +161,9 @@ export class OrderController {
     @Param('restaurantId') restaurantId: string,
     @Param('orderId') orderId: string,
     @Body('status') status: string,
-    @CurrentUser() user: { tenantId: string },
+    @CurrentUser() user: { tenantId: string; id?: string },
   ) {
-    return this.orderService.updateStatus(restaurantId, orderId, status as OrderStatus, user.tenantId);
+    return this.orderService.updateStatus(restaurantId, orderId, status as OrderStatus, user.tenantId, user.id);
   }
 
   @Post(':orderId/payment')
@@ -161,9 +175,9 @@ export class OrderController {
     @Param('restaurantId') restaurantId: string,
     @Param('orderId') orderId: string,
     @Body() dto: ProcessPaymentDto,
-    @CurrentUser() user: { tenantId: string },
+    @CurrentUser() user: { tenantId: string; id?: string },
   ) {
-    return this.orderService.processPayment(restaurantId, orderId, dto, user.tenantId);
+    return this.orderService.processPayment(restaurantId, orderId, dto, user.tenantId, user.id);
   }
 
   @Get(':orderId/receipt')

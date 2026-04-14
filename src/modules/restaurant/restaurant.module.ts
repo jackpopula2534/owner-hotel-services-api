@@ -9,6 +9,7 @@ import { ReservationModule } from './reservation/reservation.module';
 import { OrderModule } from './order/order.module';
 import { KitchenModule } from './kitchen/kitchen.module';
 import { RestaurantAnalyticsModule } from './analytics/analytics.module';
+import { StaffCallModule } from './staff-call/staff-call.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { RestaurantAnalyticsModule } from './analytics/analytics.module';
     OrderModule,
     KitchenModule,
     RestaurantAnalyticsModule,
+    StaffCallModule,
   ],
   controllers: [RestaurantController],
   providers: [RestaurantService],

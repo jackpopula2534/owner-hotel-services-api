@@ -344,6 +344,57 @@ ${data.message}`;
     this.logger.log('Daily summary notifications completed');
   }
 
+  // ─── Staff Call Notifications ────────────────────────────────────────────────
+
+  /**
+   * Send notification when a customer or POS staff creates a staff call
+   */
+  async onStaffCallCreated(
+    tenantId: string,
+    data: {
+      tableNumber: string;
+      zone?: string | null;
+      callType: string;
+      message?: string | null;
+      customerName?: string | null;
+      source: string;
+    },
+  ): Promise<void> {
+    const callTypeLabels: Record<string, string> = {
+      SERVICE: 'บริการทั่วไป',
+      PAYMENT: 'ชำระเงิน / เก็บเงิน',
+      WATER: 'เติมน้ำ',
+      ASSISTANCE: 'ขอความช่วยเหลือ',
+      CLEANUP: 'ทำความสะอาดโต๊ะ',
+      CUSTOM: 'อื่นๆ',
+    };
+
+    const sourceLabel = data.source === 'CUSTOMER' ? 'ลูกค้า' : 'พนักงาน POS';
+    const typeLabel = callTypeLabels[data.callType] ?? data.callType;
+    const zoneText = data.zone ? ` (${data.zone})` : '';
+
+    let message = `
+🔔 เรียกพนักงาน / Staff Call
+
+📍 โต๊ะ: ${data.tableNumber}${zoneText}
+📋 ประเภท: ${typeLabel}
+👤 เรียกโดย: ${sourceLabel}`;
+
+    if (data.customerName) {
+      message += `\n🏷️ ชื่อลูกค้า: ${data.customerName}`;
+    }
+
+    if (data.message) {
+      message += `\n💬 ข้อความ: ${data.message}`;
+    }
+
+    await this.lineNotifyService.sendEventNotification(
+      tenantId,
+      LineNotifyEventType.SYSTEM_ALERT, // Reuse SYSTEM_ALERT for staff calls
+      message,
+    );
+  }
+
   /**
    * Helper to format booking message
    */

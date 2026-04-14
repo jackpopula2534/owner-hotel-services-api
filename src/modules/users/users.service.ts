@@ -1,10 +1,11 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
+import { AuditLogService } from '../../audit-log/audit-log.service';
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private auditLogService: AuditLogService) {}
 
   async findAll(query: any, tenantId?: string) {
     if (!tenantId) {
@@ -98,13 +99,13 @@ export class UsersService {
     return user;
   }
 
-  async update(id: string, updateUserDto: any, tenantId?: string) {
-    await this.findOne(id, tenantId);
+  async update(id: string, updateUserDto: any, tenantId?: string, userId?: string) {
+    const oldData = await this.findOne(id, tenantId);
 
     // ไม่ให้อัพเดท password ผ่าน endpoint นี้ (ใช้ password reset แทน)
     const { password, ...safeData } = updateUserDto;
 
-    return this.prisma.user.update({
+    const result = await this.prisma.user.update({
       where: { id },
       data: safeData,
       select: {
@@ -119,6 +120,9 @@ export class UsersService {
         updatedAt: true,
       },
     });
+
+    this.auditLogService.logUserUpdate(id, oldData, result, userId, tenantId);
+    return result;
   }
 
   async remove(id: string, tenantId?: string) {

@@ -117,7 +117,7 @@ export class MaintenanceController {
     @Body() createMaintenanceTaskDto: CreateMaintenanceTaskDto,
     @CurrentUser() user?: any,
   ): Promise<any> {
-    const task = await this.maintenanceService.create(createMaintenanceTaskDto, user?.tenantId);
+    const task = await this.maintenanceService.create(createMaintenanceTaskDto, user?.tenantId, user?.id);
 
     return {
       success: true,
@@ -182,7 +182,7 @@ export class MaintenanceController {
     @Body() updateMaintenanceTaskDto: UpdateMaintenanceTaskDto,
     @CurrentUser() user?: any,
   ): Promise<any> {
-    const task = await this.maintenanceService.update(id, updateMaintenanceTaskDto, user?.tenantId);
+    const task = await this.maintenanceService.update(id, updateMaintenanceTaskDto, user?.tenantId, user?.id);
 
     return {
       success: true,

@@ -77,9 +77,9 @@ export class MenuController {
   async createCategory(
     @Param('restaurantId') restaurantId: string,
     @Body() dto: CreateMenuCategoryDto,
-    @CurrentUser() user: { tenantId: string },
+    @CurrentUser() user: { tenantId: string; id?: string },
   ) {
-    return this.menuService.createCategory(restaurantId, dto, user.tenantId);
+    return this.menuService.createCategory(restaurantId, dto, user.tenantId, user?.id);
   }
 
   @Patch('menu-categories/reorder')
@@ -103,9 +103,9 @@ export class MenuController {
     @Param('restaurantId') restaurantId: string,
     @Param('categoryId') categoryId: string,
     @Body() dto: UpdateMenuCategoryDto,
-    @CurrentUser() user: { tenantId: string },
+    @CurrentUser() user: { tenantId: string; id?: string },
   ) {
-    return this.menuService.updateCategory(restaurantId, categoryId, dto, user.tenantId);
+    return this.menuService.updateCategory(restaurantId, categoryId, dto, user.tenantId, user?.id);
   }
 
   @Delete('menu-categories/:categoryId')
@@ -118,9 +118,9 @@ export class MenuController {
   async removeCategory(
     @Param('restaurantId') restaurantId: string,
     @Param('categoryId') categoryId: string,
-    @CurrentUser() user: { tenantId: string },
+    @CurrentUser() user: { tenantId: string; id?: string },
   ) {
-    return this.menuService.removeCategory(restaurantId, categoryId, user.tenantId);
+    return this.menuService.removeCategory(restaurantId, categoryId, user.tenantId, user?.id);
   }
 
   // ─── Menu Items ───────────────────────────────────────────────────────────
@@ -169,9 +169,9 @@ export class MenuController {
   async createItem(
     @Param('restaurantId') restaurantId: string,
     @Body() dto: CreateMenuItemDto,
-    @CurrentUser() user: { tenantId: string },
+    @CurrentUser() user: { tenantId: string; id?: string },
   ) {
-    return this.menuService.createItem(restaurantId, dto, user.tenantId);
+    return this.menuService.createItem(restaurantId, dto, user.tenantId, user?.id);
   }
 
   @Patch('menu-items/:itemId')
@@ -183,9 +183,9 @@ export class MenuController {
     @Param('restaurantId') restaurantId: string,
     @Param('itemId') itemId: string,
     @Body() dto: UpdateMenuItemDto,
-    @CurrentUser() user: { tenantId: string },
+    @CurrentUser() user: { tenantId: string; id?: string },
   ) {
-    return this.menuService.updateItem(restaurantId, itemId, dto, user.tenantId);
+    return this.menuService.updateItem(restaurantId, itemId, dto, user.tenantId, user?.id);
   }
 
   @Patch('menu-items/:itemId/availability')
@@ -197,13 +197,14 @@ export class MenuController {
     @Param('restaurantId') restaurantId: string,
     @Param('itemId') itemId: string,
     @Body('isAvailable') isAvailable: boolean,
-    @CurrentUser() user: { tenantId: string },
+    @CurrentUser() user: { tenantId: string; id?: string },
   ) {
     return this.menuService.toggleAvailability(
       restaurantId,
       itemId,
       isAvailable,
       user.tenantId,
+      user?.id,
     );
   }
 
@@ -217,9 +218,9 @@ export class MenuController {
   async removeItem(
     @Param('restaurantId') restaurantId: string,
     @Param('itemId') itemId: string,
-    @CurrentUser() user: { tenantId: string },
+    @CurrentUser() user: { tenantId: string; id?: string },
   ) {
-    return this.menuService.removeItem(restaurantId, itemId, user.tenantId);
+    return this.menuService.removeItem(restaurantId, itemId, user.tenantId, user?.id);
   }
 
   // ─── Recipe ───────────────────────────────────────────────────────────────
@@ -248,9 +249,9 @@ export class MenuController {
     @Param('restaurantId') restaurantId: string,
     @Param('itemId') itemId: string,
     @Body() dto: CreateRecipeDto,
-    @CurrentUser() user: { tenantId: string },
+    @CurrentUser() user: { tenantId: string; id?: string },
   ) {
-    return this.menuService.upsertRecipe(restaurantId, itemId, dto, user.tenantId);
+    return this.menuService.upsertRecipe(restaurantId, itemId, dto, user.tenantId, user?.id);
   }
 
   @Delete('menu-items/:itemId/recipe')
@@ -263,8 +264,8 @@ export class MenuController {
   async deleteRecipe(
     @Param('restaurantId') restaurantId: string,
     @Param('itemId') itemId: string,
-    @CurrentUser() user: { tenantId: string },
+    @CurrentUser() user: { tenantId: string; id?: string },
   ) {
-    return this.menuService.deleteRecipe(restaurantId, itemId, user.tenantId);
+    return this.menuService.deleteRecipe(restaurantId, itemId, user.tenantId, user?.id);
   }
 }

@@ -115,7 +115,7 @@ export class StaffController {
     @Body() createStaffDto: CreateStaffDto,
     @CurrentUser() user?: any,
   ): Promise<any> {
-    const staff = await this.staffService.create(createStaffDto, user?.tenantId);
+    const staff = await this.staffService.create(createStaffDto, user?.tenantId, user?.id);
 
     return {
       success: true,
@@ -178,7 +178,7 @@ export class StaffController {
     @Body() updateStaffDto: UpdateStaffDto,
     @CurrentUser() user?: any,
   ): Promise<any> {
-    const staff = await this.staffService.update(id, updateStaffDto, user?.tenantId);
+    const staff = await this.staffService.update(id, updateStaffDto, user?.tenantId, user?.id);
 
     return {
       success: true,

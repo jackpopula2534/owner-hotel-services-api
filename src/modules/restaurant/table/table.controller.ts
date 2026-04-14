@@ -90,9 +90,9 @@ export class TableController {
   async create(
     @Param('restaurantId') restaurantId: string,
     @Body() dto: CreateTableDto,
-    @CurrentUser() user: { tenantId: string },
+    @CurrentUser() user: { tenantId: string; id?: string },
   ) {
-    return this.tableService.create(restaurantId, dto, user.tenantId);
+    return this.tableService.create(restaurantId, dto, user.tenantId, user?.id);
   }
 
   @Patch('layout')
@@ -102,9 +102,9 @@ export class TableController {
   async saveLayout(
     @Param('restaurantId') restaurantId: string,
     @Body() dto: SaveLayoutDto,
-    @CurrentUser() user: { tenantId: string },
+    @CurrentUser() user: { tenantId: string; id?: string },
   ) {
-    return this.tableService.saveLayout(restaurantId, dto, user.tenantId);
+    return this.tableService.saveLayout(restaurantId, dto, user.tenantId, user?.id);
   }
 
   @Patch(':tableId')
@@ -116,9 +116,9 @@ export class TableController {
     @Param('restaurantId') restaurantId: string,
     @Param('tableId') tableId: string,
     @Body() dto: UpdateTableDto,
-    @CurrentUser() user: { tenantId: string },
+    @CurrentUser() user: { tenantId: string; id?: string },
   ) {
-    return this.tableService.update(restaurantId, tableId, dto, user.tenantId);
+    return this.tableService.update(restaurantId, tableId, dto, user.tenantId, user?.id);
   }
 
   @Patch(':tableId/status')
@@ -130,9 +130,32 @@ export class TableController {
     @Param('restaurantId') restaurantId: string,
     @Param('tableId') tableId: string,
     @Body() dto: UpdateTableStatusDto,
+    @CurrentUser() user: { tenantId: string; id?: string },
+  ) {
+    return this.tableService.updateStatus(restaurantId, tableId, dto, user.tenantId, user?.id);
+  }
+
+  @Get(':tableId/qr-code')
+  @ApiOperation({ summary: 'Generate QR code for table QR ordering' })
+  @ApiParam({ name: 'restaurantId' })
+  @ApiParam({ name: 'tableId' })
+  @ApiResponse({
+    status: 200,
+    description: 'QR code image (base64 PNG) + URL',
+    schema: {
+      properties: {
+        qrCode: { type: 'string', description: 'Base64-encoded PNG QR code' },
+        url: { type: 'string', description: 'QR code target URL' },
+      },
+    },
+  })
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager')
+  async generateQrCode(
+    @Param('restaurantId') restaurantId: string,
+    @Param('tableId') tableId: string,
     @CurrentUser() user: { tenantId: string },
   ) {
-    return this.tableService.updateStatus(restaurantId, tableId, dto, user.tenantId);
+    return this.tableService.generateTableQrCode(restaurantId, tableId, user.tenantId);
   }
 
   @Delete(':tableId')
@@ -144,8 +167,8 @@ export class TableController {
   async remove(
     @Param('restaurantId') restaurantId: string,
     @Param('tableId') tableId: string,
-    @CurrentUser() user: { tenantId: string },
+    @CurrentUser() user: { tenantId: string; id?: string },
   ) {
-    return this.tableService.remove(restaurantId, tableId, user.tenantId);
+    return this.tableService.remove(restaurantId, tableId, user.tenantId, user?.id);
   }
 }

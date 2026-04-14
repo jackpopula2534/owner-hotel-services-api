@@ -5,12 +5,16 @@ import {
   Logger,
   Optional,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import * as QRCode from 'qrcode';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { OrderStatus } from '@prisma/client';
 import { CreateOrderDto, OrderTypeEnum } from './dto/create-order.dto';
 import { AddOrderItemDto } from './dto/add-order-item.dto';
 import { ProcessPaymentDto, PaymentMethodEnum } from './dto/process-payment.dto';
+import { MenuService } from '../menu/menu.service';
 import { KitchenGateway } from '../kitchen/kitchen.gateway';
+import { AuditLogService } from '../../../audit-log/audit-log.service';
 
 @Injectable()
 export class OrderService {
@@ -18,8 +22,81 @@ export class OrderService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly configService: ConfigService,
+    private readonly menuService: MenuService,
+    private readonly auditLogService: AuditLogService,
     @Optional() private readonly kitchenGateway?: KitchenGateway,
   ) {}
+
+  // ─── Booked Rooms (for Room Service lookup) ────────────────────────────
+
+  async getBookedRooms(
+    restaurantId: string,
+    tenantId: string,
+    search?: string,
+  ): Promise<{ roomNumber: string; guestName: string; bookingId: string; status: string }[]> {
+    // Verify restaurant belongs to tenant
+    const restaurant = await this.prisma.restaurant.findFirst({
+      where: { id: restaurantId, tenantId },
+    });
+    if (!restaurant) {
+      throw new NotFoundException('Restaurant not found');
+    }
+
+    const today = new Date();
+    const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
+
+    // Find bookings that are checked_in or confirmed for today
+    const bookings = await this.prisma.booking.findMany({
+      where: {
+        tenantId,
+        propertyId: restaurant.propertyId,
+        status: { in: ['checked_in', 'confirmed'] },
+        OR: [
+          // Currently checked in (checkIn <= today < checkOut)
+          {
+            checkIn: { lte: endOfDay },
+            checkOut: { gte: startOfDay },
+          },
+          // Scheduled for today
+          {
+            scheduledCheckIn: { lte: endOfDay },
+            scheduledCheckOut: { gte: startOfDay },
+          },
+        ],
+      },
+      include: {
+        room: { select: { number: true } },
+        guest: { select: { firstName: true, lastName: true } },
+      },
+      orderBy: { room: { number: 'asc' } },
+    });
+
+    const results = bookings
+      .filter((b) => b.room?.number)
+      .map((b) => ({
+        roomNumber: b.room!.number,
+        guestName: [
+          b.guest?.firstName || b.guestFirstName,
+          b.guest?.lastName || b.guestLastName,
+        ].filter(Boolean).join(' ') || 'ไม่ระบุชื่อ',
+        bookingId: b.id,
+        status: b.status,
+      }));
+
+    // Filter by search term if provided
+    if (search) {
+      const term = search.toLowerCase();
+      return results.filter(
+        (r) =>
+          r.roomNumber.toLowerCase().includes(term) ||
+          r.guestName.toLowerCase().includes(term),
+      );
+    }
+
+    return results;
+  }
 
   // ─── Orders ───────────────────────────────────────────────────────────────
 
@@ -111,7 +188,7 @@ export class OrderService {
     return order;
   }
 
-  async create(restaurantId: string, dto: CreateOrderDto, tenantId: string) {
+  async create(restaurantId: string, dto: CreateOrderDto, tenantId: string, userId?: string) {
     // Validate restaurant
     const restaurant = await this.prisma.restaurant.findFirst({
       where: { id: restaurantId, tenantId },
@@ -214,6 +291,7 @@ export class OrderService {
       });
     }
 
+    this.auditLogService.logOrderCreate(order, userId, tenantId);
     return order;
   }
 
@@ -342,6 +420,7 @@ export class OrderService {
     orderId: string,
     status: OrderStatus,
     tenantId: string,
+    userId?: string,
   ) {
     const order = await this.findOne(restaurantId, orderId, tenantId);
 
@@ -393,6 +472,8 @@ export class OrderService {
       },
     });
 
+    this.auditLogService.logOrderUpdate(orderId, { status: order.status }, { status }, userId, tenantId);
+
     // Notify guest via WebSocket (e.g. QR order tracking)
     this.kitchenGateway?.emitOrderStatusToGuest(order.orderNumber, {
       orderNumber: order.orderNumber,
@@ -408,6 +489,7 @@ export class OrderService {
     orderId: string,
     dto: ProcessPaymentDto,
     tenantId: string,
+    userId?: string,
   ) {
     const order = await this.findOne(restaurantId, orderId, tenantId);
 
@@ -434,7 +516,7 @@ export class OrderService {
 
     const changeAmount = dto.paidAmount - total;
 
-    return this.prisma.order.update({
+    const updatedOrderPayment = await this.prisma.order.update({
       where: { id: orderId },
       data: {
         paymentStatus: 'PAID',
@@ -448,6 +530,9 @@ export class OrderService {
         completedAt: new Date(),
       },
     });
+
+    this.auditLogService.logOrderUpdate(orderId, { paymentStatus: order.paymentStatus }, { paymentStatus: 'PAID' }, userId, tenantId);
+    return updatedOrderPayment;
   }
 
   async getReceipt(restaurantId: string, orderId: string, tenantId: string) {
@@ -490,11 +575,112 @@ export class OrderService {
 
   // ─── Public QR Ordering ───────────────────────────────────────────────────
 
+  async generatePublicTableQrCode(restaurantId: string, tableId: string) {
+    const table = await this.prisma.restaurantTable.findFirst({
+      where: { id: tableId, restaurantId, isActive: true },
+    });
+
+    if (!table) {
+      throw new NotFoundException('Table not found');
+    }
+
+    const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:9010';
+    const qrUrl = `${frontendUrl}/restaurant/order/${tableId}?restaurantId=${restaurantId}`;
+
+    try {
+      const qrCodeDataUrl = await QRCode.toDataURL(qrUrl, {
+        errorCorrectionLevel: 'H',
+        type: 'image/png',
+        width: 300,
+        margin: 1,
+      });
+
+      return {
+        qrCode: qrCodeDataUrl,
+        url: qrUrl,
+      };
+    } catch (error) {
+      this.logger.error(`Failed to generate QR code for table ${tableId}`, error);
+      throw new BadRequestException('Failed to generate QR code');
+    }
+  }
+
+  async lookupGuest(
+    restaurantId: string,
+    query: string,
+  ): Promise<{ matched: boolean; guest?: { id: string; firstName: string; lastName: string; isVip: boolean } }> {
+    const restaurant = await this.prisma.restaurant.findFirst({
+      where: { id: restaurantId },
+    });
+
+    if (!restaurant) {
+      throw new NotFoundException('Restaurant not found');
+    }
+
+    const tenantId = restaurant.tenantId ?? '';
+
+    const guest = await this.prisma.guest.findFirst({
+      where: {
+        tenantId,
+        OR: [
+          { firstName: { contains: query } },
+          { lastName: { contains: query } },
+          { nationalId: { contains: query } },
+        ],
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        isVip: true,
+      },
+    });
+
+    if (!guest) {
+      return { matched: false };
+    }
+
+    return {
+      matched: true,
+      guest,
+    };
+  }
+
+  async getPublicMenu(restaurantId: string) {
+    const restaurant = await this.prisma.restaurant.findFirst({
+      where: { id: restaurantId, isActive: true },
+      select: { id: true, name: true, tenantId: true },
+    });
+
+    if (!restaurant) {
+      throw new NotFoundException('Restaurant not found');
+    }
+
+    const tenantId = restaurant.tenantId ?? '';
+
+    const categories = await this.prisma.menuCategory.findMany({
+      where: { restaurantId, tenantId, isActive: true },
+      orderBy: { displayOrder: 'asc' },
+      include: {
+        items: {
+          where: { isAvailable: true },
+          orderBy: { displayOrder: 'asc' },
+        },
+      },
+    });
+
+    return {
+      restaurant: { id: restaurant.id, name: restaurant.name },
+      categories,
+    };
+  }
+
   async createPublicOrder(
     restaurantId: string,
     tableId: string,
     dto: {
       guestName?: string;
+      guestId?: string;
       items: { menuItemId: string; quantity: number; notes?: string }[];
     },
   ) {
@@ -506,7 +692,6 @@ export class OrderService {
       throw new NotFoundException('Table not found');
     }
 
-    // get tenantId from restaurant
     const restaurant = await this.prisma.restaurant.findFirst({
       where: { id: restaurantId },
     });
@@ -515,13 +700,50 @@ export class OrderService {
 
     const tenantId = restaurant.tenantId ?? '';
 
-    return this.create(restaurantId, {
+    let guestName = dto.guestName;
+    let guestIdForOrder: string | undefined;
+
+    if (dto.guestId) {
+      const guest = await this.prisma.guest.findFirst({
+        where: { id: dto.guestId, tenantId },
+      });
+
+      if (!guest) {
+        throw new NotFoundException(`Guest with ID ${dto.guestId} not found`);
+      }
+
+      guestName = `${guest.firstName} ${guest.lastName}`;
+      guestIdForOrder = guest.id;
+    }
+
+    const order = await this.create(restaurantId, {
       tableId,
       orderType: OrderTypeEnum.DINE_IN,
-      guestName: dto.guestName,
+      guestName,
       partySize: 1,
       items: dto.items,
     }, tenantId);
+
+    if (guestIdForOrder) {
+      const discount = Number(order.subtotal) * 0.02;
+      const updatedTotal = Number(order.total) - discount;
+
+      const updatedOrder = await this.prisma.order.update({
+        where: { id: order.id },
+        data: {
+          discount,
+          total: updatedTotal,
+        },
+        include: {
+          table: { select: { id: true, tableNumber: true } },
+          items: { include: { menuItem: { select: { id: true, name: true } } } },
+        },
+      });
+
+      return updatedOrder;
+    }
+
+    return order;
   }
 
   // ─── Private Helpers ──────────────────────────────────────────────────────

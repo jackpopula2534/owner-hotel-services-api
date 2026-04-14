@@ -745,8 +745,14 @@ export class AuthService {
       throw new BadRequestException('Could not create session. Please try again later.');
     }
 
+    // Decode the access token to extract the exact expiration timestamp
+    // so the frontend can schedule a proactive refresh before it expires.
+    const decoded = this.jwtService.decode(accessToken) as { exp?: number } | null;
+    const expiresAt_epoch = decoded?.exp ?? null;
+
     return {
       accessToken,
+      expiresAt: expiresAt_epoch,
       refreshToken,
     };
   }

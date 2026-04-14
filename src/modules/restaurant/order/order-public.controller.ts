@@ -6,10 +6,13 @@ import {
   Body,
   HttpCode,
   HttpStatus,
+  NotFoundException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiParam, ApiBody, ApiResponse } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { OrderService } from './order.service';
+import { TableService } from '../table/table.service';
+import { GuestLookupDto } from './dto/guest-lookup.dto';
 
 /**
  * Public endpoints for QR-code ordering — no JWT required.
@@ -19,19 +22,96 @@ import { OrderService } from './order.service';
 @ApiTags('restaurant / public QR ordering')
 @Controller('public/restaurants')
 export class OrderPublicController {
-  constructor(private readonly orderService: OrderService) {}
+  constructor(
+    private readonly orderService: OrderService,
+    private readonly tableService: TableService,
+  ) { }
 
   @Get(':restaurantId/tables/:tableId/menu')
   @Throttle({ default: { limit: 30, ttl: 60 } })   // 30 req/min per IP
   @ApiOperation({ summary: '[Public] Get menu for a table (QR scan)' })
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'tableId' })
-  @ApiResponse({ status: 200, description: 'Full menu grouped by category' })
+  @ApiResponse({ status: 200, description: 'Full menu grouped by category with table info' })
   async getMenuForTable(
     @Param('restaurantId') restaurantId: string,
+    @Param('tableId') tableId: string,
   ) {
-    // Reuse menu service — import via service when needed; for now delegate
-    return { restaurantId, message: 'Use GET /restaurants/:id/menu for full menu' };
+    const menu = await this.orderService.getPublicMenu(restaurantId);
+    return menu;
+  }
+
+  @Get(':restaurantId/menu')
+  @Throttle({ default: { limit: 30, ttl: 60 } })
+  @ApiOperation({ summary: '[Public] Get full menu for a restaurant (QR scan)' })
+  @ApiParam({ name: 'restaurantId' })
+  @ApiResponse({ status: 200, description: 'Full menu grouped by category' })
+  async getPublicMenu(@Param('restaurantId') restaurantId: string) {
+    return this.orderService.getPublicMenu(restaurantId);
+  }
+
+  @Get(':restaurantId/tables/:tableId/qr-code')
+  @Throttle({ default: { limit: 10, ttl: 60 } })
+  @ApiOperation({ summary: '[Public] Generate QR code for table (no auth required)' })
+  @ApiParam({ name: 'restaurantId' })
+  @ApiParam({ name: 'tableId' })
+  @ApiResponse({
+    status: 200,
+    description: 'QR code image (base64 PNG) + URL',
+    schema: {
+      properties: {
+        qrCode: { type: 'string', description: 'Base64-encoded PNG QR code' },
+        url: { type: 'string', description: 'QR code target URL' },
+      },
+    },
+  })
+  async getPublicTableQrCode(
+    @Param('restaurantId') restaurantId: string,
+    @Param('tableId') tableId: string,
+  ) {
+    return this.orderService.generatePublicTableQrCode(restaurantId, tableId);
+  }
+
+  @Post(':restaurantId/guest-lookup')
+  @Throttle({ default: { limit: 10, ttl: 60 } })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '[Public] Lookup guest by name or nationalId (QR ordering)',
+  })
+  @ApiParam({ name: 'restaurantId' })
+  @ApiBody({ type: GuestLookupDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Guest lookup result',
+    schema: {
+      oneOf: [
+        {
+          properties: {
+            matched: { type: 'boolean', example: true },
+            guest: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                firstName: { type: 'string' },
+                lastName: { type: 'string' },
+                isVip: { type: 'boolean' },
+              },
+            },
+          },
+        },
+        {
+          properties: {
+            matched: { type: 'boolean', example: false },
+          },
+        },
+      ],
+    },
+  })
+  async lookupGuest(
+    @Param('restaurantId') restaurantId: string,
+    @Body() dto: GuestLookupDto,
+  ) {
+    return this.orderService.lookupGuest(restaurantId, dto.query);
   }
 
   @Post(':restaurantId/tables/:tableId/orders')
@@ -44,6 +124,7 @@ export class OrderPublicController {
     schema: {
       properties: {
         guestName: { type: 'string', example: 'John Doe' },
+        guestId: { type: 'string', description: 'Optional: matched guest ID for 2% VIP discount' },
         items: {
           type: 'array',
           items: {
@@ -65,6 +146,7 @@ export class OrderPublicController {
     @Param('tableId') tableId: string,
     @Body() body: {
       guestName?: string;
+      guestId?: string;
       items: { menuItemId: string; quantity: number; notes?: string }[];
     },
   ) {
