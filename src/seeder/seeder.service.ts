@@ -14,6 +14,7 @@ import { SubscriptionStatus } from '../subscriptions/entities/subscription.entit
 import { InvoiceStatus } from '../invoices/entities/invoice.entity';
 import { PaymentMethod, PaymentStatus } from '../payments/entities/payment.entity';
 import { PrismaService } from '../prisma/prisma.service';
+import { CostCenterType, CostCategory, WarehouseType } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -57,6 +58,8 @@ export class SeederService {
       await this.seedPremiumHrData();
       await this.seedHrPerformanceData();
       await this.seedRestaurantData();
+      await this.seedInventoryData();
+      await this.seedCostAccountingData();
 
       this.logger.log('✅ Database seeding completed successfully!');
     } catch (error) {
@@ -303,8 +306,7 @@ export class SeederService {
         // Restaurant Add-on: F&B management with table reservations and menu management
         code: 'RESTAURANT_MODULE',
         name: 'Restaurant & F&B Module',
-        description:
-          'ระบบจัดการร้านอาหาร F&B: เมนู หมวดหมู่ จองโต๊ะ และเชื่อม Folio แขก',
+        description: 'ระบบจัดการร้านอาหาร F&B: เมนู หมวดหมู่ จองโต๊ะ และเชื่อม Folio แขก',
         type: FeatureType.MODULE,
         priceMonthly: 990,
         isActive: true,
@@ -313,8 +315,7 @@ export class SeederService {
         // POS Add-on: full POS system with kitchen display and cashier
         code: 'POS_MODULE',
         name: 'POS System',
-        description:
-          'ระบบ POS ครบวงจร: รับออเดอร์ ส่งครัว (KDS) ชำระเงิน และจัดการ User POS',
+        description: 'ระบบ POS ครบวงจร: รับออเดอร์ ส่งครัว (KDS) ชำระเงิน และจัดการ User POS',
         type: FeatureType.MODULE,
         priceMonthly: 790,
         isActive: true,
@@ -335,6 +336,26 @@ export class SeederService {
         description: 'โปรแกรมสะสมแต้มแขกประจำ ส่วนลด และ reward tiers',
         type: FeatureType.MODULE,
         priceMonthly: 590,
+        isActive: true,
+      },
+      {
+        // Inventory Management Add-on
+        code: 'INVENTORY_MODULE',
+        name: 'Inventory Management',
+        description:
+          'ระบบคลังสินค้าครบวงจร: คุมสต็อก เบิก-รับสินค้า สั่งซื้อ นับสต็อก และแจ้งเตือนสต็อกต่ำ',
+        type: FeatureType.MODULE,
+        priceMonthly: 990,
+        isActive: true,
+      },
+      {
+        // Cost Accounting Add-on (requires Inventory)
+        code: 'COST_ACCOUNTING_MODULE',
+        name: 'Cost Accounting',
+        description:
+          'ระบบบัญชีต้นทุน USALI: ติดตามต้นทุนรายแผนก P&L ปิดงวดรายเดือน วิเคราะห์ food cost และ dashboard KPI โรงแรม',
+        type: FeatureType.MODULE,
+        priceMonthly: 1490,
         isActive: true,
       },
     ];
@@ -506,6 +527,8 @@ export class SeederService {
     const hrModule = await this.featuresService.findByCode('HR_MODULE');
     const restaurantModule = await this.featuresService.findByCode('RESTAURANT_MODULE');
     const posModule = await this.featuresService.findByCode('POS_MODULE');
+    const inventoryModule = await this.featuresService.findByCode('INVENTORY_MODULE');
+    const costAccountingModule = await this.featuresService.findByCode('COST_ACCOUNTING_MODULE');
 
     // ข้อมูลโรงแรมตาม UI Screenshot
     const allFeatures = [
@@ -605,8 +628,10 @@ export class SeederService {
           { feature: hrModule, price: 1200 },
           { feature: restaurantModule, price: 990 },
           { feature: posModule, price: 790 },
+          { feature: inventoryModule, price: 990 },
+          { feature: costAccountingModule, price: 1490 },
         ],
-        invoices: [{ amount: 19720, status: InvoiceStatus.PAID, daysAgo: 0 }],
+        invoices: [{ amount: 23200, status: InvoiceStatus.PAID, daysAgo: 0 }],
       },
       {
         // SUB-003: บ้านพักริมทะเล - Starter (Trial)
@@ -1127,16 +1152,18 @@ export class SeederService {
             bookingCount++;
 
             // Create Audit Log for Activity Feed (WOW moment for dashboard)
-            await this.prisma.auditLog.create({
-              data: {
-                tenantId: tenant.id,
-                action: 'BOOKING_CREATE',
-                resource: 'BOOKING',
-                resourceId: createdBooking.id,
-                description: `สร้างการจองใหม่สำหรับคุณ ${guest.firstName} ${guest.lastName}`,
-                createdAt: new Date(new Date().getTime() - Math.random() * 86400000 * 2), // Last 48 hours
-              }
-            }).catch(() => {});
+            await this.prisma.auditLog
+              .create({
+                data: {
+                  tenantId: tenant.id,
+                  action: 'BOOKING_CREATE',
+                  resource: 'BOOKING',
+                  resourceId: createdBooking.id,
+                  description: `สร้างการจองใหม่สำหรับคุณ ${guest.firstName} ${guest.lastName}`,
+                  createdAt: new Date(new Date().getTime() - Math.random() * 86400000 * 2), // Last 48 hours
+                },
+              })
+              .catch(() => {});
           } catch (error) {
             this.logger.warn(`    ⚠️  Could not create booking: ${error.message}`);
           }
@@ -1304,11 +1331,11 @@ export class SeederService {
             // สร้าง Employee record ด้วย
             try {
               const empCode = `EMP-${String(staffCount + 1).padStart(4, '0')}`;
-              
+
               // Fetch department and position properly from HR master data
               let deptId = null;
               let posId = null;
-              
+
               const dept = await (this.prisma.hrDepartment as any).findFirst({
                 where: { tenantId: tenant.id, code: tpl.departmentCode },
               });
@@ -1342,7 +1369,9 @@ export class SeederService {
                 )
               `;
             } catch (err: any) {
-              this.logger.warn(`    ⚠️  Could not create employee for staff (${email}): ${err.message}`);
+              this.logger.warn(
+                `    ⚠️  Could not create employee for staff (${email}): ${err.message}`,
+              );
             }
 
             staffCount++;
@@ -1420,30 +1449,113 @@ export class SeederService {
 
     // ─── ข้อมูลแผนก (Hotel Department Master Data) ─────────────────────────
     const departmentTemplates = [
-      { name: 'ฝ่ายต้อนรับ', nameEn: 'Front Office', code: 'FO', color: '#8B5CF6', sortOrder: 1, description: 'บริการต้อนรับแขก เช็คอิน/เช็คเอาท์ คอนเซียจ' },
-      { name: 'ฝ่ายซ่อมบำรุง / ทำความสะอาด', nameEn: 'Housekeeping & Maintenance', code: 'HK', color: '#10B981', sortOrder: 2, description: 'ทำความสะอาดห้องพัก พื้นที่ส่วนกลาง ซักรีด และซ่อมบำรุงทั่วไป' },
-      { name: 'ฝ่ายอาหารและเครื่องดื่ม', nameEn: 'Food & Beverage', code: 'FB', color: '#F59E0B', sortOrder: 3, description: 'ร้านอาหาร บาร์ รูมเซอร์วิส จัดเลี้ยง' },
-      { name: 'ฝ่ายวิศวกรรม', nameEn: 'Engineering', code: 'ENG', color: '#EF4444', sortOrder: 4, description: 'บำรุงรักษา ระบบไฟฟ้า ประปา HVAC ไอที' },
-      { name: 'ฝ่ายทรัพยากรบุคคล', nameEn: 'Human Resources', code: 'HR', color: '#EC4899', sortOrder: 5, description: 'สรรหา ฝึกอบรม เงินเดือน สวัสดิการ' },
-      { name: 'ฝ่ายการเงินและบัญชี', nameEn: 'Finance & Accounting', code: 'FIN', color: '#06B6D4', sortOrder: 6, description: 'บัญชี การเงิน จัดซื้อ คลังสินค้า' },
-      { name: 'ฝ่ายขายและการตลาด', nameEn: 'Sales & Marketing', code: 'SM', color: '#F97316', sortOrder: 7, description: 'ขาย การตลาด ประชาสัมพันธ์ OTA จัดการ' },
-      { name: 'ฝ่ายรักษาความปลอดภัย', nameEn: 'Security', code: 'SEC', color: '#6B7280', sortOrder: 8, description: 'รักษาความปลอดภัย ควบคุมการเข้าออก' },
-      { name: 'ฝ่ายสปาและนันทนาการ', nameEn: 'Spa & Recreation', code: 'SPA', color: '#A78BFA', sortOrder: 9, description: 'สปา ฟิตเนส สระว่ายน้ำ กิจกรรมแขก' },
-      { name: 'ฝ่ายบริหาร', nameEn: 'Management', code: 'MGT', color: '#1D4ED8', sortOrder: 10, description: 'ผู้บริหารระดับสูง ผู้จัดการทั่วไป' },
+      {
+        name: 'ฝ่ายต้อนรับ',
+        nameEn: 'Front Office',
+        code: 'FO',
+        color: '#8B5CF6',
+        sortOrder: 1,
+        description: 'บริการต้อนรับแขก เช็คอิน/เช็คเอาท์ คอนเซียจ',
+      },
+      {
+        name: 'ฝ่ายซ่อมบำรุง / ทำความสะอาด',
+        nameEn: 'Housekeeping & Maintenance',
+        code: 'HK',
+        color: '#10B981',
+        sortOrder: 2,
+        description: 'ทำความสะอาดห้องพัก พื้นที่ส่วนกลาง ซักรีด และซ่อมบำรุงทั่วไป',
+      },
+      {
+        name: 'ฝ่ายอาหารและเครื่องดื่ม',
+        nameEn: 'Food & Beverage',
+        code: 'FB',
+        color: '#F59E0B',
+        sortOrder: 3,
+        description: 'ร้านอาหาร บาร์ รูมเซอร์วิส จัดเลี้ยง',
+      },
+      {
+        name: 'ฝ่ายวิศวกรรม',
+        nameEn: 'Engineering',
+        code: 'ENG',
+        color: '#EF4444',
+        sortOrder: 4,
+        description: 'บำรุงรักษา ระบบไฟฟ้า ประปา HVAC ไอที',
+      },
+      {
+        name: 'ฝ่ายทรัพยากรบุคคล',
+        nameEn: 'Human Resources',
+        code: 'HR',
+        color: '#EC4899',
+        sortOrder: 5,
+        description: 'สรรหา ฝึกอบรม เงินเดือน สวัสดิการ',
+      },
+      {
+        name: 'ฝ่ายการเงินและบัญชี',
+        nameEn: 'Finance & Accounting',
+        code: 'FIN',
+        color: '#06B6D4',
+        sortOrder: 6,
+        description: 'บัญชี การเงิน จัดซื้อ คลังสินค้า',
+      },
+      {
+        name: 'ฝ่ายขายและการตลาด',
+        nameEn: 'Sales & Marketing',
+        code: 'SM',
+        color: '#F97316',
+        sortOrder: 7,
+        description: 'ขาย การตลาด ประชาสัมพันธ์ OTA จัดการ',
+      },
+      {
+        name: 'ฝ่ายรักษาความปลอดภัย',
+        nameEn: 'Security',
+        code: 'SEC',
+        color: '#6B7280',
+        sortOrder: 8,
+        description: 'รักษาความปลอดภัย ควบคุมการเข้าออก',
+      },
+      {
+        name: 'ฝ่ายสปาและนันทนาการ',
+        nameEn: 'Spa & Recreation',
+        code: 'SPA',
+        color: '#A78BFA',
+        sortOrder: 9,
+        description: 'สปา ฟิตเนส สระว่ายน้ำ กิจกรรมแขก',
+      },
+      {
+        name: 'ฝ่ายบริหาร',
+        nameEn: 'Management',
+        code: 'MGT',
+        color: '#1D4ED8',
+        sortOrder: 10,
+        description: 'ผู้บริหารระดับสูง ผู้จัดการทั่วไป',
+      },
     ];
 
     // ─── ข้อมูลตำแหน่งงานตามแผนก ────────────────────────────────────────────
-    const positionTemplates: Record<string, Array<{ name: string; nameEn: string; level: number; sortOrder: number }>> = {
+    const positionTemplates: Record<
+      string,
+      Array<{ name: string; nameEn: string; level: number; sortOrder: number }>
+    > = {
       FO: [
         { name: 'ผู้จัดการฝ่ายต้อนรับ', nameEn: 'Front Office Manager', level: 8, sortOrder: 1 },
         { name: 'ผู้จัดการเวร', nameEn: 'Duty Manager', level: 7, sortOrder: 2 },
-        { name: 'พนักงานต้อนรับ (กะกลางวัน)', nameEn: 'Front Desk Agent (Day Shift)', level: 4, sortOrder: 3 },
+        {
+          name: 'พนักงานต้อนรับ (กะกลางวัน)',
+          nameEn: 'Front Desk Agent (Day Shift)',
+          level: 4,
+          sortOrder: 3,
+        },
         { name: 'พนักงานต้อนรับ (กะกลางคืน)', nameEn: 'Night Auditor', level: 4, sortOrder: 4 },
         { name: 'คอนเซียจ', nameEn: 'Concierge', level: 5, sortOrder: 5 },
         { name: 'หัวหน้าพนักงานยกกระเป๋า', nameEn: 'Bell Captain', level: 5, sortOrder: 6 },
         { name: 'พนักงานยกกระเป๋า', nameEn: 'Bellman', level: 3, sortOrder: 7 },
         { name: 'เจ้าหน้าที่ Reception', nameEn: 'Reservation Agent', level: 4, sortOrder: 8 },
-        { name: 'เจ้าหน้าที่ Guest Relations', nameEn: 'Guest Relations Officer', level: 5, sortOrder: 9 },
+        {
+          name: 'เจ้าหน้าที่ Guest Relations',
+          nameEn: 'Guest Relations Officer',
+          level: 5,
+          sortOrder: 9,
+        },
       ],
       HK: [
         { name: 'หัวหน้าแม่บ้าน', nameEn: 'Executive Housekeeper', level: 8, sortOrder: 1 },
@@ -1451,7 +1563,12 @@ export class SeederService {
         { name: 'หัวหน้าชั้น', nameEn: 'Floor Supervisor', level: 6, sortOrder: 3 },
         { name: 'แม่บ้านห้องพัก', nameEn: 'Room Attendant', level: 3, sortOrder: 4 },
         { name: 'พนักงานซักรีด', nameEn: 'Laundry Attendant', level: 3, sortOrder: 5 },
-        { name: 'พนักงานทำความสะอาดพื้นที่ส่วนกลาง', nameEn: 'Public Area Cleaner', level: 2, sortOrder: 6 },
+        {
+          name: 'พนักงานทำความสะอาดพื้นที่ส่วนกลาง',
+          nameEn: 'Public Area Cleaner',
+          level: 2,
+          sortOrder: 6,
+        },
         { name: 'แม่บ้านหัวหน้าโซน', nameEn: 'Zone Housekeeper', level: 5, sortOrder: 7 },
       ],
       FB: [
@@ -1494,11 +1611,21 @@ export class SeederService {
         { name: 'เจ้าหน้าที่ขาย', nameEn: 'Sales Executive', level: 6, sortOrder: 2 },
         { name: 'เจ้าหน้าที่การตลาด', nameEn: 'Marketing Executive', level: 6, sortOrder: 3 },
         { name: 'เจ้าหน้าที่ประชาสัมพันธ์', nameEn: 'PR Coordinator', level: 5, sortOrder: 4 },
-        { name: 'เจ้าหน้าที่ Revenue Management', nameEn: 'Revenue Manager', level: 7, sortOrder: 5 },
+        {
+          name: 'เจ้าหน้าที่ Revenue Management',
+          nameEn: 'Revenue Manager',
+          level: 7,
+          sortOrder: 5,
+        },
       ],
       SEC: [
         { name: 'ผู้จัดการรักษาความปลอดภัย', nameEn: 'Security Manager', level: 7, sortOrder: 1 },
-        { name: 'หัวหน้าเวรรักษาความปลอดภัย', nameEn: 'Security Supervisor', level: 6, sortOrder: 2 },
+        {
+          name: 'หัวหน้าเวรรักษาความปลอดภัย',
+          nameEn: 'Security Supervisor',
+          level: 6,
+          sortOrder: 2,
+        },
         { name: 'พนักงานรักษาความปลอดภัย', nameEn: 'Security Officer', level: 3, sortOrder: 3 },
         { name: 'พนักงานควบคุม CCTV', nameEn: 'CCTV Operator', level: 4, sortOrder: 4 },
       ],
@@ -1513,56 +1640,333 @@ export class SeederService {
         { name: 'ผู้จัดการทั่วไป', nameEn: 'General Manager', level: 10, sortOrder: 1 },
         { name: 'ผู้จัดการโรงแรม (Resident)', nameEn: 'Resident Manager', level: 9, sortOrder: 2 },
         { name: 'ผู้อำนวยการฝ่าย', nameEn: 'Director of Operations', level: 9, sortOrder: 3 },
-        { name: 'ผู้ช่วยผู้จัดการทั่วไป', nameEn: 'Assistant General Manager', level: 8, sortOrder: 4 },
+        {
+          name: 'ผู้ช่วยผู้จัดการทั่วไป',
+          nameEn: 'Assistant General Manager',
+          level: 8,
+          sortOrder: 4,
+        },
       ],
     };
 
     // ─── ประเภทการลา ─────────────────────────────────────────────────────────
     const leaveTypeTemplates = [
-      { name: 'ลาพักร้อน', nameEn: 'Annual Leave', code: 'ANNUAL', maxDaysPerYear: 15, isPaid: true, requiresDoc: false, color: '#10B981', sortOrder: 1, description: 'ลาพักร้อนประจำปี' },
-      { name: 'ลาป่วย', nameEn: 'Sick Leave', code: 'SICK', maxDaysPerYear: 30, isPaid: true, requiresDoc: false, color: '#EF4444', sortOrder: 2, description: 'ลาเนื่องจากเจ็บป่วย' },
-      { name: 'ลากิจ', nameEn: 'Personal Leave', code: 'PERSONAL', maxDaysPerYear: 3, isPaid: true, requiresDoc: false, color: '#F59E0B', sortOrder: 3, description: 'ลากิจส่วนตัว' },
-      { name: 'ลาคลอด', nameEn: 'Maternity Leave', code: 'MATERNITY', maxDaysPerYear: 90, isPaid: true, requiresDoc: true, color: '#EC4899', sortOrder: 4, description: 'ลาคลอดบุตร (ตามกฎหมายแรงงาน)' },
-      { name: 'ลาเพื่อดูแลภรรยาคลอด', nameEn: 'Paternity Leave', code: 'PATERNITY', maxDaysPerYear: 15, isPaid: true, requiresDoc: true, color: '#3B82F6', sortOrder: 5, description: 'ลาเพื่อดูแลภรรยาคลอด' },
-      { name: 'ลาแต่งงาน', nameEn: 'Marriage Leave', code: 'MARRIAGE', maxDaysPerYear: 3, isPaid: true, requiresDoc: true, color: '#A78BFA', sortOrder: 6, description: 'ลาแต่งงาน' },
-      { name: 'ลาไว้ทุกข์', nameEn: 'Bereavement Leave', code: 'BEREAVEMENT', maxDaysPerYear: 3, isPaid: true, requiresDoc: false, color: '#6B7280', sortOrder: 7, description: 'ลาไว้ทุกข์บุคคลในครอบครัว' },
-      { name: 'ลาอบรม/สัมมนา', nameEn: 'Training Leave', code: 'TRAINING', maxDaysPerYear: null, isPaid: true, requiresDoc: false, color: '#06B6D4', sortOrder: 8, description: 'ลาเพื่อเข้ารับการอบรมหรือสัมมนา' },
-      { name: 'ลาราชการทหาร', nameEn: 'Military Leave', code: 'MILITARY', maxDaysPerYear: 60, isPaid: true, requiresDoc: true, color: '#78716C', sortOrder: 9, description: 'ลาราชการทหาร (ตามกฎหมาย)' },
-      { name: 'ลาไม่รับเงินเดือน', nameEn: 'Unpaid Leave', code: 'UNPAID', maxDaysPerYear: null, isPaid: false, requiresDoc: false, color: '#D1D5DB', sortOrder: 10, description: 'ลาโดยไม่รับเงินเดือน' },
+      {
+        name: 'ลาพักร้อน',
+        nameEn: 'Annual Leave',
+        code: 'ANNUAL',
+        maxDaysPerYear: 15,
+        isPaid: true,
+        requiresDoc: false,
+        color: '#10B981',
+        sortOrder: 1,
+        description: 'ลาพักร้อนประจำปี',
+      },
+      {
+        name: 'ลาป่วย',
+        nameEn: 'Sick Leave',
+        code: 'SICK',
+        maxDaysPerYear: 30,
+        isPaid: true,
+        requiresDoc: false,
+        color: '#EF4444',
+        sortOrder: 2,
+        description: 'ลาเนื่องจากเจ็บป่วย',
+      },
+      {
+        name: 'ลากิจ',
+        nameEn: 'Personal Leave',
+        code: 'PERSONAL',
+        maxDaysPerYear: 3,
+        isPaid: true,
+        requiresDoc: false,
+        color: '#F59E0B',
+        sortOrder: 3,
+        description: 'ลากิจส่วนตัว',
+      },
+      {
+        name: 'ลาคลอด',
+        nameEn: 'Maternity Leave',
+        code: 'MATERNITY',
+        maxDaysPerYear: 90,
+        isPaid: true,
+        requiresDoc: true,
+        color: '#EC4899',
+        sortOrder: 4,
+        description: 'ลาคลอดบุตร (ตามกฎหมายแรงงาน)',
+      },
+      {
+        name: 'ลาเพื่อดูแลภรรยาคลอด',
+        nameEn: 'Paternity Leave',
+        code: 'PATERNITY',
+        maxDaysPerYear: 15,
+        isPaid: true,
+        requiresDoc: true,
+        color: '#3B82F6',
+        sortOrder: 5,
+        description: 'ลาเพื่อดูแลภรรยาคลอด',
+      },
+      {
+        name: 'ลาแต่งงาน',
+        nameEn: 'Marriage Leave',
+        code: 'MARRIAGE',
+        maxDaysPerYear: 3,
+        isPaid: true,
+        requiresDoc: true,
+        color: '#A78BFA',
+        sortOrder: 6,
+        description: 'ลาแต่งงาน',
+      },
+      {
+        name: 'ลาไว้ทุกข์',
+        nameEn: 'Bereavement Leave',
+        code: 'BEREAVEMENT',
+        maxDaysPerYear: 3,
+        isPaid: true,
+        requiresDoc: false,
+        color: '#6B7280',
+        sortOrder: 7,
+        description: 'ลาไว้ทุกข์บุคคลในครอบครัว',
+      },
+      {
+        name: 'ลาอบรม/สัมมนา',
+        nameEn: 'Training Leave',
+        code: 'TRAINING',
+        maxDaysPerYear: null,
+        isPaid: true,
+        requiresDoc: false,
+        color: '#06B6D4',
+        sortOrder: 8,
+        description: 'ลาเพื่อเข้ารับการอบรมหรือสัมมนา',
+      },
+      {
+        name: 'ลาราชการทหาร',
+        nameEn: 'Military Leave',
+        code: 'MILITARY',
+        maxDaysPerYear: 60,
+        isPaid: true,
+        requiresDoc: true,
+        color: '#78716C',
+        sortOrder: 9,
+        description: 'ลาราชการทหาร (ตามกฎหมาย)',
+      },
+      {
+        name: 'ลาไม่รับเงินเดือน',
+        nameEn: 'Unpaid Leave',
+        code: 'UNPAID',
+        maxDaysPerYear: null,
+        isPaid: false,
+        requiresDoc: false,
+        color: '#D1D5DB',
+        sortOrder: 10,
+        description: 'ลาโดยไม่รับเงินเดือน',
+      },
     ];
 
     // ─── กะการทำงาน ──────────────────────────────────────────────────────────
     const shiftTypeTemplates = [
-      { name: 'กะเช้า', nameEn: 'Morning Shift', code: 'MORNING', startTime: '07:00', endTime: '15:00', breakMinutes: 60, color: '#F59E0B', sortOrder: 1, description: 'กะทำงานช่วงเช้า 07:00-15:00 น.' },
-      { name: 'กะบ่าย', nameEn: 'Afternoon Shift', code: 'AFTERNOON', startTime: '15:00', endTime: '23:00', breakMinutes: 60, color: '#8B5CF6', sortOrder: 2, description: 'กะทำงานช่วงบ่าย 15:00-23:00 น.' },
-      { name: 'กะดึก', nameEn: 'Night Shift', code: 'NIGHT', startTime: '23:00', endTime: '07:00', breakMinutes: 60, color: '#1E40AF', sortOrder: 3, description: 'กะทำงานช่วงดึก 23:00-07:00 น.' },
-      { name: 'เวลาทำการปกติ', nameEn: 'Office Hours', code: 'OFFICE', startTime: '09:00', endTime: '18:00', breakMinutes: 60, color: '#10B981', sortOrder: 4, description: 'เวลาทำการสำนักงาน 09:00-18:00 น.' },
-      { name: 'กะแยก (Split Shift)', nameEn: 'Split Shift', code: 'SPLIT', startTime: '06:00', endTime: '22:00', breakMinutes: 240, color: '#EF4444', sortOrder: 5, description: 'ทำงานช่วงเช้า 06:00-10:00 และช่วงเย็น 18:00-22:00' },
-      { name: 'ยืดหยุ่น', nameEn: 'Flexible Hours', code: 'FLEXIBLE', startTime: '08:00', endTime: '17:00', breakMinutes: 60, color: '#6B7280', sortOrder: 6, description: 'เวลาทำงานยืดหยุ่นตามตกลง' },
+      {
+        name: 'กะเช้า',
+        nameEn: 'Morning Shift',
+        code: 'MORNING',
+        startTime: '07:00',
+        endTime: '15:00',
+        breakMinutes: 60,
+        color: '#F59E0B',
+        sortOrder: 1,
+        description: 'กะทำงานช่วงเช้า 07:00-15:00 น.',
+      },
+      {
+        name: 'กะบ่าย',
+        nameEn: 'Afternoon Shift',
+        code: 'AFTERNOON',
+        startTime: '15:00',
+        endTime: '23:00',
+        breakMinutes: 60,
+        color: '#8B5CF6',
+        sortOrder: 2,
+        description: 'กะทำงานช่วงบ่าย 15:00-23:00 น.',
+      },
+      {
+        name: 'กะดึก',
+        nameEn: 'Night Shift',
+        code: 'NIGHT',
+        startTime: '23:00',
+        endTime: '07:00',
+        breakMinutes: 60,
+        color: '#1E40AF',
+        sortOrder: 3,
+        description: 'กะทำงานช่วงดึก 23:00-07:00 น.',
+      },
+      {
+        name: 'เวลาทำการปกติ',
+        nameEn: 'Office Hours',
+        code: 'OFFICE',
+        startTime: '09:00',
+        endTime: '18:00',
+        breakMinutes: 60,
+        color: '#10B981',
+        sortOrder: 4,
+        description: 'เวลาทำการสำนักงาน 09:00-18:00 น.',
+      },
+      {
+        name: 'กะแยก (Split Shift)',
+        nameEn: 'Split Shift',
+        code: 'SPLIT',
+        startTime: '06:00',
+        endTime: '22:00',
+        breakMinutes: 240,
+        color: '#EF4444',
+        sortOrder: 5,
+        description: 'ทำงานช่วงเช้า 06:00-10:00 และช่วงเย็น 18:00-22:00',
+      },
+      {
+        name: 'ยืดหยุ่น',
+        nameEn: 'Flexible Hours',
+        code: 'FLEXIBLE',
+        startTime: '08:00',
+        endTime: '17:00',
+        breakMinutes: 60,
+        color: '#6B7280',
+        sortOrder: 6,
+        description: 'เวลาทำงานยืดหยุ่นตามตกลง',
+      },
     ];
 
     // ─── ประเภทเบี้ยเลี้ยง ────────────────────────────────────────────────────
     const allowanceTypeTemplates = [
-      { name: 'เซอร์วิสชาร์จ', nameEn: 'Service Charge', code: 'SERVICE_CHARGE', isTaxable: true, sortOrder: 1, description: 'ค่าบริการแบ่งให้พนักงาน' },
-      { name: 'ค่าอาหาร', nameEn: 'Meal Allowance', code: 'MEAL', isTaxable: false, sortOrder: 2, description: 'เบี้ยเลี้ยงค่าอาหาร' },
-      { name: 'ค่าเดินทาง', nameEn: 'Transportation Allowance', code: 'TRANSPORT', isTaxable: false, sortOrder: 3, description: 'ค่าใช้จ่ายการเดินทาง' },
-      { name: 'ค่าที่พัก', nameEn: 'Housing Allowance', code: 'HOUSING', isTaxable: true, sortOrder: 4, description: 'เบี้ยเลี้ยงที่พักอาศัย' },
-      { name: 'ค่าโทรศัพท์', nameEn: 'Phone Allowance', code: 'PHONE', isTaxable: false, sortOrder: 5, description: 'ค่าใช้จ่ายโทรศัพท์' },
-      { name: 'ค่าล่วงเวลา', nameEn: 'Overtime Pay', code: 'OVERTIME', isTaxable: true, sortOrder: 6, description: 'ค่าจ้างการทำงานล่วงเวลา' },
-      { name: 'เบี้ยกะ', nameEn: 'Shift Allowance', code: 'SHIFT', isTaxable: false, sortOrder: 7, description: 'เบี้ยเลี้ยงสำหรับการทำงานกะ' },
-      { name: 'โบนัสประจำปี', nameEn: 'Annual Bonus', code: 'BONUS', isTaxable: true, sortOrder: 8, description: 'โบนัสประจำปีตามผลประกอบการ' },
-      { name: 'ค่าคอมมิชชั่น', nameEn: 'Commission', code: 'COMMISSION', isTaxable: true, sortOrder: 9, description: 'ค่าคอมมิชชั่นจากการขาย' },
+      {
+        name: 'เซอร์วิสชาร์จ',
+        nameEn: 'Service Charge',
+        code: 'SERVICE_CHARGE',
+        isTaxable: true,
+        sortOrder: 1,
+        description: 'ค่าบริการแบ่งให้พนักงาน',
+      },
+      {
+        name: 'ค่าอาหาร',
+        nameEn: 'Meal Allowance',
+        code: 'MEAL',
+        isTaxable: false,
+        sortOrder: 2,
+        description: 'เบี้ยเลี้ยงค่าอาหาร',
+      },
+      {
+        name: 'ค่าเดินทาง',
+        nameEn: 'Transportation Allowance',
+        code: 'TRANSPORT',
+        isTaxable: false,
+        sortOrder: 3,
+        description: 'ค่าใช้จ่ายการเดินทาง',
+      },
+      {
+        name: 'ค่าที่พัก',
+        nameEn: 'Housing Allowance',
+        code: 'HOUSING',
+        isTaxable: true,
+        sortOrder: 4,
+        description: 'เบี้ยเลี้ยงที่พักอาศัย',
+      },
+      {
+        name: 'ค่าโทรศัพท์',
+        nameEn: 'Phone Allowance',
+        code: 'PHONE',
+        isTaxable: false,
+        sortOrder: 5,
+        description: 'ค่าใช้จ่ายโทรศัพท์',
+      },
+      {
+        name: 'ค่าล่วงเวลา',
+        nameEn: 'Overtime Pay',
+        code: 'OVERTIME',
+        isTaxable: true,
+        sortOrder: 6,
+        description: 'ค่าจ้างการทำงานล่วงเวลา',
+      },
+      {
+        name: 'เบี้ยกะ',
+        nameEn: 'Shift Allowance',
+        code: 'SHIFT',
+        isTaxable: false,
+        sortOrder: 7,
+        description: 'เบี้ยเลี้ยงสำหรับการทำงานกะ',
+      },
+      {
+        name: 'โบนัสประจำปี',
+        nameEn: 'Annual Bonus',
+        code: 'BONUS',
+        isTaxable: true,
+        sortOrder: 8,
+        description: 'โบนัสประจำปีตามผลประกอบการ',
+      },
+      {
+        name: 'ค่าคอมมิชชั่น',
+        nameEn: 'Commission',
+        code: 'COMMISSION',
+        isTaxable: true,
+        sortOrder: 9,
+        description: 'ค่าคอมมิชชั่นจากการขาย',
+      },
     ];
 
     // ─── ประเภทการหักเงิน ─────────────────────────────────────────────────────
     const deductionTypeTemplates = [
-      { name: 'ภาษีเงินได้บุคคลธรรมดา', nameEn: 'Personal Income Tax', code: 'INCOME_TAX', isRequired: true, sortOrder: 1, description: 'ภาษีเงินได้หัก ณ ที่จ่าย (ตามกฎหมาย)' },
-      { name: 'ประกันสังคม', nameEn: 'Social Security', code: 'SOCIAL_SECURITY', isRequired: true, sortOrder: 2, description: 'เงินสมทบกองทุนประกันสังคม 5% (สูงสุด 750 บาท/เดือน)' },
-      { name: 'กองทุนสำรองเลี้ยงชีพ', nameEn: 'Provident Fund', code: 'PROVIDENT_FUND', isRequired: false, sortOrder: 3, description: 'เงินสะสมกองทุนสำรองเลี้ยงชีพ' },
-      { name: 'เงินกู้พนักงาน', nameEn: 'Employee Loan', code: 'EMPLOYEE_LOAN', isRequired: false, sortOrder: 4, description: 'หักคืนเงินกู้จากโรงแรม' },
-      { name: 'หักขาดงาน', nameEn: 'Absence Deduction', code: 'ABSENCE', isRequired: false, sortOrder: 5, description: 'หักเงินกรณีขาดงานโดยไม่มีเหตุ' },
-      { name: 'หักมาสาย', nameEn: 'Late Deduction', code: 'LATE', isRequired: false, sortOrder: 6, description: 'หักเงินกรณีมาทำงานสาย' },
-      { name: 'สหกรณ์ออมทรัพย์', nameEn: 'Cooperative Savings', code: 'COOPERATIVE', isRequired: false, sortOrder: 7, description: 'เงินสะสมสหกรณ์ออมทรัพย์พนักงาน' },
+      {
+        name: 'ภาษีเงินได้บุคคลธรรมดา',
+        nameEn: 'Personal Income Tax',
+        code: 'INCOME_TAX',
+        isRequired: true,
+        sortOrder: 1,
+        description: 'ภาษีเงินได้หัก ณ ที่จ่าย (ตามกฎหมาย)',
+      },
+      {
+        name: 'ประกันสังคม',
+        nameEn: 'Social Security',
+        code: 'SOCIAL_SECURITY',
+        isRequired: true,
+        sortOrder: 2,
+        description: 'เงินสมทบกองทุนประกันสังคม 5% (สูงสุด 750 บาท/เดือน)',
+      },
+      {
+        name: 'กองทุนสำรองเลี้ยงชีพ',
+        nameEn: 'Provident Fund',
+        code: 'PROVIDENT_FUND',
+        isRequired: false,
+        sortOrder: 3,
+        description: 'เงินสะสมกองทุนสำรองเลี้ยงชีพ',
+      },
+      {
+        name: 'เงินกู้พนักงาน',
+        nameEn: 'Employee Loan',
+        code: 'EMPLOYEE_LOAN',
+        isRequired: false,
+        sortOrder: 4,
+        description: 'หักคืนเงินกู้จากโรงแรม',
+      },
+      {
+        name: 'หักขาดงาน',
+        nameEn: 'Absence Deduction',
+        code: 'ABSENCE',
+        isRequired: false,
+        sortOrder: 5,
+        description: 'หักเงินกรณีขาดงานโดยไม่มีเหตุ',
+      },
+      {
+        name: 'หักมาสาย',
+        nameEn: 'Late Deduction',
+        code: 'LATE',
+        isRequired: false,
+        sortOrder: 6,
+        description: 'หักเงินกรณีมาทำงานสาย',
+      },
+      {
+        name: 'สหกรณ์ออมทรัพย์',
+        nameEn: 'Cooperative Savings',
+        code: 'COOPERATIVE',
+        isRequired: false,
+        sortOrder: 7,
+        description: 'เงินสะสมสหกรณ์ออมทรัพย์พนักงาน',
+      },
     ];
 
     // ─── Seed สำหรับแต่ละ Tenant ─────────────────────────────────────────────
@@ -1651,7 +2055,9 @@ export class SeederService {
         });
       }
 
-      this.logger.log(`    ✓ ${departmentTemplates.length} departments, ${leaveTypeTemplates.length} leave types, ${shiftTypeTemplates.length} shifts, ${allowanceTypeTemplates.length} allowances, ${deductionTypeTemplates.length} deductions`);
+      this.logger.log(
+        `    ✓ ${departmentTemplates.length} departments, ${leaveTypeTemplates.length} leave types, ${shiftTypeTemplates.length} shifts, ${allowanceTypeTemplates.length} allowances, ${deductionTypeTemplates.length} deductions`,
+      );
     }
 
     this.logger.log('✅ HR Master Data seeded successfully!');
@@ -1709,7 +2115,7 @@ export class SeederService {
         findPosition(deptHK!.id, 'Room Attendant'),
         findPosition(deptHR!.id, 'HR Manager'),
         findPosition(deptFB!.id, 'F&B Manager'),
-        findPosition(deptFB!.id, "Chef de Partie"),
+        findPosition(deptFB!.id, 'Chef de Partie'),
         deptMGT ? findPosition(deptMGT.id, 'General Manager') : Promise.resolve(null),
         deptENG ? findPosition(deptENG.id, 'Chief Engineer') : Promise.resolve(null),
       ]);
@@ -1717,104 +2123,254 @@ export class SeederService {
     // ─── Employee template data ──────────────────────────────────────────────
     const employeeTemplates = [
       {
-        code: 'PM-0001', firstName: 'วิชัย', lastName: 'มณีรัตน์', nickname: 'ชัย',
-        email: 'wichai.manee@mountain.hotel', phone: '081-234-5001',
-        department: 'ฝ่ายบริหาร', departmentId: deptMGT?.id ?? deptFO!.id,
-        position: 'ผู้จัดการทั่วไป', positionId: posGM?.id ?? null,
-        baseSalary: 85000, initialSalary: 65000, allowance: 10000, overtime: 0, positionBonus: 15000,
-        bankAccount: '123-4-56789-0', bankName: 'KBANK',
-        gender: 'MALE', dateOfBirth: new Date('1975-03-15'), employmentType: 'FULLTIME',
-        nationalId: '1100500123456', taxId: 'TX-1100500123456', socialSecurity: 'SS-1100500123456',
+        code: 'PM-0001',
+        firstName: 'วิชัย',
+        lastName: 'มณีรัตน์',
+        nickname: 'ชัย',
+        email: 'wichai.manee@mountain.hotel',
+        phone: '081-234-5001',
+        department: 'ฝ่ายบริหาร',
+        departmentId: deptMGT?.id ?? deptFO!.id,
+        position: 'ผู้จัดการทั่วไป',
+        positionId: posGM?.id ?? null,
+        baseSalary: 85000,
+        initialSalary: 65000,
+        allowance: 10000,
+        overtime: 0,
+        positionBonus: 15000,
+        bankAccount: '123-4-56789-0',
+        bankName: 'KBANK',
+        gender: 'MALE',
+        dateOfBirth: new Date('1975-03-15'),
+        employmentType: 'FULLTIME',
+        nationalId: '1100500123456',
+        taxId: 'TX-1100500123456',
+        socialSecurity: 'SS-1100500123456',
       },
       {
-        code: 'PM-0002', firstName: 'นภาพร', lastName: 'ศรีสมบูรณ์', nickname: 'พร',
-        email: 'napaporn.sri@mountain.hotel', phone: '081-234-5002',
-        department: 'ฝ่ายต้อนรับ', departmentId: deptFO!.id,
-        position: 'ผู้จัดการฝ่ายต้อนรับ', positionId: posFOM?.id ?? null,
-        baseSalary: 45000, initialSalary: 35000, allowance: 5000, overtime: 0, positionBonus: 8000,
-        bankAccount: '123-4-56789-1', bankName: 'SCB',
-        gender: 'FEMALE', dateOfBirth: new Date('1985-07-22'), employmentType: 'FULLTIME',
-        nationalId: '1100500234567', taxId: 'TX-1100500234567', socialSecurity: 'SS-1100500234567',
+        code: 'PM-0002',
+        firstName: 'นภาพร',
+        lastName: 'ศรีสมบูรณ์',
+        nickname: 'พร',
+        email: 'napaporn.sri@mountain.hotel',
+        phone: '081-234-5002',
+        department: 'ฝ่ายต้อนรับ',
+        departmentId: deptFO!.id,
+        position: 'ผู้จัดการฝ่ายต้อนรับ',
+        positionId: posFOM?.id ?? null,
+        baseSalary: 45000,
+        initialSalary: 35000,
+        allowance: 5000,
+        overtime: 0,
+        positionBonus: 8000,
+        bankAccount: '123-4-56789-1',
+        bankName: 'SCB',
+        gender: 'FEMALE',
+        dateOfBirth: new Date('1985-07-22'),
+        employmentType: 'FULLTIME',
+        nationalId: '1100500234567',
+        taxId: 'TX-1100500234567',
+        socialSecurity: 'SS-1100500234567',
       },
       {
-        code: 'PM-0003', firstName: 'สมชาย', lastName: 'ใจดี', nickname: 'ชาย',
-        email: 'somchai.jaidee@mountain.hotel', phone: '081-234-5003',
-        department: 'ฝ่ายต้อนรับ', departmentId: deptFO!.id,
-        position: 'พนักงานต้อนรับ (กะกลางวัน)', positionId: posFDA?.id ?? null,
-        baseSalary: 18000, initialSalary: 15000, allowance: 2000, overtime: 1500, positionBonus: 0,
-        bankAccount: '123-4-56789-2', bankName: 'BBL',
-        gender: 'MALE', dateOfBirth: new Date('1995-01-10'), employmentType: 'FULLTIME',
-        nationalId: '1100500345678', taxId: 'TX-1100500345678', socialSecurity: 'SS-1100500345678',
+        code: 'PM-0003',
+        firstName: 'สมชาย',
+        lastName: 'ใจดี',
+        nickname: 'ชาย',
+        email: 'somchai.jaidee@mountain.hotel',
+        phone: '081-234-5003',
+        department: 'ฝ่ายต้อนรับ',
+        departmentId: deptFO!.id,
+        position: 'พนักงานต้อนรับ (กะกลางวัน)',
+        positionId: posFDA?.id ?? null,
+        baseSalary: 18000,
+        initialSalary: 15000,
+        allowance: 2000,
+        overtime: 1500,
+        positionBonus: 0,
+        bankAccount: '123-4-56789-2',
+        bankName: 'BBL',
+        gender: 'MALE',
+        dateOfBirth: new Date('1995-01-10'),
+        employmentType: 'FULLTIME',
+        nationalId: '1100500345678',
+        taxId: 'TX-1100500345678',
+        socialSecurity: 'SS-1100500345678',
       },
       {
-        code: 'PM-0004', firstName: 'มาลี', lastName: 'รักษ์ดี', nickname: 'ลี',
-        email: 'malee.rakdee@mountain.hotel', phone: '081-234-5004',
-        department: 'ฝ่ายต้อนรับ', departmentId: deptFO!.id,
-        position: 'พนักงานต้อนรับ (กะกลางวัน)', positionId: posFDA?.id ?? null,
-        baseSalary: 17500, initialSalary: 15000, allowance: 2000, overtime: 1000, positionBonus: 0,
-        bankAccount: '123-4-56789-3', bankName: 'KTB',
-        gender: 'FEMALE', dateOfBirth: new Date('1997-11-05'), employmentType: 'FULLTIME',
-        nationalId: '1100500456789', taxId: 'TX-1100500456789', socialSecurity: 'SS-1100500456789',
+        code: 'PM-0004',
+        firstName: 'มาลี',
+        lastName: 'รักษ์ดี',
+        nickname: 'ลี',
+        email: 'malee.rakdee@mountain.hotel',
+        phone: '081-234-5004',
+        department: 'ฝ่ายต้อนรับ',
+        departmentId: deptFO!.id,
+        position: 'พนักงานต้อนรับ (กะกลางวัน)',
+        positionId: posFDA?.id ?? null,
+        baseSalary: 17500,
+        initialSalary: 15000,
+        allowance: 2000,
+        overtime: 1000,
+        positionBonus: 0,
+        bankAccount: '123-4-56789-3',
+        bankName: 'KTB',
+        gender: 'FEMALE',
+        dateOfBirth: new Date('1997-11-05'),
+        employmentType: 'FULLTIME',
+        nationalId: '1100500456789',
+        taxId: 'TX-1100500456789',
+        socialSecurity: 'SS-1100500456789',
       },
       {
-        code: 'PM-0005', firstName: 'รัตนา', lastName: 'แม่บ้านดี', nickname: 'นา',
-        email: 'rattana.maebaan@mountain.hotel', phone: '081-234-5005',
-        department: 'ฝ่ายแม่บ้าน', departmentId: deptHK!.id,
-        position: 'หัวหน้าแม่บ้าน', positionId: posEHK?.id ?? null,
-        baseSalary: 32000, initialSalary: 25000, allowance: 3000, overtime: 0, positionBonus: 5000,
-        bankAccount: '123-4-56789-4', bankName: 'KBANK',
-        gender: 'FEMALE', dateOfBirth: new Date('1980-06-18'), employmentType: 'FULLTIME',
-        nationalId: '1100500567890', taxId: 'TX-1100500567890', socialSecurity: 'SS-1100500567890',
+        code: 'PM-0005',
+        firstName: 'รัตนา',
+        lastName: 'แม่บ้านดี',
+        nickname: 'นา',
+        email: 'rattana.maebaan@mountain.hotel',
+        phone: '081-234-5005',
+        department: 'ฝ่ายแม่บ้าน',
+        departmentId: deptHK!.id,
+        position: 'หัวหน้าแม่บ้าน',
+        positionId: posEHK?.id ?? null,
+        baseSalary: 32000,
+        initialSalary: 25000,
+        allowance: 3000,
+        overtime: 0,
+        positionBonus: 5000,
+        bankAccount: '123-4-56789-4',
+        bankName: 'KBANK',
+        gender: 'FEMALE',
+        dateOfBirth: new Date('1980-06-18'),
+        employmentType: 'FULLTIME',
+        nationalId: '1100500567890',
+        taxId: 'TX-1100500567890',
+        socialSecurity: 'SS-1100500567890',
       },
       {
-        code: 'PM-0006', firstName: 'สุนันท์', lastName: 'ทำความสะอาด', nickname: 'นัน',
-        email: 'sunun.tam@mountain.hotel', phone: '081-234-5006',
-        department: 'ฝ่ายแม่บ้าน', departmentId: deptHK!.id,
-        position: 'แม่บ้านห้องพัก', positionId: posRA?.id ?? null,
-        baseSalary: 13500, initialSalary: 12000, allowance: 1500, overtime: 2000, positionBonus: 0,
-        bankAccount: '123-4-56789-5', bankName: 'GSB',
-        gender: 'FEMALE', dateOfBirth: new Date('1992-09-28'), employmentType: 'FULLTIME',
-        nationalId: '1100500678901', taxId: 'TX-1100500678901', socialSecurity: 'SS-1100500678901',
+        code: 'PM-0006',
+        firstName: 'สุนันท์',
+        lastName: 'ทำความสะอาด',
+        nickname: 'นัน',
+        email: 'sunun.tam@mountain.hotel',
+        phone: '081-234-5006',
+        department: 'ฝ่ายแม่บ้าน',
+        departmentId: deptHK!.id,
+        position: 'แม่บ้านห้องพัก',
+        positionId: posRA?.id ?? null,
+        baseSalary: 13500,
+        initialSalary: 12000,
+        allowance: 1500,
+        overtime: 2000,
+        positionBonus: 0,
+        bankAccount: '123-4-56789-5',
+        bankName: 'GSB',
+        gender: 'FEMALE',
+        dateOfBirth: new Date('1992-09-28'),
+        employmentType: 'FULLTIME',
+        nationalId: '1100500678901',
+        taxId: 'TX-1100500678901',
+        socialSecurity: 'SS-1100500678901',
       },
       {
-        code: 'PM-0007', firstName: 'ประภา', lastName: 'บุคลากรดี', nickname: 'ภา',
-        email: 'prapa.hr@mountain.hotel', phone: '081-234-5007',
-        department: 'ฝ่ายทรัพยากรบุคคล', departmentId: deptHR!.id,
-        position: 'ผู้จัดการฝ่าย HR', positionId: posHRM?.id ?? null,
-        baseSalary: 38000, initialSalary: 30000, allowance: 4000, overtime: 0, positionBonus: 6000,
-        bankAccount: '123-4-56789-6', bankName: 'SCB',
-        gender: 'FEMALE', dateOfBirth: new Date('1988-04-12'), employmentType: 'FULLTIME',
-        nationalId: '1100500789012', taxId: 'TX-1100500789012', socialSecurity: 'SS-1100500789012',
+        code: 'PM-0007',
+        firstName: 'ประภา',
+        lastName: 'บุคลากรดี',
+        nickname: 'ภา',
+        email: 'prapa.hr@mountain.hotel',
+        phone: '081-234-5007',
+        department: 'ฝ่ายทรัพยากรบุคคล',
+        departmentId: deptHR!.id,
+        position: 'ผู้จัดการฝ่าย HR',
+        positionId: posHRM?.id ?? null,
+        baseSalary: 38000,
+        initialSalary: 30000,
+        allowance: 4000,
+        overtime: 0,
+        positionBonus: 6000,
+        bankAccount: '123-4-56789-6',
+        bankName: 'SCB',
+        gender: 'FEMALE',
+        dateOfBirth: new Date('1988-04-12'),
+        employmentType: 'FULLTIME',
+        nationalId: '1100500789012',
+        taxId: 'TX-1100500789012',
+        socialSecurity: 'SS-1100500789012',
       },
       {
-        code: 'PM-0008', firstName: 'อนุชา', lastName: 'อาหารดี', nickname: 'ชา',
-        email: 'anucha.fb@mountain.hotel', phone: '081-234-5008',
-        department: 'ฝ่ายอาหารและเครื่องดื่ม', departmentId: deptFB!.id,
-        position: 'ผู้จัดการอาหารและเครื่องดื่ม', positionId: posFBM?.id ?? null,
-        baseSalary: 40000, initialSalary: 32000, allowance: 5000, overtime: 0, positionBonus: 7000,
-        bankAccount: '123-4-56789-7', bankName: 'BAY',
-        gender: 'MALE', dateOfBirth: new Date('1983-12-01'), employmentType: 'FULLTIME',
-        nationalId: '1100500890123', taxId: 'TX-1100500890123', socialSecurity: 'SS-1100500890123',
+        code: 'PM-0008',
+        firstName: 'อนุชา',
+        lastName: 'อาหารดี',
+        nickname: 'ชา',
+        email: 'anucha.fb@mountain.hotel',
+        phone: '081-234-5008',
+        department: 'ฝ่ายอาหารและเครื่องดื่ม',
+        departmentId: deptFB!.id,
+        position: 'ผู้จัดการอาหารและเครื่องดื่ม',
+        positionId: posFBM?.id ?? null,
+        baseSalary: 40000,
+        initialSalary: 32000,
+        allowance: 5000,
+        overtime: 0,
+        positionBonus: 7000,
+        bankAccount: '123-4-56789-7',
+        bankName: 'BAY',
+        gender: 'MALE',
+        dateOfBirth: new Date('1983-12-01'),
+        employmentType: 'FULLTIME',
+        nationalId: '1100500890123',
+        taxId: 'TX-1100500890123',
+        socialSecurity: 'SS-1100500890123',
       },
       {
-        code: 'PM-0009', firstName: 'ไพศาล', lastName: 'ครัวเก่ง', nickname: 'ศาล',
-        email: 'paisal.chef@mountain.hotel', phone: '081-234-5009',
-        department: 'ฝ่ายอาหารและเครื่องดื่ม', departmentId: deptFB!.id,
-        position: 'พ่อครัวแต่ละส่วน', positionId: posChef?.id ?? null,
-        baseSalary: 22000, initialSalary: 18000, allowance: 2500, overtime: 3000, positionBonus: 0,
-        bankAccount: '123-4-56789-8', bankName: 'KBANK',
-        gender: 'MALE', dateOfBirth: new Date('1990-08-20'), employmentType: 'FULLTIME',
-        nationalId: '1100500901234', taxId: 'TX-1100500901234', socialSecurity: 'SS-1100500901234',
+        code: 'PM-0009',
+        firstName: 'ไพศาล',
+        lastName: 'ครัวเก่ง',
+        nickname: 'ศาล',
+        email: 'paisal.chef@mountain.hotel',
+        phone: '081-234-5009',
+        department: 'ฝ่ายอาหารและเครื่องดื่ม',
+        departmentId: deptFB!.id,
+        position: 'พ่อครัวแต่ละส่วน',
+        positionId: posChef?.id ?? null,
+        baseSalary: 22000,
+        initialSalary: 18000,
+        allowance: 2500,
+        overtime: 3000,
+        positionBonus: 0,
+        bankAccount: '123-4-56789-8',
+        bankName: 'KBANK',
+        gender: 'MALE',
+        dateOfBirth: new Date('1990-08-20'),
+        employmentType: 'FULLTIME',
+        nationalId: '1100500901234',
+        taxId: 'TX-1100500901234',
+        socialSecurity: 'SS-1100500901234',
       },
       {
-        code: 'PM-0010', firstName: 'ธนกร', lastName: 'ช่างดี', nickname: 'กร',
-        email: 'thanakorn.eng@mountain.hotel', phone: '081-234-5010',
-        department: 'ฝ่ายวิศวกรรม', departmentId: deptENG?.id ?? deptFO!.id,
-        position: 'หัวหน้าวิศวกร', positionId: posChiefEng?.id ?? null,
-        baseSalary: 35000, initialSalary: 28000, allowance: 3500, overtime: 2000, positionBonus: 5000,
-        bankAccount: '123-4-56789-9', bankName: 'TMBThanachart',
-        gender: 'MALE', dateOfBirth: new Date('1987-02-14'), employmentType: 'FULLTIME',
-        nationalId: '1100501012345', taxId: 'TX-1100501012345', socialSecurity: 'SS-1100501012345',
+        code: 'PM-0010',
+        firstName: 'ธนกร',
+        lastName: 'ช่างดี',
+        nickname: 'กร',
+        email: 'thanakorn.eng@mountain.hotel',
+        phone: '081-234-5010',
+        department: 'ฝ่ายวิศวกรรม',
+        departmentId: deptENG?.id ?? deptFO!.id,
+        position: 'หัวหน้าวิศวกร',
+        positionId: posChiefEng?.id ?? null,
+        baseSalary: 35000,
+        initialSalary: 28000,
+        allowance: 3500,
+        overtime: 2000,
+        positionBonus: 5000,
+        bankAccount: '123-4-56789-9',
+        bankName: 'TMBThanachart',
+        gender: 'MALE',
+        dateOfBirth: new Date('1987-02-14'),
+        employmentType: 'FULLTIME',
+        nationalId: '1100501012345',
+        taxId: 'TX-1100501012345',
+        socialSecurity: 'SS-1100501012345',
       },
     ];
 
@@ -1829,36 +2385,64 @@ export class SeederService {
         const updated = await (this.prisma.employee as any).update({
           where: { id: existing.id },
           data: {
-            tenantId, firstName: emp.firstName, lastName: emp.lastName,
-            nickname: emp.nickname, phone: emp.phone,
-            department: emp.department, position: emp.position,
-            departmentId: emp.departmentId, positionId: emp.positionId,
+            tenantId,
+            firstName: emp.firstName,
+            lastName: emp.lastName,
+            nickname: emp.nickname,
+            phone: emp.phone,
+            department: emp.department,
+            position: emp.position,
+            departmentId: emp.departmentId,
+            positionId: emp.positionId,
             propertyId: property?.id || null,
-            baseSalary: emp.baseSalary, initialSalary: emp.initialSalary,
-            allowance: emp.allowance, overtime: emp.overtime, positionBonus: emp.positionBonus,
-            taxId: emp.taxId, socialSecurity: emp.socialSecurity,
-            bankAccount: emp.bankAccount, bankName: emp.bankName,
-            gender: emp.gender, dateOfBirth: emp.dateOfBirth,
-            employmentType: emp.employmentType, nationalId: emp.nationalId,
-            status: 'ACTIVE', employeeCode: emp.code,
+            baseSalary: emp.baseSalary,
+            initialSalary: emp.initialSalary,
+            allowance: emp.allowance,
+            overtime: emp.overtime,
+            positionBonus: emp.positionBonus,
+            taxId: emp.taxId,
+            socialSecurity: emp.socialSecurity,
+            bankAccount: emp.bankAccount,
+            bankName: emp.bankName,
+            gender: emp.gender,
+            dateOfBirth: emp.dateOfBirth,
+            employmentType: emp.employmentType,
+            nationalId: emp.nationalId,
+            status: 'ACTIVE',
+            employeeCode: emp.code,
           },
         });
         createdEmployees.push(updated);
       } else {
         const created = await (this.prisma.employee as any).create({
           data: {
-            tenantId, email: emp.email, firstName: emp.firstName, lastName: emp.lastName,
-            nickname: emp.nickname, phone: emp.phone, employeeCode: emp.code,
-            department: emp.department, position: emp.position,
-            departmentId: emp.departmentId, positionId: emp.positionId,
+            tenantId,
+            email: emp.email,
+            firstName: emp.firstName,
+            lastName: emp.lastName,
+            nickname: emp.nickname,
+            phone: emp.phone,
+            employeeCode: emp.code,
+            department: emp.department,
+            position: emp.position,
+            departmentId: emp.departmentId,
+            positionId: emp.positionId,
             propertyId: property?.id || null,
-            baseSalary: emp.baseSalary, initialSalary: emp.initialSalary,
-            allowance: emp.allowance, overtime: emp.overtime, positionBonus: emp.positionBonus,
-            taxId: emp.taxId, socialSecurity: emp.socialSecurity,
-            bankAccount: emp.bankAccount, bankName: emp.bankName,
-            gender: emp.gender, dateOfBirth: emp.dateOfBirth,
-            employmentType: emp.employmentType, nationalId: emp.nationalId,
-            status: 'ACTIVE', startDate: new Date('2024-01-01'),
+            baseSalary: emp.baseSalary,
+            initialSalary: emp.initialSalary,
+            allowance: emp.allowance,
+            overtime: emp.overtime,
+            positionBonus: emp.positionBonus,
+            taxId: emp.taxId,
+            socialSecurity: emp.socialSecurity,
+            bankAccount: emp.bankAccount,
+            bankName: emp.bankName,
+            gender: emp.gender,
+            dateOfBirth: emp.dateOfBirth,
+            employmentType: emp.employmentType,
+            nationalId: emp.nationalId,
+            status: 'ACTIVE',
+            startDate: new Date('2024-01-01'),
           },
         });
         createdEmployees.push(created);
@@ -1875,7 +2459,8 @@ export class SeederService {
       const cursor = new Date(monthStart);
       while (cursor <= today) {
         const dow = cursor.getDay();
-        if (dow !== 0 && dow !== 6) { // skip weekends
+        if (dow !== 0 && dow !== 6) {
+          // skip weekends
           const dateOnly = new Date(cursor);
           dateOnly.setUTCHours(0, 0, 0, 0);
 
@@ -1891,16 +2476,20 @@ export class SeederService {
             let workMinutes: number | null = null;
             let overtimeMinutes: number | null = null;
 
-            if (rand < 0.80) {
+            if (rand < 0.8) {
               status = 'present';
-              checkIn = new Date(dateOnly); checkIn.setUTCHours(8, Math.floor(Math.random() * 30), 0);
-              checkOut = new Date(dateOnly); checkOut.setUTCHours(17, Math.floor(Math.random() * 30), 0);
+              checkIn = new Date(dateOnly);
+              checkIn.setUTCHours(8, Math.floor(Math.random() * 30), 0);
+              checkOut = new Date(dateOnly);
+              checkOut.setUTCHours(17, Math.floor(Math.random() * 30), 0);
               workMinutes = 480;
               overtimeMinutes = Math.random() < 0.3 ? Math.floor(Math.random() * 90 + 30) : 0;
-            } else if (rand < 0.90) {
+            } else if (rand < 0.9) {
               status = 'late';
-              checkIn = new Date(dateOnly); checkIn.setUTCHours(9, Math.floor(Math.random() * 30 + 15), 0);
-              checkOut = new Date(dateOnly); checkOut.setUTCHours(18, 30, 0);
+              checkIn = new Date(dateOnly);
+              checkIn.setUTCHours(9, Math.floor(Math.random() * 30 + 15), 0);
+              checkOut = new Date(dateOnly);
+              checkOut.setUTCHours(18, 30, 0);
               workMinutes = 450;
               overtimeMinutes = 0;
             } else if (rand < 0.95) {
@@ -1910,7 +2499,16 @@ export class SeederService {
             }
 
             await (this.prisma as any).hrAttendance.create({
-              data: { tenantId, employeeId: emp.id, date: dateOnly, status, checkIn, checkOut, workMinutes, overtimeMinutes },
+              data: {
+                tenantId,
+                employeeId: emp.id,
+                date: dateOnly,
+                status,
+                checkIn,
+                checkOut,
+                workMinutes,
+                overtimeMinutes,
+              },
             });
             attendanceCount++;
           }
@@ -1934,24 +2532,33 @@ export class SeederService {
           employeeId: createdEmployees[2].id, // สมชาย
           leaveTypeId: annualLeaveType.id,
           startDate: new Date(today.getFullYear(), today.getMonth(), 15),
-          endDate:   new Date(today.getFullYear(), today.getMonth(), 17),
-          totalDays: 3, reason: 'พักผ่อนประจำปี ท่องเที่ยวกับครอบครัว', status: 'approved',
-          approvedBy: ownerUser.id, approvedAt: new Date(),
+          endDate: new Date(today.getFullYear(), today.getMonth(), 17),
+          totalDays: 3,
+          reason: 'พักผ่อนประจำปี ท่องเที่ยวกับครอบครัว',
+          status: 'approved',
+          approvedBy: ownerUser.id,
+          approvedAt: new Date(),
         },
         {
           employeeId: createdEmployees[5].id, // สุนันท์
           leaveTypeId: sickLeaveType.id,
           startDate: new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1),
-          endDate:   new Date(today.getFullYear(), today.getMonth(), today.getDate() + 2),
-          totalDays: 2, reason: 'ไม่สบาย มีไข้', status: 'pending',
+          endDate: new Date(today.getFullYear(), today.getMonth(), today.getDate() + 2),
+          totalDays: 2,
+          reason: 'ไม่สบาย มีไข้',
+          status: 'pending',
         },
         {
           employeeId: createdEmployees[3].id, // มาลี
           leaveTypeId: annualLeaveType.id,
           startDate: new Date(today.getFullYear(), today.getMonth(), 5),
-          endDate:   new Date(today.getFullYear(), today.getMonth(), 5),
-          totalDays: 1, reason: 'ธุระส่วนตัว', status: 'rejected',
-          rejectedBy: ownerUser.id, rejectedAt: new Date(), rejectReason: 'ช่วงนั้นพนักงานน้อย ขอให้เลื่อนออกไป',
+          endDate: new Date(today.getFullYear(), today.getMonth(), 5),
+          totalDays: 1,
+          reason: 'ธุระส่วนตัว',
+          status: 'rejected',
+          rejectedBy: ownerUser.id,
+          rejectedAt: new Date(),
+          rejectReason: 'ช่วงนั้นพนักงานน้อย ขอให้เลื่อนออกไป',
         },
       ];
 
@@ -1988,293 +2595,758 @@ export class SeederService {
 
     // Employee templates per department code
     // Each template uses nameEn to look up the position from seedHrMasterData
-    const employeeTemplatesByDept: Record<string, Array<{
-      codePrefix: string;
-      firstName: string;
-      lastName: string;
-      nickname: string;
-      emailPrefix: string;
-      positionNameEn: string;
-      gender: string;
-      dateOfBirth: Date;
-      employmentType: string;
-      baseSalary: number;
-      initialSalary: number;
-      allowance: number;
-      overtime: number;
-      positionBonus: number;
-      bankName: string;
-    }>> = {
+    const employeeTemplatesByDept: Record<
+      string,
+      Array<{
+        codePrefix: string;
+        firstName: string;
+        lastName: string;
+        nickname: string;
+        emailPrefix: string;
+        positionNameEn: string;
+        gender: string;
+        dateOfBirth: Date;
+        employmentType: string;
+        baseSalary: number;
+        initialSalary: number;
+        allowance: number;
+        overtime: number;
+        positionBonus: number;
+        bankName: string;
+      }>
+    > = {
       MGT: [
         {
-          codePrefix: 'MGT-001', firstName: 'ธีระพล', lastName: 'วิชาการ', nickname: 'เติ้ล',
-          emailPrefix: 'teeraphol.gm', positionNameEn: 'General Manager',
-          gender: 'MALE', dateOfBirth: new Date('1972-04-10'), employmentType: 'FULLTIME',
-          baseSalary: 95000, initialSalary: 70000, allowance: 12000, overtime: 0, positionBonus: 18000, bankName: 'KBANK',
+          codePrefix: 'MGT-001',
+          firstName: 'ธีระพล',
+          lastName: 'วิชาการ',
+          nickname: 'เติ้ล',
+          emailPrefix: 'teeraphol.gm',
+          positionNameEn: 'General Manager',
+          gender: 'MALE',
+          dateOfBirth: new Date('1972-04-10'),
+          employmentType: 'FULLTIME',
+          baseSalary: 95000,
+          initialSalary: 70000,
+          allowance: 12000,
+          overtime: 0,
+          positionBonus: 18000,
+          bankName: 'KBANK',
         },
         {
-          codePrefix: 'MGT-002', firstName: 'ศิริพร', lastName: 'บริหารดี', nickname: 'อ้อม',
-          emailPrefix: 'siriporn.agm', positionNameEn: 'Assistant General Manager',
-          gender: 'FEMALE', dateOfBirth: new Date('1978-09-25'), employmentType: 'FULLTIME',
-          baseSalary: 72000, initialSalary: 55000, allowance: 8000, overtime: 0, positionBonus: 12000, bankName: 'SCB',
+          codePrefix: 'MGT-002',
+          firstName: 'ศิริพร',
+          lastName: 'บริหารดี',
+          nickname: 'อ้อม',
+          emailPrefix: 'siriporn.agm',
+          positionNameEn: 'Assistant General Manager',
+          gender: 'FEMALE',
+          dateOfBirth: new Date('1978-09-25'),
+          employmentType: 'FULLTIME',
+          baseSalary: 72000,
+          initialSalary: 55000,
+          allowance: 8000,
+          overtime: 0,
+          positionBonus: 12000,
+          bankName: 'SCB',
         },
       ],
       FO: [
         {
-          codePrefix: 'FO-001', firstName: 'กนกวรรณ', lastName: 'ต้อนรับดี', nickname: 'กนก',
-          emailPrefix: 'kanokwan.fom', positionNameEn: 'Front Office Manager',
-          gender: 'FEMALE', dateOfBirth: new Date('1983-06-12'), employmentType: 'FULLTIME',
-          baseSalary: 45000, initialSalary: 35000, allowance: 5000, overtime: 0, positionBonus: 8000, bankName: 'SCB',
+          codePrefix: 'FO-001',
+          firstName: 'กนกวรรณ',
+          lastName: 'ต้อนรับดี',
+          nickname: 'กนก',
+          emailPrefix: 'kanokwan.fom',
+          positionNameEn: 'Front Office Manager',
+          gender: 'FEMALE',
+          dateOfBirth: new Date('1983-06-12'),
+          employmentType: 'FULLTIME',
+          baseSalary: 45000,
+          initialSalary: 35000,
+          allowance: 5000,
+          overtime: 0,
+          positionBonus: 8000,
+          bankName: 'SCB',
         },
         {
-          codePrefix: 'FO-002', firstName: 'พีรพัฒน์', lastName: 'เวรกลางวัน', nickname: 'เพชร',
-          emailPrefix: 'peeraphat.fd', positionNameEn: 'Front Desk Agent (Day Shift)',
-          gender: 'MALE', dateOfBirth: new Date('1996-03-20'), employmentType: 'FULLTIME',
-          baseSalary: 18000, initialSalary: 15000, allowance: 2000, overtime: 1500, positionBonus: 0, bankName: 'KTB',
+          codePrefix: 'FO-002',
+          firstName: 'พีรพัฒน์',
+          lastName: 'เวรกลางวัน',
+          nickname: 'เพชร',
+          emailPrefix: 'peeraphat.fd',
+          positionNameEn: 'Front Desk Agent (Day Shift)',
+          gender: 'MALE',
+          dateOfBirth: new Date('1996-03-20'),
+          employmentType: 'FULLTIME',
+          baseSalary: 18000,
+          initialSalary: 15000,
+          allowance: 2000,
+          overtime: 1500,
+          positionBonus: 0,
+          bankName: 'KTB',
         },
         {
-          codePrefix: 'FO-003', firstName: 'ณิชา', lastName: 'กลางคืนดี', nickname: 'นิค',
-          emailPrefix: 'nicha.night', positionNameEn: 'Night Auditor',
-          gender: 'FEMALE', dateOfBirth: new Date('1994-11-08'), employmentType: 'FULLTIME',
-          baseSalary: 19000, initialSalary: 16000, allowance: 2500, overtime: 2500, positionBonus: 0, bankName: 'BBL',
+          codePrefix: 'FO-003',
+          firstName: 'ณิชา',
+          lastName: 'กลางคืนดี',
+          nickname: 'นิค',
+          emailPrefix: 'nicha.night',
+          positionNameEn: 'Night Auditor',
+          gender: 'FEMALE',
+          dateOfBirth: new Date('1994-11-08'),
+          employmentType: 'FULLTIME',
+          baseSalary: 19000,
+          initialSalary: 16000,
+          allowance: 2500,
+          overtime: 2500,
+          positionBonus: 0,
+          bankName: 'BBL',
         },
         {
-          codePrefix: 'FO-004', firstName: 'สุเมธ', lastName: 'คอนเซียจ', nickname: 'เมธ',
-          emailPrefix: 'sumet.concierge', positionNameEn: 'Concierge',
-          gender: 'MALE', dateOfBirth: new Date('1990-07-15'), employmentType: 'FULLTIME',
-          baseSalary: 22000, initialSalary: 18000, allowance: 2000, overtime: 1000, positionBonus: 0, bankName: 'KBANK',
+          codePrefix: 'FO-004',
+          firstName: 'สุเมธ',
+          lastName: 'คอนเซียจ',
+          nickname: 'เมธ',
+          emailPrefix: 'sumet.concierge',
+          positionNameEn: 'Concierge',
+          gender: 'MALE',
+          dateOfBirth: new Date('1990-07-15'),
+          employmentType: 'FULLTIME',
+          baseSalary: 22000,
+          initialSalary: 18000,
+          allowance: 2000,
+          overtime: 1000,
+          positionBonus: 0,
+          bankName: 'KBANK',
         },
         {
-          codePrefix: 'FO-005', firstName: 'วรรณิกา', lastName: 'รับจอง', nickname: 'ว่าน',
-          emailPrefix: 'wannika.res', positionNameEn: 'Reservation Agent',
-          gender: 'FEMALE', dateOfBirth: new Date('1998-02-28'), employmentType: 'FULLTIME',
-          baseSalary: 17500, initialSalary: 15000, allowance: 1500, overtime: 800, positionBonus: 0, bankName: 'GSB',
+          codePrefix: 'FO-005',
+          firstName: 'วรรณิกา',
+          lastName: 'รับจอง',
+          nickname: 'ว่าน',
+          emailPrefix: 'wannika.res',
+          positionNameEn: 'Reservation Agent',
+          gender: 'FEMALE',
+          dateOfBirth: new Date('1998-02-28'),
+          employmentType: 'FULLTIME',
+          baseSalary: 17500,
+          initialSalary: 15000,
+          allowance: 1500,
+          overtime: 800,
+          positionBonus: 0,
+          bankName: 'GSB',
         },
         {
-          codePrefix: 'FO-006', firstName: 'ชลธิชา', lastName: 'เกสต์รีเลชัน', nickname: 'ชล',
-          emailPrefix: 'cholticha.gro', positionNameEn: 'Guest Relations Officer',
-          gender: 'FEMALE', dateOfBirth: new Date('1995-05-19'), employmentType: 'FULLTIME',
-          baseSalary: 21000, initialSalary: 18000, allowance: 2000, overtime: 500, positionBonus: 0, bankName: 'BAY',
+          codePrefix: 'FO-006',
+          firstName: 'ชลธิชา',
+          lastName: 'เกสต์รีเลชัน',
+          nickname: 'ชล',
+          emailPrefix: 'cholticha.gro',
+          positionNameEn: 'Guest Relations Officer',
+          gender: 'FEMALE',
+          dateOfBirth: new Date('1995-05-19'),
+          employmentType: 'FULLTIME',
+          baseSalary: 21000,
+          initialSalary: 18000,
+          allowance: 2000,
+          overtime: 500,
+          positionBonus: 0,
+          bankName: 'BAY',
         },
       ],
       HK: [
         {
-          codePrefix: 'HK-001', firstName: 'จินตนา', lastName: 'ดูแลห้อง', nickname: 'จิ๋ว',
-          emailPrefix: 'jintana.ehk', positionNameEn: 'Executive Housekeeper',
-          gender: 'FEMALE', dateOfBirth: new Date('1979-08-30'), employmentType: 'FULLTIME',
-          baseSalary: 32000, initialSalary: 25000, allowance: 3000, overtime: 0, positionBonus: 5000, bankName: 'KBANK',
+          codePrefix: 'HK-001',
+          firstName: 'จินตนา',
+          lastName: 'ดูแลห้อง',
+          nickname: 'จิ๋ว',
+          emailPrefix: 'jintana.ehk',
+          positionNameEn: 'Executive Housekeeper',
+          gender: 'FEMALE',
+          dateOfBirth: new Date('1979-08-30'),
+          employmentType: 'FULLTIME',
+          baseSalary: 32000,
+          initialSalary: 25000,
+          allowance: 3000,
+          overtime: 0,
+          positionBonus: 5000,
+          bankName: 'KBANK',
         },
         {
-          codePrefix: 'HK-002', firstName: 'สุภาวดี', lastName: 'ชั้นหนึ่ง', nickname: 'พิ',
-          emailPrefix: 'supawadee.sup', positionNameEn: 'Floor Supervisor',
-          gender: 'FEMALE', dateOfBirth: new Date('1987-01-14'), employmentType: 'FULLTIME',
-          baseSalary: 22000, initialSalary: 18000, allowance: 2000, overtime: 500, positionBonus: 2000, bankName: 'SCB',
+          codePrefix: 'HK-002',
+          firstName: 'สุภาวดี',
+          lastName: 'ชั้นหนึ่ง',
+          nickname: 'พิ',
+          emailPrefix: 'supawadee.sup',
+          positionNameEn: 'Floor Supervisor',
+          gender: 'FEMALE',
+          dateOfBirth: new Date('1987-01-14'),
+          employmentType: 'FULLTIME',
+          baseSalary: 22000,
+          initialSalary: 18000,
+          allowance: 2000,
+          overtime: 500,
+          positionBonus: 2000,
+          bankName: 'SCB',
         },
         {
-          codePrefix: 'HK-003', firstName: 'ลำดวน', lastName: 'ทำห้อง', nickname: 'ดวน',
-          emailPrefix: 'lamduan.ra', positionNameEn: 'Room Attendant',
-          gender: 'FEMALE', dateOfBirth: new Date('1993-10-05'), employmentType: 'FULLTIME',
-          baseSalary: 13500, initialSalary: 12000, allowance: 1500, overtime: 2000, positionBonus: 0, bankName: 'GSB',
+          codePrefix: 'HK-003',
+          firstName: 'ลำดวน',
+          lastName: 'ทำห้อง',
+          nickname: 'ดวน',
+          emailPrefix: 'lamduan.ra',
+          positionNameEn: 'Room Attendant',
+          gender: 'FEMALE',
+          dateOfBirth: new Date('1993-10-05'),
+          employmentType: 'FULLTIME',
+          baseSalary: 13500,
+          initialSalary: 12000,
+          allowance: 1500,
+          overtime: 2000,
+          positionBonus: 0,
+          bankName: 'GSB',
         },
         {
-          codePrefix: 'HK-004', firstName: 'อรวรรณ', lastName: 'ซักรีด', nickname: 'อ้อ',
-          emailPrefix: 'orawan.laundry', positionNameEn: 'Laundry Attendant',
-          gender: 'FEMALE', dateOfBirth: new Date('1991-04-22'), employmentType: 'FULLTIME',
-          baseSalary: 13000, initialSalary: 11500, allowance: 1200, overtime: 1800, positionBonus: 0, bankName: 'KTB',
+          codePrefix: 'HK-004',
+          firstName: 'อรวรรณ',
+          lastName: 'ซักรีด',
+          nickname: 'อ้อ',
+          emailPrefix: 'orawan.laundry',
+          positionNameEn: 'Laundry Attendant',
+          gender: 'FEMALE',
+          dateOfBirth: new Date('1991-04-22'),
+          employmentType: 'FULLTIME',
+          baseSalary: 13000,
+          initialSalary: 11500,
+          allowance: 1200,
+          overtime: 1800,
+          positionBonus: 0,
+          bankName: 'KTB',
         },
         {
-          codePrefix: 'HK-005', firstName: 'ปรีดา', lastName: 'พื้นที่กลาง', nickname: 'ดา',
-          emailPrefix: 'preeda.pa', positionNameEn: 'Public Area Cleaner',
-          gender: 'MALE', dateOfBirth: new Date('1989-12-11'), employmentType: 'FULLTIME',
-          baseSalary: 12500, initialSalary: 11000, allowance: 1000, overtime: 2200, positionBonus: 0, bankName: 'BBL',
+          codePrefix: 'HK-005',
+          firstName: 'ปรีดา',
+          lastName: 'พื้นที่กลาง',
+          nickname: 'ดา',
+          emailPrefix: 'preeda.pa',
+          positionNameEn: 'Public Area Cleaner',
+          gender: 'MALE',
+          dateOfBirth: new Date('1989-12-11'),
+          employmentType: 'FULLTIME',
+          baseSalary: 12500,
+          initialSalary: 11000,
+          allowance: 1000,
+          overtime: 2200,
+          positionBonus: 0,
+          bankName: 'BBL',
         },
       ],
       FB: [
         {
-          codePrefix: 'FB-001', firstName: 'นิรันดร์', lastName: 'อาหารเลิศ', nickname: 'ดร',
-          emailPrefix: 'niran.fbm', positionNameEn: 'F&B Manager',
-          gender: 'MALE', dateOfBirth: new Date('1980-03-17'), employmentType: 'FULLTIME',
-          baseSalary: 42000, initialSalary: 33000, allowance: 5000, overtime: 0, positionBonus: 7000, bankName: 'SCB',
+          codePrefix: 'FB-001',
+          firstName: 'นิรันดร์',
+          lastName: 'อาหารเลิศ',
+          nickname: 'ดร',
+          emailPrefix: 'niran.fbm',
+          positionNameEn: 'F&B Manager',
+          gender: 'MALE',
+          dateOfBirth: new Date('1980-03-17'),
+          employmentType: 'FULLTIME',
+          baseSalary: 42000,
+          initialSalary: 33000,
+          allowance: 5000,
+          overtime: 0,
+          positionBonus: 7000,
+          bankName: 'SCB',
         },
         {
-          codePrefix: 'FB-002', firstName: 'ชาญชัย', lastName: 'ครัวเชฟ', nickname: 'ชาญ',
-          emailPrefix: 'chanchai.chef', positionNameEn: 'Head Chef',
-          gender: 'MALE', dateOfBirth: new Date('1977-11-22'), employmentType: 'FULLTIME',
-          baseSalary: 55000, initialSalary: 42000, allowance: 6000, overtime: 0, positionBonus: 8000, bankName: 'KBANK',
+          codePrefix: 'FB-002',
+          firstName: 'ชาญชัย',
+          lastName: 'ครัวเชฟ',
+          nickname: 'ชาญ',
+          emailPrefix: 'chanchai.chef',
+          positionNameEn: 'Head Chef',
+          gender: 'MALE',
+          dateOfBirth: new Date('1977-11-22'),
+          employmentType: 'FULLTIME',
+          baseSalary: 55000,
+          initialSalary: 42000,
+          allowance: 6000,
+          overtime: 0,
+          positionBonus: 8000,
+          bankName: 'KBANK',
         },
         {
-          codePrefix: 'FB-003', firstName: 'สุชาติ', lastName: 'เชฟส่วน', nickname: 'ติ',
-          emailPrefix: 'suchat.cdp', positionNameEn: 'Chef de Partie',
-          gender: 'MALE', dateOfBirth: new Date('1988-07-09'), employmentType: 'FULLTIME',
-          baseSalary: 24000, initialSalary: 19000, allowance: 2500, overtime: 3000, positionBonus: 0, bankName: 'BAY',
+          codePrefix: 'FB-003',
+          firstName: 'สุชาติ',
+          lastName: 'เชฟส่วน',
+          nickname: 'ติ',
+          emailPrefix: 'suchat.cdp',
+          positionNameEn: 'Chef de Partie',
+          gender: 'MALE',
+          dateOfBirth: new Date('1988-07-09'),
+          employmentType: 'FULLTIME',
+          baseSalary: 24000,
+          initialSalary: 19000,
+          allowance: 2500,
+          overtime: 3000,
+          positionBonus: 0,
+          bankName: 'BAY',
         },
         {
-          codePrefix: 'FB-004', firstName: 'พัชรา', lastName: 'บาริสต้า', nickname: 'แพท',
-          emailPrefix: 'patchara.barista', positionNameEn: 'Barista',
-          gender: 'FEMALE', dateOfBirth: new Date('1999-06-30'), employmentType: 'FULLTIME',
-          baseSalary: 15500, initialSalary: 14000, allowance: 1500, overtime: 1200, positionBonus: 0, bankName: 'GSB',
+          codePrefix: 'FB-004',
+          firstName: 'พัชรา',
+          lastName: 'บาริสต้า',
+          nickname: 'แพท',
+          emailPrefix: 'patchara.barista',
+          positionNameEn: 'Barista',
+          gender: 'FEMALE',
+          dateOfBirth: new Date('1999-06-30'),
+          employmentType: 'FULLTIME',
+          baseSalary: 15500,
+          initialSalary: 14000,
+          allowance: 1500,
+          overtime: 1200,
+          positionBonus: 0,
+          bankName: 'GSB',
         },
         {
-          codePrefix: 'FB-005', firstName: 'ปัณณ์', lastName: 'เสิร์ฟดี', nickname: 'ปัน',
-          emailPrefix: 'pan.waiter', positionNameEn: 'Waiter / Waitress',
-          gender: 'MALE', dateOfBirth: new Date('2000-09-14'), employmentType: 'FULLTIME',
-          baseSalary: 14000, initialSalary: 12500, allowance: 1500, overtime: 1500, positionBonus: 0, bankName: 'KTB',
+          codePrefix: 'FB-005',
+          firstName: 'ปัณณ์',
+          lastName: 'เสิร์ฟดี',
+          nickname: 'ปัน',
+          emailPrefix: 'pan.waiter',
+          positionNameEn: 'Waiter / Waitress',
+          gender: 'MALE',
+          dateOfBirth: new Date('2000-09-14'),
+          employmentType: 'FULLTIME',
+          baseSalary: 14000,
+          initialSalary: 12500,
+          allowance: 1500,
+          overtime: 1500,
+          positionBonus: 0,
+          bankName: 'KTB',
         },
         {
-          codePrefix: 'FB-006', firstName: 'สิริกาญจน์', lastName: 'รูมเซอร์วิส', nickname: 'เกด',
-          emailPrefix: 'sirikarn.rs', positionNameEn: 'Room Service Attendant',
-          gender: 'FEMALE', dateOfBirth: new Date('1997-01-03'), employmentType: 'FULLTIME',
-          baseSalary: 14500, initialSalary: 13000, allowance: 1500, overtime: 1800, positionBonus: 0, bankName: 'SCB',
+          codePrefix: 'FB-006',
+          firstName: 'สิริกาญจน์',
+          lastName: 'รูมเซอร์วิส',
+          nickname: 'เกด',
+          emailPrefix: 'sirikarn.rs',
+          positionNameEn: 'Room Service Attendant',
+          gender: 'FEMALE',
+          dateOfBirth: new Date('1997-01-03'),
+          employmentType: 'FULLTIME',
+          baseSalary: 14500,
+          initialSalary: 13000,
+          allowance: 1500,
+          overtime: 1800,
+          positionBonus: 0,
+          bankName: 'SCB',
         },
       ],
       ENG: [
         {
-          codePrefix: 'ENG-001', firstName: 'ประกิต', lastName: 'ช่างใหญ่', nickname: 'กิต',
-          emailPrefix: 'prakit.chief', positionNameEn: 'Chief Engineer',
-          gender: 'MALE', dateOfBirth: new Date('1975-05-28'), employmentType: 'FULLTIME',
-          baseSalary: 45000, initialSalary: 36000, allowance: 5000, overtime: 0, positionBonus: 7000, bankName: 'KBANK',
+          codePrefix: 'ENG-001',
+          firstName: 'ประกิต',
+          lastName: 'ช่างใหญ่',
+          nickname: 'กิต',
+          emailPrefix: 'prakit.chief',
+          positionNameEn: 'Chief Engineer',
+          gender: 'MALE',
+          dateOfBirth: new Date('1975-05-28'),
+          employmentType: 'FULLTIME',
+          baseSalary: 45000,
+          initialSalary: 36000,
+          allowance: 5000,
+          overtime: 0,
+          positionBonus: 7000,
+          bankName: 'KBANK',
         },
         {
-          codePrefix: 'ENG-002', firstName: 'พิสิฐ', lastName: 'ช่างรอง', nickname: 'พิ',
-          emailPrefix: 'pisit.aeng', positionNameEn: 'Assistant Engineer',
-          gender: 'MALE', dateOfBirth: new Date('1984-02-19'), employmentType: 'FULLTIME',
-          baseSalary: 35000, initialSalary: 28000, allowance: 4000, overtime: 1500, positionBonus: 4000, bankName: 'SCB',
+          codePrefix: 'ENG-002',
+          firstName: 'พิสิฐ',
+          lastName: 'ช่างรอง',
+          nickname: 'พิ',
+          emailPrefix: 'pisit.aeng',
+          positionNameEn: 'Assistant Engineer',
+          gender: 'MALE',
+          dateOfBirth: new Date('1984-02-19'),
+          employmentType: 'FULLTIME',
+          baseSalary: 35000,
+          initialSalary: 28000,
+          allowance: 4000,
+          overtime: 1500,
+          positionBonus: 4000,
+          bankName: 'SCB',
         },
         {
-          codePrefix: 'ENG-003', firstName: 'อาทิตย์', lastName: 'ช่างไฟฟ้า', nickname: 'ท้า',
-          emailPrefix: 'artit.elec', positionNameEn: 'Electrician',
-          gender: 'MALE', dateOfBirth: new Date('1990-08-14'), employmentType: 'FULLTIME',
-          baseSalary: 22000, initialSalary: 18000, allowance: 2500, overtime: 3500, positionBonus: 0, bankName: 'KTB',
+          codePrefix: 'ENG-003',
+          firstName: 'อาทิตย์',
+          lastName: 'ช่างไฟฟ้า',
+          nickname: 'ท้า',
+          emailPrefix: 'artit.elec',
+          positionNameEn: 'Electrician',
+          gender: 'MALE',
+          dateOfBirth: new Date('1990-08-14'),
+          employmentType: 'FULLTIME',
+          baseSalary: 22000,
+          initialSalary: 18000,
+          allowance: 2500,
+          overtime: 3500,
+          positionBonus: 0,
+          bankName: 'KTB',
         },
         {
-          codePrefix: 'ENG-004', firstName: 'วันชัย', lastName: 'ช่างประปา', nickname: 'ชัย',
-          emailPrefix: 'wanchai.plumb', positionNameEn: 'Plumber',
-          gender: 'MALE', dateOfBirth: new Date('1988-11-30'), employmentType: 'FULLTIME',
-          baseSalary: 21000, initialSalary: 17500, allowance: 2500, overtime: 3000, positionBonus: 0, bankName: 'BBL',
+          codePrefix: 'ENG-004',
+          firstName: 'วันชัย',
+          lastName: 'ช่างประปา',
+          nickname: 'ชัย',
+          emailPrefix: 'wanchai.plumb',
+          positionNameEn: 'Plumber',
+          gender: 'MALE',
+          dateOfBirth: new Date('1988-11-30'),
+          employmentType: 'FULLTIME',
+          baseSalary: 21000,
+          initialSalary: 17500,
+          allowance: 2500,
+          overtime: 3000,
+          positionBonus: 0,
+          bankName: 'BBL',
         },
         {
-          codePrefix: 'ENG-005', firstName: 'สุรศักดิ์', lastName: 'ช่างแอร์', nickname: 'ศักดิ์',
-          emailPrefix: 'surasak.hvac', positionNameEn: 'HVAC Technician',
-          gender: 'MALE', dateOfBirth: new Date('1986-04-07'), employmentType: 'FULLTIME',
-          baseSalary: 23000, initialSalary: 19000, allowance: 2500, overtime: 4000, positionBonus: 0, bankName: 'GSB',
+          codePrefix: 'ENG-005',
+          firstName: 'สุรศักดิ์',
+          lastName: 'ช่างแอร์',
+          nickname: 'ศักดิ์',
+          emailPrefix: 'surasak.hvac',
+          positionNameEn: 'HVAC Technician',
+          gender: 'MALE',
+          dateOfBirth: new Date('1986-04-07'),
+          employmentType: 'FULLTIME',
+          baseSalary: 23000,
+          initialSalary: 19000,
+          allowance: 2500,
+          overtime: 4000,
+          positionBonus: 0,
+          bankName: 'GSB',
         },
         {
-          codePrefix: 'ENG-006', firstName: 'ปรเมศร์', lastName: 'ช่างไอที', nickname: 'เมศ',
-          emailPrefix: 'paramet.it', positionNameEn: 'IT Technician',
-          gender: 'MALE', dateOfBirth: new Date('1993-01-25'), employmentType: 'FULLTIME',
-          baseSalary: 26000, initialSalary: 22000, allowance: 3000, overtime: 2000, positionBonus: 0, bankName: 'SCB',
+          codePrefix: 'ENG-006',
+          firstName: 'ปรเมศร์',
+          lastName: 'ช่างไอที',
+          nickname: 'เมศ',
+          emailPrefix: 'paramet.it',
+          positionNameEn: 'IT Technician',
+          gender: 'MALE',
+          dateOfBirth: new Date('1993-01-25'),
+          employmentType: 'FULLTIME',
+          baseSalary: 26000,
+          initialSalary: 22000,
+          allowance: 3000,
+          overtime: 2000,
+          positionBonus: 0,
+          bankName: 'SCB',
         },
         {
-          codePrefix: 'ENG-007', firstName: 'บุญยง', lastName: 'ช่างทั่วไป', nickname: 'บุญ',
-          emailPrefix: 'bunyong.maint', positionNameEn: 'General Maintenance',
-          gender: 'MALE', dateOfBirth: new Date('1991-06-18'), employmentType: 'FULLTIME',
-          baseSalary: 14500, initialSalary: 12500, allowance: 1500, overtime: 3500, positionBonus: 0, bankName: 'KTB',
+          codePrefix: 'ENG-007',
+          firstName: 'บุญยง',
+          lastName: 'ช่างทั่วไป',
+          nickname: 'บุญ',
+          emailPrefix: 'bunyong.maint',
+          positionNameEn: 'General Maintenance',
+          gender: 'MALE',
+          dateOfBirth: new Date('1991-06-18'),
+          employmentType: 'FULLTIME',
+          baseSalary: 14500,
+          initialSalary: 12500,
+          allowance: 1500,
+          overtime: 3500,
+          positionBonus: 0,
+          bankName: 'KTB',
         },
       ],
       HR: [
         {
-          codePrefix: 'HR-001', firstName: 'ดวงฤดี', lastName: 'บุคลากร', nickname: 'ดวง',
-          emailPrefix: 'duangrudee.hrm', positionNameEn: 'HR Manager',
-          gender: 'FEMALE', dateOfBirth: new Date('1982-09-03'), employmentType: 'FULLTIME',
-          baseSalary: 38000, initialSalary: 30000, allowance: 4000, overtime: 0, positionBonus: 6000, bankName: 'SCB',
+          codePrefix: 'HR-001',
+          firstName: 'ดวงฤดี',
+          lastName: 'บุคลากร',
+          nickname: 'ดวง',
+          emailPrefix: 'duangrudee.hrm',
+          positionNameEn: 'HR Manager',
+          gender: 'FEMALE',
+          dateOfBirth: new Date('1982-09-03'),
+          employmentType: 'FULLTIME',
+          baseSalary: 38000,
+          initialSalary: 30000,
+          allowance: 4000,
+          overtime: 0,
+          positionBonus: 6000,
+          bankName: 'SCB',
         },
         {
-          codePrefix: 'HR-002', firstName: 'ภัทรพล', lastName: 'เจ้าหน้าที่ HR', nickname: 'แฝด',
-          emailPrefix: 'pattarapon.hr', positionNameEn: 'HR Officer',
-          gender: 'MALE', dateOfBirth: new Date('1996-12-15'), employmentType: 'FULLTIME',
-          baseSalary: 20000, initialSalary: 17000, allowance: 2000, overtime: 500, positionBonus: 0, bankName: 'KBANK',
+          codePrefix: 'HR-002',
+          firstName: 'ภัทรพล',
+          lastName: 'เจ้าหน้าที่ HR',
+          nickname: 'แฝด',
+          emailPrefix: 'pattarapon.hr',
+          positionNameEn: 'HR Officer',
+          gender: 'MALE',
+          dateOfBirth: new Date('1996-12-15'),
+          employmentType: 'FULLTIME',
+          baseSalary: 20000,
+          initialSalary: 17000,
+          allowance: 2000,
+          overtime: 500,
+          positionBonus: 0,
+          bankName: 'KBANK',
         },
         {
-          codePrefix: 'HR-003', firstName: 'ธัญญา', lastName: 'เงินเดือน', nickname: 'ญา',
-          emailPrefix: 'tanya.payroll', positionNameEn: 'Payroll Officer',
-          gender: 'FEMALE', dateOfBirth: new Date('1990-03-27'), employmentType: 'FULLTIME',
-          baseSalary: 22000, initialSalary: 18500, allowance: 2000, overtime: 0, positionBonus: 0, bankName: 'BBL',
+          codePrefix: 'HR-003',
+          firstName: 'ธัญญา',
+          lastName: 'เงินเดือน',
+          nickname: 'ญา',
+          emailPrefix: 'tanya.payroll',
+          positionNameEn: 'Payroll Officer',
+          gender: 'FEMALE',
+          dateOfBirth: new Date('1990-03-27'),
+          employmentType: 'FULLTIME',
+          baseSalary: 22000,
+          initialSalary: 18500,
+          allowance: 2000,
+          overtime: 0,
+          positionBonus: 0,
+          bankName: 'BBL',
         },
       ],
       FIN: [
         {
-          codePrefix: 'FIN-001', firstName: 'ชัชพล', lastName: 'ผู้ควบคุมการเงิน', nickname: 'ชัช',
-          emailPrefix: 'chatchapon.fc', positionNameEn: 'Financial Controller',
-          gender: 'MALE', dateOfBirth: new Date('1973-07-11'), employmentType: 'FULLTIME',
-          baseSalary: 70000, initialSalary: 55000, allowance: 8000, overtime: 0, positionBonus: 12000, bankName: 'KBANK',
+          codePrefix: 'FIN-001',
+          firstName: 'ชัชพล',
+          lastName: 'ผู้ควบคุมการเงิน',
+          nickname: 'ชัช',
+          emailPrefix: 'chatchapon.fc',
+          positionNameEn: 'Financial Controller',
+          gender: 'MALE',
+          dateOfBirth: new Date('1973-07-11'),
+          employmentType: 'FULLTIME',
+          baseSalary: 70000,
+          initialSalary: 55000,
+          allowance: 8000,
+          overtime: 0,
+          positionBonus: 12000,
+          bankName: 'KBANK',
         },
         {
-          codePrefix: 'FIN-002', firstName: 'ฉันทนา', lastName: 'บัญชีดี', nickname: 'ฉัน',
-          emailPrefix: 'chantana.acc', positionNameEn: 'Accountant',
-          gender: 'FEMALE', dateOfBirth: new Date('1986-10-20'), employmentType: 'FULLTIME',
-          baseSalary: 25000, initialSalary: 20000, allowance: 2500, overtime: 0, positionBonus: 0, bankName: 'SCB',
+          codePrefix: 'FIN-002',
+          firstName: 'ฉันทนา',
+          lastName: 'บัญชีดี',
+          nickname: 'ฉัน',
+          emailPrefix: 'chantana.acc',
+          positionNameEn: 'Accountant',
+          gender: 'FEMALE',
+          dateOfBirth: new Date('1986-10-20'),
+          employmentType: 'FULLTIME',
+          baseSalary: 25000,
+          initialSalary: 20000,
+          allowance: 2500,
+          overtime: 0,
+          positionBonus: 0,
+          bankName: 'SCB',
         },
         {
-          codePrefix: 'FIN-003', firstName: 'วิโรจน์', lastName: 'จัดซื้อ', nickname: 'โรจน์',
-          emailPrefix: 'wiroj.purchase', positionNameEn: 'Purchasing Officer',
-          gender: 'MALE', dateOfBirth: new Date('1991-08-05'), employmentType: 'FULLTIME',
-          baseSalary: 20000, initialSalary: 16500, allowance: 2000, overtime: 1000, positionBonus: 0, bankName: 'KTB',
+          codePrefix: 'FIN-003',
+          firstName: 'วิโรจน์',
+          lastName: 'จัดซื้อ',
+          nickname: 'โรจน์',
+          emailPrefix: 'wiroj.purchase',
+          positionNameEn: 'Purchasing Officer',
+          gender: 'MALE',
+          dateOfBirth: new Date('1991-08-05'),
+          employmentType: 'FULLTIME',
+          baseSalary: 20000,
+          initialSalary: 16500,
+          allowance: 2000,
+          overtime: 1000,
+          positionBonus: 0,
+          bankName: 'KTB',
         },
       ],
       SM: [
         {
-          codePrefix: 'SM-001', firstName: 'ณัฐวุฒิ', lastName: 'ขายดี', nickname: 'วุฒิ',
-          emailPrefix: 'nattawut.sm', positionNameEn: 'Sales Manager',
-          gender: 'MALE', dateOfBirth: new Date('1981-05-16'), employmentType: 'FULLTIME',
-          baseSalary: 48000, initialSalary: 38000, allowance: 6000, overtime: 0, positionBonus: 10000, bankName: 'SCB',
+          codePrefix: 'SM-001',
+          firstName: 'ณัฐวุฒิ',
+          lastName: 'ขายดี',
+          nickname: 'วุฒิ',
+          emailPrefix: 'nattawut.sm',
+          positionNameEn: 'Sales Manager',
+          gender: 'MALE',
+          dateOfBirth: new Date('1981-05-16'),
+          employmentType: 'FULLTIME',
+          baseSalary: 48000,
+          initialSalary: 38000,
+          allowance: 6000,
+          overtime: 0,
+          positionBonus: 10000,
+          bankName: 'SCB',
         },
         {
-          codePrefix: 'SM-002', firstName: 'ทิพวรรณ', lastName: 'การตลาด', nickname: 'ทิพ',
-          emailPrefix: 'thipwan.mkt', positionNameEn: 'Marketing Executive',
-          gender: 'FEMALE', dateOfBirth: new Date('1993-02-08'), employmentType: 'FULLTIME',
-          baseSalary: 26000, initialSalary: 22000, allowance: 3000, overtime: 0, positionBonus: 0, bankName: 'KBANK',
+          codePrefix: 'SM-002',
+          firstName: 'ทิพวรรณ',
+          lastName: 'การตลาด',
+          nickname: 'ทิพ',
+          emailPrefix: 'thipwan.mkt',
+          positionNameEn: 'Marketing Executive',
+          gender: 'FEMALE',
+          dateOfBirth: new Date('1993-02-08'),
+          employmentType: 'FULLTIME',
+          baseSalary: 26000,
+          initialSalary: 22000,
+          allowance: 3000,
+          overtime: 0,
+          positionBonus: 0,
+          bankName: 'KBANK',
         },
         {
-          codePrefix: 'SM-003', firstName: 'สัญญา', lastName: 'รายได้ดี', nickname: 'ยา',
-          emailPrefix: 'sanya.rev', positionNameEn: 'Revenue Manager',
-          gender: 'MALE', dateOfBirth: new Date('1985-09-21'), employmentType: 'FULLTIME',
-          baseSalary: 38000, initialSalary: 30000, allowance: 4000, overtime: 0, positionBonus: 6000, bankName: 'BBL',
+          codePrefix: 'SM-003',
+          firstName: 'สัญญา',
+          lastName: 'รายได้ดี',
+          nickname: 'ยา',
+          emailPrefix: 'sanya.rev',
+          positionNameEn: 'Revenue Manager',
+          gender: 'MALE',
+          dateOfBirth: new Date('1985-09-21'),
+          employmentType: 'FULLTIME',
+          baseSalary: 38000,
+          initialSalary: 30000,
+          allowance: 4000,
+          overtime: 0,
+          positionBonus: 6000,
+          bankName: 'BBL',
         },
       ],
       SEC: [
         {
-          codePrefix: 'SEC-001', firstName: 'ศิลปิน', lastName: 'รปภ.ใหญ่', nickname: 'ศิล',
-          emailPrefix: 'sillapin.secm', positionNameEn: 'Security Manager',
-          gender: 'MALE', dateOfBirth: new Date('1976-12-04'), employmentType: 'FULLTIME',
-          baseSalary: 32000, initialSalary: 26000, allowance: 3500, overtime: 0, positionBonus: 4000, bankName: 'KTB',
+          codePrefix: 'SEC-001',
+          firstName: 'ศิลปิน',
+          lastName: 'รปภ.ใหญ่',
+          nickname: 'ศิล',
+          emailPrefix: 'sillapin.secm',
+          positionNameEn: 'Security Manager',
+          gender: 'MALE',
+          dateOfBirth: new Date('1976-12-04'),
+          employmentType: 'FULLTIME',
+          baseSalary: 32000,
+          initialSalary: 26000,
+          allowance: 3500,
+          overtime: 0,
+          positionBonus: 4000,
+          bankName: 'KTB',
         },
         {
-          codePrefix: 'SEC-002', firstName: 'สงกรานต์', lastName: 'รักษาความปลอดภัย', nickname: 'กรานต์',
-          emailPrefix: 'songkran.sec', positionNameEn: 'Security Officer',
-          gender: 'MALE', dateOfBirth: new Date('1995-04-13'), employmentType: 'FULLTIME',
-          baseSalary: 14000, initialSalary: 12500, allowance: 1500, overtime: 3000, positionBonus: 0, bankName: 'GSB',
+          codePrefix: 'SEC-002',
+          firstName: 'สงกรานต์',
+          lastName: 'รักษาความปลอดภัย',
+          nickname: 'กรานต์',
+          emailPrefix: 'songkran.sec',
+          positionNameEn: 'Security Officer',
+          gender: 'MALE',
+          dateOfBirth: new Date('1995-04-13'),
+          employmentType: 'FULLTIME',
+          baseSalary: 14000,
+          initialSalary: 12500,
+          allowance: 1500,
+          overtime: 3000,
+          positionBonus: 0,
+          bankName: 'GSB',
         },
         {
-          codePrefix: 'SEC-003', firstName: 'มนัส', lastName: 'ดู CCTV', nickname: 'นัส',
-          emailPrefix: 'manas.cctv', positionNameEn: 'CCTV Operator',
-          gender: 'MALE', dateOfBirth: new Date('1993-07-29'), employmentType: 'FULLTIME',
-          baseSalary: 16000, initialSalary: 14000, allowance: 1500, overtime: 2500, positionBonus: 0, bankName: 'SCB',
+          codePrefix: 'SEC-003',
+          firstName: 'มนัส',
+          lastName: 'ดู CCTV',
+          nickname: 'นัส',
+          emailPrefix: 'manas.cctv',
+          positionNameEn: 'CCTV Operator',
+          gender: 'MALE',
+          dateOfBirth: new Date('1993-07-29'),
+          employmentType: 'FULLTIME',
+          baseSalary: 16000,
+          initialSalary: 14000,
+          allowance: 1500,
+          overtime: 2500,
+          positionBonus: 0,
+          bankName: 'SCB',
         },
       ],
       SPA: [
         {
-          codePrefix: 'SPA-001', firstName: 'ศิริลักษณ์', lastName: 'สปาดี', nickname: 'ลักษณ์',
-          emailPrefix: 'sirilak.spam', positionNameEn: 'Spa Manager',
-          gender: 'FEMALE', dateOfBirth: new Date('1984-11-17'), employmentType: 'FULLTIME',
-          baseSalary: 36000, initialSalary: 28000, allowance: 4000, overtime: 0, positionBonus: 5000, bankName: 'SCB',
+          codePrefix: 'SPA-001',
+          firstName: 'ศิริลักษณ์',
+          lastName: 'สปาดี',
+          nickname: 'ลักษณ์',
+          emailPrefix: 'sirilak.spam',
+          positionNameEn: 'Spa Manager',
+          gender: 'FEMALE',
+          dateOfBirth: new Date('1984-11-17'),
+          employmentType: 'FULLTIME',
+          baseSalary: 36000,
+          initialSalary: 28000,
+          allowance: 4000,
+          overtime: 0,
+          positionBonus: 5000,
+          bankName: 'SCB',
         },
         {
-          codePrefix: 'SPA-002', firstName: 'นวลพรรณ', lastName: 'นวดบำบัด', nickname: 'นวล',
-          emailPrefix: 'nuanpan.ther', positionNameEn: 'Therapist',
-          gender: 'FEMALE', dateOfBirth: new Date('1992-03-12'), employmentType: 'FULLTIME',
-          baseSalary: 20000, initialSalary: 17000, allowance: 2000, overtime: 1500, positionBonus: 0, bankName: 'KBANK',
+          codePrefix: 'SPA-002',
+          firstName: 'นวลพรรณ',
+          lastName: 'นวดบำบัด',
+          nickname: 'นวล',
+          emailPrefix: 'nuanpan.ther',
+          positionNameEn: 'Therapist',
+          gender: 'FEMALE',
+          dateOfBirth: new Date('1992-03-12'),
+          employmentType: 'FULLTIME',
+          baseSalary: 20000,
+          initialSalary: 17000,
+          allowance: 2000,
+          overtime: 1500,
+          positionBonus: 0,
+          bankName: 'KBANK',
         },
         {
-          codePrefix: 'SPA-003', firstName: 'เอกชัย', lastName: 'ฟิตเนสโค้ช', nickname: 'เอก',
-          emailPrefix: 'ekkachai.fit', positionNameEn: 'Fitness Instructor',
-          gender: 'MALE', dateOfBirth: new Date('1989-06-04'), employmentType: 'FULLTIME',
-          baseSalary: 21000, initialSalary: 17500, allowance: 2000, overtime: 1000, positionBonus: 0, bankName: 'BBL',
+          codePrefix: 'SPA-003',
+          firstName: 'เอกชัย',
+          lastName: 'ฟิตเนสโค้ช',
+          nickname: 'เอก',
+          emailPrefix: 'ekkachai.fit',
+          positionNameEn: 'Fitness Instructor',
+          gender: 'MALE',
+          dateOfBirth: new Date('1989-06-04'),
+          employmentType: 'FULLTIME',
+          baseSalary: 21000,
+          initialSalary: 17500,
+          allowance: 2000,
+          overtime: 1000,
+          positionBonus: 0,
+          bankName: 'BBL',
         },
         {
-          codePrefix: 'SPA-004', firstName: 'พิมพ์ชนก', lastName: 'รับสปา', nickname: 'พิม',
-          emailPrefix: 'pimchanok.rec', positionNameEn: 'Spa Receptionist',
-          gender: 'FEMALE', dateOfBirth: new Date('1998-08-22'), employmentType: 'FULLTIME',
-          baseSalary: 15000, initialSalary: 13500, allowance: 1500, overtime: 800, positionBonus: 0, bankName: 'GSB',
+          codePrefix: 'SPA-004',
+          firstName: 'พิมพ์ชนก',
+          lastName: 'รับสปา',
+          nickname: 'พิม',
+          emailPrefix: 'pimchanok.rec',
+          positionNameEn: 'Spa Receptionist',
+          gender: 'FEMALE',
+          dateOfBirth: new Date('1998-08-22'),
+          employmentType: 'FULLTIME',
+          baseSalary: 15000,
+          initialSalary: 13500,
+          allowance: 1500,
+          overtime: 800,
+          positionBonus: 0,
+          bankName: 'GSB',
         },
       ],
     };
@@ -2293,7 +3365,9 @@ export class SeederService {
       });
 
       if (departments.length === 0) {
-        this.logger.warn(`    ⚠️ No HR departments found for ${tenant.name}, run seedHrMasterData first`);
+        this.logger.warn(
+          `    ⚠️ No HR departments found for ${tenant.name}, run seedHrMasterData first`,
+        );
         continue;
       }
 
@@ -2360,7 +3434,9 @@ export class SeederService {
       this.logger.log(`    ✓ ${tenantCount} new employees created for ${tenant.name}`);
     }
 
-    this.logger.log(`✅ Employee seeding complete — ${totalCreated} new employees across all tenants`);
+    this.logger.log(
+      `✅ Employee seeding complete — ${totalCreated} new employees across all tenants`,
+    );
   }
 
   /**
@@ -2393,10 +3469,13 @@ export class SeederService {
 
     // Determine the most-recently completed quarter
     const now = new Date();
-    const curQ = Math.floor(now.getMonth() / 3) + 1;  // 1-4
+    const curQ = Math.floor(now.getMonth() / 3) + 1; // 1-4
     let targetQ = curQ - 1;
     let targetYear = now.getFullYear();
-    if (targetQ === 0) { targetQ = 4; targetYear -= 1; }
+    if (targetQ === 0) {
+      targetQ = 4;
+      targetYear -= 1;
+    }
     const period = `${targetYear}-Q${targetQ}`;
 
     // Quarter end dates for reviewDate
@@ -2405,16 +3484,106 @@ export class SeederService {
 
     // Per-employee score profiles (cycling if more employees than profiles)
     const scoreProfiles = [
-      { work: 92, attendance: 95, teamwork: 88, service: 90, status: 'approved', strengths: 'ทำงานได้ดีเยี่ยม มีความรับผิดชอบสูง บริการแขกได้อย่างมืออาชีพ', improvements: 'ควรพัฒนาทักษะภาษาอังกฤษเพิ่มเติม', goals: 'เป้าหมาย UPSELL rate 15% ในไตรมาสหน้า' },
-      { work: 78, attendance: 82, teamwork: 85, service: 80, status: 'approved', strengths: 'ทำงานเป็นทีมได้ดี มีความสามัคคี', improvements: 'ควรพัฒนาความรวดเร็วในการทำงาน', goals: 'เพิ่มคะแนน guest satisfaction 5%' },
-      { work: 88, attendance: 90, teamwork: 92, service: 86, status: 'approved', strengths: 'สื่อสารกับแขกได้ดี ยิ้มแย้มแจ่มใสเสมอ', improvements: 'ควรเรียนรู้ระบบ PMS เพิ่มเติม', goals: 'ผ่านการอบรม front desk excellence' },
-      { work: 65, attendance: 70, teamwork: 72, service: 68, status: 'submitted', strengths: 'มีความพยายามและตั้งใจทำงาน', improvements: 'ควรปรับปรุงเรื่องเวลาการทำงาน ลดการมาสาย', goals: 'ลดอัตราการมาสายให้เหลือ 0% ในไตรมาสหน้า' },
-      { work: 95, attendance: 98, teamwork: 94, service: 96, status: 'approved', strengths: 'พนักงานดีเด่น ทำงานได้ครบถ้วน รวดเร็ว และถูกต้อง', improvements: 'สามารถพัฒนาทักษะผู้นำทีมได้มากขึ้น', goals: 'เป็น mentor ให้พนักงานใหม่' },
-      { work: 75, attendance: 80, teamwork: 78, service: 76, status: 'approved', strengths: 'มีความรู้ด้านอาหารและเครื่องดื่มดี', improvements: 'ควรพัฒนาการสื่อสารกับแขกต่างชาติ', goals: 'เรียนภาษาอังกฤษอย่างน้อย 1 คอร์ส' },
-      { work: 82, attendance: 85, teamwork: 80, service: 84, status: 'submitted', strengths: 'ทักษะเทคนิคดี รู้จักระบบดี', improvements: 'ควรพัฒนา soft skill การบริการ', goals: 'ผ่านการอบรม customer excellence' },
-      { work: 70, attendance: 75, teamwork: 73, service: 72, status: 'draft', strengths: 'มีความอดทนในการทำงาน', improvements: 'ควรปรับปรุงคุณภาพงาน', goals: 'เพิ่มคะแนนคุณภาพงาน 10%' },
-      { work: 88, attendance: 92, teamwork: 87, service: 89, status: 'approved', strengths: 'บริการแขกได้อย่างยอดเยี่ยม มีทักษะการขายดี', improvements: 'ควรพัฒนาทักษะด้าน IT', goals: 'เพิ่มยอดขาย in-room dining 20%' },
-      { work: 80, attendance: 83, teamwork: 82, service: 81, status: 'approved', strengths: 'ทำงานสม่ำเสมอและน่าเชื่อถือ', improvements: 'ควรริเริ่มสิ่งใหม่มากขึ้น', goals: 'เสนอโปรเจ็กต์ใหม่อย่างน้อย 1 อย่าง' },
+      {
+        work: 92,
+        attendance: 95,
+        teamwork: 88,
+        service: 90,
+        status: 'approved',
+        strengths: 'ทำงานได้ดีเยี่ยม มีความรับผิดชอบสูง บริการแขกได้อย่างมืออาชีพ',
+        improvements: 'ควรพัฒนาทักษะภาษาอังกฤษเพิ่มเติม',
+        goals: 'เป้าหมาย UPSELL rate 15% ในไตรมาสหน้า',
+      },
+      {
+        work: 78,
+        attendance: 82,
+        teamwork: 85,
+        service: 80,
+        status: 'approved',
+        strengths: 'ทำงานเป็นทีมได้ดี มีความสามัคคี',
+        improvements: 'ควรพัฒนาความรวดเร็วในการทำงาน',
+        goals: 'เพิ่มคะแนน guest satisfaction 5%',
+      },
+      {
+        work: 88,
+        attendance: 90,
+        teamwork: 92,
+        service: 86,
+        status: 'approved',
+        strengths: 'สื่อสารกับแขกได้ดี ยิ้มแย้มแจ่มใสเสมอ',
+        improvements: 'ควรเรียนรู้ระบบ PMS เพิ่มเติม',
+        goals: 'ผ่านการอบรม front desk excellence',
+      },
+      {
+        work: 65,
+        attendance: 70,
+        teamwork: 72,
+        service: 68,
+        status: 'submitted',
+        strengths: 'มีความพยายามและตั้งใจทำงาน',
+        improvements: 'ควรปรับปรุงเรื่องเวลาการทำงาน ลดการมาสาย',
+        goals: 'ลดอัตราการมาสายให้เหลือ 0% ในไตรมาสหน้า',
+      },
+      {
+        work: 95,
+        attendance: 98,
+        teamwork: 94,
+        service: 96,
+        status: 'approved',
+        strengths: 'พนักงานดีเด่น ทำงานได้ครบถ้วน รวดเร็ว และถูกต้อง',
+        improvements: 'สามารถพัฒนาทักษะผู้นำทีมได้มากขึ้น',
+        goals: 'เป็น mentor ให้พนักงานใหม่',
+      },
+      {
+        work: 75,
+        attendance: 80,
+        teamwork: 78,
+        service: 76,
+        status: 'approved',
+        strengths: 'มีความรู้ด้านอาหารและเครื่องดื่มดี',
+        improvements: 'ควรพัฒนาการสื่อสารกับแขกต่างชาติ',
+        goals: 'เรียนภาษาอังกฤษอย่างน้อย 1 คอร์ส',
+      },
+      {
+        work: 82,
+        attendance: 85,
+        teamwork: 80,
+        service: 84,
+        status: 'submitted',
+        strengths: 'ทักษะเทคนิคดี รู้จักระบบดี',
+        improvements: 'ควรพัฒนา soft skill การบริการ',
+        goals: 'ผ่านการอบรม customer excellence',
+      },
+      {
+        work: 70,
+        attendance: 75,
+        teamwork: 73,
+        service: 72,
+        status: 'draft',
+        strengths: 'มีความอดทนในการทำงาน',
+        improvements: 'ควรปรับปรุงคุณภาพงาน',
+        goals: 'เพิ่มคะแนนคุณภาพงาน 10%',
+      },
+      {
+        work: 88,
+        attendance: 92,
+        teamwork: 87,
+        service: 89,
+        status: 'approved',
+        strengths: 'บริการแขกได้อย่างยอดเยี่ยม มีทักษะการขายดี',
+        improvements: 'ควรพัฒนาทักษะด้าน IT',
+        goals: 'เพิ่มยอดขาย in-room dining 20%',
+      },
+      {
+        work: 80,
+        attendance: 83,
+        teamwork: 82,
+        service: 81,
+        status: 'approved',
+        strengths: 'ทำงานสม่ำเสมอและน่าเชื่อถือ',
+        improvements: 'ควรริเริ่มสิ่งใหม่มากขึ้น',
+        goals: 'เสนอโปรเจ็กต์ใหม่อย่างน้อย 1 อย่าง',
+      },
     ];
 
     function deriveGrade(score: number): string {
@@ -2430,9 +3599,14 @@ export class SeederService {
     for (let i = 0; i < employees.length; i++) {
       const emp = employees[i];
       const profile = scoreProfiles[i % scoreProfiles.length];
-      const scoreOverall = Math.round(
-        (profile.work * 0.3 + profile.attendance * 0.2 + profile.teamwork * 0.2 + profile.service * 0.3) * 100,
-      ) / 100;
+      const scoreOverall =
+        Math.round(
+          (profile.work * 0.3 +
+            profile.attendance * 0.2 +
+            profile.teamwork * 0.2 +
+            profile.service * 0.3) *
+            100,
+        ) / 100;
       const grade = deriveGrade(scoreOverall);
 
       // ตรวจสอบ unique constraint ใหม่: (employeeId, period, cycleId=null) สำหรับ legacy records
@@ -2443,23 +3617,23 @@ export class SeederService {
         await (this.prisma as any).hrPerformance.create({
           data: {
             tenantId,
-            employeeId:      emp.id,
-            cycleId:         null,   // legacy record — ไม่ผ่าน Cycle
-            templateId:      null,   // legacy record — ใช้ fixed scores
+            employeeId: emp.id,
+            cycleId: null, // legacy record — ไม่ผ่าน Cycle
+            templateId: null, // legacy record — ใช้ fixed scores
             period,
-            periodType:      'quarterly',
+            periodType: 'quarterly',
             reviewDate,
-            reviewerName:    'ผู้จัดการ HR',
-            scoreWork:       profile.work,
+            reviewerName: 'ผู้จัดการ HR',
+            scoreWork: profile.work,
             scoreAttendance: profile.attendance,
-            scoreTeamwork:   profile.teamwork,
-            scoreService:    profile.service,
+            scoreTeamwork: profile.teamwork,
+            scoreService: profile.service,
             scoreOverall,
             grade,
-            status:          profile.status,
-            strengths:       profile.strengths,
-            improvements:    profile.improvements,
-            goals:           profile.goals,
+            status: profile.status,
+            strengths: profile.strengths,
+            improvements: profile.improvements,
+            goals: profile.goals,
             ...(profile.status === 'approved' ? { approvedAt: new Date() } : {}),
           },
         });
@@ -2507,11 +3681,41 @@ export class SeederService {
         periodType: 'quarterly',
         description: 'เกณฑ์ประเมินสำหรับพนักงานต้อนรับ เน้นการบริการแขกและความรวดเร็ว',
         items: [
-          { name: 'คุณภาพการบริการแขก', nameEn: 'Guest Service Quality', description: 'ความพึงพอใจของแขกจาก feedback และ guest score', weight: 30, sortOrder: 1 },
-          { name: 'ความตรงต่อเวลา', nameEn: 'Punctuality & Attendance', description: 'อัตราการมาทำงานตรงเวลา ไม่ขาดงานโดยไม่มีเหตุผล', weight: 20, sortOrder: 2 },
-          { name: 'ความรู้ด้านระบบ PMS', nameEn: 'PMS & System Knowledge', description: 'ความสามารถใช้ระบบ PMS check-in/out, booking management', weight: 20, sortOrder: 3 },
-          { name: 'ทักษะสื่อสาร', nameEn: 'Communication Skills', description: 'ทักษะภาษาและการสื่อสารกับแขกชาวไทยและต่างชาติ', weight: 20, sortOrder: 4 },
-          { name: 'การทำงานเป็นทีม', nameEn: 'Teamwork & Collaboration', description: 'ความร่วมมือกับเพื่อนร่วมงาน ส่งต่องานได้อย่างราบรื่น', weight: 10, sortOrder: 5 },
+          {
+            name: 'คุณภาพการบริการแขก',
+            nameEn: 'Guest Service Quality',
+            description: 'ความพึงพอใจของแขกจาก feedback และ guest score',
+            weight: 30,
+            sortOrder: 1,
+          },
+          {
+            name: 'ความตรงต่อเวลา',
+            nameEn: 'Punctuality & Attendance',
+            description: 'อัตราการมาทำงานตรงเวลา ไม่ขาดงานโดยไม่มีเหตุผล',
+            weight: 20,
+            sortOrder: 2,
+          },
+          {
+            name: 'ความรู้ด้านระบบ PMS',
+            nameEn: 'PMS & System Knowledge',
+            description: 'ความสามารถใช้ระบบ PMS check-in/out, booking management',
+            weight: 20,
+            sortOrder: 3,
+          },
+          {
+            name: 'ทักษะสื่อสาร',
+            nameEn: 'Communication Skills',
+            description: 'ทักษะภาษาและการสื่อสารกับแขกชาวไทยและต่างชาติ',
+            weight: 20,
+            sortOrder: 4,
+          },
+          {
+            name: 'การทำงานเป็นทีม',
+            nameEn: 'Teamwork & Collaboration',
+            description: 'ความร่วมมือกับเพื่อนร่วมงาน ส่งต่องานได้อย่างราบรื่น',
+            weight: 10,
+            sortOrder: 5,
+          },
         ],
       },
       // ── Housekeeping ────────────────────────────────────────────────────────
@@ -2522,11 +3726,41 @@ export class SeederService {
         periodType: 'quarterly',
         description: 'เกณฑ์ประเมินสำหรับแม่บ้านและหัวหน้าแม่บ้าน เน้นคุณภาพและความเร็ว',
         items: [
-          { name: 'คุณภาพการทำความสะอาด', nameEn: 'Cleaning Quality', description: 'ผลการตรวจห้องพักโดย supervisor มาตรฐาน 5 stars', weight: 35, sortOrder: 1 },
-          { name: 'ความเร็วในการทำห้อง', nameEn: 'Room Turnaround Speed', description: 'เวลาเฉลี่ยการทำห้องเทียบกับมาตรฐาน SLA', weight: 25, sortOrder: 2 },
-          { name: 'ความตรงต่อเวลา', nameEn: 'Punctuality & Attendance', description: 'อัตราการมาทำงานตรงเวลา ไม่ขาดงานโดยไม่มีเหตุผล', weight: 20, sortOrder: 3 },
-          { name: 'การใช้สินค้าคงคลัง', nameEn: 'Inventory Management', description: 'การใช้ amenities และ supplies อย่างประหยัดและถูกต้อง', weight: 10, sortOrder: 4 },
-          { name: 'ทัศนคติและความร่วมมือ', nameEn: 'Attitude & Teamwork', description: 'ความสุภาพต่อแขก ทัศนคติดี ทำงานร่วมกับทีมได้ดี', weight: 10, sortOrder: 5 },
+          {
+            name: 'คุณภาพการทำความสะอาด',
+            nameEn: 'Cleaning Quality',
+            description: 'ผลการตรวจห้องพักโดย supervisor มาตรฐาน 5 stars',
+            weight: 35,
+            sortOrder: 1,
+          },
+          {
+            name: 'ความเร็วในการทำห้อง',
+            nameEn: 'Room Turnaround Speed',
+            description: 'เวลาเฉลี่ยการทำห้องเทียบกับมาตรฐาน SLA',
+            weight: 25,
+            sortOrder: 2,
+          },
+          {
+            name: 'ความตรงต่อเวลา',
+            nameEn: 'Punctuality & Attendance',
+            description: 'อัตราการมาทำงานตรงเวลา ไม่ขาดงานโดยไม่มีเหตุผล',
+            weight: 20,
+            sortOrder: 3,
+          },
+          {
+            name: 'การใช้สินค้าคงคลัง',
+            nameEn: 'Inventory Management',
+            description: 'การใช้ amenities และ supplies อย่างประหยัดและถูกต้อง',
+            weight: 10,
+            sortOrder: 4,
+          },
+          {
+            name: 'ทัศนคติและความร่วมมือ',
+            nameEn: 'Attitude & Teamwork',
+            description: 'ความสุภาพต่อแขก ทัศนคติดี ทำงานร่วมกับทีมได้ดี',
+            weight: 10,
+            sortOrder: 5,
+          },
         ],
       },
       // ── F&B Service ─────────────────────────────────────────────────────────
@@ -2537,11 +3771,41 @@ export class SeederService {
         periodType: 'quarterly',
         description: 'เกณฑ์ประเมินสำหรับพนักงานร้านอาหารและบาร์',
         items: [
-          { name: 'การบริการลูกค้า', nameEn: 'Customer Service', description: 'คะแนน feedback จากลูกค้า ความรวดเร็ว ความสุภาพ', weight: 30, sortOrder: 1 },
-          { name: 'ความรู้เมนูและเครื่องดื่ม', nameEn: 'Menu & Beverage Knowledge', description: 'ความสามารถแนะนำเมนู อธิบาย ingredients ได้ถูกต้อง', weight: 25, sortOrder: 2 },
-          { name: 'ความตรงต่อเวลา', nameEn: 'Punctuality & Attendance', description: 'อัตราการมาทำงานตรงเวลา ไม่ขาดงานโดยไม่มีเหตุผล', weight: 20, sortOrder: 3 },
-          { name: 'ยอดขาย Upsell', nameEn: 'Upsell Performance', description: 'ยอดขาย upsell เครื่องดื่มพรีเมียมและ dessert เทียบกับ target', weight: 15, sortOrder: 4 },
-          { name: 'มาตรฐานความสะอาด', nameEn: 'Hygiene Standards', description: 'การรักษาความสะอาดสถานที่ อุปกรณ์ และ uniform', weight: 10, sortOrder: 5 },
+          {
+            name: 'การบริการลูกค้า',
+            nameEn: 'Customer Service',
+            description: 'คะแนน feedback จากลูกค้า ความรวดเร็ว ความสุภาพ',
+            weight: 30,
+            sortOrder: 1,
+          },
+          {
+            name: 'ความรู้เมนูและเครื่องดื่ม',
+            nameEn: 'Menu & Beverage Knowledge',
+            description: 'ความสามารถแนะนำเมนู อธิบาย ingredients ได้ถูกต้อง',
+            weight: 25,
+            sortOrder: 2,
+          },
+          {
+            name: 'ความตรงต่อเวลา',
+            nameEn: 'Punctuality & Attendance',
+            description: 'อัตราการมาทำงานตรงเวลา ไม่ขาดงานโดยไม่มีเหตุผล',
+            weight: 20,
+            sortOrder: 3,
+          },
+          {
+            name: 'ยอดขาย Upsell',
+            nameEn: 'Upsell Performance',
+            description: 'ยอดขาย upsell เครื่องดื่มพรีเมียมและ dessert เทียบกับ target',
+            weight: 15,
+            sortOrder: 4,
+          },
+          {
+            name: 'มาตรฐานความสะอาด',
+            nameEn: 'Hygiene Standards',
+            description: 'การรักษาความสะอาดสถานที่ อุปกรณ์ และ uniform',
+            weight: 10,
+            sortOrder: 5,
+          },
         ],
       },
       // ── Kitchen ─────────────────────────────────────────────────────────────
@@ -2552,11 +3816,41 @@ export class SeederService {
         periodType: 'quarterly',
         description: 'เกณฑ์ประเมินสำหรับพ่อครัวและผู้ช่วย',
         items: [
-          { name: 'คุณภาพอาหาร', nameEn: 'Food Quality', description: 'มาตรฐานรสชาติ การจัดจาน ตรงกับ recipe specification', weight: 35, sortOrder: 1 },
-          { name: 'มาตรฐานสุขอนามัย', nameEn: 'Food Safety & Hygiene', description: 'การปฏิบัติตาม food safety standard HACCP', weight: 25, sortOrder: 2 },
-          { name: 'ความเร็วในการปรุงอาหาร', nameEn: 'Cooking Speed', description: 'เวลาส่งอาหารเทียบกับ SLA ของร้าน', weight: 20, sortOrder: 3 },
-          { name: 'การจัดการวัตถุดิบ', nameEn: 'Ingredient Management', description: 'การใช้วัตถุดิบอย่างประหยัด ลด food waste', weight: 10, sortOrder: 4 },
-          { name: 'การทำงานเป็นทีม', nameEn: 'Teamwork', description: 'ความร่วมมือในครัว รับผิดชอบหน้าที่ของตัวเอง', weight: 10, sortOrder: 5 },
+          {
+            name: 'คุณภาพอาหาร',
+            nameEn: 'Food Quality',
+            description: 'มาตรฐานรสชาติ การจัดจาน ตรงกับ recipe specification',
+            weight: 35,
+            sortOrder: 1,
+          },
+          {
+            name: 'มาตรฐานสุขอนามัย',
+            nameEn: 'Food Safety & Hygiene',
+            description: 'การปฏิบัติตาม food safety standard HACCP',
+            weight: 25,
+            sortOrder: 2,
+          },
+          {
+            name: 'ความเร็วในการปรุงอาหาร',
+            nameEn: 'Cooking Speed',
+            description: 'เวลาส่งอาหารเทียบกับ SLA ของร้าน',
+            weight: 20,
+            sortOrder: 3,
+          },
+          {
+            name: 'การจัดการวัตถุดิบ',
+            nameEn: 'Ingredient Management',
+            description: 'การใช้วัตถุดิบอย่างประหยัด ลด food waste',
+            weight: 10,
+            sortOrder: 4,
+          },
+          {
+            name: 'การทำงานเป็นทีม',
+            nameEn: 'Teamwork',
+            description: 'ความร่วมมือในครัว รับผิดชอบหน้าที่ของตัวเอง',
+            weight: 10,
+            sortOrder: 5,
+          },
         ],
       },
       // ── Maintenance ─────────────────────────────────────────────────────────
@@ -2567,11 +3861,41 @@ export class SeederService {
         periodType: 'quarterly',
         description: 'เกณฑ์ประเมินสำหรับช่างซ่อมบำรุงและทีม engineering',
         items: [
-          { name: 'ความเร็วในการซ่อม', nameEn: 'Repair Response Time', description: 'เวลาตั้งแต่รับ work order ถึงเสร็จเทียบกับ SLA', weight: 30, sortOrder: 1 },
-          { name: 'คุณภาพงานซ่อม', nameEn: 'Repair Quality', description: 'อัตราการกลับมาซ่อมซ้ำ (ต่ำ = ดี) และคุณภาพผลงาน', weight: 30, sortOrder: 2 },
-          { name: 'ความตรงต่อเวลา', nameEn: 'Punctuality & Attendance', description: 'อัตราการมาทำงานตรงเวลา พร้อมรับ on-call', weight: 20, sortOrder: 3 },
-          { name: 'การบำรุงรักษาเชิงป้องกัน', nameEn: 'Preventive Maintenance', description: 'ความสม่ำเสมอในการทำ PM schedule ตามแผน', weight: 10, sortOrder: 4 },
-          { name: 'ความปลอดภัย', nameEn: 'Safety Compliance', description: 'การปฏิบัติตามมาตรฐานความปลอดภัยในการทำงาน', weight: 10, sortOrder: 5 },
+          {
+            name: 'ความเร็วในการซ่อม',
+            nameEn: 'Repair Response Time',
+            description: 'เวลาตั้งแต่รับ work order ถึงเสร็จเทียบกับ SLA',
+            weight: 30,
+            sortOrder: 1,
+          },
+          {
+            name: 'คุณภาพงานซ่อม',
+            nameEn: 'Repair Quality',
+            description: 'อัตราการกลับมาซ่อมซ้ำ (ต่ำ = ดี) และคุณภาพผลงาน',
+            weight: 30,
+            sortOrder: 2,
+          },
+          {
+            name: 'ความตรงต่อเวลา',
+            nameEn: 'Punctuality & Attendance',
+            description: 'อัตราการมาทำงานตรงเวลา พร้อมรับ on-call',
+            weight: 20,
+            sortOrder: 3,
+          },
+          {
+            name: 'การบำรุงรักษาเชิงป้องกัน',
+            nameEn: 'Preventive Maintenance',
+            description: 'ความสม่ำเสมอในการทำ PM schedule ตามแผน',
+            weight: 10,
+            sortOrder: 4,
+          },
+          {
+            name: 'ความปลอดภัย',
+            nameEn: 'Safety Compliance',
+            description: 'การปฏิบัติตามมาตรฐานความปลอดภัยในการทำงาน',
+            weight: 10,
+            sortOrder: 5,
+          },
         ],
       },
       // ── HR / Admin ──────────────────────────────────────────────────────────
@@ -2582,11 +3906,41 @@ export class SeederService {
         periodType: 'quarterly',
         description: 'เกณฑ์ประเมินสำหรับทีม HR และธุรการ',
         items: [
-          { name: 'ความถูกต้องของเอกสาร', nameEn: 'Documentation Accuracy', description: 'ความถูกต้องครบถ้วนของเอกสาร HR สัญญาจ้าง payroll', weight: 30, sortOrder: 1 },
-          { name: 'ความตรงต่อเวลา', nameEn: 'Punctuality & Attendance', description: 'อัตราการมาทำงานตรงเวลา ไม่ขาดงานโดยไม่มีเหตุผล', weight: 20, sortOrder: 2 },
-          { name: 'การพัฒนาบุคลากร', nameEn: 'Employee Development', description: 'จัดการฝึกอบรม orientation และ development program ได้ตามแผน', weight: 20, sortOrder: 3 },
-          { name: 'ความพึงพอใจพนักงาน', nameEn: 'Employee Satisfaction', description: 'ผลสำรวจ engagement score ของทีม', weight: 20, sortOrder: 4 },
-          { name: 'การทำงานเชิงรุก', nameEn: 'Proactiveness', description: 'ริเริ่มปรับปรุง process หรือเสนอ initiative ใหม่', weight: 10, sortOrder: 5 },
+          {
+            name: 'ความถูกต้องของเอกสาร',
+            nameEn: 'Documentation Accuracy',
+            description: 'ความถูกต้องครบถ้วนของเอกสาร HR สัญญาจ้าง payroll',
+            weight: 30,
+            sortOrder: 1,
+          },
+          {
+            name: 'ความตรงต่อเวลา',
+            nameEn: 'Punctuality & Attendance',
+            description: 'อัตราการมาทำงานตรงเวลา ไม่ขาดงานโดยไม่มีเหตุผล',
+            weight: 20,
+            sortOrder: 2,
+          },
+          {
+            name: 'การพัฒนาบุคลากร',
+            nameEn: 'Employee Development',
+            description: 'จัดการฝึกอบรม orientation และ development program ได้ตามแผน',
+            weight: 20,
+            sortOrder: 3,
+          },
+          {
+            name: 'ความพึงพอใจพนักงาน',
+            nameEn: 'Employee Satisfaction',
+            description: 'ผลสำรวจ engagement score ของทีม',
+            weight: 20,
+            sortOrder: 4,
+          },
+          {
+            name: 'การทำงานเชิงรุก',
+            nameEn: 'Proactiveness',
+            description: 'ริเริ่มปรับปรุง process หรือเสนอ initiative ใหม่',
+            weight: 10,
+            sortOrder: 5,
+          },
         ],
       },
     ];
@@ -2607,24 +3961,24 @@ export class SeederService {
 
       await (this.prisma as any).hrKpiTemplate.create({
         data: {
-          tenantId:       null,
-          name:           tpl.name,
-          nameEn:         tpl.nameEn,
+          tenantId: null,
+          name: tpl.name,
+          nameEn: tpl.nameEn,
           departmentCode: tpl.departmentCode,
-          periodType:     tpl.periodType,
-          description:    tpl.description,
-          isDefault:      true,
-          isActive:       true,
-          sortOrder:      templatesCreated,
+          periodType: tpl.periodType,
+          description: tpl.description,
+          isDefault: true,
+          isActive: true,
+          sortOrder: templatesCreated,
           items: {
             create: tpl.items.map((item) => ({
-              name:        item.name,
-              nameEn:      item.nameEn,
+              name: item.name,
+              nameEn: item.nameEn,
               description: item.description,
-              weight:      item.weight,
-              minScore:    0,
-              maxScore:    100,
-              sortOrder:   item.sortOrder,
+              weight: item.weight,
+              minScore: 0,
+              maxScore: 100,
+              sortOrder: item.sortOrder,
             })),
           },
         },
@@ -2635,7 +3989,9 @@ export class SeederService {
       this.logger.log(`  ✓ ${tpl.name} (${tpl.items.length} KPI items)`);
     }
 
-    this.logger.log(`✅ KPI Templates seeded: ${templatesCreated} templates, ${itemsCreated} items`);
+    this.logger.log(
+      `✅ KPI Templates seeded: ${templatesCreated} templates, ${itemsCreated} items`,
+    );
   }
 
   /**
@@ -2727,20 +4083,104 @@ export class SeederService {
     if (existingTables === 0) {
       const mainTables = [
         // Zone: Indoor
-        { tableNumber: 'A1', capacity: 2, zone: 'Indoor', shape: 'SQUARE', positionX: 1, positionY: 1 },
-        { tableNumber: 'A2', capacity: 2, zone: 'Indoor', shape: 'SQUARE', positionX: 2, positionY: 1 },
-        { tableNumber: 'A3', capacity: 4, zone: 'Indoor', shape: 'RECTANGLE', positionX: 3, positionY: 1 },
-        { tableNumber: 'A4', capacity: 4, zone: 'Indoor', shape: 'RECTANGLE', positionX: 4, positionY: 1 },
-        { tableNumber: 'B1', capacity: 6, zone: 'Indoor', shape: 'RECTANGLE', positionX: 1, positionY: 2 },
-        { tableNumber: 'B2', capacity: 6, zone: 'Indoor', shape: 'RECTANGLE', positionX: 2, positionY: 2 },
-        { tableNumber: 'B3', capacity: 8, zone: 'Indoor', shape: 'RECTANGLE', positionX: 3, positionY: 2 },
+        {
+          tableNumber: 'A1',
+          capacity: 2,
+          zone: 'Indoor',
+          shape: 'SQUARE',
+          positionX: 1,
+          positionY: 1,
+        },
+        {
+          tableNumber: 'A2',
+          capacity: 2,
+          zone: 'Indoor',
+          shape: 'SQUARE',
+          positionX: 2,
+          positionY: 1,
+        },
+        {
+          tableNumber: 'A3',
+          capacity: 4,
+          zone: 'Indoor',
+          shape: 'RECTANGLE',
+          positionX: 3,
+          positionY: 1,
+        },
+        {
+          tableNumber: 'A4',
+          capacity: 4,
+          zone: 'Indoor',
+          shape: 'RECTANGLE',
+          positionX: 4,
+          positionY: 1,
+        },
+        {
+          tableNumber: 'B1',
+          capacity: 6,
+          zone: 'Indoor',
+          shape: 'RECTANGLE',
+          positionX: 1,
+          positionY: 2,
+        },
+        {
+          tableNumber: 'B2',
+          capacity: 6,
+          zone: 'Indoor',
+          shape: 'RECTANGLE',
+          positionX: 2,
+          positionY: 2,
+        },
+        {
+          tableNumber: 'B3',
+          capacity: 8,
+          zone: 'Indoor',
+          shape: 'RECTANGLE',
+          positionX: 3,
+          positionY: 2,
+        },
         // Zone: Terrace
-        { tableNumber: 'T1', capacity: 2, zone: 'Terrace', shape: 'ROUND', positionX: 1, positionY: 4 },
-        { tableNumber: 'T2', capacity: 2, zone: 'Terrace', shape: 'ROUND', positionX: 2, positionY: 4 },
-        { tableNumber: 'T3', capacity: 4, zone: 'Terrace', shape: 'ROUND', positionX: 3, positionY: 4 },
-        { tableNumber: 'T4', capacity: 4, zone: 'Terrace', shape: 'ROUND', positionX: 4, positionY: 4 },
+        {
+          tableNumber: 'T1',
+          capacity: 2,
+          zone: 'Terrace',
+          shape: 'ROUND',
+          positionX: 1,
+          positionY: 4,
+        },
+        {
+          tableNumber: 'T2',
+          capacity: 2,
+          zone: 'Terrace',
+          shape: 'ROUND',
+          positionX: 2,
+          positionY: 4,
+        },
+        {
+          tableNumber: 'T3',
+          capacity: 4,
+          zone: 'Terrace',
+          shape: 'ROUND',
+          positionX: 3,
+          positionY: 4,
+        },
+        {
+          tableNumber: 'T4',
+          capacity: 4,
+          zone: 'Terrace',
+          shape: 'ROUND',
+          positionX: 4,
+          positionY: 4,
+        },
         // Zone: Private Dining
-        { tableNumber: 'P1', capacity: 10, zone: 'Private', shape: 'OVAL', positionX: 1, positionY: 6 },
+        {
+          tableNumber: 'P1',
+          capacity: 10,
+          zone: 'Private',
+          shape: 'OVAL',
+          positionX: 1,
+          positionY: 6,
+        },
       ];
 
       await this.prisma.restaurantTable.createMany({
@@ -2808,11 +4248,41 @@ export class SeederService {
         description: 'เมนูอาหารเช้าเสิร์ฟเวลา 06:00-10:30 น.',
         displayOrder: 1,
         items: [
-          { name: 'ข้าวต้มปลา', description: 'ข้าวต้มปลาช่อนสด ขิง ต้นหอม น้ำปลา', price: 120, preparationTime: 10, isAvailable: true },
-          { name: 'โจ๊กหมูสับ', description: 'โจ๊กข้าวหอมมะลิ หมูสับนุ่ม ขิง ต้นหอม', price: 110, preparationTime: 8, isAvailable: true },
-          { name: 'ไข่กระทะ', description: 'ไข่ดาว 2 ฟอง เสิร์ฟพร้อมขนมปังปิ้ง แยม เนย', price: 90, preparationTime: 7, isAvailable: true },
-          { name: 'American Breakfast', description: 'ไข่คน เบคอน ไส้กรอก มะเขือเทศ เห็ด ถั่วอบ', price: 280, preparationTime: 15, isAvailable: true },
-          { name: 'Continental Breakfast', description: 'ขนมปังปิ้ง ครัวซองต์ ผลไม้ โยเกิร์ต', price: 220, preparationTime: 5, isAvailable: true },
+          {
+            name: 'ข้าวต้มปลา',
+            description: 'ข้าวต้มปลาช่อนสด ขิง ต้นหอม น้ำปลา',
+            price: 120,
+            preparationTime: 10,
+            isAvailable: true,
+          },
+          {
+            name: 'โจ๊กหมูสับ',
+            description: 'โจ๊กข้าวหอมมะลิ หมูสับนุ่ม ขิง ต้นหอม',
+            price: 110,
+            preparationTime: 8,
+            isAvailable: true,
+          },
+          {
+            name: 'ไข่กระทะ',
+            description: 'ไข่ดาว 2 ฟอง เสิร์ฟพร้อมขนมปังปิ้ง แยม เนย',
+            price: 90,
+            preparationTime: 7,
+            isAvailable: true,
+          },
+          {
+            name: 'American Breakfast',
+            description: 'ไข่คน เบคอน ไส้กรอก มะเขือเทศ เห็ด ถั่วอบ',
+            price: 280,
+            preparationTime: 15,
+            isAvailable: true,
+          },
+          {
+            name: 'Continental Breakfast',
+            description: 'ขนมปังปิ้ง ครัวซองต์ ผลไม้ โยเกิร์ต',
+            price: 220,
+            preparationTime: 5,
+            isAvailable: true,
+          },
         ],
       },
       {
@@ -2820,12 +4290,54 @@ export class SeederService {
         description: 'อาหารไทยและนานาชาติ',
         displayOrder: 2,
         items: [
-          { name: 'ผัดไทยกุ้งสด', description: 'ผัดไทยกุ้งแม่น้ำสด เส้นจันทร์ ถั่วงอก ต้นหอม', price: 220, preparationTime: 15, isSpicy: false, isAvailable: true },
-          { name: 'ต้มยำกุ้ง', description: 'ต้มยำกุ้งน้ำข้น กุ้งแม่น้ำ เห็ดฟาง ตะไคร้ ใบมะกรูด', price: 280, preparationTime: 20, isSpicy: true, spicyLevel: 3, isAvailable: true },
-          { name: 'แกงเขียวหวานไก่', description: 'แกงเขียวหวานไก่บ้าน กะทิสด มะเขือเปราะ', price: 180, preparationTime: 20, isSpicy: true, spicyLevel: 2, isAvailable: true },
-          { name: 'ข้าวมันไก่', description: 'ข้าวมันไก่ต้มซอสขิง น้ำซุปใส แตงกวา ต้นหอม', price: 160, preparationTime: 12, isAvailable: true },
-          { name: 'สเต็กเนื้อออสเตรเลีย', description: 'เนื้อออสเตรเลีย 200g ย่างตามสั่ง มันฝรั่งบด ผักย่าง', price: 580, preparationTime: 25, isAvailable: true },
-          { name: 'Grilled Salmon', description: 'แซลมอนย่าง ซอส Lemon Dill เสิร์ฟพร้อมผักนึ่ง', price: 420, preparationTime: 20, isGlutenFree: true, isAvailable: true },
+          {
+            name: 'ผัดไทยกุ้งสด',
+            description: 'ผัดไทยกุ้งแม่น้ำสด เส้นจันทร์ ถั่วงอก ต้นหอม',
+            price: 220,
+            preparationTime: 15,
+            isSpicy: false,
+            isAvailable: true,
+          },
+          {
+            name: 'ต้มยำกุ้ง',
+            description: 'ต้มยำกุ้งน้ำข้น กุ้งแม่น้ำ เห็ดฟาง ตะไคร้ ใบมะกรูด',
+            price: 280,
+            preparationTime: 20,
+            isSpicy: true,
+            spicyLevel: 3,
+            isAvailable: true,
+          },
+          {
+            name: 'แกงเขียวหวานไก่',
+            description: 'แกงเขียวหวานไก่บ้าน กะทิสด มะเขือเปราะ',
+            price: 180,
+            preparationTime: 20,
+            isSpicy: true,
+            spicyLevel: 2,
+            isAvailable: true,
+          },
+          {
+            name: 'ข้าวมันไก่',
+            description: 'ข้าวมันไก่ต้มซอสขิง น้ำซุปใส แตงกวา ต้นหอม',
+            price: 160,
+            preparationTime: 12,
+            isAvailable: true,
+          },
+          {
+            name: 'สเต็กเนื้อออสเตรเลีย',
+            description: 'เนื้อออสเตรเลีย 200g ย่างตามสั่ง มันฝรั่งบด ผักย่าง',
+            price: 580,
+            preparationTime: 25,
+            isAvailable: true,
+          },
+          {
+            name: 'Grilled Salmon',
+            description: 'แซลมอนย่าง ซอส Lemon Dill เสิร์ฟพร้อมผักนึ่ง',
+            price: 420,
+            preparationTime: 20,
+            isGlutenFree: true,
+            isAvailable: true,
+          },
         ],
       },
       {
@@ -2833,10 +4345,39 @@ export class SeederService {
         description: 'ขนมหวานไทยและเดสเสิร์ตนานาชาติ',
         displayOrder: 3,
         items: [
-          { name: 'ข้าวเหนียวมะม่วง', description: 'ข้าวเหนียวมะม่วงน้ำดอกไม้ กะทิสด งาขาว', price: 160, preparationTime: 5, isVegetarian: true, isAvailable: true },
-          { name: 'ทับทิมกรอบ', description: 'ทับทิมกรอบในน้ำกะทิ น้ำแข็ง', price: 120, preparationTime: 5, isVegetarian: true, isAvailable: true },
-          { name: 'Chocolate Lava Cake', description: 'เค้กช็อกโกแลตหน้าละลาย ไอศกรีมวนิลา', price: 190, preparationTime: 15, isVegetarian: true, isAvailable: true },
-          { name: 'Crème Brûlée', description: 'คัสตาร์ดวนิลาหน้าน้ำตาลไหม้', price: 175, preparationTime: 3, isVegetarian: true, isGlutenFree: true, isAvailable: true },
+          {
+            name: 'ข้าวเหนียวมะม่วง',
+            description: 'ข้าวเหนียวมะม่วงน้ำดอกไม้ กะทิสด งาขาว',
+            price: 160,
+            preparationTime: 5,
+            isVegetarian: true,
+            isAvailable: true,
+          },
+          {
+            name: 'ทับทิมกรอบ',
+            description: 'ทับทิมกรอบในน้ำกะทิ น้ำแข็ง',
+            price: 120,
+            preparationTime: 5,
+            isVegetarian: true,
+            isAvailable: true,
+          },
+          {
+            name: 'Chocolate Lava Cake',
+            description: 'เค้กช็อกโกแลตหน้าละลาย ไอศกรีมวนิลา',
+            price: 190,
+            preparationTime: 15,
+            isVegetarian: true,
+            isAvailable: true,
+          },
+          {
+            name: 'Crème Brûlée',
+            description: 'คัสตาร์ดวนิลาหน้าน้ำตาลไหม้',
+            price: 175,
+            preparationTime: 3,
+            isVegetarian: true,
+            isGlutenFree: true,
+            isAvailable: true,
+          },
         ],
       },
       {
@@ -2845,11 +4386,50 @@ export class SeederService {
         displayOrder: 4,
         restaurantId: mainRestaurant.id,
         items: [
-          { name: 'ชาไทยเย็น', description: 'ชาไทยเข้มข้น นมข้น น้ำแข็ง', price: 80, preparationTime: 3, isVegetarian: true, isAvailable: true },
-          { name: 'กาแฟดำร้อน', description: 'เอสเปรสโซ่คัดพิเศษจากดอยช้าง', price: 90, preparationTime: 5, isVegetarian: true, isAvailable: true },
-          { name: 'Latte', description: 'เอสเปรสโซ่ + นมสด ตามสั่งร้อน/เย็น', price: 120, preparationTime: 5, isVegetarian: true, isAvailable: true },
-          { name: 'น้ำผลไม้ปั่นสด', description: 'เลือกได้: สตรอว์เบอรี่ มะม่วง ฝรั่ง ส้ม', price: 110, preparationTime: 5, isVegetarian: true, isVegan: true, isGlutenFree: true, isAvailable: true },
-          { name: 'มะพร้าวน้ำหอม', description: 'มะพร้าวน้ำหอมสด เนื้อมะพร้าวอ่อน', price: 90, preparationTime: 2, isVegetarian: true, isVegan: true, isGlutenFree: true, isAvailable: true },
+          {
+            name: 'ชาไทยเย็น',
+            description: 'ชาไทยเข้มข้น นมข้น น้ำแข็ง',
+            price: 80,
+            preparationTime: 3,
+            isVegetarian: true,
+            isAvailable: true,
+          },
+          {
+            name: 'กาแฟดำร้อน',
+            description: 'เอสเปรสโซ่คัดพิเศษจากดอยช้าง',
+            price: 90,
+            preparationTime: 5,
+            isVegetarian: true,
+            isAvailable: true,
+          },
+          {
+            name: 'Latte',
+            description: 'เอสเปรสโซ่ + นมสด ตามสั่งร้อน/เย็น',
+            price: 120,
+            preparationTime: 5,
+            isVegetarian: true,
+            isAvailable: true,
+          },
+          {
+            name: 'น้ำผลไม้ปั่นสด',
+            description: 'เลือกได้: สตรอว์เบอรี่ มะม่วง ฝรั่ง ส้ม',
+            price: 110,
+            preparationTime: 5,
+            isVegetarian: true,
+            isVegan: true,
+            isGlutenFree: true,
+            isAvailable: true,
+          },
+          {
+            name: 'มะพร้าวน้ำหอม',
+            description: 'มะพร้าวน้ำหอมสด เนื้อมะพร้าวอ่อน',
+            price: 90,
+            preparationTime: 2,
+            isVegetarian: true,
+            isVegan: true,
+            isGlutenFree: true,
+            isAvailable: true,
+          },
         ],
       },
     ];
@@ -2913,11 +4493,36 @@ export class SeederService {
       categoryCount++;
 
       const barItems = [
-        { name: 'Mountain Breeze', description: 'Vodka, Blue Curacao, Lime Juice, Soda', price: 280, preparationTime: 5 },
-        { name: 'Thai Mojito', description: 'White Rum, Mint, Lime, Lemongrass, Soda', price: 260, preparationTime: 7 },
-        { name: 'Sunset Spritz', description: 'Aperol, Prosecco, Orange Slice', price: 320, preparationTime: 5 },
-        { name: 'เบียร์สด (Chang / Singha)', description: 'เบียร์สดแก้วใหญ่ เย็นสดชื่น', price: 120, preparationTime: 2 },
-        { name: 'House Wine (แดง/ขาว)', description: 'House wine แก้ว เลือกแดงหรือขาว', price: 220, preparationTime: 1 },
+        {
+          name: 'Mountain Breeze',
+          description: 'Vodka, Blue Curacao, Lime Juice, Soda',
+          price: 280,
+          preparationTime: 5,
+        },
+        {
+          name: 'Thai Mojito',
+          description: 'White Rum, Mint, Lime, Lemongrass, Soda',
+          price: 260,
+          preparationTime: 7,
+        },
+        {
+          name: 'Sunset Spritz',
+          description: 'Aperol, Prosecco, Orange Slice',
+          price: 320,
+          preparationTime: 5,
+        },
+        {
+          name: 'เบียร์สด (Chang / Singha)',
+          description: 'เบียร์สดแก้วใหญ่ เย็นสดชื่น',
+          price: 120,
+          preparationTime: 2,
+        },
+        {
+          name: 'House Wine (แดง/ขาว)',
+          description: 'House wine แก้ว เลือกแดงหรือขาว',
+          price: 220,
+          preparationTime: 1,
+        },
       ];
 
       for (let i = 0; i < barItems.length; i++) {
@@ -3023,7 +4628,7 @@ export class SeederService {
 
     this.logger.log(
       `  ✓ POS staff: ${posCreated} created, ${posUpdated} updated` +
-      ` (password: pos123456, systems: waiter/chef/cashier → POS only, manager → main+POS)`,
+        ` (password: pos123456, systems: waiter/chef/cashier → POS only, manager → main+POS)`,
     );
 
     // ── Backfill allowedSystems for existing hotel owner/admins ───────────────
@@ -3051,5 +4656,569 @@ export class SeederService {
   async clear(): Promise<void> {
     this.logger.warn('🗑️ Clearing all data...');
     this.logger.warn('⚠️ Clear function not implemented. Use migration revert instead.');
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // INVENTORY MANAGEMENT SEEDER
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Seed Inventory data for demo tenants that have INVENTORY_MODULE add-on.
+   * Creates: item categories, inventory items, suppliers, warehouses,
+   * room-type amenity templates, and demo stock balances.
+   */
+  private async seedInventoryData(): Promise<void> {
+    this.logger.log('📦 Seeding Inventory data...');
+
+    // Only seed for the premium demo tenant (SUB-002)
+    const allTenants = await this.tenantsService.findAll();
+    const tenant = allTenants.find(t => (t as any).name_en === 'Mountain View Resort' || (t as any).slug === 'mountain' || t.name === 'Mountain View Resort (Premium Test)');
+    if (!tenant) {
+      this.logger.warn('  ⚠️ Demo tenant (mountain) not found — skipping inventory seed');
+      return;
+    }
+
+    const property = await this.prisma.property.findFirst({
+      where: { tenantId: tenant.id },
+    });
+    if (!property) {
+      this.logger.warn('  ⚠️ No property found for demo tenant — skipping inventory seed');
+      return;
+    }
+
+    const tenantId = tenant.id;
+    const propertyId = property.id;
+
+    // ── 1. Item Categories (hierarchical) ────────────────────────────────────
+    const categoryDefs = [
+      { code: 'CAT-FB',    name: 'F&B วัตถุดิบ',        parentCode: null },
+      { code: 'CAT-FB-DRY',name: 'ของแห้ง',              parentCode: 'CAT-FB' },
+      { code: 'CAT-FB-VEG',name: 'ผักและผลไม้',           parentCode: 'CAT-FB' },
+      { code: 'CAT-FB-BEV',name: 'เครื่องดื่ม',            parentCode: 'CAT-FB' },
+      { code: 'CAT-ROOM',  name: 'ของใช้ห้องพัก',         parentCode: null },
+      { code: 'CAT-ROOM-BED', name: 'ผ้าปูและผ้าห่ม',    parentCode: 'CAT-ROOM' },
+      { code: 'CAT-ROOM-AMEN',name: 'Amenities',          parentCode: 'CAT-ROOM' },
+      { code: 'CAT-CLEAN', name: 'น้ำยาทำความสะอาด',      parentCode: null },
+      { code: 'CAT-MAINT', name: 'อุปกรณ์ซ่อมบำรุง',       parentCode: null },
+    ];
+
+    const categoryMap: Record<string, string> = {};
+    for (const cat of categoryDefs) {
+      const parentId = cat.parentCode ? categoryMap[cat.parentCode] : null;
+      const existing = await this.prisma.itemCategory.findFirst({
+        where: { tenantId, code: cat.code },
+      });
+      if (!existing) {
+        const created = await this.prisma.itemCategory.create({
+          data: { tenantId, code: cat.code, name: cat.name, parentId, isActive: true, sortOrder: 0 },
+        });
+        categoryMap[cat.code] = created.id;
+        this.logger.log(`  ✓ Category: ${cat.name}`);
+      } else {
+        categoryMap[cat.code] = existing.id;
+      }
+    }
+
+    // ── 2. Suppliers ─────────────────────────────────────────────────────────
+    const supplierDefs = [
+      {
+        code: 'SUP-MAKRO',  name: 'แม็คโคร (Makro)', contactPerson: 'จัดซื้อส่วนกลาง',
+        email: 'order@makro.co.th', phone: '02-999-9999', paymentTerms: 'NET30',
+        leadTimeDays: 2,
+      },
+      {
+        code: 'SUP-BIGC',   name: 'บิ๊กซี ซัพพลาย', contactPerson: 'ฝ่ายขายส่ง',
+        email: 'wholesale@bigc.co.th', phone: '02-888-8888', paymentTerms: 'COD',
+        leadTimeDays: 1,
+      },
+      {
+        code: 'SUP-CLEAN',  name: 'บริษัท ซัพพลายคลีน จำกัด', contactPerson: 'คุณสมหวัง',
+        email: 'sales@supplyclean.th', phone: '086-111-2222', paymentTerms: 'NET15',
+        leadTimeDays: 3,
+      },
+      {
+        code: 'SUP-HOTEL',  name: 'Hotel Amenities TH', contactPerson: 'คุณนารี',
+        email: 'info@hotelamenities.th', phone: '088-555-6666', paymentTerms: 'NET30',
+        leadTimeDays: 5,
+      },
+    ];
+
+    const supplierMap: Record<string, string> = {};
+    for (const sup of supplierDefs) {
+      const existing = await this.prisma.supplier.findFirst({
+        where: { tenantId, code: sup.code },
+      });
+      if (!existing) {
+        const created = await this.prisma.supplier.create({
+          data: { tenantId, ...sup, isActive: true },
+        });
+        supplierMap[sup.code] = created.id;
+        this.logger.log(`  ✓ Supplier: ${sup.name}`);
+      } else {
+        supplierMap[sup.code] = existing.id;
+      }
+    }
+
+    // ── 3. Warehouses ─────────────────────────────────────────────────────────
+    const warehouseDefs = [
+      { code: 'WH-MAIN',  name: 'คลังกลาง',       type: 'GENERAL',      isDefault: true },
+      { code: 'WH-KITCH', name: 'คลังครัว',        type: 'KITCHEN',      isDefault: false },
+      { code: 'WH-HK',    name: 'คลัง Housekeeping', type: 'HOUSEKEEPING', isDefault: false },
+      { code: 'WH-MAINT', name: 'คลังช่างซ่อม',    type: 'MAINTENANCE',  isDefault: false },
+    ];
+
+    const warehouseMap: Record<string, string> = {};
+    for (const wh of warehouseDefs) {
+      const existing = await this.prisma.warehouse.findFirst({
+        where: { tenantId, propertyId, code: wh.code },
+      });
+      if (!existing) {
+        const created = await this.prisma.warehouse.create({
+          data: { tenantId, propertyId, ...wh, type: wh.type as WarehouseType, isActive: true },
+        });
+        warehouseMap[wh.code] = created.id;
+        this.logger.log(`  ✓ Warehouse: ${wh.name}`);
+      } else {
+        warehouseMap[wh.code] = existing.id;
+      }
+    }
+
+    // ── 4. Inventory Items ────────────────────────────────────────────────────
+    const itemDefs = [
+      // Room Amenities
+      {
+        sku: 'SOAP-75G',   name: 'สบู่ก้อน 75g',         catCode: 'CAT-ROOM-AMEN', unit: 'PIECE',
+        reorderPoint: 200, reorderQty: 500, minStock: 50, costMethod: 'WEIGHTED_AVG',
+        isPerishable: false, supplierCode: 'SUP-HOTEL', unitPrice: 18,
+      },
+      {
+        sku: 'SHAMP-30ML', name: 'แชมพู 30ml',            catCode: 'CAT-ROOM-AMEN', unit: 'BOTTLE',
+        reorderPoint: 150, reorderQty: 400, minStock: 30, costMethod: 'WEIGHTED_AVG',
+        isPerishable: false, supplierCode: 'SUP-HOTEL', unitPrice: 22,
+      },
+      {
+        sku: 'COND-30ML',  name: 'ครีมนวด 30ml',           catCode: 'CAT-ROOM-AMEN', unit: 'BOTTLE',
+        reorderPoint: 150, reorderQty: 400, minStock: 30, costMethod: 'WEIGHTED_AVG',
+        isPerishable: false, supplierCode: 'SUP-HOTEL', unitPrice: 22,
+      },
+      {
+        sku: 'TOWEL-BATH', name: 'ผ้าเช็ดตัว',             catCode: 'CAT-ROOM-BED',  unit: 'PIECE',
+        reorderPoint: 100, reorderQty: 200, minStock: 50, costMethod: 'WEIGHTED_AVG',
+        isPerishable: false, supplierCode: 'SUP-HOTEL', unitPrice: 120,
+      },
+      {
+        sku: 'TOWEL-FACE', name: 'ผ้าเช็ดหน้า',            catCode: 'CAT-ROOM-BED',  unit: 'PIECE',
+        reorderPoint: 100, reorderQty: 200, minStock: 50, costMethod: 'WEIGHTED_AVG',
+        isPerishable: false, supplierCode: 'SUP-HOTEL', unitPrice: 60,
+      },
+      {
+        sku: 'SHEET-STD',  name: 'ผ้าปูที่นอน (Standard)',  catCode: 'CAT-ROOM-BED',  unit: 'SET',
+        reorderPoint: 30,  reorderQty: 60,  minStock: 15, costMethod: 'WEIGHTED_AVG',
+        isPerishable: false, supplierCode: 'SUP-HOTEL', unitPrice: 350,
+      },
+      // F&B Dry goods
+      {
+        sku: 'RICE-25KG',  name: 'ข้าวหอมมะลิ 25kg',       catCode: 'CAT-FB-DRY',    unit: 'BAG',
+        reorderPoint: 10,  reorderQty: 20,  minStock: 5,  costMethod: 'WEIGHTED_AVG',
+        isPerishable: true, defaultShelfLifeDays: 365, supplierCode: 'SUP-MAKRO', unitPrice: 780,
+      },
+      {
+        sku: 'FLOUR-1KG',  name: 'แป้งอเนกประสงค์ 1kg',    catCode: 'CAT-FB-DRY',    unit: 'KG',
+        reorderPoint: 20,  reorderQty: 50,  minStock: 5,  costMethod: 'WEIGHTED_AVG',
+        isPerishable: true, defaultShelfLifeDays: 180, supplierCode: 'SUP-MAKRO', unitPrice: 32,
+      },
+      {
+        sku: 'OIL-5L',     name: 'น้ำมันพืช 5 ลิตร',        catCode: 'CAT-FB-DRY',    unit: 'BOTTLE',
+        reorderPoint: 10,  reorderQty: 24,  minStock: 3,  costMethod: 'WEIGHTED_AVG',
+        isPerishable: true, defaultShelfLifeDays: 365, supplierCode: 'SUP-MAKRO', unitPrice: 220,
+      },
+      {
+        sku: 'SUGAR-1KG',  name: 'น้ำตาลทราย 1kg',          catCode: 'CAT-FB-DRY',    unit: 'KG',
+        reorderPoint: 10,  reorderQty: 30,  minStock: 5,  costMethod: 'WEIGHTED_AVG',
+        isPerishable: true, defaultShelfLifeDays: 730, supplierCode: 'SUP-MAKRO', unitPrice: 28,
+      },
+      // Beverages
+      {
+        sku: 'WATER-600',  name: 'น้ำดื่ม 600ml (ลัง 24)',   catCode: 'CAT-FB-BEV',    unit: 'BOX',
+        reorderPoint: 20,  reorderQty: 50,  minStock: 10, costMethod: 'WEIGHTED_AVG',
+        isPerishable: true, defaultShelfLifeDays: 365, supplierCode: 'SUP-MAKRO', unitPrice: 90,
+      },
+      {
+        sku: 'COLA-330',   name: 'น้ำอัดลม 330ml (ลัง 24)', catCode: 'CAT-FB-BEV',    unit: 'BOX',
+        reorderPoint: 10,  reorderQty: 20,  minStock: 5,  costMethod: 'WEIGHTED_AVG',
+        isPerishable: true, defaultShelfLifeDays: 365, supplierCode: 'SUP-BIGC', unitPrice: 180,
+      },
+      // Cleaning Supplies
+      {
+        sku: 'DETERGENT',  name: 'น้ำยาซักผ้า 5L',           catCode: 'CAT-CLEAN',     unit: 'BOTTLE',
+        reorderPoint: 10,  reorderQty: 24,  minStock: 3,  costMethod: 'WEIGHTED_AVG',
+        isPerishable: false, supplierCode: 'SUP-CLEAN', unitPrice: 180,
+      },
+      {
+        sku: 'FLOOR-CLN',  name: 'น้ำยาถูพื้น 5L',            catCode: 'CAT-CLEAN',     unit: 'BOTTLE',
+        reorderPoint: 8,   reorderQty: 20,  minStock: 2,  costMethod: 'WEIGHTED_AVG',
+        isPerishable: false, supplierCode: 'SUP-CLEAN', unitPrice: 150,
+      },
+      {
+        sku: 'TOILET-CLN', name: 'น้ำยาล้างห้องน้ำ 750ml',    catCode: 'CAT-CLEAN',     unit: 'BOTTLE',
+        reorderPoint: 20,  reorderQty: 48,  minStock: 5,  costMethod: 'WEIGHTED_AVG',
+        isPerishable: false, supplierCode: 'SUP-CLEAN', unitPrice: 65,
+      },
+      // Maintenance Parts
+      {
+        sku: 'BULB-E27',   name: 'หลอดไฟ LED E27 9W',        catCode: 'CAT-MAINT',     unit: 'PIECE',
+        reorderPoint: 20,  reorderQty: 50,  minStock: 10, costMethod: 'WEIGHTED_AVG',
+        isPerishable: false, supplierCode: 'SUP-BIGC', unitPrice: 85,
+      },
+      {
+        sku: 'FILTER-AC',  name: 'ฟิลเตอร์แอร์',             catCode: 'CAT-MAINT',     unit: 'PIECE',
+        reorderPoint: 10,  reorderQty: 20,  minStock: 5,  costMethod: 'WEIGHTED_AVG',
+        isPerishable: false, supplierCode: 'SUP-BIGC', unitPrice: 120,
+      },
+    ];
+
+    const itemMap: Record<string, string> = {};
+    let itemCount = 0;
+    for (const item of itemDefs) {
+      const catId = categoryMap[item.catCode];
+      const existing = await this.prisma.inventoryItem.findFirst({
+        where: { tenantId, sku: item.sku },
+      });
+      let itemId: string;
+      if (!existing) {
+        const created = await this.prisma.inventoryItem.create({
+          data: {
+            tenantId, sku: item.sku, name: item.name, categoryId: catId,
+            unit: item.unit as any, costMethod: item.costMethod as any,
+            reorderPoint: item.reorderPoint, reorderQty: item.reorderQty,
+            minStock: item.minStock, isPerishable: item.isPerishable,
+            defaultShelfLifeDays: item.defaultShelfLifeDays ?? null,
+            isActive: true,
+          },
+        });
+        itemId = created.id;
+        itemCount++;
+      } else {
+        itemId = existing.id;
+      }
+      itemMap[item.sku] = itemId;
+
+      // Link supplier to item
+      const suppId = supplierMap[item.supplierCode];
+      if (suppId) {
+        const existingLink = await this.prisma.itemSupplier.findFirst({
+          where: { itemId, supplierId: suppId },
+        });
+        if (!existingLink) {
+          await this.prisma.itemSupplier.create({
+            data: {
+              itemId, supplierId: suppId, unitPrice: item.unitPrice,
+              currency: 'THB', isPreferred: true,
+            },
+          });
+        }
+      }
+    }
+    this.logger.log(`  ✓ ${itemCount} inventory items seeded`);
+
+    // ── 5. Warehouse Stocks (initial balances) ────────────────────────────────
+    const stockDefs: Array<{ sku: string; whCode: string; qty: number; avgCost: number }> = [
+      // Housekeeping warehouse stocks
+      { sku: 'SOAP-75G',   whCode: 'WH-HK',    qty: 320, avgCost: 18 },
+      { sku: 'SHAMP-30ML', whCode: 'WH-HK',    qty: 280, avgCost: 22 },
+      { sku: 'COND-30ML',  whCode: 'WH-HK',    qty: 260, avgCost: 22 },
+      { sku: 'TOWEL-BATH', whCode: 'WH-HK',    qty: 180, avgCost: 120 },
+      { sku: 'TOWEL-FACE', whCode: 'WH-HK',    qty: 180, avgCost: 60 },
+      { sku: 'SHEET-STD',  whCode: 'WH-HK',    qty: 45,  avgCost: 350 },
+      { sku: 'DETERGENT',  whCode: 'WH-HK',    qty: 18,  avgCost: 180 },
+      { sku: 'TOILET-CLN', whCode: 'WH-HK',    qty: 32,  avgCost: 65 },
+      // Kitchen warehouse stocks
+      { sku: 'RICE-25KG',  whCode: 'WH-KITCH', qty: 15,  avgCost: 780 },
+      { sku: 'FLOUR-1KG',  whCode: 'WH-KITCH', qty: 25,  avgCost: 32 },
+      { sku: 'OIL-5L',     whCode: 'WH-KITCH', qty: 12,  avgCost: 220 },
+      { sku: 'SUGAR-1KG',  whCode: 'WH-KITCH', qty: 20,  avgCost: 28 },
+      { sku: 'WATER-600',  whCode: 'WH-KITCH', qty: 35,  avgCost: 90 },
+      { sku: 'COLA-330',   whCode: 'WH-KITCH', qty: 15,  avgCost: 180 },
+      // Maintenance warehouse stocks
+      { sku: 'BULB-E27',   whCode: 'WH-MAINT', qty: 35,  avgCost: 85 },
+      { sku: 'FILTER-AC',  whCode: 'WH-MAINT', qty: 12,  avgCost: 120 },
+      { sku: 'FLOOR-CLN',  whCode: 'WH-MAINT', qty: 10,  avgCost: 150 },
+    ];
+
+    let stockCount = 0;
+    for (const stock of stockDefs) {
+      const itemId = itemMap[stock.sku];
+      const warehouseId = warehouseMap[stock.whCode];
+      if (!itemId || !warehouseId) continue;
+
+      const existing = await this.prisma.warehouseStock.findUnique({
+        where: { warehouseId_itemId: { warehouseId, itemId } },
+      });
+      if (!existing) {
+        await this.prisma.warehouseStock.create({
+          data: {
+            warehouseId, itemId,
+            quantity: stock.qty,
+            avgCost: stock.avgCost,
+            totalValue: stock.qty * stock.avgCost,
+          },
+        });
+        stockCount++;
+      }
+    }
+    this.logger.log(`  ✓ ${stockCount} warehouse stock records seeded`);
+
+    // ── 6. Room Type Amenity Templates ────────────────────────────────────────
+    // Define what gets auto-deducted per room type per housekeeping task
+    const templateDefs = [
+      // Standard room checkout
+      { roomType: 'standard',  taskType: 'checkout', sku: 'SOAP-75G',   qty: 2 },
+      { roomType: 'standard',  taskType: 'checkout', sku: 'SHAMP-30ML', qty: 1 },
+      { roomType: 'standard',  taskType: 'checkout', sku: 'COND-30ML',  qty: 1 },
+      { roomType: 'standard',  taskType: 'checkout', sku: 'TOWEL-BATH', qty: 1 },
+      { roomType: 'standard',  taskType: 'checkout', sku: 'TOWEL-FACE', qty: 1 },
+      // Deluxe room checkout
+      { roomType: 'deluxe',    taskType: 'checkout', sku: 'SOAP-75G',   qty: 2 },
+      { roomType: 'deluxe',    taskType: 'checkout', sku: 'SHAMP-30ML', qty: 2 },
+      { roomType: 'deluxe',    taskType: 'checkout', sku: 'COND-30ML',  qty: 2 },
+      { roomType: 'deluxe',    taskType: 'checkout', sku: 'TOWEL-BATH', qty: 2 },
+      { roomType: 'deluxe',    taskType: 'checkout', sku: 'TOWEL-FACE', qty: 2 },
+      // Suite checkout
+      { roomType: 'suite',     taskType: 'checkout', sku: 'SOAP-75G',   qty: 4 },
+      { roomType: 'suite',     taskType: 'checkout', sku: 'SHAMP-30ML', qty: 3 },
+      { roomType: 'suite',     taskType: 'checkout', sku: 'COND-30ML',  qty: 3 },
+      { roomType: 'suite',     taskType: 'checkout', sku: 'TOWEL-BATH', qty: 3 },
+      { roomType: 'suite',     taskType: 'checkout', sku: 'TOWEL-FACE', qty: 3 },
+      // Daily turndown
+      { roomType: 'standard',  taskType: 'daily',    sku: 'TOILET-CLN', qty: 1 },
+      { roomType: 'deluxe',    taskType: 'daily',    sku: 'TOILET-CLN', qty: 1 },
+    ];
+
+    let templateCount = 0;
+    for (const tmpl of templateDefs) {
+      const itemId = itemMap[tmpl.sku];
+      const warehouseId = warehouseMap['WH-HK'];
+      if (!itemId) continue;
+      const existing = await this.prisma.roomTypeAmenityTemplate.findFirst({
+        where: { tenantId, roomType: tmpl.roomType, taskType: tmpl.taskType, itemId },
+      });
+      if (!existing) {
+        await this.prisma.roomTypeAmenityTemplate.create({
+          data: {
+            tenantId, roomType: tmpl.roomType, taskType: tmpl.taskType,
+            itemId, quantity: tmpl.qty, warehouseId, isActive: true,
+          },
+        });
+        templateCount++;
+      }
+    }
+    this.logger.log(`  ✓ ${templateCount} room type amenity templates seeded`);
+
+    // ── 7. Inventory Recipes (F&B BOM) ────────────────────────────────────────
+    // Seed a simple recipe for demo (links to a restaurant menu item by ID placeholder)
+    const existingRecipe = await this.prisma.inventoryRecipe.findFirst({
+      where: { tenantId, menuItemId: 'DEMO-KAOPAT-001' },
+    });
+    if (!existingRecipe) {
+      const recipe = await this.prisma.inventoryRecipe.create({
+        data: {
+          tenantId, menuItemId: 'DEMO-KAOPAT-001', menuItemName: 'ข้าวผัดกุ้ง',
+          servings: 1, isActive: true, notes: 'สูตรมาตรฐาน',
+        },
+      });
+      const riceId = itemMap['RICE-25KG'];
+      const oilId  = itemMap['OIL-5L'];
+      if (riceId && oilId) {
+        await this.prisma.inventoryRecipeIngredient.createMany({
+          data: [
+            { recipeId: recipe.id, itemId: riceId, quantity: 0.2, unit: 'กก.', wastagePercent: 5 },
+            { recipeId: recipe.id, itemId: oilId,  quantity: 0.02, unit: 'ลิตร', wastagePercent: 10 },
+          ],
+        });
+        this.logger.log(`  ✓ Recipe seeded: ข้าวผัดกุ้ง`);
+      }
+    }
+
+    this.logger.log(`✅ Inventory seed complete: warehouses, ${itemDefs.length} items, templates`);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // COST ACCOUNTING SEEDER
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Seed Cost Accounting data for demo tenants that have COST_ACCOUNTING_MODULE.
+   * Creates: USALI cost centers, standard cost types, sample cost entries,
+   * and budget entries for current month.
+   */
+  private async seedCostAccountingData(): Promise<void> {
+    this.logger.log('📊 Seeding Cost Accounting data...');
+
+    const allTenants2 = await this.tenantsService.findAll();
+    const tenant = allTenants2.find(t => (t as any).name_en === 'Mountain View Resort' || (t as any).slug === 'mountain' || t.name === 'Mountain View Resort (Premium Test)');
+    if (!tenant) {
+      this.logger.warn('  ⚠️ Demo tenant not found — skipping cost accounting seed');
+      return;
+    }
+    const property = await this.prisma.property.findFirst({
+      where: { tenantId: tenant.id },
+    });
+    if (!property) {
+      this.logger.warn('  ⚠️ No property found — skipping cost accounting seed');
+      return;
+    }
+
+    const tenantId = tenant.id;
+    const propertyId = property.id;
+    const now = new Date();
+    const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+    // ── 1. Cost Centers (USALI standard) ─────────────────────────────────────
+    const centerDefs = [
+      { code: 'CC-ROOMS', name: 'Rooms Division',              type: 'ROOMS',           sortOrder: 1 },
+      { code: 'CC-FB',    name: 'Food & Beverage',             type: 'FOOD_BEVERAGE',   sortOrder: 2 },
+      { code: 'CC-ADMIN', name: 'Administrative & General',    type: 'ADMIN_GENERAL',   sortOrder: 3 },
+      { code: 'CC-SM',    name: 'Sales & Marketing',           type: 'SALES_MARKETING', sortOrder: 4 },
+      { code: 'CC-MAINT', name: 'Property Operations & Maint', type: 'MAINTENANCE_DEPT',sortOrder: 5 },
+      { code: 'CC-ENERGY',name: 'Energy / Utilities',          type: 'ENERGY',          sortOrder: 6 },
+    ];
+
+    const centerMap: Record<string, string> = {};
+    for (const cc of centerDefs) {
+      const existing = await this.prisma.costCenter.findFirst({
+        where: { tenantId, propertyId, code: cc.code },
+      });
+      if (!existing) {
+        const created = await this.prisma.costCenter.create({
+          data: { tenantId, propertyId, ...cc, type: cc.type as CostCenterType, isActive: true },
+        });
+        centerMap[cc.code] = created.id;
+        this.logger.log(`  ✓ Cost Center: ${cc.name}`);
+      } else {
+        centerMap[cc.code] = existing.id;
+      }
+    }
+
+    // ── 2. Cost Types ─────────────────────────────────────────────────────────
+    const typeDefs = [
+      // Material
+      { code: 'CT-AMEN',  name: 'Room Amenities',    category: 'MATERIAL',  sortOrder: 1 },
+      { code: 'CT-INGR',  name: 'F&B Ingredients',   category: 'MATERIAL',  sortOrder: 2 },
+      { code: 'CT-PARTS', name: 'Maintenance Parts',  category: 'MATERIAL',  sortOrder: 3 },
+      { code: 'CT-CLEAN', name: 'Cleaning Supplies',  category: 'MATERIAL',  sortOrder: 4 },
+      // Labor
+      { code: 'CT-SAL',   name: 'Staff Salary',       category: 'LABOR',     sortOrder: 5 },
+      { code: 'CT-BEN',   name: 'Staff Benefits',     category: 'LABOR',     sortOrder: 6 },
+      { code: 'CT-OT',    name: 'Overtime Pay',        category: 'LABOR',     sortOrder: 7 },
+      // Overhead
+      { code: 'CT-ELEC',  name: 'Electricity',        category: 'OVERHEAD',  sortOrder: 8 },
+      { code: 'CT-WATER', name: 'Water & Sewage',      category: 'OVERHEAD',  sortOrder: 9 },
+      { code: 'CT-DEPR',  name: 'Depreciation',        category: 'OVERHEAD',  sortOrder: 10 },
+      { code: 'CT-INS',   name: 'Insurance',           category: 'OVERHEAD',  sortOrder: 11 },
+      { code: 'CT-RENT',  name: 'Rent / Lease',        category: 'OVERHEAD',  sortOrder: 12 },
+      // Revenue
+      { code: 'CT-RREV',  name: 'Room Revenue',        category: 'REVENUE',   sortOrder: 13 },
+      { code: 'CT-FBREV', name: 'F&B Revenue',         category: 'REVENUE',   sortOrder: 14 },
+      { code: 'CT-OREV',  name: 'Other Revenue',       category: 'REVENUE',   sortOrder: 15 },
+    ];
+
+    const typeMap: Record<string, string> = {};
+    for (const ct of typeDefs) {
+      const existing = await this.prisma.costType.findFirst({
+        where: { tenantId, code: ct.code },
+      });
+      if (!existing) {
+        const created = await this.prisma.costType.create({
+          data: { tenantId, ...ct, category: ct.category as CostCategory, isActive: true },
+        });
+        typeMap[ct.code] = created.id;
+      } else {
+        typeMap[ct.code] = existing.id;
+      }
+    }
+    this.logger.log(`  ✓ ${typeDefs.length} cost types seeded`);
+
+    // ── 3. Sample Cost Entries (current month) ────────────────────────────────
+    const entriesExist = await this.prisma.costEntry.findFirst({
+      where: { tenantId, propertyId, period: currentPeriod },
+    });
+    if (!entriesExist) {
+      const entryDefs = [
+        // Rooms Division costs
+        { centerCode: 'CC-ROOMS', typeCode: 'CT-AMEN',  amount: 18500, desc: 'Room amenities consumption' },
+        { centerCode: 'CC-ROOMS', typeCode: 'CT-CLEAN', amount: 8200,  desc: 'Cleaning supplies - rooms' },
+        { centerCode: 'CC-ROOMS', typeCode: 'CT-SAL',   amount: 95000, desc: 'Housekeeping staff salary' },
+        { centerCode: 'CC-ROOMS', typeCode: 'CT-RREV',  amount: 485000,desc: 'Room revenue this month' },
+        // F&B costs
+        { centerCode: 'CC-FB',    typeCode: 'CT-INGR',  amount: 62000, desc: 'F&B ingredient cost' },
+        { centerCode: 'CC-FB',    typeCode: 'CT-SAL',   amount: 72000, desc: 'F&B staff salary' },
+        { centerCode: 'CC-FB',    typeCode: 'CT-FBREV', amount: 195000,desc: 'F&B revenue this month' },
+        // Admin costs
+        { centerCode: 'CC-ADMIN', typeCode: 'CT-SAL',   amount: 85000, desc: 'Admin staff salary' },
+        { centerCode: 'CC-ADMIN', typeCode: 'CT-BEN',   amount: 12000, desc: 'Staff benefits & insurance' },
+        // Maintenance
+        { centerCode: 'CC-MAINT', typeCode: 'CT-PARTS', amount: 15500, desc: 'Maintenance parts used' },
+        { centerCode: 'CC-MAINT', typeCode: 'CT-SAL',   amount: 38000, desc: 'Maintenance staff salary' },
+        // Energy
+        { centerCode: 'CC-ENERGY',typeCode: 'CT-ELEC',  amount: 52000, desc: 'Electricity bill' },
+        { centerCode: 'CC-ENERGY',typeCode: 'CT-WATER', amount: 8500,  desc: 'Water & sewage bill' },
+      ];
+
+      for (const entry of entryDefs) {
+        const costCenterId = centerMap[entry.centerCode];
+        const costTypeId   = typeMap[entry.typeCode];
+        if (!costCenterId || !costTypeId) continue;
+        await this.prisma.costEntry.create({
+          data: {
+            tenantId, propertyId, costCenterId, costTypeId,
+            amount: entry.amount, period: currentPeriod,
+            description: entry.desc,
+            sourceType: 'manual', isAutoPosted: false, status: 'posted',
+            createdBy: 'seeder',
+          },
+        });
+      }
+      this.logger.log(`  ✓ ${entryDefs.length} sample cost entries seeded for ${currentPeriod}`);
+    } else {
+      this.logger.log(`  ⊙ Cost entries already exist for period ${currentPeriod}`);
+    }
+
+    // ── 4. Cost Budgets (current month) ───────────────────────────────────────
+    const budgetsExist = await this.prisma.costBudget.findFirst({
+      where: { tenantId, propertyId, period: currentPeriod },
+    });
+    if (!budgetsExist) {
+      const budgetDefs = [
+        { centerCode: 'CC-ROOMS', typeCode: 'CT-AMEN',  budget: 20000 },
+        { centerCode: 'CC-ROOMS', typeCode: 'CT-CLEAN', budget: 10000 },
+        { centerCode: 'CC-ROOMS', typeCode: 'CT-SAL',   budget: 100000 },
+        { centerCode: 'CC-FB',    typeCode: 'CT-INGR',  budget: 60000 },
+        { centerCode: 'CC-FB',    typeCode: 'CT-SAL',   budget: 70000 },
+        { centerCode: 'CC-ADMIN', typeCode: 'CT-SAL',   budget: 90000 },
+        { centerCode: 'CC-MAINT', typeCode: 'CT-PARTS', budget: 20000 },
+        { centerCode: 'CC-MAINT', typeCode: 'CT-SAL',   budget: 40000 },
+        { centerCode: 'CC-ENERGY',typeCode: 'CT-ELEC',  budget: 55000 },
+        { centerCode: 'CC-ENERGY',typeCode: 'CT-WATER', budget: 10000 },
+      ];
+
+      for (const b of budgetDefs) {
+        const costCenterId = centerMap[b.centerCode];
+        const costTypeId   = typeMap[b.typeCode];
+        if (!costCenterId || !costTypeId) continue;
+        await this.prisma.costBudget.create({
+          data: {
+            tenantId, propertyId, costCenterId, costTypeId,
+            period: currentPeriod, budgetAmount: b.budget,
+            actualAmount: 0, variance: 0, variancePercent: 0,
+            createdBy: 'seeder',
+          },
+        });
+      }
+      this.logger.log(`  ✓ ${budgetDefs.length} budget entries seeded for ${currentPeriod}`);
+    } else {
+      this.logger.log(`  ⊙ Budgets already exist for period ${currentPeriod}`);
+    }
+
+    this.logger.log('✅ Cost accounting seed complete: cost centers, types, entries, budgets');
   }
 }

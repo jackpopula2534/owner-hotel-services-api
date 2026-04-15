@@ -203,7 +203,16 @@ export class TenantsController {
    * รองรับ search, filter, pagination
    */
   @Get('hotels')
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr', 'receptionist', 'staff', 'user')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'hr',
+    'receptionist',
+    'staff',
+    'user',
+  )
   getHotelList(
     @Query() query: HotelListQueryDto,
     @CurrentUser() user: { tenantId?: string; role?: string },
@@ -225,7 +234,16 @@ export class TenantsController {
    * รวมข้อมูล: status, subscription, plan, features, invoices, alerts, permissions
    */
   @Get('hotels/:id')
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr', 'receptionist', 'staff', 'user')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'hr',
+    'receptionist',
+    'staff',
+    'user',
+  )
   async getHotelDetail(
     @Param('id') id: string,
     @CurrentUser() user: { userId?: string; tenantId?: string; role?: string },
@@ -278,7 +296,16 @@ export class TenantsController {
   }
 
   @Get()
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr', 'receptionist', 'staff', 'user')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'hr',
+    'receptionist',
+    'staff',
+    'user',
+  )
   findAll(@CurrentUser() user: { tenantId?: string; role?: string }) {
     // Platform admin เห็นทั้งหมด, คนอื่นเห็นแค่ tenant ตัวเอง
     if (user?.role === 'platform_admin') {
@@ -291,7 +318,16 @@ export class TenantsController {
    * @deprecated Use GET /tenants/hotels/:id instead
    */
   @Get(':id/detail')
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr', 'receptionist', 'staff', 'user')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'hr',
+    'receptionist',
+    'staff',
+    'user',
+  )
   getHotelDetailLegacy(
     @Param('id') id: string,
     @CurrentUser() user: { tenantId?: string; role?: string },
@@ -304,7 +340,16 @@ export class TenantsController {
   }
 
   @Get(':id')
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr', 'receptionist', 'staff', 'user')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'hr',
+    'receptionist',
+    'staff',
+    'user',
+  )
   findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string; role?: string }) {
     // Platform admin ดูได้ทุก tenant, คนอื่นดูได้แค่ tenant ตัวเอง
     if (user?.role !== 'platform_admin' && user?.tenantId !== id) {

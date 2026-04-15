@@ -160,9 +160,7 @@ async function bootstrap() {
         logger.log('user_tenants → tenants FK already exists');
       }
     } catch (fkError) {
-      logger.warn(
-        'Could not re-add user_tenants FK: ' + (fkError as Error).message,
-      );
+      logger.warn('Could not re-add user_tenants FK: ' + (fkError as Error).message);
     } finally {
       await fkRunner.release();
     }

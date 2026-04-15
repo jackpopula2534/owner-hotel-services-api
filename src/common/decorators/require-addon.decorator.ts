@@ -13,5 +13,4 @@ export const REQUIRE_ADDON_KEY = 'require_addon';
  * @Post()
  * createOrder() { ... }
  */
-export const RequireAddon = (addonCode: AddonCode) =>
-  SetMetadata(REQUIRE_ADDON_KEY, addonCode);
+export const RequireAddon = (addonCode: AddonCode) => SetMetadata(REQUIRE_ADDON_KEY, addonCode);

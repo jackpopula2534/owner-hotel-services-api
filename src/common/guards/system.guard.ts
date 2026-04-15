@@ -50,8 +50,7 @@ export class SystemGuard implements CanActivate {
 
     // Determine effective systemContext from the JWT payload
     // posLaunch tokens are always 'pos' context even if the field isn't set
-    const effectiveSystem: SystemContext =
-      (user.posLaunch ? 'pos' : user.systemContext) ?? 'main';
+    const effectiveSystem: SystemContext = (user.posLaunch ? 'pos' : user.systemContext) ?? 'main';
 
     if (effectiveSystem !== requiredSystem) {
       throw new ForbiddenException({

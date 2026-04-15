@@ -59,9 +59,12 @@ export class AllExceptionsFilter implements ExceptionFilter {
         code = this.statusToCode(status);
       } else {
         const b = body as Record<string, any>;
-        message = Array.isArray(b.message)
-          ? b.message.join(', ')
-          : (b.message ?? exception.message);
+        if (Array.isArray(b.message)) {
+          // class-validator returns array of validation messages — join & translate
+          message = this.translateValidationMessages(b.message);
+        } else {
+          message = b.message ?? exception.message;
+        }
         code = b.error
           ? String(b.error).toUpperCase().replace(/\s+/g, '_')
           : this.statusToCode(status);
@@ -95,7 +98,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
         );
         status = HttpStatus.SERVICE_UNAVAILABLE;
         code = `SCHEMA_NOT_READY`;
-        message = 'ตารางข้อมูลยังไม่พร้อม กรุณา run migration ก่อนใช้งาน (Database table not found — please run prisma migrate)';
+        message =
+          'ตารางข้อมูลยังไม่พร้อม กรุณา run migration ก่อนใช้งาน (Database table not found — please run prisma migrate)';
       } else {
         status = this.prismaStatus(exception.code);
         code = `PRISMA_${exception.code}`;
@@ -153,6 +157,30 @@ export class AllExceptionsFilter implements ExceptionFilter {
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
+
+  /**
+   * Translate class-validator English messages to user-friendly Thai/English.
+   * Keeps custom Thai messages (from DTO decorators) as-is.
+   */
+  private translateValidationMessages(messages: string[]): string {
+    const translations: Record<string, string> = {
+      'page must be a number string': 'page ต้องเป็นตัวเลข (เช่น 1, 2, 3)',
+      'limit must be a number string': 'limit ต้องเป็นตัวเลข (เช่น 10, 20, 50)',
+      'page must be an integer number': 'page ต้องเป็นตัวเลขจำนวนเต็ม',
+      'limit must be an integer number': 'limit ต้องเป็นตัวเลขจำนวนเต็ม',
+      'page must not be less than 1': 'page ต้องมีค่าอย่างน้อย 1',
+      'limit must not be less than 1': 'limit ต้องมีค่าอย่างน้อย 1',
+      'limit must not be greater than 100': 'limit ต้องไม่เกิน 100 รายการต่อหน้า',
+    };
+
+    const translated = messages.map((msg) => {
+      // If the message is already in Thai (contains Thai chars) — keep as-is
+      if (/[\u0E00-\u0E7F]/.test(msg)) return msg;
+      return translations[msg.toLowerCase()] ?? msg;
+    });
+
+    return translated.join(', ');
+  }
 
   private statusToCode(status: number): string {
     const map: Record<number, string> = {

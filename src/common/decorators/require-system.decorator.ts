@@ -15,5 +15,4 @@ export const REQUIRE_SYSTEM_KEY = 'require_system';
  * This prevents POS tokens from being used to call management-dashboard APIs
  * and management-dashboard tokens from being used to call POS-specific APIs.
  */
-export const RequireSystem = (system: SystemContext) =>
-  SetMetadata(REQUIRE_SYSTEM_KEY, system);
+export const RequireSystem = (system: SystemContext) => SetMetadata(REQUIRE_SYSTEM_KEY, system);

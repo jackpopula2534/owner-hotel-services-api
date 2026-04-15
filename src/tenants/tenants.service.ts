@@ -164,11 +164,11 @@ export class TenantsService {
     });
 
     // Create default property for this tenant so rooms/bookings can work
-    const propertyCode = createCompanyDto.name
-      .substring(0, 3)
-      .toUpperCase()
-      .replace(/[^A-Z]/g, 'X')
-      + String(Math.floor(Math.random() * 9000) + 1000);
+    const propertyCode =
+      createCompanyDto.name
+        .substring(0, 3)
+        .toUpperCase()
+        .replace(/[^A-Z]/g, 'X') + String(Math.floor(Math.random() * 9000) + 1000);
 
     const defaultProperty = await this.prisma.property.create({
       data: {

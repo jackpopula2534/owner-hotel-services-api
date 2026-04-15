@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD, Reflector } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { SubscriptionGuard } from './subscription/subscription.guard';
 import { ConfigModule } from '@nestjs/config';
 import { validate } from './config/env.validation';
@@ -57,12 +58,21 @@ import { SearchModule } from './modules/search/search.module';
 import { StaffModule } from './modules/staff/staff.module';
 import { MaintenanceModule } from './modules/maintenance/maintenance.module';
 import { AddonModule } from './modules/addons/addon.module';
+import { InventoryModule } from './modules/inventory/inventory.module';
+import { CostAccountingModule } from './modules/cost-accounting/cost-accounting.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
       validate, // throws at startup if any required env var is missing
+    }),
+    EventEmitterModule.forRoot({
+      // Use this so event handlers don't block the emitter
+      wildcard: false,
+      delimiter: '.',
+      maxListeners: 20,
+      verboseMemoryLeak: true,
     }),
     PrismaModule,
     AuthModule,
@@ -117,6 +127,8 @@ import { AddonModule } from './modules/addons/addon.module';
     StaffModule,
     MaintenanceModule,
     AddonModule,
+    InventoryModule,
+    CostAccountingModule,
     ThrottlerModule.forRoot([
       {
         ttl: 60, // 60 seconds window
