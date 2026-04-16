@@ -62,11 +62,17 @@ export class SubscriptionExpiryService {
 
       this.logger.warn(
         `Auto-expired ${result.count} subscription(s): ${expiredSubs
-          .map((s) => `${s.subscription_code || s.id} (tenant: ${s.tenant_id}, was: ${s.status}, ended: ${s.end_date})`)
+          .map(
+            (s) =>
+              `${s.subscription_code || s.id} (tenant: ${s.tenant_id}, was: ${s.status}, ended: ${s.end_date})`,
+          )
           .join(', ')}`,
       );
     } catch (error) {
-      this.logger.error('Failed to auto-expire subscriptions', error instanceof Error ? error.stack : String(error));
+      this.logger.error(
+        'Failed to auto-expire subscriptions',
+        error instanceof Error ? error.stack : String(error),
+      );
     }
   }
 }

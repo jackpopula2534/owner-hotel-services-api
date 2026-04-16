@@ -37,9 +37,7 @@ function calcOverallLegacy(
 }
 
 /** Dynamic weighted calculation from KPI scores array */
-function calcOverallDynamic(
-  scores: { score: number; weight: number }[],
-): number {
+function calcOverallDynamic(scores: { score: number; weight: number }[]): number {
   const totalWeight = scores.reduce((s, k) => s + k.weight, 0);
   if (totalWeight === 0) return 0;
   const weighted = scores.reduce((s, k) => s + (k.score / 5) * 100 * k.weight, 0);
@@ -62,25 +60,25 @@ export class HrPerformanceService {
   // ─── Query ───────────────────────────────────────────────────────────────────
 
   async findAll(query: Record<string, string>, tenantId: string) {
-    const page  = parseInt(query.page  ?? '1',  10);
+    const page = parseInt(query.page ?? '1', 10);
     const limit = parseInt(query.limit ?? '20', 10);
-    const skip  = (page - 1) * limit;
+    const skip = (page - 1) * limit;
 
     const { employeeId, period, periodType, status, search, cycleId } = query;
 
     const where: Record<string, unknown> = { tenantId };
     if (employeeId) where['employeeId'] = employeeId;
-    if (cycleId)    where['cycleId']    = cycleId;
-    if (period)     where['period']     = period;
+    if (cycleId) where['cycleId'] = cycleId;
+    if (period) where['period'] = period;
     if (periodType) where['periodType'] = periodType;
-    if (status)     where['status']     = status;
+    if (status) where['status'] = status;
     if (search) {
       where['employee'] = {
         OR: [
-          { firstName:    { contains: search } },
-          { lastName:     { contains: search } },
+          { firstName: { contains: search } },
+          { lastName: { contains: search } },
           { employeeCode: { contains: search } },
-          { department:   { contains: search } },
+          { department: { contains: search } },
         ],
       };
     }
@@ -120,9 +118,9 @@ export class HrPerformanceService {
     const { period, periodType, cycleId } = query;
 
     const where: Record<string, unknown> = { tenantId };
-    if (period)     where['period']     = period;
+    if (period) where['period'] = period;
     if (periodType) where['periodType'] = periodType;
-    if (cycleId)    where['cycleId']    = cycleId;
+    if (cycleId) where['cycleId'] = cycleId;
 
     const records = await (this.prisma as any).hrPerformance.findMany({
       where,
@@ -130,17 +128,24 @@ export class HrPerformanceService {
     });
 
     const total = records.length;
-    const avgOverall = total > 0
-      ? Math.round(
-          records.reduce((s: number, r: any) => s + Number(r.scoreOverall), 0) / total * 100,
-        ) / 100
-      : 0;
+    const avgOverall =
+      total > 0
+        ? Math.round(
+            (records.reduce((s: number, r: any) => s + Number(r.scoreOverall), 0) / total) * 100,
+          ) / 100
+        : 0;
 
-    const byGrade: Record<string, number>  = { A: 0, 'B+': 0, B: 0, 'C+': 0, C: 0, D: 0 };
-    const byStatus: Record<string, number> = { pending: 0, draft: 0, submitted: 0, approved: 0, rejected: 0 };
+    const byGrade: Record<string, number> = { A: 0, 'B+': 0, B: 0, 'C+': 0, C: 0, D: 0 };
+    const byStatus: Record<string, number> = {
+      pending: 0,
+      draft: 0,
+      submitted: 0,
+      approved: 0,
+      rejected: 0,
+    };
 
     for (const r of records) {
-      if (r.grade  && byGrade[r.grade]   !== undefined) byGrade[r.grade]++;
+      if (r.grade && byGrade[r.grade] !== undefined) byGrade[r.grade]++;
       if (r.status && byStatus[r.status] !== undefined) byStatus[r.status]++;
     }
 
@@ -153,8 +158,12 @@ export class HrPerformanceService {
       include: {
         employee: {
           select: {
-            id: true, firstName: true, lastName: true,
-            employeeCode: true, department: true, position: true,
+            id: true,
+            firstName: true,
+            lastName: true,
+            employeeCode: true,
+            department: true,
+            position: true,
           },
         },
         cycle: {
@@ -163,7 +172,14 @@ export class HrPerformanceService {
         kpiScores: {
           include: {
             criteria: {
-              select: { id: true, name: true, weight: true, minScore: true, maxScore: true, sortOrder: true },
+              select: {
+                id: true,
+                name: true,
+                weight: true,
+                minScore: true,
+                maxScore: true,
+                sortOrder: true,
+              },
             },
           },
           orderBy: { criteria: { sortOrder: 'asc' } },
@@ -202,7 +218,9 @@ export class HrPerformanceService {
       for (const scoreInput of dto.scores) {
         const item = templateItems.find((i: any) => i.id === scoreInput.criteriaId);
         if (!item && templateItems.length > 0) {
-          throw new BadRequestException(`KPI criteria ${scoreInput.criteriaId} ไม่ได้อยู่ใน Template`);
+          throw new BadRequestException(
+            `KPI criteria ${scoreInput.criteriaId} ไม่ได้อยู่ใน Template`,
+          );
         }
 
         await tx.hrKpiScore.upsert({
@@ -244,10 +262,10 @@ export class HrPerformanceService {
         status: record.status === 'pending' ? 'draft' : record.status,
         scoreOverall,
         grade,
-        ...(dto.strengths !== undefined  && { strengths: dto.strengths }),
+        ...(dto.strengths !== undefined && { strengths: dto.strengths }),
         ...(dto.improvements !== undefined && { improvements: dto.improvements }),
-        ...(dto.goals !== undefined        && { goals: dto.goals }),
-        ...(dto.note !== undefined         && { note: dto.note }),
+        ...(dto.goals !== undefined && { goals: dto.goals }),
+        ...(dto.note !== undefined && { note: dto.note }),
         ...(dto.reviewerName !== undefined && { reviewerName: dto.reviewerName }),
       },
       include: {
@@ -270,9 +288,7 @@ export class HrPerformanceService {
     if (!record) throw new NotFoundException(`Performance record ${id} not found`);
 
     if (!['draft', 'rejected'].includes(record.status)) {
-      throw new ConflictException(
-        `ไม่สามารถ submit ได้เมื่อ status เป็น ${record.status}`,
-      );
+      throw new ConflictException(`ไม่สามารถ submit ได้เมื่อ status เป็น ${record.status}`);
     }
     if (record.kpiScores.length === 0) {
       throw new BadRequestException('ต้องกรอกคะแนนก่อน submit');
@@ -389,34 +405,43 @@ export class HrPerformanceService {
     }
 
     const scoreOverall = calcOverallLegacy(
-      dto.scoreWork, dto.scoreAttendance, dto.scoreTeamwork, dto.scoreService,
+      dto.scoreWork,
+      dto.scoreAttendance,
+      dto.scoreTeamwork,
+      dto.scoreService,
     );
     const grade = deriveGrade(scoreOverall);
 
     const record = await (this.prisma as any).hrPerformance.create({
       data: {
         tenantId,
-        employeeId:      dto.employeeId,
-        period:          dto.period,
-        periodType:      dto.periodType,
-        reviewDate:      dto.reviewDate ? new Date(dto.reviewDate) : new Date(),
-        reviewerId:      dto.reviewerId,
-        reviewerName:    dto.reviewerName,
-        scoreWork:       dto.scoreWork,
+        employeeId: dto.employeeId,
+        period: dto.period,
+        periodType: dto.periodType,
+        reviewDate: dto.reviewDate ? new Date(dto.reviewDate) : new Date(),
+        reviewerId: dto.reviewerId,
+        reviewerName: dto.reviewerName,
+        scoreWork: dto.scoreWork,
         scoreAttendance: dto.scoreAttendance,
-        scoreTeamwork:   dto.scoreTeamwork,
-        scoreService:    dto.scoreService,
+        scoreTeamwork: dto.scoreTeamwork,
+        scoreService: dto.scoreService,
         scoreOverall,
         grade,
-        status:          dto.status ?? 'draft',
-        strengths:       dto.strengths,
-        improvements:    dto.improvements,
-        goals:           dto.goals,
-        note:            dto.note,
+        status: dto.status ?? 'draft',
+        strengths: dto.strengths,
+        improvements: dto.improvements,
+        goals: dto.goals,
+        note: dto.note,
       },
       include: {
         employee: {
-          select: { id: true, firstName: true, lastName: true, employeeCode: true, department: true },
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            employeeCode: true,
+            department: true,
+          },
         },
       },
     });
@@ -431,24 +456,29 @@ export class HrPerformanceService {
     });
     if (!existing) throw new NotFoundException(`Performance record ${id} not found`);
 
-    const scoreWork       = dto.scoreWork       ?? Number(existing.scoreWork);
+    const scoreWork = dto.scoreWork ?? Number(existing.scoreWork);
     const scoreAttendance = dto.scoreAttendance ?? Number(existing.scoreAttendance);
-    const scoreTeamwork   = dto.scoreTeamwork   ?? Number(existing.scoreTeamwork);
-    const scoreService    = dto.scoreService    ?? Number(existing.scoreService);
+    const scoreTeamwork = dto.scoreTeamwork ?? Number(existing.scoreTeamwork);
+    const scoreService = dto.scoreService ?? Number(existing.scoreService);
 
     const scoreOverall = calcOverallLegacy(scoreWork, scoreAttendance, scoreTeamwork, scoreService);
     const grade = deriveGrade(scoreOverall);
 
     const updateData: Record<string, unknown> = {
-      scoreWork, scoreAttendance, scoreTeamwork, scoreService, scoreOverall, grade,
+      scoreWork,
+      scoreAttendance,
+      scoreTeamwork,
+      scoreService,
+      scoreOverall,
+      grade,
     };
 
-    if (dto.reviewDate)    updateData['reviewDate']    = new Date(dto.reviewDate);
+    if (dto.reviewDate) updateData['reviewDate'] = new Date(dto.reviewDate);
     if (dto.reviewerName !== undefined) updateData['reviewerName'] = dto.reviewerName;
-    if (dto.strengths    !== undefined) updateData['strengths']    = dto.strengths;
+    if (dto.strengths !== undefined) updateData['strengths'] = dto.strengths;
     if (dto.improvements !== undefined) updateData['improvements'] = dto.improvements;
-    if (dto.goals        !== undefined) updateData['goals']        = dto.goals;
-    if (dto.note         !== undefined) updateData['note']         = dto.note;
+    if (dto.goals !== undefined) updateData['goals'] = dto.goals;
+    if (dto.note !== undefined) updateData['note'] = dto.note;
     if (dto.status) {
       updateData['status'] = dto.status;
       if (dto.status === 'approved') {
@@ -461,7 +491,13 @@ export class HrPerformanceService {
       data: updateData,
       include: {
         employee: {
-          select: { id: true, firstName: true, lastName: true, employeeCode: true, department: true },
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            employeeCode: true,
+            department: true,
+          },
         },
       },
     });

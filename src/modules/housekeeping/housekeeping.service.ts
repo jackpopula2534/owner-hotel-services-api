@@ -1,9 +1,19 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CreateHousekeepingTaskDto, TaskType, TaskPriority, TaskStatus } from './dto/create-housekeeping-task.dto';
+import {
+  CreateHousekeepingTaskDto,
+  TaskType,
+  TaskPriority,
+  TaskStatus,
+} from './dto/create-housekeeping-task.dto';
 import { UpdateHousekeepingTaskDto } from './dto/update-housekeeping-task.dto';
 import { AuditLogService } from '../../audit-log/audit-log.service';
 import { normalizePagination } from '../../common/utils/pagination.util';
+import {
+  INVENTORY_EVENTS,
+  HousekeepingTaskCompletedEvent,
+} from '../inventory/events/inventory.events';
 
 interface TaskQuery {
   status?: string;
@@ -35,6 +45,7 @@ export class HousekeepingService {
   constructor(
     private prisma: PrismaService,
     private auditLogService: AuditLogService,
+    private eventEmitter: EventEmitter2,
   ) {}
 
   /**
@@ -71,9 +82,7 @@ export class HousekeepingService {
         },
       });
 
-      this.logger.log(
-        `Created housekeeping task ${task.id} for room ${room.number} (${dto.type})`
-      );
+      this.logger.log(`Created housekeeping task ${task.id} for room ${room.number} (${dto.type})`);
 
       return task;
     } catch (error) {
@@ -162,7 +171,10 @@ export class HousekeepingService {
   /**
    * Get tasks with filtering and pagination
    */
-  async getTasks(query: TaskQuery, tenantId: string): Promise<{
+  async getTasks(
+    query: TaskQuery,
+    tenantId: string,
+  ): Promise<{
     data: any[];
     total: number;
     page: number;
@@ -210,11 +222,15 @@ export class HousekeepingService {
 
       return { data: tasks, total, page, limit };
     } catch (error) {
-      this.logger.error(`Failed to fetch housekeeping tasks (full include): ${(error as any)?.message ?? error}`);
+      this.logger.error(
+        `Failed to fetch housekeeping tasks (full include): ${(error as any)?.message ?? error}`,
+      );
 
       // Any DB/schema error (P2021 table not found, P2022 column not found, or any other)
       // falls back progressively — this covers partially-run migrations
-      this.logger.warn('Falling back to basic query without Staff relations (run migration to fix)');
+      this.logger.warn(
+        'Falling back to basic query without Staff relations (run migration to fix)',
+      );
       try {
         const [tasks, total] = await Promise.all([
           this.prisma.housekeepingTask.findMany({
@@ -228,7 +244,9 @@ export class HousekeepingService {
         ]);
         return { data: tasks, total, page, limit };
       } catch (fallbackError) {
-        this.logger.error(`Fallback query also failed: ${(fallbackError as any)?.message ?? fallbackError}`);
+        this.logger.error(
+          `Fallback query also failed: ${(fallbackError as any)?.message ?? fallbackError}`,
+        );
         return { data: [], total: 0, page, limit };
       }
     }
@@ -254,7 +272,9 @@ export class HousekeepingService {
         ...(dto.assignedToId && { assignedToId: dto.assignedToId }),
         ...(dto.assignedToName && { assignedToName: dto.assignedToName }),
         ...(dto.notes && { notes: dto.notes }),
-        ...(dto.completionPercentage !== undefined && { completionPercentage: dto.completionPercentage }),
+        ...(dto.completionPercentage !== undefined && {
+          completionPercentage: dto.completionPercentage,
+        }),
         ...(dto.rating && { rating: dto.rating }),
         ...(dto.inspectionNotes && { inspectionNotes: dto.inspectionNotes }),
         ...(dto.inspectedById && { inspectedById: dto.inspectedById }),
@@ -318,7 +338,12 @@ export class HousekeepingService {
   /**
    * Assign task to staff
    */
-  async assignTask(id: string, assignedToId: string, assignedToName: string, tenantId: string): Promise<any> {
+  async assignTask(
+    id: string,
+    assignedToId: string,
+    assignedToName: string,
+    tenantId: string,
+  ): Promise<any> {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID is required');
     }
@@ -418,7 +443,9 @@ export class HousekeepingService {
     let actualDuration: number | null = null;
 
     if (task.actualStartTime) {
-      actualDuration = Math.round((now.getTime() - new Date(task.actualStartTime).getTime()) / 60000);
+      actualDuration = Math.round(
+        (now.getTime() - new Date(task.actualStartTime).getTime()) / 60000,
+      );
     }
 
     try {
@@ -429,7 +456,9 @@ export class HousekeepingService {
         updateData.actualDuration = actualDuration;
         updateData.completionPercentage = completionPercentage;
         updateData.roomReadyAt = now;
-      } catch { /* ignore — column may not exist yet */ }
+      } catch {
+        /* ignore — column may not exist yet */
+      }
 
       let updated: any;
       try {
@@ -464,6 +493,28 @@ export class HousekeepingService {
         tenantId,
       );
 
+      // Emit event for inventory integration (auto-deduct amenities)
+      try {
+        const room = updated.room || task.room;
+        if (room) {
+          const event: HousekeepingTaskCompletedEvent = {
+            taskId: id,
+            tenantId,
+            roomId: task.roomId,
+            roomType: room.type || 'standard',
+            taskType: task.type || 'checkout',
+            propertyId: room.propertyId,
+            completedBy: completedByUserId || 'system',
+          };
+          this.eventEmitter.emit(INVENTORY_EVENTS.HOUSEKEEPING_TASK_COMPLETED, event);
+        }
+      } catch (eventError) {
+        // Don't fail task completion if event emission fails
+        this.logger.warn(
+          `Failed to emit housekeeping completion event: ${(eventError as Error).message}`,
+        );
+      }
+
       this.logger.log(`Completed task ${id}`);
       return updated;
     } catch (error) {
@@ -475,7 +526,14 @@ export class HousekeepingService {
   /**
    * Inspect task (set status to inspected)
    */
-  async inspectTask(id: string, rating: number, inspectionNotes: string, inspectedById: string, inspectedByName: string, tenantId: string): Promise<any> {
+  async inspectTask(
+    id: string,
+    rating: number,
+    inspectionNotes: string,
+    inspectedById: string,
+    inspectedByName: string,
+    tenantId: string,
+  ): Promise<any> {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID is required');
     }
@@ -563,7 +621,10 @@ export class HousekeepingService {
 
       const avgCompletionTime =
         allCompleted.length > 0
-          ? Math.round(allCompleted.reduce((sum, t) => sum + (t.actualDuration ?? 0), 0) / allCompleted.length)
+          ? Math.round(
+              allCompleted.reduce((sum, t) => sum + (t.actualDuration ?? 0), 0) /
+                allCompleted.length,
+            )
           : 0;
 
       return {

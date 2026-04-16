@@ -74,7 +74,10 @@ export class SavePerformanceDraftDto {
 // ─── Approval / Rejection ─────────────────────────────────────────────────────
 
 export class RejectPerformanceDto {
-  @ApiProperty({ description: 'เหตุผลที่ reject (บังคับระบุ)', example: 'คะแนนบางรายการไม่ครบถ้วน' })
+  @ApiProperty({
+    description: 'เหตุผลที่ reject (บังคับระบุ)',
+    example: 'คะแนนบางรายการไม่ครบถ้วน',
+  })
   @IsString()
   @IsNotEmpty()
   reason: string;

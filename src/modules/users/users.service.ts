@@ -5,7 +5,10 @@ import { AuditLogService } from '../../audit-log/audit-log.service';
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService, private auditLogService: AuditLogService) {}
+  constructor(
+    private prisma: PrismaService,
+    private auditLogService: AuditLogService,
+  ) {}
 
   async findAll(query: any, tenantId?: string) {
     if (!tenantId) {

@@ -12,6 +12,9 @@ import { ReorderAlertsModule } from './reorder-alerts/reorder-alerts.module';
 import { RoomTypeTemplatesModule } from './room-type-templates/room-type-templates.module';
 import { RecipesModule } from './recipes/recipes.module';
 import { DemandForecastModule } from './demand-forecast/demand-forecast.module';
+import { SupplierQuotesModule } from './supplier-quotes/supplier-quotes.module';
+import { PriceComparisonsModule } from './price-comparisons/price-comparisons.module';
+import { PurchaseRequisitionsModule } from './purchase-requisitions/purchase-requisitions.module';
 import { InventoryEventListener } from './events/inventory-event.listener';
 
 @Module({
@@ -29,6 +32,9 @@ import { InventoryEventListener } from './events/inventory-event.listener';
     RoomTypeTemplatesModule,
     RecipesModule,
     DemandForecastModule,
+    SupplierQuotesModule,
+    PriceComparisonsModule,
+    PurchaseRequisitionsModule,
   ],
   providers: [InventoryEventListener],
   exports: [
@@ -44,6 +50,9 @@ import { InventoryEventListener } from './events/inventory-event.listener';
     RoomTypeTemplatesModule,
     RecipesModule,
     DemandForecastModule,
+    SupplierQuotesModule,
+    PriceComparisonsModule,
+    PurchaseRequisitionsModule,
   ],
 })
 export class InventoryModule {}

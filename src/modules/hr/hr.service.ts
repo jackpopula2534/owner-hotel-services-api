@@ -57,10 +57,10 @@ export class HrService {
           skip,
           take: limit,
           orderBy: { createdAt: 'desc' },
-          include: { 
+          include: {
             staff: { select: { id: true, role: true, status: true } },
             hrDepartment: true,
-            hrPosition: true
+            hrPosition: true,
           },
         }),
         this.prisma.employee.count({ where }),
@@ -84,10 +84,10 @@ export class HrService {
 
     const employee = await (this.prisma.employee as any).findFirst({
       where: { id, tenantId },
-      include: { 
+      include: {
         staff: { select: { id: true, role: true, status: true, department: true } },
         hrDepartment: true,
-        hrPosition: true
+        hrPosition: true,
       },
     });
 
@@ -166,10 +166,7 @@ export class HrService {
     const finalPropertyId = propertyId || hotelId || (employee as any).propertyId;
 
     // ── Conflict check when employeeCode is being changed ──────────────
-    if (
-      rest.employeeCode &&
-      rest.employeeCode !== (employee as any).employeeCode
-    ) {
+    if (rest.employeeCode && rest.employeeCode !== (employee as any).employeeCode) {
       const codeConflict = await (this.prisma.employee as any).findFirst({
         where: {
           tenantId,
@@ -186,7 +183,7 @@ export class HrService {
       }
     }
 
-    const updated = await (this.prisma.employee as any).update({
+    const updated = (await (this.prisma.employee as any).update({
       where: { id },
       data: {
         ...rest,
@@ -199,7 +196,7 @@ export class HrService {
         hrDepartment: true,
         hrPosition: true,
       },
-    }) as any;
+    })) as any;
 
     // Auto-sync basic info to linked Staff record if one exists
     if (updated.staff) {
@@ -301,8 +298,7 @@ export class HrService {
     // Resolve role and department: caller-supplied > inferred from employee dept code > defaults
     const resolvedRole = dto?.role ?? 'housekeeper';
     const resolvedDepartment =
-      dto?.department ??
-      (resolvedRole === 'technician' ? 'maintenance' : 'housekeeping');
+      dto?.department ?? (resolvedRole === 'technician' ? 'maintenance' : 'housekeeping');
 
     try {
       // Atomic: guard check + Staff creation in a single transaction.
@@ -349,7 +345,11 @@ export class HrService {
       };
     } catch (error: unknown) {
       // Re-throw NestJS HTTP exceptions (ConflictException, NotFoundException, etc.) directly
-      if (error instanceof ConflictException || error instanceof BadRequestException || error instanceof NotFoundException) {
+      if (
+        error instanceof ConflictException ||
+        error instanceof BadRequestException ||
+        error instanceof NotFoundException
+      ) {
         throw error;
       }
       this.logger.error(
@@ -411,9 +411,7 @@ export class HrService {
             where: { employeeId: employee.id },
           });
           if (existingStaff) {
-            throw new ConflictException(
-              `Already linked to Staff record ${existingStaff.id}`,
-            );
+            throw new ConflictException(`Already linked to Staff record ${existingStaff.id}`);
           }
 
           return (tx.staff as any).create({
@@ -442,9 +440,12 @@ export class HrService {
           `Bulk sync: Staff ${staff.id} created and linked to Employee ${employee.id}`,
         );
       } catch (error: unknown) {
-        const reason = error instanceof ConflictException
-          ? 'Already linked to a Staff record'
-          : (error instanceof Error ? error.message : 'Unknown error');
+        const reason =
+          error instanceof ConflictException
+            ? 'Already linked to a Staff record'
+            : error instanceof Error
+              ? error.message
+              : 'Unknown error';
 
         results.push({ employeeId: employee.id, employeeName, status: 'skipped', reason });
         skipped++;

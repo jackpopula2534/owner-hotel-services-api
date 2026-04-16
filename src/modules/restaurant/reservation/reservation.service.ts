@@ -196,7 +196,12 @@ export class ReservationService {
     return updated;
   }
 
-  async markAsNoShow(restaurantId: string, reservationId: string, tenantId: string, userId?: string) {
+  async markAsNoShow(
+    restaurantId: string,
+    reservationId: string,
+    tenantId: string,
+    userId?: string,
+  ) {
     const reservation = await this.findOne(restaurantId, reservationId, tenantId);
 
     if (!['PENDING', 'CONFIRMED'].includes(reservation.status)) {

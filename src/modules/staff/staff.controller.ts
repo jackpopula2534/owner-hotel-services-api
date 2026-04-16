@@ -111,10 +111,7 @@ export class StaffController {
       },
     },
   })
-  async create(
-    @Body() createStaffDto: CreateStaffDto,
-    @CurrentUser() user?: any,
-  ): Promise<any> {
+  async create(@Body() createStaffDto: CreateStaffDto, @CurrentUser() user?: any): Promise<any> {
     const staff = await this.staffService.create(createStaffDto, user?.tenantId, user?.id);
 
     return {
@@ -143,10 +140,7 @@ export class StaffController {
       },
     },
   })
-  async findOne(
-    @Param('id') id: string,
-    @CurrentUser() user?: any,
-  ): Promise<any> {
+  async findOne(@Param('id') id: string, @CurrentUser() user?: any): Promise<any> {
     const staff = await this.staffService.findOne(id, user?.tenantId);
 
     return {
@@ -194,10 +188,7 @@ export class StaffController {
     status: 204,
     description: 'Staff member deleted',
   })
-  async remove(
-    @Param('id') id: string,
-    @CurrentUser() user?: any,
-  ): Promise<void> {
+  async remove(@Param('id') id: string, @CurrentUser() user?: any): Promise<void> {
     await this.staffService.remove(id, user?.tenantId);
   }
 
@@ -275,10 +266,7 @@ export class StaffController {
   @ApiResponse({ status: 200, description: 'Link removed successfully' })
   @ApiResponse({ status: 403, description: 'HR add-on not active' })
   @ApiResponse({ status: 400, description: 'Staff is not linked to any employee' })
-  async unlinkEmployee(
-    @Param('id') id: string,
-    @CurrentUser() user?: any,
-  ): Promise<any> {
+  async unlinkEmployee(@Param('id') id: string, @CurrentUser() user?: any): Promise<any> {
     return this.staffService.unlinkEmployee(id, user?.tenantId);
   }
 
@@ -291,10 +279,7 @@ export class StaffController {
   @ApiResponse({ status: 200, description: 'Linked Employee record (or null if not linked)' })
   @ApiResponse({ status: 403, description: 'HR add-on not active' })
   @ApiResponse({ status: 404, description: 'Staff not found' })
-  async getLinkedEmployee(
-    @Param('id') id: string,
-    @CurrentUser() user?: any,
-  ): Promise<any> {
+  async getLinkedEmployee(@Param('id') id: string, @CurrentUser() user?: any): Promise<any> {
     return this.staffService.getLinkedEmployee(id, user?.tenantId);
   }
 }

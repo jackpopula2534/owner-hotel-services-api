@@ -66,14 +66,16 @@ export class RecipesController {
     },
   })
   async findAll(
-    @Query('page') page?: number,
-    @Query('limit') limit?: number,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
     @Query('search') search?: string,
     @CurrentUser() user?: any,
   ): Promise<any> {
+    const pageNum = Math.max(1, Number(page) || 1);
+    const limitNum = Math.min(100, Math.max(1, Number(limit) || 20));
     const result = await this.recipesService.findAll(user?.tenantId, {
-      page,
-      limit,
+      page: pageNum,
+      limit: limitNum,
       search,
     });
 

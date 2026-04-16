@@ -1,12 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsString,
-  IsOptional,
-  IsBoolean,
-  IsInt,
-  Min,
-  MaxLength,
-} from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsInt, Min, MaxLength } from 'class-validator';
 
 export class CreateHrDeductionTypeDto {
   @ApiProperty({ example: 'ประกันสังคม' })

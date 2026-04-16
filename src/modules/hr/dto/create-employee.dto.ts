@@ -1,4 +1,12 @@
-import { IsString, IsNotEmpty, IsOptional, IsEmail, IsDateString, IsNumber, IsArray } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsEmail,
+  IsDateString,
+  IsNumber,
+  IsArray,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateEmployeeDto {
@@ -57,12 +65,18 @@ export class CreateEmployeeDto {
   @IsOptional()
   phone?: string;
 
-  @ApiPropertyOptional({ example: 'FULLTIME', enum: ['FULLTIME', 'TEMPORARY', 'DAILY', 'CONTRACT'] })
+  @ApiPropertyOptional({
+    example: 'FULLTIME',
+    enum: ['FULLTIME', 'TEMPORARY', 'DAILY', 'CONTRACT'],
+  })
   @IsString()
   @IsOptional()
   employmentType?: string;
 
-  @ApiPropertyOptional({ example: 'ACTIVE', enum: ['active', 'ACTIVE', 'ON_LEAVE', 'RESIGNED', 'SUSPENDED', 'TERMINATED'] })
+  @ApiPropertyOptional({
+    example: 'ACTIVE',
+    enum: ['active', 'ACTIVE', 'ON_LEAVE', 'RESIGNED', 'SUSPENDED', 'TERMINATED'],
+  })
   @IsString()
   @IsOptional()
   status?: string;
@@ -145,7 +159,15 @@ export class CreateEmployeeDto {
 
   @ApiPropertyOptional({
     description: 'Education history (JSON array)',
-    example: [{ level: 'BACHELOR', institution: 'มหาวิทยาลัยเชียงใหม่', major: 'การโรงแรม', graduationYear: '2020', gpa: '3.50' }],
+    example: [
+      {
+        level: 'BACHELOR',
+        institution: 'มหาวิทยาลัยเชียงใหม่',
+        major: 'การโรงแรม',
+        graduationYear: '2020',
+        gpa: '3.50',
+      },
+    ],
   })
   @IsArray()
   @IsOptional()
@@ -153,7 +175,9 @@ export class CreateEmployeeDto {
 
   @ApiPropertyOptional({
     description: 'Work experience history (JSON array)',
-    example: [{ company: 'Hotel XYZ', position: 'Receptionist', startYear: '2020', endYear: '2022' }],
+    example: [
+      { company: 'Hotel XYZ', position: 'Receptionist', startYear: '2020', endYear: '2022' },
+    ],
   })
   @IsArray()
   @IsOptional()

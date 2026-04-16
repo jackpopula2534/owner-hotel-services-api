@@ -136,7 +136,8 @@ export class MenuController {
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'waiter', 'staff')
   async findAllItems(
     @Param('restaurantId') restaurantId: string,
-    @Query() query: {
+    @Query()
+    query: {
       categoryId?: string;
       isAvailable?: string;
       search?: string;

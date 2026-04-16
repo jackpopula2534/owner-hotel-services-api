@@ -9,14 +9,12 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiBearerAuth,
-  ApiResponse,
-} from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { EmployeeCodeConfigService } from './employee-code-config.service';
-import { UpsertEmployeeCodeConfigDto, PreviewEmployeeCodeDto } from './dto/employee-code-config.dto';
+import {
+  UpsertEmployeeCodeConfigDto,
+  PreviewEmployeeCodeDto,
+} from './dto/employee-code-config.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
 import { Roles } from '../../common/decorators/roles.decorator';

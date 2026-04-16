@@ -61,10 +61,7 @@ export class HrKpiTemplateController {
   @ApiResponse({ status: 200, description: 'Template detail' })
   @ApiResponse({ status: 404, description: 'Not found' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
-  async findOne(
-    @Param('id') id: string,
-    @CurrentUser() user: { tenantId?: string },
-  ) {
+  async findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.kpiTemplateService.findOne(id, user.tenantId!);
   }
 
@@ -74,10 +71,7 @@ export class HrKpiTemplateController {
   @ApiResponse({ status: 400, description: 'น้ำหนักรวมไม่ = 100%' })
   @HttpCode(HttpStatus.CREATED)
   @Roles('platform_admin', 'tenant_admin', 'admin', 'hr')
-  async create(
-    @Body() dto: CreateKpiTemplateDto,
-    @CurrentUser() user: { tenantId?: string },
-  ) {
+  async create(@Body() dto: CreateKpiTemplateDto, @CurrentUser() user: { tenantId?: string }) {
     return this.kpiTemplateService.create(dto, user.tenantId!);
   }
 
@@ -100,10 +94,7 @@ export class HrKpiTemplateController {
   @ApiResponse({ status: 200, description: 'Template deleted' })
   @ApiResponse({ status: 409, description: 'มี Cycle ใช้งานอยู่ ลบไม่ได้' })
   @Roles('platform_admin', 'tenant_admin', 'admin')
-  async remove(
-    @Param('id') id: string,
-    @CurrentUser() user: { tenantId?: string },
-  ) {
+  async remove(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.kpiTemplateService.remove(id, user.tenantId!);
   }
 

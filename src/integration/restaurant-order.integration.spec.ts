@@ -45,9 +45,28 @@ const ORDER_ID = 'ord-1';
 const TABLE_ID = 'tbl-1';
 const TODAY = new Date().toISOString().slice(0, 10).replace(/-/g, '');
 
-const mockRestaurant = { id: RESTAURANT_ID, tenantId: TENANT_ID, name: 'Test Restaurant', location: null };
-const mockTable = { id: TABLE_ID, tableNumber: 'T01', capacity: 4, restaurantId: RESTAURANT_ID, tenantId: TENANT_ID, isActive: true };
-const mockMenuItem = { id: 'mi-1', name: 'Pad Thai', price: 120, restaurantId: RESTAURANT_ID, tenantId: TENANT_ID, isAvailable: true };
+const mockRestaurant = {
+  id: RESTAURANT_ID,
+  tenantId: TENANT_ID,
+  name: 'Test Restaurant',
+  location: null,
+};
+const mockTable = {
+  id: TABLE_ID,
+  tableNumber: 'T01',
+  capacity: 4,
+  restaurantId: RESTAURANT_ID,
+  tenantId: TENANT_ID,
+  isActive: true,
+};
+const mockMenuItem = {
+  id: 'mi-1',
+  name: 'Pad Thai',
+  price: 120,
+  restaurantId: RESTAURANT_ID,
+  tenantId: TENANT_ID,
+  isAvailable: true,
+};
 
 const makeOrder = (overrides: Record<string, unknown> = {}) => ({
   id: ORDER_ID,
@@ -109,10 +128,14 @@ describe('OrderService', () => {
       prismaMock.order.create.mockResolvedValue(makeOrder({ items: [] }));
       prismaMock.restaurantTable.update.mockResolvedValue({});
 
-      const result = await orderService.create(RESTAURANT_ID, {
-        tableId: TABLE_ID,
-        orderType: 'DINE_IN' as any,
-      }, TENANT_ID);
+      const result = await orderService.create(
+        RESTAURANT_ID,
+        {
+          tableId: TABLE_ID,
+          orderType: 'DINE_IN' as any,
+        },
+        TENANT_ID,
+      );
 
       expect(result.orderNumber).toMatch(/^ORD-\d{8}-0001$/);
     });
@@ -125,10 +148,14 @@ describe('OrderService', () => {
       prismaMock.order.create.mockResolvedValue(makeOrder({ orderNumber: `ORD-${TODAY}-0012` }));
       prismaMock.restaurantTable.update.mockResolvedValue({});
 
-      const result = await orderService.create(RESTAURANT_ID, {
-        tableId: TABLE_ID,
-        orderType: 'DINE_IN' as any,
-      }, TENANT_ID);
+      const result = await orderService.create(
+        RESTAURANT_ID,
+        {
+          tableId: TABLE_ID,
+          orderType: 'DINE_IN' as any,
+        },
+        TENANT_ID,
+      );
 
       expect(result.orderNumber).toMatch(/0012$/);
     });
@@ -146,11 +173,15 @@ describe('OrderService', () => {
       prismaMock.order.create.mockResolvedValue(expectedOrder);
       prismaMock.restaurantTable.update.mockResolvedValue({});
 
-      const result = await orderService.create(RESTAURANT_ID, {
-        tableId: TABLE_ID,
-        orderType: 'DINE_IN' as any,
-        items: [{ menuItemId: 'mi-1', quantity: 2 }],
-      }, TENANT_ID);
+      const result = await orderService.create(
+        RESTAURANT_ID,
+        {
+          tableId: TABLE_ID,
+          orderType: 'DINE_IN' as any,
+          items: [{ menuItemId: 'mi-1', quantity: 2 }],
+        },
+        TENANT_ID,
+      );
 
       // 2 × 120 = 240 subtotal
       expect(prismaMock.order.create).toHaveBeenCalledWith(
@@ -176,11 +207,15 @@ describe('OrderService', () => {
       prismaMock.menuItem.findMany.mockResolvedValue([]); // item not found / unavailable
 
       await expect(
-        orderService.create(RESTAURANT_ID, {
-          tableId: TABLE_ID,
-          orderType: 'DINE_IN' as any,
-          items: [{ menuItemId: 'mi-999', quantity: 1 }],
-        }, TENANT_ID),
+        orderService.create(
+          RESTAURANT_ID,
+          {
+            tableId: TABLE_ID,
+            orderType: 'DINE_IN' as any,
+            items: [{ menuItemId: 'mi-999', quantity: 1 }],
+          },
+          TENANT_ID,
+        ),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -192,10 +227,14 @@ describe('OrderService', () => {
       prismaMock.order.create.mockResolvedValue(makeOrder());
       prismaMock.restaurantTable.update.mockResolvedValue({});
 
-      await orderService.create(RESTAURANT_ID, {
-        tableId: TABLE_ID,
-        orderType: 'DINE_IN' as any,
-      }, TENANT_ID);
+      await orderService.create(
+        RESTAURANT_ID,
+        {
+          tableId: TABLE_ID,
+          orderType: 'DINE_IN' as any,
+        },
+        TENANT_ID,
+      );
 
       expect(prismaMock.restaurantTable.update).toHaveBeenCalledWith({
         where: { id: TABLE_ID },
@@ -212,16 +251,24 @@ describe('OrderService', () => {
       prismaMock.order.findFirst.mockResolvedValue(order);
       prismaMock.menuItem.findFirst.mockResolvedValue(mockMenuItem);
       prismaMock.orderItem.create.mockResolvedValue({
-        id: 'oi-1', menuItemId: 'mi-1', quantity: 1, unitPrice: 120, totalPrice: 120,
+        id: 'oi-1',
+        menuItemId: 'mi-1',
+        quantity: 1,
+        unitPrice: 120,
+        totalPrice: 120,
       });
-      prismaMock.orderItem.findMany.mockResolvedValue([
-        { totalPrice: 120 },
-      ]);
+      prismaMock.orderItem.findMany.mockResolvedValue([{ totalPrice: 120 }]);
       prismaMock.order.update.mockResolvedValue({});
 
-      const result = await orderService.addItem(RESTAURANT_ID, ORDER_ID, {
-        menuItemId: 'mi-1', quantity: 1,
-      }, TENANT_ID);
+      const result = await orderService.addItem(
+        RESTAURANT_ID,
+        ORDER_ID,
+        {
+          menuItemId: 'mi-1',
+          quantity: 1,
+        },
+        TENANT_ID,
+      );
 
       expect(result.totalPrice).toBe(120);
       expect(prismaMock.orderItem.create).toHaveBeenCalledTimes(1);
@@ -232,7 +279,12 @@ describe('OrderService', () => {
       prismaMock.order.findFirst.mockResolvedValue(makeOrder({ status: 'COMPLETED' }));
 
       await expect(
-        orderService.addItem(RESTAURANT_ID, ORDER_ID, { menuItemId: 'mi-1', quantity: 1 }, TENANT_ID),
+        orderService.addItem(
+          RESTAURANT_ID,
+          ORDER_ID,
+          { menuItemId: 'mi-1', quantity: 1 },
+          TENANT_ID,
+        ),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -241,7 +293,12 @@ describe('OrderService', () => {
       prismaMock.menuItem.findFirst.mockResolvedValue(null);
 
       await expect(
-        orderService.addItem(RESTAURANT_ID, ORDER_ID, { menuItemId: 'mi-999', quantity: 1 }, TENANT_ID),
+        orderService.addItem(
+          RESTAURANT_ID,
+          ORDER_ID,
+          { menuItemId: 'mi-999', quantity: 1 },
+          TENANT_ID,
+        ),
       ).rejects.toThrow(NotFoundException);
     });
   });
@@ -276,12 +333,24 @@ describe('OrderService', () => {
   // ── sendToKitchen ─────────────────────────────────────────────────────────
 
   describe('sendToKitchen', () => {
-    const pendingItem = { id: 'oi-1', sentToKitchen: false, status: 'PENDING', menuItemId: 'mi-1', quantity: 1, notes: null };
+    const pendingItem = {
+      id: 'oi-1',
+      sentToKitchen: false,
+      status: 'PENDING',
+      menuItemId: 'mi-1',
+      quantity: 1,
+      notes: null,
+    };
 
     it('creates kitchen order ticket and emits WebSocket event', async () => {
       prismaMock.order.findFirst
         .mockResolvedValueOnce(makeOrder({ status: 'PENDING', items: [pendingItem] }))
-        .mockResolvedValueOnce(makeOrder({ status: 'PREPARING', items: [{ ...pendingItem, sentToKitchen: true, status: 'SENT' }] }));
+        .mockResolvedValueOnce(
+          makeOrder({
+            status: 'PREPARING',
+            items: [{ ...pendingItem, sentToKitchen: true, status: 'SENT' }],
+          }),
+        );
 
       prismaMock.$transaction.mockResolvedValue([
         { count: 1 },
@@ -302,9 +371,9 @@ describe('OrderService', () => {
     it('throws BadRequestException for CANCELLED order', async () => {
       prismaMock.order.findFirst.mockResolvedValue(makeOrder({ status: 'CANCELLED', items: [] }));
 
-      await expect(
-        orderService.sendToKitchen(RESTAURANT_ID, ORDER_ID, TENANT_ID),
-      ).rejects.toThrow(BadRequestException);
+      await expect(orderService.sendToKitchen(RESTAURANT_ID, ORDER_ID, TENANT_ID)).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('throws BadRequestException when all items already sent', async () => {
@@ -312,9 +381,9 @@ describe('OrderService', () => {
         makeOrder({ status: 'PENDING', items: [{ ...pendingItem, sentToKitchen: true }] }),
       );
 
-      await expect(
-        orderService.sendToKitchen(RESTAURANT_ID, ORDER_ID, TENANT_ID),
-      ).rejects.toThrow(BadRequestException);
+      await expect(orderService.sendToKitchen(RESTAURANT_ID, ORDER_ID, TENANT_ID)).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 
@@ -322,15 +391,15 @@ describe('OrderService', () => {
 
   describe('updateStatus', () => {
     const transitions: [string, string, boolean][] = [
-      ['PENDING',    'CONFIRMED',  true],
-      ['PENDING',    'CANCELLED',  true],
-      ['CONFIRMED',  'PREPARING',  true],
-      ['PREPARING',  'READY',      true],
-      ['READY',      'SERVED',     true],
-      ['SERVED',     'COMPLETED',  true],
-      ['COMPLETED',  'CANCELLED',  false], // invalid — COMPLETED is terminal
-      ['PREPARING',  'CONFIRMED',  false], // can't go backward
-      ['PENDING',    'COMPLETED',  false], // must follow sequence
+      ['PENDING', 'CONFIRMED', true],
+      ['PENDING', 'CANCELLED', true],
+      ['CONFIRMED', 'PREPARING', true],
+      ['PREPARING', 'READY', true],
+      ['READY', 'SERVED', true],
+      ['SERVED', 'COMPLETED', true],
+      ['COMPLETED', 'CANCELLED', false], // invalid — COMPLETED is terminal
+      ['PREPARING', 'CONFIRMED', false], // can't go backward
+      ['PENDING', 'COMPLETED', false], // must follow sequence
     ];
 
     transitions.forEach(([from, to, allowed]) => {
@@ -339,7 +408,12 @@ describe('OrderService', () => {
         prismaMock.order.update.mockResolvedValue(makeOrder({ status: to }));
 
         if (allowed) {
-          const result = await orderService.updateStatus(RESTAURANT_ID, ORDER_ID, to as any, TENANT_ID);
+          const result = await orderService.updateStatus(
+            RESTAURANT_ID,
+            ORDER_ID,
+            to as any,
+            TENANT_ID,
+          );
           expect(result.status).toBe(to);
         } else {
           await expect(
@@ -350,7 +424,9 @@ describe('OrderService', () => {
     });
 
     it('sets table to CLEANING when order COMPLETED', async () => {
-      prismaMock.order.findFirst.mockResolvedValue(makeOrder({ status: 'SERVED', tableId: TABLE_ID }));
+      prismaMock.order.findFirst.mockResolvedValue(
+        makeOrder({ status: 'SERVED', tableId: TABLE_ID }),
+      );
       prismaMock.order.update.mockResolvedValue(makeOrder({ status: 'COMPLETED' }));
       prismaMock.restaurantTable.update.mockResolvedValue({});
 
@@ -379,13 +455,20 @@ describe('OrderService', () => {
 
   describe('processPayment', () => {
     it('marks order as PAID and calculates change correctly', async () => {
-      prismaMock.order.findFirst.mockResolvedValue(makeOrder({ total: 280.8, paymentStatus: 'UNPAID' }));
-      prismaMock.order.update.mockResolvedValue(makeOrder({
-        paymentStatus: 'PAID', paidAmount: 300, changeAmount: 19.2,
-      }));
+      prismaMock.order.findFirst.mockResolvedValue(
+        makeOrder({ total: 280.8, paymentStatus: 'UNPAID' }),
+      );
+      prismaMock.order.update.mockResolvedValue(
+        makeOrder({
+          paymentStatus: 'PAID',
+          paidAmount: 300,
+          changeAmount: 19.2,
+        }),
+      );
 
       const result = await orderService.processPayment(
-        RESTAURANT_ID, ORDER_ID,
+        RESTAURANT_ID,
+        ORDER_ID,
         { paymentMethod: 'CASH' as any, paidAmount: 300 },
         TENANT_ID,
       );
@@ -406,40 +489,67 @@ describe('OrderService', () => {
       prismaMock.order.findFirst.mockResolvedValue(makeOrder({ paymentStatus: 'PAID' }));
 
       await expect(
-        orderService.processPayment(RESTAURANT_ID, ORDER_ID, { paymentMethod: 'CASH' as any, paidAmount: 300 }, TENANT_ID),
+        orderService.processPayment(
+          RESTAURANT_ID,
+          ORDER_ID,
+          { paymentMethod: 'CASH' as any, paidAmount: 300 },
+          TENANT_ID,
+        ),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('throws BadRequestException when paidAmount is less than total', async () => {
-      prismaMock.order.findFirst.mockResolvedValue(makeOrder({ total: 280.8, paymentStatus: 'UNPAID' }));
+      prismaMock.order.findFirst.mockResolvedValue(
+        makeOrder({ total: 280.8, paymentStatus: 'UNPAID' }),
+      );
 
       await expect(
-        orderService.processPayment(RESTAURANT_ID, ORDER_ID, { paymentMethod: 'CASH' as any, paidAmount: 100 }, TENANT_ID),
+        orderService.processPayment(
+          RESTAURANT_ID,
+          ORDER_ID,
+          { paymentMethod: 'CASH' as any, paidAmount: 100 },
+          TENANT_ID,
+        ),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('throws BadRequestException for ROOM_CHARGE without room number', async () => {
-      prismaMock.order.findFirst.mockResolvedValue(makeOrder({ total: 280.8, paymentStatus: 'UNPAID', guestRoom: null }));
+      prismaMock.order.findFirst.mockResolvedValue(
+        makeOrder({ total: 280.8, paymentStatus: 'UNPAID', guestRoom: null }),
+      );
 
       await expect(
-        orderService.processPayment(RESTAURANT_ID, ORDER_ID, {
-          paymentMethod: 'ROOM_CHARGE' as any, paidAmount: 300,
-          // guestRoom intentionally omitted
-        }, TENANT_ID),
+        orderService.processPayment(
+          RESTAURANT_ID,
+          ORDER_ID,
+          {
+            paymentMethod: 'ROOM_CHARGE' as any,
+            paidAmount: 300,
+            // guestRoom intentionally omitted
+          },
+          TENANT_ID,
+        ),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('applies discount before checking paidAmount', async () => {
-      prismaMock.order.findFirst.mockResolvedValue(makeOrder({ total: 280.8, paymentStatus: 'UNPAID', status: 'SERVED' }));
+      prismaMock.order.findFirst.mockResolvedValue(
+        makeOrder({ total: 280.8, paymentStatus: 'UNPAID', status: 'SERVED' }),
+      );
       prismaMock.order.update.mockResolvedValue(makeOrder({ paymentStatus: 'PAID' }));
 
       // total - discount = 280.8 - 80.8 = 200 ; paidAmount = 200 → exact match
       await expect(
-        orderService.processPayment(RESTAURANT_ID, ORDER_ID, {
-          paymentMethod: 'CASH' as any,
-          paidAmount: 200,
-          discount: 80.8,
-        }, TENANT_ID),
+        orderService.processPayment(
+          RESTAURANT_ID,
+          ORDER_ID,
+          {
+            paymentMethod: 'CASH' as any,
+            paidAmount: 200,
+            discount: 80.8,
+          },
+          TENANT_ID,
+        ),
       ).resolves.not.toThrow();
     });
   });

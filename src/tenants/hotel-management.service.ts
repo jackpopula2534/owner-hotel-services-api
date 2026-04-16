@@ -715,10 +715,7 @@ export class HotelManagementService {
     };
   }
 
-  private mapPropertyToListItem(
-    prop: any,
-    tenant: Tenant | null,
-  ): HotelListItemDto {
+  private mapPropertyToListItem(prop: any, tenant: Tenant | null): HotelListItemDto {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -754,9 +751,7 @@ export class HotelManagementService {
         ? {
             code: tenant.subscription.plan.code,
             name: tenant.subscription.plan.name,
-            nameTh:
-              planNameTh[tenant.subscription.plan.code] ||
-              tenant.subscription.plan.name,
+            nameTh: planNameTh[tenant.subscription.plan.code] || tenant.subscription.plan.name,
           }
         : null,
       trial: {
@@ -775,9 +770,7 @@ export class HotelManagementService {
     };
   }
 
-  private async getPropertySummaryStats(
-    tenantId: string,
-  ): Promise<HotelSummaryStatsDto> {
+  private async getPropertySummaryStats(tenantId: string): Promise<HotelSummaryStatsDto> {
     const [total, active, trial] = await Promise.all([
       this.prisma.property.count({ where: { tenantId, deletedAt: null } }),
       this.prisma.property.count({ where: { tenantId, status: 'active', deletedAt: null } }),
@@ -796,9 +789,7 @@ export class HotelManagementService {
     };
   }
 
-  private async getPropertyFilterOptions(
-    tenantId: string,
-  ): Promise<HotelFilterOptionsDto> {
+  private async getPropertyFilterOptions(tenantId: string): Promise<HotelFilterOptionsDto> {
     // Get distinct statuses from properties
     const properties = await this.prisma.property.groupBy({
       by: ['status'],

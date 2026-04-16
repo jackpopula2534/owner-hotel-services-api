@@ -37,7 +37,12 @@ describe('RoomAvailabilityService', () => {
   describe('checkRoomAvailable', () => {
     it('throws when tenantId is missing', async () => {
       await expect(
-        service.checkRoomAvailable('room-1', new Date('2026-04-10T14:00:00.000Z'), new Date('2026-04-11T11:00:00.000Z'), ''),
+        service.checkRoomAvailable(
+          'room-1',
+          new Date('2026-04-10T14:00:00.000Z'),
+          new Date('2026-04-11T11:00:00.000Z'),
+          '',
+        ),
       ).rejects.toThrow(BadRequestException);
     });
 

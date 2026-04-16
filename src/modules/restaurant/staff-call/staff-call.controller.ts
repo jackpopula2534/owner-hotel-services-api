@@ -31,11 +31,10 @@ export class StaffCallController {
     @Body() dto: CreateStaffCallDto,
     @Request() req: { user: { tenantId: string } },
   ) {
-    const call = await this.staffCallService.create(
-      req.user.tenantId,
-      restaurantId,
-      { ...dto, source: dto.source ?? CallSourceDto.POS },
-    );
+    const call = await this.staffCallService.create(req.user.tenantId, restaurantId, {
+      ...dto,
+      source: dto.source ?? CallSourceDto.POS,
+    });
     return { success: true, data: call };
   }
 
@@ -46,10 +45,7 @@ export class StaffCallController {
     @Param('restaurantId') restaurantId: string,
     @Request() req: { user: { tenantId: string } },
   ) {
-    const calls = await this.staffCallService.findActive(
-      req.user.tenantId,
-      restaurantId,
-    );
+    const calls = await this.staffCallService.findActive(req.user.tenantId, restaurantId);
     return { success: true, data: calls };
   }
 
@@ -64,16 +60,12 @@ export class StaffCallController {
     @Query('includeResolved') includeResolved?: string,
     @Request() req?: { user: { tenantId: string } },
   ) {
-    const result = await this.staffCallService.findAll(
-      req.user.tenantId,
-      restaurantId,
-      {
-        page: page ? parseInt(page, 10) : undefined,
-        limit: limit ? parseInt(limit, 10) : undefined,
-        status,
-        includeResolved: includeResolved === 'true',
-      },
-    );
+    const result = await this.staffCallService.findAll(req.user.tenantId, restaurantId, {
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      status,
+      includeResolved: includeResolved === 'true',
+    });
     return { success: true, ...result };
   }
 
@@ -84,10 +76,7 @@ export class StaffCallController {
     @Param('restaurantId') restaurantId: string,
     @Request() req: { user: { tenantId: string } },
   ) {
-    const counts = await this.staffCallService.getCounts(
-      req.user.tenantId,
-      restaurantId,
-    );
+    const counts = await this.staffCallService.getCounts(req.user.tenantId, restaurantId);
     return { success: true, data: counts };
   }
 
@@ -118,12 +107,7 @@ export class StaffCallController {
     @Body() dto: ResolveCallDto,
     @Request() req: { user: { tenantId: string } },
   ) {
-    const call = await this.staffCallService.resolve(
-      req.user.tenantId,
-      restaurantId,
-      callId,
-      dto,
-    );
+    const call = await this.staffCallService.resolve(req.user.tenantId, restaurantId, callId, dto);
     return { success: true, data: call };
   }
 
@@ -135,11 +119,7 @@ export class StaffCallController {
     @Param('callId') callId: string,
     @Request() req: { user: { tenantId: string } },
   ) {
-    const call = await this.staffCallService.cancel(
-      req.user.tenantId,
-      restaurantId,
-      callId,
-    );
+    const call = await this.staffCallService.cancel(req.user.tenantId, restaurantId, callId);
     return { success: true, data: call };
   }
 
@@ -150,10 +130,7 @@ export class StaffCallController {
     @Param('restaurantId') restaurantId: string,
     @Request() req: { user: { tenantId: string } },
   ) {
-    const result = await this.staffCallService.resolveAll(
-      req.user.tenantId,
-      restaurantId,
-    );
+    const result = await this.staffCallService.resolveAll(req.user.tenantId, restaurantId);
     return { success: true, data: result };
   }
 }

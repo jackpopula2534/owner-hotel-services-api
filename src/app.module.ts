@@ -60,6 +60,7 @@ import { MaintenanceModule } from './modules/maintenance/maintenance.module';
 import { AddonModule } from './modules/addons/addon.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { CostAccountingModule } from './modules/cost-accounting/cost-accounting.module';
+import { DocumentSettingsModule } from './modules/document-settings/document-settings.module';
 
 @Module({
   imports: [
@@ -129,6 +130,7 @@ import { CostAccountingModule } from './modules/cost-accounting/cost-accounting.
     AddonModule,
     InventoryModule,
     CostAccountingModule,
+    DocumentSettingsModule,
     ThrottlerModule.forRoot([
       {
         ttl: 60, // 60 seconds window

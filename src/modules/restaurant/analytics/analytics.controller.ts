@@ -1,10 +1,4 @@
-import {
-  Controller,
-  Get,
-  Param,
-  Query,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -32,15 +26,28 @@ export class RestaurantAnalyticsController {
   @Get('revenue')
   @ApiOperation({ summary: 'Get revenue summary with timeline breakdown' })
   @ApiParam({ name: 'restaurantId', description: 'Restaurant ID' })
-  @ApiQuery({ name: 'from', required: false, description: 'Start date (ISO 8601)', example: '2026-04-01' })
-  @ApiQuery({ name: 'to', required: false, description: 'End date (ISO 8601)', example: '2026-04-30' })
+  @ApiQuery({
+    name: 'from',
+    required: false,
+    description: 'Start date (ISO 8601)',
+    example: '2026-04-01',
+  })
+  @ApiQuery({
+    name: 'to',
+    required: false,
+    description: 'End date (ISO 8601)',
+    example: '2026-04-30',
+  })
   @ApiQuery({
     name: 'groupBy',
     required: false,
     enum: ['day', 'week', 'month'],
     description: 'Time grouping for timeline',
   })
-  @ApiResponse({ status: 200, description: 'Revenue summary with timeline, payment breakdown, and order type breakdown' })
+  @ApiResponse({
+    status: 200,
+    description: 'Revenue summary with timeline, payment breakdown, and order type breakdown',
+  })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'accountant')
   async getRevenueSummary(
     @Param('restaurantId') restaurantId: string,
@@ -59,8 +66,16 @@ export class RestaurantAnalyticsController {
   @Get('daily-summary')
   @ApiOperation({ summary: 'Get operational summary for a specific day' })
   @ApiParam({ name: 'restaurantId' })
-  @ApiQuery({ name: 'date', required: false, description: 'Date (ISO 8601)', example: '2026-04-10' })
-  @ApiResponse({ status: 200, description: 'Daily summary: revenue, orders, guests, kitchen, table stats' })
+  @ApiQuery({
+    name: 'date',
+    required: false,
+    description: 'Date (ISO 8601)',
+    example: '2026-04-10',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Daily summary: revenue, orders, guests, kitchen, table stats',
+  })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'accountant')
   async getDailySummary(
     @Param('restaurantId') restaurantId: string,
@@ -75,7 +90,12 @@ export class RestaurantAnalyticsController {
   @ApiParam({ name: 'restaurantId' })
   @ApiQuery({ name: 'from', required: false })
   @ApiQuery({ name: 'to', required: false })
-  @ApiQuery({ name: 'limit', required: false, description: 'Number of items (default 10)', example: 10 })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    description: 'Number of items (default 10)',
+    example: 10,
+  })
   @ApiResponse({ status: 200, description: 'Ranked menu items with quantity and revenue data' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'accountant')
   async getTopMenuItems(
@@ -97,7 +117,10 @@ export class RestaurantAnalyticsController {
   @ApiParam({ name: 'restaurantId' })
   @ApiQuery({ name: 'from', required: false })
   @ApiQuery({ name: 'to', required: false })
-  @ApiResponse({ status: 200, description: 'Per-table stats: orders served, revenue, avg turnover time' })
+  @ApiResponse({
+    status: 200,
+    description: 'Per-table stats: orders served, revenue, avg turnover time',
+  })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'accountant')
   async getTableUtilization(
     @Param('restaurantId') restaurantId: string,

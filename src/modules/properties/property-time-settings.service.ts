@@ -101,9 +101,7 @@ export class PropertyTimeSettingsService {
       );
     }
 
-    this.logger.log(
-      `Updating time settings for property ${propertyId} (tenant ${tenantId})`,
-    );
+    this.logger.log(`Updating time settings for property ${propertyId} (tenant ${tenantId})`);
 
     const updated = await this.prisma.property.update({
       where: { id: propertyId },

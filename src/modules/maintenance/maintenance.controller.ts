@@ -117,7 +117,11 @@ export class MaintenanceController {
     @Body() createMaintenanceTaskDto: CreateMaintenanceTaskDto,
     @CurrentUser() user?: any,
   ): Promise<any> {
-    const task = await this.maintenanceService.create(createMaintenanceTaskDto, user?.tenantId, user?.id);
+    const task = await this.maintenanceService.create(
+      createMaintenanceTaskDto,
+      user?.tenantId,
+      user?.id,
+    );
 
     return {
       success: true,
@@ -146,10 +150,7 @@ export class MaintenanceController {
     },
   })
   @ApiResponse({ status: 429, description: 'Too many requests' })
-  async findOne(
-    @Param('id') id: string,
-    @CurrentUser() user?: any,
-  ): Promise<any> {
+  async findOne(@Param('id') id: string, @CurrentUser() user?: any): Promise<any> {
     const task = await this.maintenanceService.findOne(id, user?.tenantId);
 
     return {
@@ -182,7 +183,12 @@ export class MaintenanceController {
     @Body() updateMaintenanceTaskDto: UpdateMaintenanceTaskDto,
     @CurrentUser() user?: any,
   ): Promise<any> {
-    const task = await this.maintenanceService.update(id, updateMaintenanceTaskDto, user?.tenantId, user?.id);
+    const task = await this.maintenanceService.update(
+      id,
+      updateMaintenanceTaskDto,
+      user?.tenantId,
+      user?.id,
+    );
 
     return {
       success: true,
@@ -200,10 +206,7 @@ export class MaintenanceController {
     description: 'Maintenance task deleted',
   })
   @ApiResponse({ status: 429, description: 'Too many requests' })
-  async remove(
-    @Param('id') id: string,
-    @CurrentUser() user?: any,
-  ): Promise<void> {
+  async remove(@Param('id') id: string, @CurrentUser() user?: any): Promise<void> {
     await this.maintenanceService.remove(id, user?.tenantId);
   }
 
@@ -223,9 +226,7 @@ export class MaintenanceController {
           completedCount: 25,
           totalEstimatedCost: 5000,
           totalActualCost: 4800,
-          byCategory: [
-            { category: 'ac', count: 10, cost: 2000 },
-          ],
+          byCategory: [{ category: 'ac', count: 10, cost: 2000 }],
         },
       },
     },

@@ -1,4 +1,17 @@
-import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, UseGuards, DefaultValuePipe, ParseIntPipe } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Patch,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+  DefaultValuePipe,
+  ParseIntPipe,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { BookingsService } from './bookings.service';
@@ -250,7 +263,8 @@ export class BookingsController {
   @Get(':id/activities')
   @ApiOperation({
     summary: 'Get booking activity timeline',
-    description: 'Returns all activity log entries for this booking — who did what and when, ordered oldest to newest.',
+    description:
+      'Returns all activity log entries for this booking — who did what and when, ordered oldest to newest.',
   })
   @ApiResponse({ status: 200, description: 'Activity timeline returned successfully' })
   @ApiResponse({ status: 404, description: 'Booking not found' })

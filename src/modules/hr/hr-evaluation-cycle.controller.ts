@@ -19,7 +19,10 @@ import {
   ApiQuery,
 } from '@nestjs/swagger';
 import { HrEvaluationCycleService } from './hr-evaluation-cycle.service';
-import { CreateEvaluationCycleDto, UpdateEvaluationCycleDto } from './dto/create-evaluation-cycle.dto';
+import {
+  CreateEvaluationCycleDto,
+  UpdateEvaluationCycleDto,
+} from './dto/create-evaluation-cycle.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -37,8 +40,8 @@ export class HrEvaluationCycleController {
   @ApiOperation({ summary: 'รายการ Evaluation Cycles ทั้งหมด' })
   @ApiQuery({ name: 'status', required: false, enum: ['open', 'closed', 'archived'] })
   @ApiQuery({ name: 'period', required: false, type: String })
-  @ApiQuery({ name: 'page',   required: false, type: Number })
-  @ApiQuery({ name: 'limit',  required: false, type: Number })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiResponse({ status: 200, description: 'Paginated list of evaluation cycles' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
   async findAll(
@@ -53,10 +56,7 @@ export class HrEvaluationCycleController {
   @ApiParam({ name: 'id', description: 'Cycle ID' })
   @ApiResponse({ status: 200, description: 'Cycle detail with performances' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
-  async findOne(
-    @Param('id') id: string,
-    @CurrentUser() user: { tenantId?: string },
-  ) {
+  async findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.cycleService.findOne(id, user.tenantId!);
   }
 
@@ -65,10 +65,7 @@ export class HrEvaluationCycleController {
   @ApiParam({ name: 'id', description: 'Cycle ID' })
   @ApiResponse({ status: 200, description: 'Progress summary by status' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
-  async getProgress(
-    @Param('id') id: string,
-    @CurrentUser() user: { tenantId?: string },
-  ) {
+  async getProgress(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.cycleService.getProgress(id, user.tenantId!);
   }
 
@@ -107,10 +104,7 @@ export class HrEvaluationCycleController {
   @ApiResponse({ status: 200, description: 'Cycle closed' })
   @ApiResponse({ status: 409, description: 'Cycle ไม่ได้อยู่ในสถานะ open' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager')
-  async close(
-    @Param('id') id: string,
-    @CurrentUser() user: { tenantId?: string },
-  ) {
+  async close(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.cycleService.close(id, user.tenantId!);
   }
 }

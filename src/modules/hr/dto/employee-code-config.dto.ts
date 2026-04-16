@@ -14,7 +14,8 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpsertEmployeeCodeConfigDto {
   @ApiProperty({
-    description: 'Pattern template using placeholders: {PREFIX}, {DEPT}, {YYYY}, {YY}, {MM}, {NNNN}',
+    description:
+      'Pattern template using placeholders: {PREFIX}, {DEPT}, {YYYY}, {YY}, {MM}, {NNNN}',
     example: '{PREFIX}-{DEPT}-{YYYY}-{NNNN}',
   })
   @IsString()
@@ -49,7 +50,9 @@ export class UpsertEmployeeCodeConfigDto {
   })
   @IsString()
   @IsOptional()
-  @IsEnum(['NEVER', 'YEARLY', 'MONTHLY'], { message: 'resetCycle must be NEVER, YEARLY, or MONTHLY' })
+  @IsEnum(['NEVER', 'YEARLY', 'MONTHLY'], {
+    message: 'resetCycle must be NEVER, YEARLY, or MONTHLY',
+  })
   resetCycle?: string;
 
   @ApiPropertyOptional({ description: 'Include year in code', example: true })
@@ -57,7 +60,11 @@ export class UpsertEmployeeCodeConfigDto {
   @IsOptional()
   includeYear?: boolean;
 
-  @ApiPropertyOptional({ description: 'Year format: YYYY or YY', enum: ['YYYY', 'YY'], example: 'YYYY' })
+  @ApiPropertyOptional({
+    description: 'Year format: YYYY or YY',
+    enum: ['YYYY', 'YY'],
+    example: 'YYYY',
+  })
   @IsString()
   @IsOptional()
   @IsEnum(['YYYY', 'YY'], { message: 'yearFormat must be YYYY or YY' })
@@ -90,7 +97,10 @@ export class PreviewEmployeeCodeDto {
   @IsOptional()
   departmentCode?: string;
 
-  @ApiPropertyOptional({ description: 'Property/hotel ID to scope the preview (avoids stale codes)', example: 'abc-123' })
+  @ApiPropertyOptional({
+    description: 'Property/hotel ID to scope the preview (avoids stale codes)',
+    example: 'abc-123',
+  })
   @IsString()
   @IsOptional()
   propertyId?: string;

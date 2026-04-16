@@ -22,7 +22,11 @@ export class CreateHrPerformanceDto {
   @IsNotEmpty()
   period: string;
 
-  @ApiProperty({ description: 'Period type', enum: ['quarterly', 'half_yearly', 'yearly'], example: 'quarterly' })
+  @ApiProperty({
+    description: 'Period type',
+    enum: ['quarterly', 'half_yearly', 'yearly'],
+    example: 'quarterly',
+  })
   @IsString()
   @IsIn(['quarterly', 'half_yearly', 'yearly'])
   periodType: string;
@@ -69,7 +73,10 @@ export class CreateHrPerformanceDto {
   @Type(() => Number)
   scoreService: number;
 
-  @ApiPropertyOptional({ description: 'Strengths & achievements', example: 'ทำงานได้ดี มีความรับผิดชอบสูง' })
+  @ApiPropertyOptional({
+    description: 'Strengths & achievements',
+    example: 'ทำงานได้ดี มีความรับผิดชอบสูง',
+  })
   @IsOptional()
   @IsString()
   strengths?: string;
@@ -89,7 +96,11 @@ export class CreateHrPerformanceDto {
   @IsString()
   note?: string;
 
-  @ApiPropertyOptional({ description: 'Status', enum: ['draft', 'submitted', 'approved', 'rejected'], default: 'draft' })
+  @ApiPropertyOptional({
+    description: 'Status',
+    enum: ['draft', 'submitted', 'approved', 'rejected'],
+    default: 'draft',
+  })
   @IsOptional()
   @IsString()
   @IsIn(['draft', 'submitted', 'approved', 'rejected'])
@@ -159,7 +170,10 @@ export class UpdateHrPerformanceDto {
   @IsString()
   note?: string;
 
-  @ApiPropertyOptional({ description: 'Status', enum: ['draft', 'submitted', 'approved', 'rejected'] })
+  @ApiPropertyOptional({
+    description: 'Status',
+    enum: ['draft', 'submitted', 'approved', 'rejected'],
+  })
   @IsOptional()
   @IsString()
   @IsIn(['draft', 'submitted', 'approved', 'rejected'])

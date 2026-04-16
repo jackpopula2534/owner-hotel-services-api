@@ -90,7 +90,13 @@ export class ReservationController {
     @Body() dto: UpdateReservationDto,
     @CurrentUser() user: { tenantId: string; id?: string },
   ) {
-    return this.reservationService.update(restaurantId, reservationId, dto, user.tenantId, user?.id);
+    return this.reservationService.update(
+      restaurantId,
+      reservationId,
+      dto,
+      user.tenantId,
+      user?.id,
+    );
   }
 
   @Patch(':reservationId/no-show')
@@ -103,7 +109,12 @@ export class ReservationController {
     @Param('reservationId') reservationId: string,
     @CurrentUser() user: { tenantId: string; id?: string },
   ) {
-    return this.reservationService.markAsNoShow(restaurantId, reservationId, user.tenantId, user?.id);
+    return this.reservationService.markAsNoShow(
+      restaurantId,
+      reservationId,
+      user.tenantId,
+      user?.id,
+    );
   }
 
   @Delete(':reservationId')

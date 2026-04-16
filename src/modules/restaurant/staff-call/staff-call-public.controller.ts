@@ -16,10 +16,7 @@ export class StaffCallPublicController {
   @ApiResponse({ status: 201, description: 'Call created' })
   @ApiResponse({ status: 400, description: 'Duplicate pending call' })
   @ApiResponse({ status: 429, description: 'Rate limited' })
-  async create(
-    @Param('restaurantId') restaurantId: string,
-    @Body() dto: CreateStaffCallDto,
-  ) {
+  async create(@Param('restaurantId') restaurantId: string, @Body() dto: CreateStaffCallDto) {
     // Resolve tenantId from restaurant
     // For public endpoints we need to look up the tenant from the restaurant
     const call = await this.staffCallService.createPublic(restaurantId, {

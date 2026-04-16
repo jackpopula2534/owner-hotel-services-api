@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-  BadRequestException,
-} from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateStaffCallDto, CallSourceDto } from './dto/create-staff-call.dto';
 import { AcknowledgeCallDto, ResolveCallDto } from './dto/update-staff-call.dto';
@@ -21,11 +16,7 @@ export class StaffCallService {
   ) {}
 
   // ─── Create a new staff call ─────────────────────────────────────────────────
-  async create(
-    tenantId: string,
-    restaurantId: string,
-    dto: CreateStaffCallDto,
-  ) {
+  async create(tenantId: string, restaurantId: string, dto: CreateStaffCallDto) {
     // Validate table exists and belongs to this restaurant
     const table = await this.prisma.restaurantTable.findFirst({
       where: { id: dto.tableId, restaurantId },
@@ -47,9 +38,7 @@ export class StaffCallService {
     });
 
     if (existingCall) {
-      throw new BadRequestException(
-        'A pending call of this type already exists for this table',
-      );
+      throw new BadRequestException('A pending call of this type already exists for this table');
     }
 
     const call = await this.prisma.staffCall.create({
@@ -192,12 +181,7 @@ export class StaffCallService {
   }
 
   // ─── Resolve a call ──────────────────────────────────────────────────────────
-  async resolve(
-    tenantId: string,
-    restaurantId: string,
-    callId: string,
-    dto: ResolveCallDto,
-  ) {
+  async resolve(tenantId: string, restaurantId: string, callId: string, dto: ResolveCallDto) {
     const call = await this.findCallOrThrow(tenantId, restaurantId, callId);
 
     if (call.status === 'RESOLVED' || call.status === 'CANCELLED') {
@@ -299,11 +283,7 @@ export class StaffCallService {
   }
 
   // ─── Private helpers ─────────────────────────────────────────────────────────
-  private async findCallOrThrow(
-    tenantId: string,
-    restaurantId: string,
-    callId: string,
-  ) {
+  private async findCallOrThrow(tenantId: string, restaurantId: string, callId: string) {
     const call = await this.prisma.staffCall.findFirst({
       where: { id: callId, tenantId, restaurantId },
     });

@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  NotFoundException,
-  BadRequestException,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AddFolioChargeDto } from './dto/add-folio-charge.dto';
@@ -103,8 +98,7 @@ export class GuestFolioService {
 
     const roomChargeAmount = Number(booking.totalPrice ?? 0);
     const guestName =
-      `${booking.guestFirstName ?? ''} ${booking.guestLastName ?? ''}`.trim() ||
-      'ไม่ระบุชื่อ';
+      `${booking.guestFirstName ?? ''} ${booking.guestLastName ?? ''}`.trim() || 'ไม่ระบุชื่อ';
 
     // Try to fetch invoice data — gracefully degrade if tables don't exist
     let tablesReady = true;
@@ -143,9 +137,7 @@ export class GuestFolioService {
           method: p.method,
           status: p.status,
           paymentNo: p.payment_no ?? undefined,
-          createdAt: p.created_at
-            ? new Date(p.created_at).toISOString()
-            : new Date().toISOString(),
+          createdAt: p.created_at ? new Date(p.created_at).toISOString() : new Date().toISOString(),
         }));
       }
     } catch (err) {
@@ -159,10 +151,7 @@ export class GuestFolioService {
       }
     }
 
-    const additionalChargesTotal = additionalCharges.reduce(
-      (sum, c) => sum + c.amount,
-      0,
-    );
+    const additionalChargesTotal = additionalCharges.reduce((sum, c) => sum + c.amount, 0);
     const totalBalance = roomChargeAmount + additionalChargesTotal;
     const totalPaid = payments
       .filter((p) => p.status === 'approved')
@@ -249,11 +238,7 @@ export class GuestFolioService {
     return this.getFolio(bookingId, tenantId);
   }
 
-  async deleteCharge(
-    bookingId: string,
-    tenantId: string,
-    itemId: string,
-  ): Promise<GuestFolio> {
+  async deleteCharge(bookingId: string, tenantId: string, itemId: string): Promise<GuestFolio> {
     if (!tenantId) throw new BadRequestException('Tenant ID is required');
 
     try {
@@ -340,11 +325,7 @@ export class GuestFolioService {
 
       // Update booking paymentStatus and amountPaid to stay in sync
       const newPaymentStatus =
-        folio.balanceDue <= 0
-          ? 'paid'
-          : folio.totalPaid > 0
-            ? 'partial'
-            : 'pending';
+        folio.balanceDue <= 0 ? 'paid' : folio.totalPaid > 0 ? 'partial' : 'pending';
 
       await this.prisma.booking.update({
         where: { id: bookingId },
@@ -369,11 +350,7 @@ export class GuestFolioService {
         const currentPaid = Number(booking.amountPaid ?? 0);
         const newPaid = currentPaid + dto.amount;
         const fallbackStatus =
-          newPaid >= totalPrice && totalPrice > 0
-            ? 'paid'
-            : newPaid > 0
-              ? 'partial'
-              : 'pending';
+          newPaid >= totalPrice && totalPrice > 0 ? 'paid' : newPaid > 0 ? 'partial' : 'pending';
 
         // Use selective update — skip fields that might not exist in DB yet
         try {
@@ -412,8 +389,7 @@ export class GuestFolioService {
       Math.round((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24)),
     );
 
-    const invoiceNo =
-      folio.invoiceNo ?? this.generateInvoiceNumber();
+    const invoiceNo = folio.invoiceNo ?? this.generateInvoiceNumber();
 
     return {
       invoiceNo,
@@ -457,9 +433,7 @@ export class GuestFolioService {
         },
       });
 
-      this.logger.log(
-        `Finalized folio — Booking: ${bookingId}, Total: ${folio.totalBalance}`,
-      );
+      this.logger.log(`Finalized folio — Booking: ${bookingId}, Total: ${folio.totalBalance}`);
     }
 
     return this.getFolio(bookingId, tenantId);

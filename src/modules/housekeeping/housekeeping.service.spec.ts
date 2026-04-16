@@ -92,7 +92,9 @@ describe('HousekeepingService', () => {
     });
 
     it('throws when tenantId is missing', async () => {
-      await expect(service.completeTask('task-1', 100, '', '')).rejects.toThrow(BadRequestException);
+      await expect(service.completeTask('task-1', 100, '', '')).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 });

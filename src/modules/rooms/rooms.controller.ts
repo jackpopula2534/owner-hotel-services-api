@@ -89,7 +89,10 @@ export class RoomsController {
   @ApiOperation({ summary: 'Create a new room' })
   @ApiResponse({ status: 201, description: 'Room created successfully' })
   @Roles('admin', 'manager', 'tenant_admin', 'platform_admin')
-  async create(@Body() createRoomDto: CreateRoomDto, @CurrentUser() user: { tenantId?: string; id?: string }) {
+  async create(
+    @Body() createRoomDto: CreateRoomDto,
+    @CurrentUser() user: { tenantId?: string; id?: string },
+  ) {
     return this.roomsService.create(createRoomDto, user?.tenantId, user?.id);
   }
 
@@ -173,7 +176,9 @@ export class RoomsController {
     // Note: Prisma type doesn't reflect `images` yet — regenerate after migration
     const room = await this.roomsService.findOne(id, user?.tenantId);
     const roomAny = room as unknown as Record<string, unknown>;
-    const existingImages: string[] = Array.isArray(roomAny.images) ? (roomAny.images as string[]) : [];
+    const existingImages: string[] = Array.isArray(roomAny.images)
+      ? (roomAny.images as string[])
+      : [];
     const updatedImages = [...existingImages, ...imageUrls].slice(0, 8);
 
     return this.roomsService.update(id, { images: updatedImages }, user?.tenantId, user?.id);

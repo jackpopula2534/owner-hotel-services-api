@@ -1,15 +1,18 @@
 import { IsOptional, IsNumber, IsString, IsISO8601, Min } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class QueryStockCountDto {
   @ApiPropertyOptional({ example: 1, description: 'Page number' })
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(1)
   page?: number;
 
   @ApiPropertyOptional({ example: 20, description: 'Items per page' })
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(1)
   limit?: number;

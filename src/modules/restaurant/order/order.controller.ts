@@ -67,7 +67,8 @@ export class OrderController {
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'waiter', 'staff')
   async findAll(
     @Param('restaurantId') restaurantId: string,
-    @Query() query: {
+    @Query()
+    query: {
       status?: string;
       paymentStatus?: string;
       orderType?: string;
@@ -163,7 +164,13 @@ export class OrderController {
     @Body('status') status: string,
     @CurrentUser() user: { tenantId: string; id?: string },
   ) {
-    return this.orderService.updateStatus(restaurantId, orderId, status as OrderStatus, user.tenantId, user.id);
+    return this.orderService.updateStatus(
+      restaurantId,
+      orderId,
+      status as OrderStatus,
+      user.tenantId,
+      user.id,
+    );
   }
 
   @Post(':orderId/payment')

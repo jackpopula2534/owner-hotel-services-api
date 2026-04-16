@@ -6,7 +6,10 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CreateEvaluationCycleDto, UpdateEvaluationCycleDto } from './dto/create-evaluation-cycle.dto';
+import {
+  CreateEvaluationCycleDto,
+  UpdateEvaluationCycleDto,
+} from './dto/create-evaluation-cycle.dto';
 
 @Injectable()
 export class HrEvaluationCycleService {
@@ -18,9 +21,9 @@ export class HrEvaluationCycleService {
 
   async findAll(tenantId: string, query: Record<string, string>) {
     const { status, period } = query;
-    const page  = parseInt(query.page  ?? '1',  10);
+    const page = parseInt(query.page ?? '1', 10);
     const limit = parseInt(query.limit ?? '20', 10);
-    const skip  = (page - 1) * limit;
+    const skip = (page - 1) * limit;
 
     const where: Record<string, unknown> = { tenantId };
     if (status) where['status'] = status;
@@ -68,7 +71,13 @@ export class HrEvaluationCycleService {
         performances: {
           include: {
             employee: {
-              select: { id: true, firstName: true, lastName: true, employeeCode: true, department: true },
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                employeeCode: true,
+                department: true,
+              },
             },
           },
           orderBy: { createdAt: 'asc' },

@@ -70,7 +70,10 @@ describe('AuthController', () => {
       const mockReq = { ip: '127.0.0.1', socket: {}, headers: { 'user-agent': 'jest' } } as any;
       const result = await controller.register(registerDto, mockReq);
 
-      expect(authService.register).toHaveBeenCalledWith(registerDto, expect.objectContaining({ ipAddress: '127.0.0.1' }));
+      expect(authService.register).toHaveBeenCalledWith(
+        registerDto,
+        expect.objectContaining({ ipAddress: '127.0.0.1' }),
+      );
       expect(result).toEqual(mockResult);
     });
   });
@@ -100,7 +103,10 @@ describe('AuthController', () => {
       const mockReq = { ip: '127.0.0.1', socket: {}, headers: { 'user-agent': 'jest' } } as any;
       const result = await controller.loginAdmin(loginDto, mockReq);
 
-      expect(authService.loginAdmin).toHaveBeenCalledWith(loginDto, expect.objectContaining({ ipAddress: '127.0.0.1' }));
+      expect(authService.loginAdmin).toHaveBeenCalledWith(
+        loginDto,
+        expect.objectContaining({ ipAddress: '127.0.0.1' }),
+      );
       expect(result).toEqual(mockResult);
     });
   });
@@ -130,7 +136,10 @@ describe('AuthController', () => {
       const mockReq = { ip: '127.0.0.1', socket: {}, headers: { 'user-agent': 'jest' } } as any;
       const result = await controller.login(loginDto, mockReq);
 
-      expect(authService.login).toHaveBeenCalledWith(loginDto, expect.objectContaining({ ipAddress: '127.0.0.1' }));
+      expect(authService.login).toHaveBeenCalledWith(
+        loginDto,
+        expect.objectContaining({ ipAddress: '127.0.0.1' }),
+      );
       expect(result).toEqual(mockResult);
     });
   });

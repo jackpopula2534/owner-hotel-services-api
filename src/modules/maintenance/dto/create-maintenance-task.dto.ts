@@ -1,16 +1,9 @@
-import {
-  IsString,
-  IsOptional,
-  IsEnum,
-  IsNumber,
-  IsDateString,
-  Min,
-} from 'class-validator';
+import { IsString, IsOptional, IsEnum, IsNumber, IsDateString, Min } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export enum MaintenanceCategory {
   AC = 'ac',
-  HVAC = 'hvac',           // alias ใช้แทน ac ได้
+  HVAC = 'hvac', // alias ใช้แทน ac ได้
   PLUMBING = 'plumbing',
   ELECTRICAL = 'electrical',
   FURNITURE = 'furniture',

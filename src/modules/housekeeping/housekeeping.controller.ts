@@ -121,7 +121,10 @@ export class HousekeepingController {
     @Body() createHousekeepingTaskDto: CreateHousekeepingTaskDto,
     @CurrentUser() user?: any,
   ): Promise<any> {
-    const task = await this.housekeepingService.createTask(createHousekeepingTaskDto, user?.tenantId);
+    const task = await this.housekeepingService.createTask(
+      createHousekeepingTaskDto,
+      user?.tenantId,
+    );
 
     return {
       success: true,
@@ -144,10 +147,7 @@ export class HousekeepingController {
     },
   })
   @ApiResponse({ status: 429, description: 'Too many requests' })
-  async getTask(
-    @Param('id') id: string,
-    @CurrentUser() user?: any,
-  ): Promise<any> {
+  async getTask(@Param('id') id: string, @CurrentUser() user?: any): Promise<any> {
     const task = await this.housekeepingService.getTask(id, user?.tenantId);
 
     return {
@@ -176,7 +176,11 @@ export class HousekeepingController {
     @Body() updateHousekeepingTaskDto: UpdateHousekeepingTaskDto,
     @CurrentUser() user?: any,
   ): Promise<any> {
-    const task = await this.housekeepingService.updateTask(id, updateHousekeepingTaskDto, user?.tenantId);
+    const task = await this.housekeepingService.updateTask(
+      id,
+      updateHousekeepingTaskDto,
+      user?.tenantId,
+    );
 
     return {
       success: true,
@@ -194,10 +198,7 @@ export class HousekeepingController {
     description: 'Housekeeping task deleted',
   })
   @ApiResponse({ status: 429, description: 'Too many requests' })
-  async deleteTask(
-    @Param('id') id: string,
-    @CurrentUser() user?: any,
-  ): Promise<void> {
+  async deleteTask(@Param('id') id: string, @CurrentUser() user?: any): Promise<void> {
     await this.housekeepingService.deleteTask(id, user?.tenantId);
   }
 
@@ -249,10 +250,7 @@ export class HousekeepingController {
     },
   })
   @ApiResponse({ status: 429, description: 'Too many requests' })
-  async startTask(
-    @Param('id') id: string,
-    @CurrentUser() user?: any,
-  ): Promise<any> {
+  async startTask(@Param('id') id: string, @CurrentUser() user?: any): Promise<any> {
     const task = await this.housekeepingService.startTask(id, user?.tenantId);
 
     return {
@@ -381,10 +379,7 @@ export class HousekeepingController {
     },
   })
   @ApiResponse({ status: 429, description: 'Too many requests' })
-  async getRoomStatus(
-    @Param('roomId') roomId: string,
-    @CurrentUser() user?: any,
-  ): Promise<any> {
+  async getRoomStatus(@Param('roomId') roomId: string, @CurrentUser() user?: any): Promise<any> {
     const roomStatus = await this.housekeepingService.getRoomStatus(roomId, user?.tenantId);
 
     return {

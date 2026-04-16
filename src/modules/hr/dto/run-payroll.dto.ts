@@ -48,7 +48,9 @@ export class RunPayrollDto {
   @Min(2020)
   year: number;
 
-  @ApiPropertyOptional({ description: 'Specific employee IDs to run payroll for (empty = all active employees)' })
+  @ApiPropertyOptional({
+    description: 'Specific employee IDs to run payroll for (empty = all active employees)',
+  })
   @IsOptional()
   @IsArray()
   @IsString({ each: true })

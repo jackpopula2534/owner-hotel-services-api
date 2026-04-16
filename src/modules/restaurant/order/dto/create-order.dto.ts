@@ -81,7 +81,10 @@ export class CreateOrderDto {
   @IsOptional()
   taxRate?: number;
 
-  @ApiPropertyOptional({ example: 10.0, description: 'Service charge rate percentage (default 10)' })
+  @ApiPropertyOptional({
+    example: 10.0,
+    description: 'Service charge rate percentage (default 10)',
+  })
   @IsNumber({ maxDecimalPlaces: 2 })
   @IsOptional()
   serviceRate?: number;
@@ -91,7 +94,10 @@ export class CreateOrderDto {
   @IsOptional()
   notes?: string;
 
-  @ApiPropertyOptional({ type: [CreateOrderItemDto], description: 'Initial order items (optional)' })
+  @ApiPropertyOptional({
+    type: [CreateOrderItemDto],
+    description: 'Initial order items (optional)',
+  })
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CreateOrderItemDto)

@@ -43,7 +43,12 @@ export class HrLeaveController {
   @Get('balance/:employeeId')
   @ApiOperation({ summary: 'Get leave balance for an employee' })
   @ApiParam({ name: 'employeeId', description: 'Employee ID' })
-  @ApiQuery({ name: 'year', required: false, type: Number, description: 'Year (defaults to current year)' })
+  @ApiQuery({
+    name: 'year',
+    required: false,
+    type: Number,
+    description: 'Year (defaults to current year)',
+  })
   @ApiResponse({ status: 200, description: 'Leave balance per leave type' })
   @ApiResponse({ status: 404, description: 'Employee not found' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
@@ -63,12 +68,16 @@ export class HrLeaveController {
 
   @Get()
   @ApiOperation({ summary: 'List all leave requests' })
-  @ApiQuery({ name: 'page',        required: false, type: Number })
-  @ApiQuery({ name: 'limit',       required: false, type: Number })
-  @ApiQuery({ name: 'status',      required: false, enum: ['pending', 'approved', 'rejected', 'cancelled'] })
-  @ApiQuery({ name: 'employeeId',  required: false, type: String })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['pending', 'approved', 'rejected', 'cancelled'],
+  })
+  @ApiQuery({ name: 'employeeId', required: false, type: String })
   @ApiQuery({ name: 'leaveTypeId', required: false, type: String })
-  @ApiQuery({ name: 'search',      required: false, type: String })
+  @ApiQuery({ name: 'search', required: false, type: String })
   @ApiResponse({ status: 200, description: 'Paginated leave requests' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
   async findAll(
@@ -84,10 +93,7 @@ export class HrLeaveController {
   @ApiResponse({ status: 200, description: 'Leave request detail' })
   @ApiResponse({ status: 404, description: 'Not found' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
-  async findOne(
-    @Param('id') id: string,
-    @CurrentUser() user: { tenantId?: string },
-  ) {
+  async findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.leaveService.findOne(id, user.tenantId!);
   }
 
@@ -99,10 +105,7 @@ export class HrLeaveController {
   @ApiResponse({ status: 400, description: 'Invalid date range' })
   @HttpCode(HttpStatus.CREATED)
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
-  async create(
-    @Body() dto: CreateHrLeaveRequestDto,
-    @CurrentUser() user: { tenantId?: string },
-  ) {
+  async create(@Body() dto: CreateHrLeaveRequestDto, @CurrentUser() user: { tenantId?: string }) {
     return this.leaveService.create(dto, user.tenantId!);
   }
 
@@ -126,10 +129,7 @@ export class HrLeaveController {
   @ApiResponse({ status: 200, description: 'Leave request deleted' })
   @ApiResponse({ status: 400, description: 'Cannot delete approved request' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'hr')
-  async remove(
-    @Param('id') id: string,
-    @CurrentUser() user: { tenantId?: string },
-  ) {
+  async remove(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.leaveService.remove(id, user.tenantId!);
   }
 
@@ -142,10 +142,7 @@ export class HrLeaveController {
   @ApiResponse({ status: 400, description: 'Request is not pending' })
   @HttpCode(HttpStatus.OK)
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
-  async approve(
-    @Param('id') id: string,
-    @CurrentUser() user: { tenantId?: string; id?: string },
-  ) {
+  async approve(@Param('id') id: string, @CurrentUser() user: { tenantId?: string; id?: string }) {
     return this.leaveService.approve(id, user.id ?? 'system', user.tenantId!);
   }
 
@@ -170,10 +167,7 @@ export class HrLeaveController {
   @ApiResponse({ status: 200, description: 'Leave request cancelled' })
   @HttpCode(HttpStatus.OK)
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
-  async cancel(
-    @Param('id') id: string,
-    @CurrentUser() user: { tenantId?: string },
-  ) {
+  async cancel(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.leaveService.cancel(id, user.tenantId!);
   }
 }

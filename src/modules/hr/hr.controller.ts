@@ -24,7 +24,10 @@ import { HrService } from './hr.service';
 import { EmployeeCodeConfigService } from './employee-code-config.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
-import { UpsertEmployeeCodeConfigDto, PreviewEmployeeCodeDto } from './dto/employee-code-config.dto';
+import {
+  UpsertEmployeeCodeConfigDto,
+  PreviewEmployeeCodeDto,
+} from './dto/employee-code-config.dto';
 import { CreateStaffFromEmployeeDto } from './dto/create-staff-from-employee.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
@@ -196,8 +199,18 @@ export class HrController {
         created: 2,
         skipped: 1,
         results: [
-          { employeeId: 'emp-1', employeeName: 'รัตนา แม่บ้านดี', staffId: 'staff-123', status: 'created' },
-          { employeeId: 'emp-2', employeeName: 'สุนันท์ ทำความสะอาด', status: 'skipped', reason: 'Already linked to a Staff record' },
+          {
+            employeeId: 'emp-1',
+            employeeName: 'รัตนา แม่บ้านดี',
+            staffId: 'staff-123',
+            status: 'created',
+          },
+          {
+            employeeId: 'emp-2',
+            employeeName: 'สุนันท์ ทำความสะอาด',
+            status: 'skipped',
+            reason: 'Already linked to a Staff record',
+          },
         ],
       },
     },

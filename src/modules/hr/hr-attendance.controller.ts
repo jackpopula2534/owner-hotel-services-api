@@ -20,11 +20,7 @@ import {
   ApiQuery,
 } from '@nestjs/swagger';
 import { HrAttendanceService } from './hr-attendance.service';
-import {
-  CheckInDto,
-  CheckOutDto,
-  CreateHrAttendanceDto,
-} from './dto/create-hr-attendance.dto';
+import { CheckInDto, CheckOutDto, CreateHrAttendanceDto } from './dto/create-hr-attendance.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -55,13 +51,17 @@ export class HrAttendanceController {
 
   @Get()
   @ApiOperation({ summary: 'List all attendance records' })
-  @ApiQuery({ name: 'page',       required: false, type: Number })
-  @ApiQuery({ name: 'limit',      required: false, type: Number })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'employeeId', required: false, type: String })
-  @ApiQuery({ name: 'status',     required: false, enum: ['present', 'late', 'absent', 'on_leave', 'holiday'] })
-  @ApiQuery({ name: 'dateFrom',   required: false, type: String })
-  @ApiQuery({ name: 'dateTo',     required: false, type: String })
-  @ApiQuery({ name: 'search',     required: false, type: String })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['present', 'late', 'absent', 'on_leave', 'holiday'],
+  })
+  @ApiQuery({ name: 'dateFrom', required: false, type: String })
+  @ApiQuery({ name: 'dateTo', required: false, type: String })
+  @ApiQuery({ name: 'search', required: false, type: String })
   @ApiResponse({ status: 200, description: 'Paginated attendance records' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
   async findAll(
@@ -77,10 +77,7 @@ export class HrAttendanceController {
   @ApiResponse({ status: 200, description: 'Attendance record' })
   @ApiResponse({ status: 404, description: 'Not found' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
-  async findOne(
-    @Param('id') id: string,
-    @CurrentUser() user: { tenantId?: string },
-  ) {
+  async findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.attendanceService.findOne(id, user.tenantId!);
   }
 
@@ -92,10 +89,7 @@ export class HrAttendanceController {
   @ApiResponse({ status: 409, description: 'Already checked in today' })
   @HttpCode(HttpStatus.CREATED)
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
-  async checkIn(
-    @Body() dto: CheckInDto,
-    @CurrentUser() user: { tenantId?: string },
-  ) {
+  async checkIn(@Body() dto: CheckInDto, @CurrentUser() user: { tenantId?: string }) {
     return this.attendanceService.checkIn(dto, user.tenantId!);
   }
 
@@ -121,10 +115,7 @@ export class HrAttendanceController {
   @ApiResponse({ status: 201, description: 'Attendance record created' })
   @HttpCode(HttpStatus.CREATED)
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
-  async create(
-    @Body() dto: CreateHrAttendanceDto,
-    @CurrentUser() user: { tenantId?: string },
-  ) {
+  async create(@Body() dto: CreateHrAttendanceDto, @CurrentUser() user: { tenantId?: string }) {
     return this.attendanceService.create(dto, user.tenantId!);
   }
 
@@ -146,10 +137,7 @@ export class HrAttendanceController {
   @ApiParam({ name: 'id', description: 'Attendance record ID' })
   @ApiResponse({ status: 200, description: 'Attendance record deleted' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'hr')
-  async remove(
-    @Param('id') id: string,
-    @CurrentUser() user: { tenantId?: string },
-  ) {
+  async remove(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.attendanceService.remove(id, user.tenantId!);
   }
 }

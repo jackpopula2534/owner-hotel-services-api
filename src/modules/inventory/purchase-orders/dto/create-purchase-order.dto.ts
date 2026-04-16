@@ -65,10 +65,12 @@ export class PurchaseOrderItemDto {
 export class CreatePurchaseOrderDto {
   @ApiProperty({
     example: '123e4567-e89b-12d3-a456-426614174000',
-    description: 'Property ID',
+    description: 'Property ID (auto-resolved from tenant if not provided)',
+    required: false,
   })
+  @IsOptional()
   @IsString()
-  propertyId: string;
+  propertyId?: string;
 
   @ApiProperty({
     example: '123e4567-e89b-12d3-a456-426614174001',
@@ -110,6 +112,33 @@ export class CreatePurchaseOrderDto {
   @IsOptional()
   @IsString()
   internalNotes?: string;
+
+  @ApiProperty({
+    example: 'QT-202604-0001',
+    description: 'Quotation number (เลขที่ใบเสนอราคา)',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  quotationNumber?: string;
+
+  @ApiProperty({
+    example: '2026-04-10',
+    description: 'Quotation date (ISO 8601)',
+    required: false,
+  })
+  @IsOptional()
+  @IsISO8601()
+  quotationDate?: string;
+
+  @ApiProperty({
+    example: '123e4567-e89b-12d3-a456-426614174999',
+    description: 'Purchase requisition ID (link to PR)',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  purchaseRequisitionId?: string;
 
   @ApiProperty({
     type: [PurchaseOrderItemDto],

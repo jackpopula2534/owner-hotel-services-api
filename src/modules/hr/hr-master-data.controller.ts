@@ -12,13 +12,7 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiBearerAuth,
-  ApiResponse,
-  ApiQuery,
-} from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
@@ -52,7 +46,10 @@ export class HrMasterDataController {
 
   @Post('initialize-defaults')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'ตั้งค่าข้อมูล HR เริ่มต้น สำหรับ Tenant ใหม่ (แผนก, ตำแหน่ง, ประเภทลา, กะ, เบี้ยเลี้ยง, การหัก)' })
+  @ApiOperation({
+    summary:
+      'ตั้งค่าข้อมูล HR เริ่มต้น สำหรับ Tenant ใหม่ (แผนก, ตำแหน่ง, ประเภทลา, กะ, เบี้ยเลี้ยง, การหัก)',
+  })
   @ApiResponse({ status: 200, description: 'Defaults initialized successfully' })
   initializeDefaults(@Request() req: Express.Request & { user: { tenantId: string } }) {
     return this.hrMasterDataService.initializeDefaults(req.user.tenantId);

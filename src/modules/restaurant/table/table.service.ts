@@ -122,7 +122,11 @@ export class TableService {
       resourceId: tableId,
       userId,
       tenantId,
-      oldValues: { tableNumber: oldTable.tableNumber, zone: oldTable.zone, capacity: oldTable.capacity },
+      oldValues: {
+        tableNumber: oldTable.tableNumber,
+        zone: oldTable.zone,
+        capacity: oldTable.capacity,
+      },
       newValues: { tableNumber: result.tableNumber, zone: result.zone, capacity: result.capacity },
       description: 'แก้ไขโต๊ะ',
     });

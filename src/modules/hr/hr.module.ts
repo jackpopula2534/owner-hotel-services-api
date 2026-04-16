@@ -37,9 +37,9 @@ import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
     HrLeaveController,
     HrPayrollController,
     HrPerformanceController,
-    HrKpiTemplateController,      // NEW: KPI Template CRUD
-    HrEvaluationCycleController,  // NEW: Evaluation Cycle + auto-generate
-    HrController,  // Must be LAST — its @Get(':id') would catch sub-paths otherwise
+    HrKpiTemplateController, // NEW: KPI Template CRUD
+    HrEvaluationCycleController, // NEW: Evaluation Cycle + auto-generate
+    HrController, // Must be LAST — its @Get(':id') would catch sub-paths otherwise
   ],
   providers: [
     HrService,
@@ -48,15 +48,21 @@ import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
     HrLeaveService,
     HrPayrollService,
     HrPerformanceService,
-    HrKpiTemplateService,         // NEW
-    HrEvaluationCycleService,     // NEW
+    HrKpiTemplateService, // NEW
+    HrEvaluationCycleService, // NEW
     EmployeeCodeConfigService,
     HrAddonGuard,
   ],
   exports: [
-    HrService, HrMasterDataService, HrAttendanceService, HrLeaveService,
-    HrPayrollService, HrPerformanceService, HrKpiTemplateService,
-    HrEvaluationCycleService, EmployeeCodeConfigService,
+    HrService,
+    HrMasterDataService,
+    HrAttendanceService,
+    HrLeaveService,
+    HrPayrollService,
+    HrPerformanceService,
+    HrKpiTemplateService,
+    HrEvaluationCycleService,
+    EmployeeCodeConfigService,
   ],
 })
 export class HrModule {}

@@ -1,13 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsString,
-  IsOptional,
-  IsBoolean,
-  IsInt,
-  Min,
-  MaxLength,
-  Matches,
-} from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsInt, Min, MaxLength, Matches } from 'class-validator';
 
 export class CreateHrShiftTypeDto {
   @ApiProperty({ example: 'กะเช้า' })

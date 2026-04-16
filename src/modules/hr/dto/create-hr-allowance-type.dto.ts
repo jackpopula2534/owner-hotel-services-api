@@ -1,12 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsString,
-  IsOptional,
-  IsBoolean,
-  IsInt,
-  Min,
-  MaxLength,
-} from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsInt, Min, MaxLength } from 'class-validator';
 
 export class CreateHrAllowanceTypeDto {
   @ApiProperty({ example: 'เซอร์วิสชาร์จ' })

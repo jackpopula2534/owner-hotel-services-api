@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  NotFoundException,
-  BadRequestException,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogService } from '../../../audit-log/audit-log.service';
 import { CreateMenuCategoryDto } from './dto/create-menu-category.dto';
@@ -95,7 +90,12 @@ export class MenuService {
     return result;
   }
 
-  async removeCategory(restaurantId: string, categoryId: string, tenantId: string, userId?: string) {
+  async removeCategory(
+    restaurantId: string,
+    categoryId: string,
+    tenantId: string,
+    userId?: string,
+  ) {
     await this.findCategoryOrFail(categoryId, restaurantId, tenantId);
 
     const itemCount = await this.prisma.menuItem.count({
@@ -121,11 +121,7 @@ export class MenuService {
     });
   }
 
-  async reorderCategories(
-    restaurantId: string,
-    dto: ReorderCategoriesDto,
-    tenantId: string,
-  ) {
+  async reorderCategories(restaurantId: string, dto: ReorderCategoriesDto, tenantId: string) {
     await this.validateRestaurant(restaurantId, tenantId);
 
     await this.prisma.$transaction(
@@ -163,10 +159,7 @@ export class MenuService {
     if (categoryId) where.categoryId = categoryId;
     if (isAvailable !== undefined) where.isAvailable = isAvailable === 'true';
     if (search) {
-      where.OR = [
-        { name: { contains: search } },
-        { description: { contains: search } },
-      ];
+      where.OR = [{ name: { contains: search } }, { description: { contains: search } }];
     }
 
     const [data, total] = await Promise.all([
@@ -181,7 +174,7 @@ export class MenuService {
     ]);
 
     return {
-      data: data.map(item => this.parseItemAllergens(item)),
+      data: data.map((item) => this.parseItemAllergens(item)),
       total,
       page: Number(page),
       limit: Number(limit),
@@ -201,7 +194,12 @@ export class MenuService {
     return this.parseItemAllergens(item);
   }
 
-  async createItem(restaurantId: string, dto: CreateMenuItemDto, tenantId: string, userId?: string) {
+  async createItem(
+    restaurantId: string,
+    dto: CreateMenuItemDto,
+    tenantId: string,
+    userId?: string,
+  ) {
     await this.validateRestaurant(restaurantId, tenantId);
     await this.findCategoryOrFail(dto.categoryId, restaurantId, tenantId);
 
@@ -467,11 +465,7 @@ export class MenuService {
     return restaurant;
   }
 
-  private async findCategoryOrFail(
-    categoryId: string,
-    restaurantId: string,
-    tenantId: string,
-  ) {
+  private async findCategoryOrFail(categoryId: string, restaurantId: string, tenantId: string) {
     const category = await this.prisma.menuCategory.findFirst({
       where: { id: categoryId, restaurantId, tenantId },
     });

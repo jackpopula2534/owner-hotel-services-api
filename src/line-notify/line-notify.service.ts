@@ -60,12 +60,16 @@ export class LineNotifyService {
         client_secret: this.clientSecret,
       });
 
-      const response = await httpClient.post<LineNotifyTokenResponseDto>(this.tokenUrl, params.toString(), {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
+      const response = await httpClient.post<LineNotifyTokenResponseDto>(
+        this.tokenUrl,
+        params.toString(),
+        {
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          enforceHttps: true,
         },
-        enforceHttps: true,
-      });
+      );
 
       return response.data;
     } catch (error) {

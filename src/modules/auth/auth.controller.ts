@@ -63,7 +63,8 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60 } })
   @ApiOperation({
-    summary: 'Login to hotel management dashboard (User table — tenant_admin, manager, receptionist, etc.)',
+    summary:
+      'Login to hotel management dashboard (User table — tenant_admin, manager, receptionist, etc.)',
     description:
       'Creates a session tagged systemContext="main". POS-only staff (waiter, chef, cashier) ' +
       'cannot log in through this endpoint — use POST /auth/pos/login instead.',
@@ -123,8 +124,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Logout from main hotel management dashboard',
-    description:
-      'Revokes only the main-dashboard session tokens. POS sessions remain active.',
+    description: 'Revokes only the main-dashboard session tokens. POS sessions remain active.',
   })
   @ApiResponse({ status: 200, description: 'User successfully logged out' })
   async logout(@CurrentUser() user: any, @Body() body?: { refreshToken?: string }) {
@@ -180,7 +180,7 @@ export class AuthController {
     summary: 'Create a POS login account for an employee',
     description:
       'Creates a User record with a restaurant-staff role (waiter, chef, cashier, etc.) ' +
-      'scoped to the caller\'s tenant. Only tenant_admin or manager can call this.',
+      "scoped to the caller's tenant. Only tenant_admin or manager can call this.",
   })
   @ApiResponse({ status: 201, description: 'POS user created' })
   @ApiResponse({ status: 409, description: 'Email already in use' })

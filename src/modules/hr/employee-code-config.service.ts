@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  BadRequestException,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UpsertEmployeeCodeConfigDto } from './dto/employee-code-config.dto';
 
@@ -325,7 +321,17 @@ export class EmployeeCodeConfigService {
   }
 
   private validatePattern(pattern: string): void {
-    const validPlaceholders = ['{PREFIX}', '{DEPT}', '{YYYY}', '{YY}', '{MM}', '{NNNN}', '{NNN}', '{NN}', '{N}'];
+    const validPlaceholders = [
+      '{PREFIX}',
+      '{DEPT}',
+      '{YYYY}',
+      '{YY}',
+      '{MM}',
+      '{NNNN}',
+      '{NNN}',
+      '{NN}',
+      '{N}',
+    ];
     const placeholders = pattern.match(/\{[A-Z]+\}/g) || [];
 
     for (const ph of placeholders) {
@@ -337,9 +343,7 @@ export class EmployeeCodeConfigService {
     }
 
     // Must contain at least a running number placeholder
-    const hasRunning = placeholders.some((ph) =>
-      ['{NNNN}', '{NNN}', '{NN}', '{N}'].includes(ph),
-    );
+    const hasRunning = placeholders.some((ph) => ['{NNNN}', '{NNN}', '{NN}', '{N}'].includes(ph));
     if (!hasRunning) {
       throw new BadRequestException(
         'Pattern must include a running number placeholder ({N}, {NN}, {NNN}, or {NNNN})',
@@ -368,7 +372,8 @@ export class EmployeeCodeConfigService {
     departmentCode: string;
     runningNumber: number;
   }): string {
-    const { pattern, prefix, separator, digitLength, yearFormat, departmentCode, runningNumber } = params;
+    const { pattern, prefix, separator, digitLength, yearFormat, departmentCode, runningNumber } =
+      params;
     const now = new Date();
     const yyyy = now.getFullYear().toString();
     const yy = yyyy.slice(-2);
@@ -395,10 +400,7 @@ export class EmployeeCodeConfigService {
     return code;
   }
 
-  private shouldResetCounter(config: {
-    resetCycle: string;
-    lastResetDate: Date | null;
-  }): boolean {
+  private shouldResetCounter(config: { resetCycle: string; lastResetDate: Date | null }): boolean {
     if (config.resetCycle === 'NEVER') return false;
     if (!config.lastResetDate) return false;
 

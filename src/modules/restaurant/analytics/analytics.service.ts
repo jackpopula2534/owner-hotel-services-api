@@ -122,9 +122,7 @@ export class RestaurantAnalyticsService {
         totalRevenue: Math.round(totalRevenue * 100) / 100,
         totalOrders,
         averageOrderValue:
-          totalOrders > 0
-            ? Math.round((totalRevenue / totalOrders) * 100) / 100
-            : 0,
+          totalOrders > 0 ? Math.round((totalRevenue / totalOrders) * 100) / 100 : 0,
         period: { from: fromDate.toISOString(), to: toDate.toISOString(), groupBy },
       },
       timeline,
@@ -180,9 +178,7 @@ export class RestaurantAnalyticsService {
       (o) => o.status === 'COMPLETED' && o.paymentStatus === 'PAID',
     );
     const cancelledOrders = orders.filter((o) => o.status === 'CANCELLED');
-    const activeOrders = orders.filter(
-      (o) => !['COMPLETED', 'CANCELLED'].includes(o.status),
-    );
+    const activeOrders = orders.filter((o) => !['COMPLETED', 'CANCELLED'].includes(o.status));
 
     const totalRevenue = completedOrders.reduce((sum, o) => sum + Number(o.total), 0);
     const totalGuests = completedOrders.reduce((sum, o) => sum + (o.partySize ?? 1), 0);
@@ -319,9 +315,7 @@ export class RestaurantAnalyticsService {
   ) {
     const { from, to } = query;
 
-    const fromDate = from
-      ? new Date(from)
-      : new Date(new Date().setDate(new Date().getDate() - 7));
+    const fromDate = from ? new Date(from) : new Date(new Date().setDate(new Date().getDate() - 7));
     const toDate = to ? new Date(to) : new Date();
     toDate.setHours(23, 59, 59, 999);
 
@@ -372,9 +366,7 @@ export class RestaurantAnalyticsService {
         totalGuests,
         avgTurnoverMinutes: Math.round(avgTurnoverMinutes),
         revenuePerSeat:
-          table.capacity > 0
-            ? Math.round((totalRevenue / table.capacity) * 100) / 100
-            : 0,
+          table.capacity > 0 ? Math.round((totalRevenue / table.capacity) * 100) / 100 : 0,
       };
     });
 
@@ -385,9 +377,7 @@ export class RestaurantAnalyticsService {
         totalTables: tables.length,
         totalOrders: completedOrders.length,
         totalRevenue:
-          Math.round(
-            completedOrders.reduce((s, o) => s + Number(o.total), 0) * 100,
-          ) / 100,
+          Math.round(completedOrders.reduce((s, o) => s + Number(o.total), 0) * 100) / 100,
       },
     };
   }
@@ -437,15 +427,7 @@ export class RestaurantAnalyticsService {
       }
     }
 
-    const dayNames = [
-      'Sunday',
-      'Monday',
-      'Tuesday',
-      'Wednesday',
-      'Thursday',
-      'Friday',
-      'Saturday',
-    ];
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
     return {
       period: { from: fromDate.toISOString(), to: toDate.toISOString() },

@@ -108,10 +108,7 @@ describe('MenuService', () => {
     prismaMock = makePrismaMock();
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        MenuService,
-        { provide: PrismaService, useValue: prismaMock },
-      ],
+      providers: [MenuService, { provide: PrismaService, useValue: prismaMock }],
     }).compile();
 
     menuService = module.get<MenuService>(MenuService);
@@ -135,9 +132,9 @@ describe('MenuService', () => {
     it('throws NotFoundException for unknown restaurant', async () => {
       prismaMock.restaurant.findFirst.mockResolvedValue(null);
 
-      await expect(
-        menuService.findAllCategories(RESTAURANT_ID, TENANT_ID),
-      ).rejects.toThrow(NotFoundException);
+      await expect(menuService.findAllCategories(RESTAURANT_ID, TENANT_ID)).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
@@ -147,11 +144,7 @@ describe('MenuService', () => {
       prismaMock.menuCategory.aggregate.mockResolvedValue({ _max: { displayOrder: 2 } });
       prismaMock.menuCategory.create.mockResolvedValue({ ...mockCategory, displayOrder: 3 });
 
-      const result = await menuService.createCategory(
-        RESTAURANT_ID,
-        { name: 'Mains' },
-        TENANT_ID,
-      );
+      const result = await menuService.createCategory(RESTAURANT_ID, { name: 'Mains' }, TENANT_ID);
 
       expect(result.displayOrder).toBe(3);
       expect(prismaMock.menuCategory.create).toHaveBeenCalledWith(
@@ -175,17 +168,17 @@ describe('MenuService', () => {
       prismaMock.menuCategory.findFirst.mockResolvedValue(mockCategory);
       prismaMock.menuItem.count.mockResolvedValue(3);
 
-      await expect(
-        menuService.removeCategory(RESTAURANT_ID, 'cat-1', TENANT_ID),
-      ).rejects.toThrow(BadRequestException);
+      await expect(menuService.removeCategory(RESTAURANT_ID, 'cat-1', TENANT_ID)).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('throws NotFoundException for missing category', async () => {
       prismaMock.menuCategory.findFirst.mockResolvedValue(null);
 
-      await expect(
-        menuService.removeCategory(RESTAURANT_ID, 'cat-999', TENANT_ID),
-      ).rejects.toThrow(NotFoundException);
+      await expect(menuService.removeCategory(RESTAURANT_ID, 'cat-999', TENANT_ID)).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
@@ -195,7 +188,12 @@ describe('MenuService', () => {
       prismaMock.menuItem.findFirst.mockResolvedValue(mockItem);
       prismaMock.menuItem.update.mockResolvedValue({ ...mockItem, isAvailable: false });
 
-      const result = await menuService.toggleAvailability(RESTAURANT_ID, 'item-1', false, TENANT_ID);
+      const result = await menuService.toggleAvailability(
+        RESTAURANT_ID,
+        'item-1',
+        false,
+        TENANT_ID,
+      );
 
       expect(result.isAvailable).toBe(false);
       expect(prismaMock.menuItem.update).toHaveBeenCalledWith({
@@ -228,10 +226,7 @@ describe('TableService', () => {
     prismaMock = makePrismaMock();
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        TableService,
-        { provide: PrismaService, useValue: prismaMock },
-      ],
+      providers: [TableService, { provide: PrismaService, useValue: prismaMock }],
     }).compile();
 
     tableService = module.get<TableService>(TableService);
@@ -267,17 +262,15 @@ describe('TableService', () => {
       prismaMock.restaurantTable.findFirst.mockResolvedValue(mockTable);
       prismaMock.restaurantTable.delete.mockResolvedValue(mockTable);
 
-      await expect(
-        tableService.remove(RESTAURANT_ID, 'tbl-1', TENANT_ID),
-      ).resolves.not.toThrow();
+      await expect(tableService.remove(RESTAURANT_ID, 'tbl-1', TENANT_ID)).resolves.not.toThrow();
     });
 
     it('throws BadRequestException for occupied table', async () => {
       prismaMock.restaurantTable.findFirst.mockResolvedValue({ ...mockTable, status: 'OCCUPIED' });
 
-      await expect(
-        tableService.remove(RESTAURANT_ID, 'tbl-1', TENANT_ID),
-      ).rejects.toThrow(BadRequestException);
+      await expect(tableService.remove(RESTAURANT_ID, 'tbl-1', TENANT_ID)).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 
@@ -319,7 +312,14 @@ describe('ReservationService', () => {
 
   const RESTAURANT_ID = 'rest-1';
   const TENANT_ID = 'tenant-1';
-  const mockTable = { id: 'tbl-1', tableNumber: 'T01', capacity: 4, restaurantId: RESTAURANT_ID, tenantId: TENANT_ID, isActive: true };
+  const mockTable = {
+    id: 'tbl-1',
+    tableNumber: 'T01',
+    capacity: 4,
+    restaurantId: RESTAURANT_ID,
+    tenantId: TENANT_ID,
+    isActive: true,
+  };
   const mockReservation = {
     id: 'rsv-1',
     tableId: 'tbl-1',
@@ -335,10 +335,7 @@ describe('ReservationService', () => {
     prismaMock = makePrismaMock();
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        ReservationService,
-        { provide: PrismaService, useValue: prismaMock },
-      ],
+      providers: [ReservationService, { provide: PrismaService, useValue: prismaMock }],
     }).compile();
 
     reservationService = module.get<ReservationService>(ReservationService);
@@ -372,7 +369,14 @@ describe('ReservationService', () => {
       await expect(
         reservationService.create(
           RESTAURANT_ID,
-          { tableId: 'tbl-1', partySize: 6, reservationDate: '2026-04-15', startTime: '19:00', guestName: 'A', guestPhone: 'B' },
+          {
+            tableId: 'tbl-1',
+            partySize: 6,
+            reservationDate: '2026-04-15',
+            startTime: '19:00',
+            guestName: 'A',
+            guestPhone: 'B',
+          },
           TENANT_ID,
         ),
       ).rejects.toThrow(BadRequestException);
@@ -385,7 +389,14 @@ describe('ReservationService', () => {
       await expect(
         reservationService.create(
           RESTAURANT_ID,
-          { tableId: 'tbl-1', partySize: 2, reservationDate: '2026-04-15', startTime: '19:00', guestName: 'A', guestPhone: 'B' },
+          {
+            tableId: 'tbl-1',
+            partySize: 2,
+            reservationDate: '2026-04-15',
+            startTime: '19:00',
+            guestName: 'A',
+            guestPhone: 'B',
+          },
           TENANT_ID,
         ),
       ).rejects.toThrow(ConflictException);
@@ -394,8 +405,14 @@ describe('ReservationService', () => {
 
   describe('markAsNoShow', () => {
     it('marks a CONFIRMED reservation as NO_SHOW', async () => {
-      prismaMock.tableReservation.findFirst.mockResolvedValue({ ...mockReservation, status: 'CONFIRMED' });
-      prismaMock.tableReservation.update.mockResolvedValue({ ...mockReservation, status: 'NO_SHOW' });
+      prismaMock.tableReservation.findFirst.mockResolvedValue({
+        ...mockReservation,
+        status: 'CONFIRMED',
+      });
+      prismaMock.tableReservation.update.mockResolvedValue({
+        ...mockReservation,
+        status: 'NO_SHOW',
+      });
 
       const result = await reservationService.markAsNoShow(RESTAURANT_ID, 'rsv-1', TENANT_ID);
 
@@ -403,7 +420,10 @@ describe('ReservationService', () => {
     });
 
     it('throws BadRequestException for already SEATED reservation', async () => {
-      prismaMock.tableReservation.findFirst.mockResolvedValue({ ...mockReservation, status: 'SEATED' });
+      prismaMock.tableReservation.findFirst.mockResolvedValue({
+        ...mockReservation,
+        status: 'SEATED',
+      });
 
       await expect(
         reservationService.markAsNoShow(RESTAURANT_ID, 'rsv-1', TENANT_ID),
@@ -441,10 +461,7 @@ describe('KitchenService', () => {
     prismaMock = makePrismaMock();
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        KitchenService,
-        { provide: PrismaService, useValue: prismaMock },
-      ],
+      providers: [KitchenService, { provide: PrismaService, useValue: prismaMock }],
     }).compile();
 
     kitchenService = module.get<KitchenService>(KitchenService);
@@ -467,9 +484,9 @@ describe('KitchenService', () => {
         status: 'PREPARING',
       });
 
-      await expect(
-        kitchenService.startOrder(RESTAURANT_ID, KO_ID, TENANT_ID),
-      ).rejects.toThrow(BadRequestException);
+      await expect(kitchenService.startOrder(RESTAURANT_ID, KO_ID, TENANT_ID)).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 
@@ -498,16 +515,16 @@ describe('KitchenService', () => {
         status: 'READY',
       });
 
-      await expect(
-        kitchenService.completeOrder(RESTAURANT_ID, KO_ID, TENANT_ID),
-      ).rejects.toThrow(BadRequestException);
+      await expect(kitchenService.completeOrder(RESTAURANT_ID, KO_ID, TENANT_ID)).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 
   describe('getStats', () => {
     it('returns queue and completion stats', async () => {
       prismaMock.kitchenOrder.count
-        .mockResolvedValueOnce(3)  // inQueue
+        .mockResolvedValueOnce(3) // inQueue
         .mockResolvedValueOnce(12); // completedToday
       prismaMock.kitchenOrder.findMany.mockResolvedValue([
         { startedAt: new Date(now.getTime() - 8 * 60 * 1000), completedAt: now },
@@ -530,9 +547,18 @@ describe('KitchenService', () => {
         order: { restaurantId: RESTAURANT_ID, tenantId: TENANT_ID },
       };
       prismaMock.orderItem.findFirst.mockResolvedValue(mockItem);
-      prismaMock.orderItem.update.mockResolvedValue({ ...mockItem, status: 'READY', preparedAt: now });
+      prismaMock.orderItem.update.mockResolvedValue({
+        ...mockItem,
+        status: 'READY',
+        preparedAt: now,
+      });
 
-      const result = await kitchenService.updateItemStatus(RESTAURANT_ID, 'item-1', 'READY', TENANT_ID);
+      const result = await kitchenService.updateItemStatus(
+        RESTAURANT_ID,
+        'item-1',
+        'READY',
+        TENANT_ID,
+      );
 
       expect(prismaMock.orderItem.update).toHaveBeenCalledWith(
         expect.objectContaining({

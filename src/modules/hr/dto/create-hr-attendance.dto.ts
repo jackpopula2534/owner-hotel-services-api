@@ -20,7 +20,10 @@ export class CreateHrAttendanceDto {
   @IsDateString()
   date: string;
 
-  @ApiPropertyOptional({ description: 'Check-in time (ISO 8601)', example: '2026-04-07T08:00:00.000Z' })
+  @ApiPropertyOptional({
+    description: 'Check-in time (ISO 8601)',
+    example: '2026-04-07T08:00:00.000Z',
+  })
   @IsOptional()
   @IsDateString()
   checkIn?: string;

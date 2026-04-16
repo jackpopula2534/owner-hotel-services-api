@@ -42,10 +42,7 @@ describe('EmployeeCodeConfigService', () => {
     prisma = createMockPrisma();
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        EmployeeCodeConfigService,
-        { provide: PrismaService, useValue: prisma },
-      ],
+      providers: [EmployeeCodeConfigService, { provide: PrismaService, useValue: prisma }],
     }).compile();
 
     service = module.get<EmployeeCodeConfigService>(EmployeeCodeConfigService);
@@ -122,9 +119,7 @@ describe('EmployeeCodeConfigService', () => {
         lastResetDate: null,
       });
 
-      prisma.employee.findMany.mockResolvedValue([
-        { employeeCode: 'EMP-0005' },
-      ]);
+      prisma.employee.findMany.mockResolvedValue([{ employeeCode: 'EMP-0005' }]);
 
       const code = await service.previewNextCode('tenant-1');
       // config.nextNumber=20 > maxInDB+1=6, so use 20
@@ -208,10 +203,9 @@ describe('EmployeeCodeConfigService', () => {
           update: jest.fn(),
         },
         employee: {
-          findMany: jest.fn().mockResolvedValue([
-            { employeeCode: 'EMP-0001' },
-            { employeeCode: 'EMP-0002' },
-          ]),
+          findMany: jest
+            .fn()
+            .mockResolvedValue([{ employeeCode: 'EMP-0001' }, { employeeCode: 'EMP-0002' }]),
           // First two attempts find collision, third succeeds
           findFirst: jest
             .fn()

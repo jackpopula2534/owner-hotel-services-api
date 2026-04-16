@@ -1,14 +1,26 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEmail, IsString, MinLength, IsOptional, IsIn } from 'class-validator';
 
-const POS_ROLES = ['waiter', 'chef', 'cashier', 'receptionist', 'bartender', 'housekeeper', 'maintenance', 'manager'] as const;
+const POS_ROLES = [
+  'waiter',
+  'chef',
+  'cashier',
+  'receptionist',
+  'bartender',
+  'housekeeper',
+  'maintenance',
+  'manager',
+] as const;
 
 export class CreatePosUserDto {
   @ApiProperty({ example: 'staff@hotel.com', description: 'Employee email for POS login' })
   @IsEmail()
   email: string;
 
-  @ApiProperty({ example: 'StrongPass123!', description: 'Initial password (employee can change later)' })
+  @ApiProperty({
+    example: 'StrongPass123!',
+    description: 'Initial password (employee can change later)',
+  })
   @IsString()
   @MinLength(8)
   password: string;
@@ -28,7 +40,10 @@ export class CreatePosUserDto {
   @IsString()
   lastName?: string;
 
-  @ApiPropertyOptional({ example: 'EMP-001', description: 'Employee ID to link this POS account to' })
+  @ApiPropertyOptional({
+    example: 'EMP-001',
+    description: 'Employee ID to link this POS account to',
+  })
   @IsOptional()
   @IsString()
   employeeId?: string;

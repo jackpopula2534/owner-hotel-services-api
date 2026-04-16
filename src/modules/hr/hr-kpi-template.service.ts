@@ -39,10 +39,7 @@ export class HrKpiTemplateService {
     if (isActive !== undefined) where['isActive'] = isActive === 'true';
     if (departmentCode) where['departmentCode'] = departmentCode;
     if (search) {
-      where['OR'] = [
-        { name: { contains: search } },
-        { nameEn: { contains: search } },
-      ];
+      where['OR'] = [{ name: { contains: search } }, { nameEn: { contains: search } }];
     }
 
     return (this.prisma as any).hrKpiTemplate.findMany({
@@ -151,10 +148,16 @@ export class HrKpiTemplateService {
       where: { templateId },
       select: { weight: true },
     });
-    const existingTotal = existing.reduce((s: number, i: { weight: { toNumber?: () => number } | number }) => {
-      const w = typeof i.weight === 'object' && 'toNumber' in i.weight ? (i.weight as any).toNumber() : Number(i.weight);
-      return s + w;
-    }, 0);
+    const existingTotal = existing.reduce(
+      (s: number, i: { weight: { toNumber?: () => number } | number }) => {
+        const w =
+          typeof i.weight === 'object' && 'toNumber' in i.weight
+            ? (i.weight as any).toNumber()
+            : Number(i.weight);
+        return s + w;
+      },
+      0,
+    );
 
     if (existingTotal + dto.weight > 100.01) {
       throw new BadRequestException(
@@ -190,7 +193,8 @@ export class HrKpiTemplateService {
     const item = await (this.prisma as any).hrKpiTemplateItem.findFirst({
       where: { id: itemId, templateId },
     });
-    if (!item) throw new NotFoundException(`KPI criteria ${itemId} not found in template ${templateId}`);
+    if (!item)
+      throw new NotFoundException(`KPI criteria ${itemId} not found in template ${templateId}`);
 
     // ถ้า update weight ให้ตรวจสอบรวม
     if (dto.weight !== undefined) {

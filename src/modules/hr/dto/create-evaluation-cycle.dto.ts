@@ -1,12 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsString,
-  IsNotEmpty,
-  IsOptional,
-  IsDateString,
-  IsIn,
-  IsArray,
-} from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsDateString, IsIn, IsArray } from 'class-validator';
 
 export class CreateEvaluationCycleDto {
   @ApiProperty({ description: 'Template ID ที่ใช้', example: 'uuid' })

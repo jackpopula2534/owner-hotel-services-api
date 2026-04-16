@@ -43,15 +43,17 @@ export class StockMovementsController {
   @ApiResponse({ status: 200, description: 'Movement history retrieved' })
   async getMovementsByItem(
     @Param('itemId') itemId: string,
-    @Query('page') page?: number,
-    @Query('limit') limit?: number,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
     @Req() req?: { user: { tenantId: string } },
   ): Promise<{ success: boolean; data: unknown }> {
+    const pageNum = Math.max(1, Number(page) || 1);
+    const limitNum = Math.min(100, Math.max(1, Number(limit) || 20));
     const data = await this.stockMovementsService.getMovementsByItem(
       itemId,
       req.user.tenantId,
-      page,
-      limit,
+      pageNum,
+      limitNum,
     );
     return { success: true, data };
   }
@@ -61,15 +63,17 @@ export class StockMovementsController {
   @ApiResponse({ status: 200, description: 'Movement history retrieved' })
   async getMovementsByWarehouse(
     @Param('warehouseId') warehouseId: string,
-    @Query('page') page?: number,
-    @Query('limit') limit?: number,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
     @Req() req?: { user: { tenantId: string } },
   ): Promise<{ success: boolean; data: unknown }> {
+    const pageNum = Math.max(1, Number(page) || 1);
+    const limitNum = Math.min(100, Math.max(1, Number(limit) || 20));
     const data = await this.stockMovementsService.getMovementsByWarehouse(
       warehouseId,
       req.user.tenantId,
-      page,
-      limit,
+      pageNum,
+      limitNum,
     );
     return { success: true, data };
   }

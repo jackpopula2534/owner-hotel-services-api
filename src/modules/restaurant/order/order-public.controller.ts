@@ -25,10 +25,10 @@ export class OrderPublicController {
   constructor(
     private readonly orderService: OrderService,
     private readonly tableService: TableService,
-  ) { }
+  ) {}
 
   @Get(':restaurantId/tables/:tableId/menu')
-  @Throttle({ default: { limit: 30, ttl: 60 } })   // 30 req/min per IP
+  @Throttle({ default: { limit: 30, ttl: 60 } }) // 30 req/min per IP
   @ApiOperation({ summary: '[Public] Get menu for a table (QR scan)' })
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'tableId' })
@@ -107,15 +107,12 @@ export class OrderPublicController {
       ],
     },
   })
-  async lookupGuest(
-    @Param('restaurantId') restaurantId: string,
-    @Body() dto: GuestLookupDto,
-  ) {
+  async lookupGuest(@Param('restaurantId') restaurantId: string, @Body() dto: GuestLookupDto) {
     return this.orderService.lookupGuest(restaurantId, dto.query);
   }
 
   @Post(':restaurantId/tables/:tableId/orders')
-  @Throttle({ default: { limit: 10, ttl: 60 } })   // 10 new orders/min per IP
+  @Throttle({ default: { limit: 10, ttl: 60 } }) // 10 new orders/min per IP
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: '[Public] Create order via QR code (no auth)' })
   @ApiParam({ name: 'restaurantId' })
@@ -144,7 +141,8 @@ export class OrderPublicController {
   async createQrOrder(
     @Param('restaurantId') restaurantId: string,
     @Param('tableId') tableId: string,
-    @Body() body: {
+    @Body()
+    body: {
       guestName?: string;
       guestId?: string;
       items: { menuItemId: string; quantity: number; notes?: string }[];
@@ -154,13 +152,11 @@ export class OrderPublicController {
   }
 
   @Get('orders/:orderNumber/status')
-  @Throttle({ default: { limit: 60, ttl: 60 } })   // polling-friendly: 60 req/min
+  @Throttle({ default: { limit: 60, ttl: 60 } }) // polling-friendly: 60 req/min
   @ApiOperation({ summary: '[Public] Track order status by order number' })
   @ApiParam({ name: 'orderNumber', example: 'ORD-20260410-0001' })
   @ApiResponse({ status: 200, description: 'Order status and items' })
-  async getOrderStatus(
-    @Param('orderNumber') orderNumber: string,
-  ) {
+  async getOrderStatus(@Param('orderNumber') orderNumber: string) {
     // tenantId is derived from the order itself via findByOrderNumber
     return this.orderService.findByOrderNumber(orderNumber, '');
   }

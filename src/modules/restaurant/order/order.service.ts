@@ -77,10 +77,10 @@ export class OrderService {
       .filter((b) => b.room?.number)
       .map((b) => ({
         roomNumber: b.room!.number,
-        guestName: [
-          b.guest?.firstName || b.guestFirstName,
-          b.guest?.lastName || b.guestLastName,
-        ].filter(Boolean).join(' ') || 'ไม่ระบุชื่อ',
+        guestName:
+          [b.guest?.firstName || b.guestFirstName, b.guest?.lastName || b.guestLastName]
+            .filter(Boolean)
+            .join(' ') || 'ไม่ระบุชื่อ',
         bookingId: b.id,
         status: b.status,
       }));
@@ -90,8 +90,7 @@ export class OrderService {
       const term = search.toLowerCase();
       return results.filter(
         (r) =>
-          r.roomNumber.toLowerCase().includes(term) ||
-          r.guestName.toLowerCase().includes(term),
+          r.roomNumber.toLowerCase().includes(term) || r.guestName.toLowerCase().includes(term),
       );
     }
 
@@ -295,12 +294,7 @@ export class OrderService {
     return order;
   }
 
-  async addItem(
-    restaurantId: string,
-    orderId: string,
-    dto: AddOrderItemDto,
-    tenantId: string,
-  ) {
+  async addItem(restaurantId: string, orderId: string, dto: AddOrderItemDto, tenantId: string) {
     const order = await this.findOne(restaurantId, orderId, tenantId);
 
     if (['COMPLETED', 'CANCELLED'].includes(order.status)) {
@@ -337,12 +331,7 @@ export class OrderService {
     return newItem;
   }
 
-  async removeItem(
-    restaurantId: string,
-    orderId: string,
-    itemId: string,
-    tenantId: string,
-  ) {
+  async removeItem(restaurantId: string, orderId: string, itemId: string, tenantId: string) {
     const order = await this.findOne(restaurantId, orderId, tenantId);
 
     if (['COMPLETED', 'CANCELLED'].includes(order.status)) {
@@ -369,7 +358,8 @@ export class OrderService {
       throw new BadRequestException(`Cannot send ${order.status} order to kitchen`);
     }
 
-    const pendingItems = order.items?.filter((i) => !i.sentToKitchen && i.status !== 'CANCELLED') ?? [];
+    const pendingItems =
+      order.items?.filter((i) => !i.sentToKitchen && i.status !== 'CANCELLED') ?? [];
 
     if (pendingItems.length === 0) {
       throw new BadRequestException('No new items to send to kitchen');
@@ -435,9 +425,7 @@ export class OrderService {
     };
 
     if (!validTransitions[order.status]?.includes(status)) {
-      throw new BadRequestException(
-        `Cannot transition order from ${order.status} to ${status}`,
-      );
+      throw new BadRequestException(`Cannot transition order from ${order.status} to ${status}`);
     }
 
     const timestamps: Record<string, Date> = {};
@@ -472,7 +460,13 @@ export class OrderService {
       },
     });
 
-    this.auditLogService.logOrderUpdate(orderId, { status: order.status }, { status }, userId, tenantId);
+    this.auditLogService.logOrderUpdate(
+      orderId,
+      { status: order.status },
+      { status },
+      userId,
+      tenantId,
+    );
 
     // Notify guest via WebSocket (e.g. QR order tracking)
     this.kitchenGateway?.emitOrderStatusToGuest(order.orderNumber, {
@@ -531,7 +525,13 @@ export class OrderService {
       },
     });
 
-    this.auditLogService.logOrderUpdate(orderId, { paymentStatus: order.paymentStatus }, { paymentStatus: 'PAID' }, userId, tenantId);
+    this.auditLogService.logOrderUpdate(
+      orderId,
+      { paymentStatus: order.paymentStatus },
+      { paymentStatus: 'PAID' },
+      userId,
+      tenantId,
+    );
     return updatedOrderPayment;
   }
 
@@ -608,7 +608,10 @@ export class OrderService {
   async lookupGuest(
     restaurantId: string,
     query: string,
-  ): Promise<{ matched: boolean; guest?: { id: string; firstName: string; lastName: string; isVip: boolean } }> {
+  ): Promise<{
+    matched: boolean;
+    guest?: { id: string; firstName: string; lastName: string; isVip: boolean };
+  }> {
     const restaurant = await this.prisma.restaurant.findFirst({
       where: { id: restaurantId },
     });
@@ -716,13 +719,17 @@ export class OrderService {
       guestIdForOrder = guest.id;
     }
 
-    const order = await this.create(restaurantId, {
-      tableId,
-      orderType: OrderTypeEnum.DINE_IN,
-      guestName,
-      partySize: 1,
-      items: dto.items,
-    }, tenantId);
+    const order = await this.create(
+      restaurantId,
+      {
+        tableId,
+        orderType: OrderTypeEnum.DINE_IN,
+        guestName,
+        partySize: 1,
+        items: dto.items,
+      },
+      tenantId,
+    );
 
     if (guestIdForOrder) {
       const discount = Number(order.subtotal) * 0.02;

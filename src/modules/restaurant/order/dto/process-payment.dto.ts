@@ -29,12 +29,18 @@ export class ProcessPaymentDto {
   @Type(() => Number)
   discount?: number;
 
-  @ApiPropertyOptional({ example: 'ROOM-101', description: 'Room number (required for ROOM_CHARGE)' })
+  @ApiPropertyOptional({
+    example: 'ROOM-101',
+    description: 'Room number (required for ROOM_CHARGE)',
+  })
   @IsString()
   @IsOptional()
   guestRoom?: string;
 
-  @ApiPropertyOptional({ example: 'booking-uuid', description: 'Booking ID (for room charge validation)' })
+  @ApiPropertyOptional({
+    example: 'booking-uuid',
+    description: 'Booking ID (for room charge validation)',
+  })
   @IsString()
   @IsOptional()
   bookingId?: string;

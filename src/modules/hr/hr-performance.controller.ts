@@ -43,7 +43,7 @@ export class HrPerformanceController {
 
   @Get('summary')
   @ApiOperation({ summary: 'Get performance summary (avg score, grade/status breakdown)' })
-  @ApiQuery({ name: 'period',     required: false, type: String })
+  @ApiQuery({ name: 'period', required: false, type: String })
   @ApiQuery({ name: 'periodType', required: false, enum: ['quarterly', 'half_yearly', 'yearly'] })
   @ApiResponse({ status: 200, description: 'Performance summary' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
@@ -58,13 +58,17 @@ export class HrPerformanceController {
 
   @Get()
   @ApiOperation({ summary: 'List all performance reviews' })
-  @ApiQuery({ name: 'page',       required: false, type: Number })
-  @ApiQuery({ name: 'limit',      required: false, type: Number })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'employeeId', required: false, type: String })
-  @ApiQuery({ name: 'period',     required: false, type: String })
+  @ApiQuery({ name: 'period', required: false, type: String })
   @ApiQuery({ name: 'periodType', required: false, enum: ['quarterly', 'half_yearly', 'yearly'] })
-  @ApiQuery({ name: 'status',     required: false, enum: ['draft', 'submitted', 'approved', 'rejected'] })
-  @ApiQuery({ name: 'search',     required: false, type: String })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['draft', 'submitted', 'approved', 'rejected'],
+  })
+  @ApiQuery({ name: 'search', required: false, type: String })
   @ApiResponse({ status: 200, description: 'Paginated performance reviews' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
   async findAll(
@@ -80,10 +84,7 @@ export class HrPerformanceController {
   @ApiResponse({ status: 200, description: 'Performance record' })
   @ApiResponse({ status: 404, description: 'Not found' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
-  async findOne(
-    @Param('id') id: string,
-    @CurrentUser() user: { tenantId?: string },
-  ) {
+  async findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.performanceService.findOne(id, user.tenantId!);
   }
 
@@ -95,10 +96,7 @@ export class HrPerformanceController {
   @ApiResponse({ status: 409, description: 'Review for this employee & period already exists' })
   @HttpCode(HttpStatus.CREATED)
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
-  async create(
-    @Body() dto: CreateHrPerformanceDto,
-    @CurrentUser() user: { tenantId?: string },
-  ) {
+  async create(@Body() dto: CreateHrPerformanceDto, @CurrentUser() user: { tenantId?: string }) {
     return this.performanceService.create(dto, user.tenantId!);
   }
 
@@ -120,10 +118,7 @@ export class HrPerformanceController {
   @ApiParam({ name: 'id', description: 'Performance record ID' })
   @ApiResponse({ status: 200, description: 'Performance review deleted' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
-  async remove(
-    @Param('id') id: string,
-    @CurrentUser() user: { tenantId?: string },
-  ) {
+  async remove(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.performanceService.remove(id, user.tenantId!);
   }
 
@@ -149,10 +144,7 @@ export class HrPerformanceController {
   @ApiResponse({ status: 400, description: 'กรอกคะแนนไม่ครบ' })
   @ApiResponse({ status: 409, description: 'status ไม่ถูกต้อง' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
-  async submit(
-    @Param('id') id: string,
-    @CurrentUser() user: { tenantId?: string },
-  ) {
+  async submit(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.performanceService.submit(id, user.tenantId!);
   }
 

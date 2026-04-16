@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  NotFoundException,
-  BadRequestException,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogService } from '../../../audit-log/audit-log.service';
 import { OrderItemStatus, KitchenPriority } from '@prisma/client';
@@ -67,12 +62,13 @@ export class KitchenService {
     }));
   }
 
-  async startOrder(restaurantId: string, kitchenOrderId: string, tenantId: string, userId?: string) {
-    const kitchenOrder = await this.findKitchenOrderOrFail(
-      kitchenOrderId,
-      restaurantId,
-      tenantId,
-    );
+  async startOrder(
+    restaurantId: string,
+    kitchenOrderId: string,
+    tenantId: string,
+    userId?: string,
+  ) {
+    const kitchenOrder = await this.findKitchenOrderOrFail(kitchenOrderId, restaurantId, tenantId);
 
     if (kitchenOrder.status !== 'SENT') {
       throw new BadRequestException(`Kitchen order is already ${kitchenOrder.status}`);
@@ -102,12 +98,13 @@ export class KitchenService {
     return updated;
   }
 
-  async completeOrder(restaurantId: string, kitchenOrderId: string, tenantId: string, userId?: string) {
-    const kitchenOrder = await this.findKitchenOrderOrFail(
-      kitchenOrderId,
-      restaurantId,
-      tenantId,
-    );
+  async completeOrder(
+    restaurantId: string,
+    kitchenOrderId: string,
+    tenantId: string,
+    userId?: string,
+  ) {
+    const kitchenOrder = await this.findKitchenOrderOrFail(kitchenOrderId, restaurantId, tenantId);
 
     if (!['SENT', 'PREPARING'].includes(kitchenOrder.status)) {
       throw new BadRequestException(`Kitchen order is already ${kitchenOrder.status}`);

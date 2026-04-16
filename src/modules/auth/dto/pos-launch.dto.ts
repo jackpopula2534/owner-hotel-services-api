@@ -6,7 +6,10 @@ export class PosLaunchDto {
   @IsString()
   restaurantId: string;
 
-  @ApiPropertyOptional({ example: 'table_xyz456', description: 'Optional table to pre-select in POS' })
+  @ApiPropertyOptional({
+    example: 'table_xyz456',
+    description: 'Optional table to pre-select in POS',
+  })
   @IsOptional()
   @IsString()
   tableId?: string;

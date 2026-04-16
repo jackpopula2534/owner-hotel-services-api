@@ -1,13 +1,4 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Body,
-  Param,
-  Query,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -104,7 +95,13 @@ export class KitchenController {
     @Body('status') status: string,
     @CurrentUser() user: { tenantId: string; id?: string },
   ) {
-    return this.kitchenService.updateItemStatus(restaurantId, itemId, status as OrderItemStatus, user.tenantId, user?.id);
+    return this.kitchenService.updateItemStatus(
+      restaurantId,
+      itemId,
+      status as OrderItemStatus,
+      user.tenantId,
+      user?.id,
+    );
   }
 
   @Patch('orders/:kitchenOrderId/priority')
@@ -125,6 +122,12 @@ export class KitchenController {
     @Body('priority') priority: string,
     @CurrentUser() user: { tenantId: string; id?: string },
   ) {
-    return this.kitchenService.setPriority(restaurantId, kitchenOrderId, priority as KitchenPriority, user.tenantId, user?.id);
+    return this.kitchenService.setPriority(
+      restaurantId,
+      kitchenOrderId,
+      priority as KitchenPriority,
+      user.tenantId,
+      user?.id,
+    );
   }
 }

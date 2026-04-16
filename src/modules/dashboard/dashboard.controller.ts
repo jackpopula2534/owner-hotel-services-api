@@ -73,10 +73,7 @@ export class DashboardController {
     departuresToday: number;
     inHouseGuests: number;
   }> {
-    return this.dashboardService.getMetrics(
-      user.tenantId,
-      propertyId || user.defaultPropertyId,
-    );
+    return this.dashboardService.getMetrics(user.tenantId, propertyId || user.defaultPropertyId);
   }
 
   @Get('timeline')
@@ -97,10 +94,7 @@ export class DashboardController {
       status: string;
     }>;
   }> {
-    return this.dashboardService.getTimeline(
-      user.tenantId,
-      propertyId || user.defaultPropertyId,
-    );
+    return this.dashboardService.getTimeline(user.tenantId, propertyId || user.defaultPropertyId);
   }
 
   @Get('room-heatmap')
@@ -138,7 +132,12 @@ export class DashboardController {
   @Get('activity-feed')
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'receptionist', 'staff')
   @ApiOperation({ summary: 'Get recent activity feed' })
-  @ApiQuery({ name: 'limit', required: false, type: 'number', description: 'Max items to return (default: 20)' })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: 'number',
+    description: 'Max items to return (default: 20)',
+  })
   @ApiResponse({ status: 200, description: 'Activity feed retrieved successfully' })
   async getActivityFeed(
     @CurrentUser() user: CurrentUserType,

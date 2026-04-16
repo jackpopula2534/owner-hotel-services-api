@@ -11,6 +11,27 @@ export class PurchaseOrdersService {
 
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * Resolve user UUIDs to full names (firstName + lastName).
+   * Returns a Map<userId, fullName>.
+   */
+  private async resolveUserNames(userIds: (string | null | undefined)[]): Promise<Map<string, string>> {
+    const validIds = userIds.filter((id): id is string => !!id);
+    if (validIds.length === 0) return new Map();
+
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: validIds } },
+      select: { id: true, firstName: true, lastName: true, email: true },
+    });
+
+    const map = new Map<string, string>();
+    for (const user of users) {
+      const fullName = [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email;
+      map.set(user.id, fullName);
+    }
+    return map;
+  }
+
   async findAll(
     tenantId: string,
     query: QueryPurchaseOrderDto,
@@ -129,6 +150,12 @@ export class PurchaseOrdersService {
       throw new NotFoundException('Purchase order not found');
     }
 
+    // Resolve user names for approvedBy and requestedBy
+    const userNameMap = await this.resolveUserNames([
+      po.approvedBy,
+      po.requestedBy,
+    ]);
+
     return {
       id: po.id,
       poNumber: po.poNumber,
@@ -158,18 +185,36 @@ export class PurchaseOrdersService {
       })),
       goodsReceives: po.goodsReceives,
       approvedBy: po.approvedBy || null,
+      approvedByName: po.approvedBy ? userNameMap.get(po.approvedBy) || null : null,
       approvedAt: po.approvedAt,
       requestedBy: po.requestedBy,
+      requestedByName: po.requestedBy ? userNameMap.get(po.requestedBy) || null : null,
       createdAt: po.createdAt,
       updatedAt: po.updatedAt,
     };
   }
 
   async create(dto: CreatePurchaseOrderDto, userId: string, tenantId: string): Promise<any> {
+    // Auto-resolve propertyId if not provided — use tenant's first property
+    let propertyId = dto.propertyId;
+    if (!propertyId) {
+      const defaultProperty = await this.prisma.property.findFirst({
+        where: { tenantId },
+        select: { id: true },
+        orderBy: { createdAt: 'asc' },
+      });
+      if (!defaultProperty) {
+        throw new NotFoundException(
+          'No property found for this tenant. Please create a property first.',
+        );
+      }
+      propertyId = defaultProperty.id;
+    }
+
     // Validate that property, supplier, warehouse, and items exist
     const [property, supplier, warehouse] = await Promise.all([
       this.prisma.property.findUnique({
-        where: { id: dto.propertyId },
+        where: { id: propertyId },
       }),
       this.prisma.supplier.findUnique({
         where: { id: dto.supplierId },
@@ -226,12 +271,15 @@ export class PurchaseOrdersService {
         data: {
           tenantId,
           poNumber,
-          propertyId: dto.propertyId,
+          propertyId,
           supplierId: dto.supplierId,
           warehouseId: dto.warehouseId,
           expectedDate: dto.expectedDate ? new Date(dto.expectedDate) : null,
           notes: dto.notes || null,
           internalNotes: dto.internalNotes || null,
+          quotationNumber: dto.quotationNumber || null,
+          quotationDate: dto.quotationDate ? new Date(dto.quotationDate) : null,
+          purchaseRequisitionId: dto.purchaseRequisitionId || null,
           status: PurchaseOrderStatus.DRAFT,
           subtotal,
           taxAmount,
@@ -259,6 +307,17 @@ export class PurchaseOrdersService {
           };
         }),
       });
+
+      // Update PR status to PO_CREATED if linked to a purchase requisition
+      if (dto.purchaseRequisitionId) {
+        await tx.purchaseRequisition.update({
+          where: { id: dto.purchaseRequisitionId },
+          data: { status: 'PO_CREATED' },
+        });
+        this.logger.log(
+          `PR ${dto.purchaseRequisitionId} status updated to PO_CREATED`,
+        );
+      }
 
       return newPo;
     });

@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  NotFoundException,
-  BadRequestException,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateRestaurantDto } from './dto/create-restaurant.dto';
 import { UpdateRestaurantDto } from './dto/update-restaurant.dto';
@@ -16,10 +11,10 @@ export class RestaurantService {
   constructor(private readonly prisma: PrismaService) {}
 
   async findAll(
-    query: { 
-      page?: number; 
-      limit?: number; 
-      search?: string; 
+    query: {
+      page?: number;
+      limit?: number;
+      search?: string;
       isActive?: string;
       propertyId?: string;
       hotelId?: string;

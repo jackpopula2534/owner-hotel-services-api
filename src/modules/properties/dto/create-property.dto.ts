@@ -1,4 +1,14 @@
-import { IsString, IsNotEmpty, IsOptional, IsEmail, IsBoolean, IsNumber, IsEnum, Min, Max } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsEmail,
+  IsBoolean,
+  IsNumber,
+  IsEnum,
+  Min,
+  Max,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreatePropertyDto {
@@ -68,7 +78,11 @@ export class CreatePropertyDto {
   @Max(100)
   vatPercent?: number;
 
-  @ApiPropertyOptional({ enum: ['breakdown', 'included', 'net'], example: 'breakdown', description: 'วิธีแสดงราคา: breakdown=แยกบรรทัด, included=รวมในราคาห้อง, net=ราคาสุทธิ' })
+  @ApiPropertyOptional({
+    enum: ['breakdown', 'included', 'net'],
+    example: 'breakdown',
+    description: 'วิธีแสดงราคา: breakdown=แยกบรรทัด, included=รวมในราคาห้อง, net=ราคาสุทธิ',
+  })
   @IsOptional()
   @IsEnum(['breakdown', 'included', 'net'])
   taxDisplayMode?: 'breakdown' | 'included' | 'net';

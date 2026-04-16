@@ -56,7 +56,10 @@ interface PerformanceData {
 export class StaffService {
   private readonly logger = new Logger(StaffService.name);
 
-  constructor(private prisma: PrismaService, private auditLogService: AuditLogService) {}
+  constructor(
+    private prisma: PrismaService,
+    private auditLogService: AuditLogService,
+  ) {}
 
   /**
    * Get all staff with pagination and optional filtering
@@ -116,10 +119,14 @@ export class StaffService {
 
       return { data: enrichedStaff, total, page, limit };
     } catch (error) {
-      this.logger.error(`Failed to fetch staff (with task metrics): ${(error as any)?.message ?? error}`);
+      this.logger.error(
+        `Failed to fetch staff (with task metrics): ${(error as any)?.message ?? error}`,
+      );
 
       // Any error (missing table, missing column, FK mismatch, etc.) — fall back progressively
-      this.logger.warn('Falling back to basic staff query without task metrics (run migration to fix)');
+      this.logger.warn(
+        'Falling back to basic staff query without task metrics (run migration to fix)',
+      );
       try {
         const [staff, total] = await Promise.all([
           this.prisma.staff.findMany({
@@ -141,7 +148,9 @@ export class StaffService {
 
         return { data: enrichedStaff, total, page, limit };
       } catch (fallbackError) {
-        this.logger.error(`Fallback staff query also failed: ${(fallbackError as any)?.message ?? fallbackError}`);
+        this.logger.error(
+          `Fallback staff query also failed: ${(fallbackError as any)?.message ?? fallbackError}`,
+        );
         return { data: [], total: 0, page, limit };
       }
     }
@@ -188,7 +197,8 @@ export class StaffService {
         rating: staff.rating !== null ? Number(staff.rating) : undefined,
         efficiency: staff.efficiency ?? undefined,
         tasksToday: staff.housekeepingTasks?.length ?? 0,
-        completedToday: staff.housekeepingTasks?.filter((t: any) => t.status === 'completed').length ?? 0,
+        completedToday:
+          staff.housekeepingTasks?.filter((t: any) => t.status === 'completed').length ?? 0,
       };
     } catch (error) {
       if (error instanceof NotFoundException) {
@@ -216,7 +226,9 @@ export class StaffService {
     });
 
     if (existingStaff) {
-      throw new ConflictException(`Staff member with email ${dto.email} already exists in this tenant`);
+      throw new ConflictException(
+        `Staff member with email ${dto.email} already exists in this tenant`,
+      );
     }
 
     try {
@@ -368,9 +380,7 @@ export class StaffService {
       where: { id: dto.employeeId, tenantId },
     });
     if (!employee) {
-      throw new NotFoundException(
-        `Employee ${dto.employeeId} not found in this tenant`,
-      );
+      throw new NotFoundException(`Employee ${dto.employeeId} not found in this tenant`);
     }
 
     // Guard: Employee not already linked to another Staff (cast to any — field added in latest migration)
@@ -385,7 +395,7 @@ export class StaffService {
 
     const updated = await (this.prisma.staff as any).update({
       where: { id: staffId },
-      data: { employeeId: dto.employeeId },  // field added in latest migration
+      data: { employeeId: dto.employeeId }, // field added in latest migration
       include: { employee: true },
     });
 
@@ -402,7 +412,7 @@ export class StaffService {
       throw new BadRequestException('Tenant ID is required');
     }
 
-    const staff = await this.findOne(staffId, tenantId) as any;
+    const staff = (await this.findOne(staffId, tenantId)) as any;
 
     if (!staff.employeeId) {
       throw new BadRequestException(`Staff ${staffId} is not linked to any employee`);
@@ -410,7 +420,7 @@ export class StaffService {
 
     const updated = await (this.prisma.staff as any).update({
       where: { id: staffId },
-      data: { employeeId: null },  // field added in latest migration
+      data: { employeeId: null }, // field added in latest migration
     });
 
     this.logger.log(`Unlinked Staff ${staffId} from Employee (tenant: ${tenantId})`);
@@ -427,7 +437,7 @@ export class StaffService {
 
     const staff = await (this.prisma.staff as any).findFirst({
       where: { id: staffId, tenantId },
-      include: { employee: true },  // relation added in latest migration
+      include: { employee: true }, // relation added in latest migration
     });
 
     if (!staff) {
@@ -490,14 +500,19 @@ export class StaffService {
       const tasksCount = completedTasks.length;
       const totalDuration = completedTasks.reduce((sum, t) => sum + (t.actualDuration ?? 0), 0);
       const avgCompletionTime = tasksCount > 0 ? Math.round(totalDuration / tasksCount) : 0;
-      const avgRating = tasksCount > 0
-        ? Number((completedTasks.reduce((sum, t) => sum + (t.rating ?? 0), 0) / tasksCount).toFixed(2))
-        : 0;
+      const avgRating =
+        tasksCount > 0
+          ? Number(
+              (completedTasks.reduce((sum, t) => sum + (t.rating ?? 0), 0) / tasksCount).toFixed(2),
+            )
+          : 0;
 
       // Group by date
       const completedByDate = new Map<string, number>();
       completedTasks.forEach((task) => {
-        const dateStr = task.actualEndTime ? new Date(task.actualEndTime).toISOString().split('T')[0] : '';
+        const dateStr = task.actualEndTime
+          ? new Date(task.actualEndTime).toISOString().split('T')[0]
+          : '';
         if (dateStr) {
           completedByDate.set(dateStr, (completedByDate.get(dateStr) ?? 0) + 1);
         }

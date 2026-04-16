@@ -17,23 +17,23 @@ export class HrPayrollService {
   // ─── List & Detail ────────────────────────────────────────────────────────────
 
   async findAll(query: Record<string, string>, tenantId: string) {
-    const page  = parseInt(query.page  ?? '1',  10);
+    const page = parseInt(query.page ?? '1', 10);
     const limit = parseInt(query.limit ?? '20', 10);
-    const skip  = (page - 1) * limit;
+    const skip = (page - 1) * limit;
 
     const { status, search } = query;
     const month = query.month ? parseInt(query.month, 10) : undefined;
-    const year  = query.year  ? parseInt(query.year,  10) : undefined;
+    const year = query.year ? parseInt(query.year, 10) : undefined;
 
     const where: Record<string, unknown> = { tenantId };
     if (status) where['status'] = status;
-    if (month)  where['month']  = month;
-    if (year)   where['year']   = year;
+    if (month) where['month'] = month;
+    if (year) where['year'] = year;
     if (search) {
       where['employee'] = {
         OR: [
-          { firstName:    { contains: search } },
-          { lastName:     { contains: search } },
+          { firstName: { contains: search } },
+          { lastName: { contains: search } },
           { employeeCode: { contains: search } },
         ],
       };
@@ -46,7 +46,15 @@ export class HrPayrollService {
         take: limit,
         orderBy: [{ year: 'desc' }, { month: 'desc' }, { createdAt: 'desc' }],
         include: {
-          employee: { select: { id: true, firstName: true, lastName: true, employeeCode: true, department: true } },
+          employee: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              employeeCode: true,
+              department: true,
+            },
+          },
           items: true,
         },
       }),
@@ -60,7 +68,17 @@ export class HrPayrollService {
     const payroll = await (this.prisma as any).hrPayroll.findFirst({
       where: { id, tenantId },
       include: {
-        employee: { select: { id: true, firstName: true, lastName: true, employeeCode: true, department: true, position: true, bankAccount: true } },
+        employee: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            employeeCode: true,
+            department: true,
+            position: true,
+            bankAccount: true,
+          },
+        },
         items: { orderBy: { type: 'asc' } },
       },
     });
@@ -96,7 +114,9 @@ export class HrPayrollService {
           where: { tenantId, employeeId: emp.id, month, year },
         });
         if (existing) {
-          errors.push(`Payroll already exists for employee ${emp.employeeCode ?? emp.id} (${month}/${year})`);
+          errors.push(
+            `Payroll already exists for employee ${emp.employeeCode ?? emp.id} (${month}/${year})`,
+          );
           continue;
         }
 
@@ -104,7 +124,7 @@ export class HrPayrollService {
 
         // Calculate OT pay from attendance records for the month
         const monthStart = new Date(`${year}-${String(month).padStart(2, '0')}-01`);
-        const monthEnd   = new Date(year, month, 0); // last day of month
+        const monthEnd = new Date(year, month, 0); // last day of month
         const attendance = await (this.prisma as any).hrAttendance.findMany({
           where: {
             tenantId,
@@ -119,7 +139,7 @@ export class HrPayrollService {
           0,
         );
         // OT rate: 1.5× of hourly rate (baseSalary / 30 days / 8 hours)
-        const hourlyRate  = baseSalary / 30 / 8;
+        const hourlyRate = baseSalary / 30 / 8;
         const overtimePay = totalOtMinutes > 0 ? hourlyRate * 1.5 * (totalOtMinutes / 60) : 0;
 
         // Process additional items (allowances/deductions/bonus)
@@ -139,31 +159,40 @@ export class HrPayrollService {
         const payroll = await (this.prisma as any).hrPayroll.create({
           data: {
             tenantId,
-            employeeId:     emp.id,
+            employeeId: emp.id,
             month,
             year,
-            baseSalary:     baseSalary.toFixed(2),
+            baseSalary: baseSalary.toFixed(2),
             totalAllowance: totalAllowance.toFixed(2),
             totalDeduction: totalDeduction.toFixed(2),
-            overtimePay:    overtimePay.toFixed(2),
-            bonusPay:       bonusPay.toFixed(2),
-            netSalary:      netSalary.toFixed(2),
-            status:         'draft',
+            overtimePay: overtimePay.toFixed(2),
+            bonusPay: bonusPay.toFixed(2),
+            netSalary: netSalary.toFixed(2),
+            status: 'draft',
             items: {
               create: [
                 ...payrollItems.map((item) => ({
-                  type:   item.type,
-                  name:   item.name,
+                  type: item.type,
+                  name: item.name,
                   amount: item.amount.toFixed(2),
-                  note:   item.note ?? null,
+                  note: item.note ?? null,
                 })),
                 ...(totalOtMinutes > 0
-                  ? [{ type: 'overtime', name: `OT ${totalOtMinutes} นาที`, amount: overtimePay.toFixed(2) }]
+                  ? [
+                      {
+                        type: 'overtime',
+                        name: `OT ${totalOtMinutes} นาที`,
+                        amount: overtimePay.toFixed(2),
+                      },
+                    ]
                   : []),
               ],
             },
           },
-          include: { employee: { select: { id: true, firstName: true, lastName: true, employeeCode: true } }, items: true },
+          include: {
+            employee: { select: { id: true, firstName: true, lastName: true, employeeCode: true } },
+            items: true,
+          },
         });
 
         results.push(payroll);
@@ -189,10 +218,10 @@ export class HrPayrollService {
     const updated = await (this.prisma as any).hrPayroll.update({
       where: { id },
       data: {
-        status:     'approved',
+        status: 'approved',
         approvedBy: approverId,
         approvedAt: new Date(),
-        note:       dto.note ?? payroll.note,
+        note: dto.note ?? payroll.note,
       },
       include: { employee: { select: { id: true, firstName: true, lastName: true } } },
     });
@@ -228,29 +257,38 @@ export class HrPayrollService {
 
   async getSummary(query: Record<string, string>, tenantId: string) {
     const month = query.month ? parseInt(query.month, 10) : new Date().getMonth() + 1;
-    const year  = query.year  ? parseInt(query.year,  10) : new Date().getFullYear();
+    const year = query.year ? parseInt(query.year, 10) : new Date().getFullYear();
 
     const payrolls = await (this.prisma as any).hrPayroll.findMany({
       where: { tenantId, month, year },
-      select: { baseSalary: true, totalAllowance: true, totalDeduction: true, overtimePay: true, bonusPay: true, netSalary: true, status: true },
+      select: {
+        baseSalary: true,
+        totalAllowance: true,
+        totalDeduction: true,
+        overtimePay: true,
+        bonusPay: true,
+        netSalary: true,
+        status: true,
+      },
     });
 
     const sum = (field: string) =>
       payrolls.reduce((s: number, p: any) => s + Number(p[field] ?? 0), 0);
 
     return {
-      month, year,
-      count:          payrolls.length,
+      month,
+      year,
+      count: payrolls.length,
       totalBaseSalary: sum('baseSalary'),
-      totalAllowance:  sum('totalAllowance'),
-      totalDeduction:  sum('totalDeduction'),
-      totalOvertime:   sum('overtimePay'),
-      totalBonus:      sum('bonusPay'),
-      totalNetSalary:  sum('netSalary'),
+      totalAllowance: sum('totalAllowance'),
+      totalDeduction: sum('totalDeduction'),
+      totalOvertime: sum('overtimePay'),
+      totalBonus: sum('bonusPay'),
+      totalNetSalary: sum('netSalary'),
       byStatus: {
-        draft:     payrolls.filter((p: any) => p.status === 'draft').length,
-        approved:  payrolls.filter((p: any) => p.status === 'approved').length,
-        paid:      payrolls.filter((p: any) => p.status === 'paid').length,
+        draft: payrolls.filter((p: any) => p.status === 'draft').length,
+        approved: payrolls.filter((p: any) => p.status === 'approved').length,
+        paid: payrolls.filter((p: any) => p.status === 'paid').length,
         cancelled: payrolls.filter((p: any) => p.status === 'cancelled').length,
       },
     };

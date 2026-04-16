@@ -34,10 +34,12 @@ export class SuppliersController {
   async findAll(
     @Req() req: { user: { tenantId: string } },
     @Query('search') search?: string,
-    @Query('page') page: number = 1,
-    @Query('limit') limit: number = 20,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ): Promise<{ success: boolean; data: unknown }> {
-    const data = await this.suppliersService.findAll(req.user.tenantId, search, page, limit);
+    const pageNum = Math.max(1, Number(page) || 1);
+    const limitNum = Math.min(100, Math.max(1, Number(limit) || 20));
+    const data = await this.suppliersService.findAll(req.user.tenantId, search, pageNum, limitNum);
     return { success: true, data };
   }
 

@@ -30,7 +30,10 @@ export class AuthService {
     private onboardingService: OnboardingService,
   ) {}
 
-  async register(registerDto: RegisterDto, deviceInfo?: { ipAddress?: string; userAgent?: string }) {
+  async register(
+    registerDto: RegisterDto,
+    deviceInfo?: { ipAddress?: string; userAgent?: string },
+  ) {
     const { email, password, firstName, lastName, hotelName, hotelAddress, hotelPhone } =
       registerDto;
 
@@ -176,7 +179,14 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const tokens = await this.generateTokens(admin.id, admin.email, admin.role, undefined, 'admin', deviceInfo);
+    const tokens = await this.generateTokens(
+      admin.id,
+      admin.email,
+      admin.role,
+      undefined,
+      'admin',
+      deviceInfo,
+    );
 
     return {
       ...tokens,
@@ -236,7 +246,9 @@ export class AuthService {
       } catch (e) {
         if (e instanceof UnauthorizedException) throw e;
         // JSON parse error — allow through (DB migration may not have run yet)
-        this.logger.warn(`Could not parse allowedSystems for user ${user.id}: ${allowedSystemsRaw}`);
+        this.logger.warn(
+          `Could not parse allowedSystems for user ${user.id}: ${allowedSystemsRaw}`,
+        );
       }
     }
     // ────────────────────────────────────────────────────────────────────────
@@ -264,7 +276,15 @@ export class AuthService {
       }
     }
 
-    const tokens = await this.generateTokens(user.id, user.email, user.role, tenantId, 'user', deviceInfo, systemContext);
+    const tokens = await this.generateTokens(
+      user.id,
+      user.email,
+      user.role,
+      tenantId,
+      'user',
+      deviceInfo,
+      systemContext,
+    );
 
     // Resolve default property for this tenant so frontend has the correct propertyId
     let defaultProperty: { id: string; name: string; code: string } | undefined;
@@ -394,11 +414,7 @@ export class AuthService {
     };
   }
 
-  async logout(
-    userIdOrAdminId: string,
-    refreshToken?: string,
-    systemContext?: 'main' | 'pos',
-  ) {
+  async logout(userIdOrAdminId: string, refreshToken?: string, systemContext?: 'main' | 'pos') {
     if (refreshToken) {
       // Revoke the specific refresh token
       // If systemContext provided, also filter by it (prevents cross-system token revocation)
@@ -406,7 +422,7 @@ export class AuthService {
         where: {
           token: refreshToken,
           OR: [{ userId: userIdOrAdminId }, { adminId: userIdOrAdminId }],
-          ...(systemContext ? { systemContext } as any : {}),
+          ...(systemContext ? ({ systemContext } as any) : {}),
         },
         data: { revokedAt: new Date() },
       });
@@ -417,7 +433,7 @@ export class AuthService {
         where: {
           OR: [{ userId: userIdOrAdminId }, { adminId: userIdOrAdminId }],
           revokedAt: null,
-          ...(systemContext ? { systemContext } as any : {}),
+          ...(systemContext ? ({ systemContext } as any) : {}),
         },
         data: { revokedAt: new Date() },
       });
@@ -508,9 +524,7 @@ export class AuthService {
     // - Managers can access both main dashboard and POS
     // - Operational POS staff (waiter, chef, cashier, kitchen_staff) → POS only
     const POS_ONLY_ROLES = ['waiter', 'chef', 'cashier', 'kitchen_staff'];
-    const allowedSystems = POS_ONLY_ROLES.includes(dto.role)
-      ? '["pos"]'
-      : '["main","pos"]';
+    const allowedSystems = POS_ONLY_ROLES.includes(dto.role) ? '["pos"]' : '["main","pos"]';
 
     const user = await this.prisma.user.create({
       data: {
@@ -666,12 +680,18 @@ export class AuthService {
 
   private buildDeviceName(userAgent: string): string {
     // Extract a human-readable name from User-Agent (best-effort)
-    if (/iphone/i.test(userAgent)) return `iPhone — ${/safari/i.test(userAgent) ? 'Safari' : 'Browser'}`;
-    if (/ipad/i.test(userAgent)) return `iPad — ${/safari/i.test(userAgent) ? 'Safari' : 'Browser'}`;
-    if (/android/i.test(userAgent)) return `Android — ${/chrome/i.test(userAgent) ? 'Chrome' : 'Browser'}`;
-    if (/windows/i.test(userAgent)) return `Windows — ${/chrome/i.test(userAgent) ? 'Chrome' : /firefox/i.test(userAgent) ? 'Firefox' : /edge/i.test(userAgent) ? 'Edge' : 'Browser'}`;
-    if (/macintosh|mac os/i.test(userAgent)) return `Mac — ${/chrome/i.test(userAgent) ? 'Chrome' : /safari/i.test(userAgent) ? 'Safari' : /firefox/i.test(userAgent) ? 'Firefox' : 'Browser'}`;
-    if (/linux/i.test(userAgent)) return `Linux — ${/chrome/i.test(userAgent) ? 'Chrome' : /firefox/i.test(userAgent) ? 'Firefox' : 'Browser'}`;
+    if (/iphone/i.test(userAgent))
+      return `iPhone — ${/safari/i.test(userAgent) ? 'Safari' : 'Browser'}`;
+    if (/ipad/i.test(userAgent))
+      return `iPad — ${/safari/i.test(userAgent) ? 'Safari' : 'Browser'}`;
+    if (/android/i.test(userAgent))
+      return `Android — ${/chrome/i.test(userAgent) ? 'Chrome' : 'Browser'}`;
+    if (/windows/i.test(userAgent))
+      return `Windows — ${/chrome/i.test(userAgent) ? 'Chrome' : /firefox/i.test(userAgent) ? 'Firefox' : /edge/i.test(userAgent) ? 'Edge' : 'Browser'}`;
+    if (/macintosh|mac os/i.test(userAgent))
+      return `Mac — ${/chrome/i.test(userAgent) ? 'Chrome' : /safari/i.test(userAgent) ? 'Safari' : /firefox/i.test(userAgent) ? 'Firefox' : 'Browser'}`;
+    if (/linux/i.test(userAgent))
+      return `Linux — ${/chrome/i.test(userAgent) ? 'Chrome' : /firefox/i.test(userAgent) ? 'Firefox' : 'Browser'}`;
     return 'Unknown Device';
   }
 

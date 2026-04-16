@@ -176,12 +176,7 @@ export class RoomAvailabilityService {
       const availableRooms = [];
 
       for (const room of allRooms) {
-        const isAvailable = await this.checkRoomAvailable(
-          room.id,
-          checkIn,
-          checkOut,
-          tenantId,
-        );
+        const isAvailable = await this.checkRoomAvailable(room.id, checkIn, checkOut, tenantId);
 
         if (isAvailable.available) {
           availableRooms.push(room);
@@ -234,9 +229,10 @@ export class RoomAvailabilityService {
         throw new NotFoundException(`Property with ID ${propertyId} not found`);
       }
 
-      const timeStr = timeType === 'checkIn'
-        ? (property.standardCheckInTime ?? '14:00')
-        : (property.standardCheckOutTime ?? '11:00');
+      const timeStr =
+        timeType === 'checkIn'
+          ? (property.standardCheckInTime ?? '14:00')
+          : (property.standardCheckOutTime ?? '11:00');
 
       // Parse time (format: HH:mm)
       const [hours, minutes] = timeStr.split(':').map(Number);

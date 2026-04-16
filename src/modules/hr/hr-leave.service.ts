@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  NotFoundException,
-  BadRequestException,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   CreateHrLeaveRequestDto,
@@ -20,21 +15,21 @@ export class HrLeaveService {
   // ─── List & Detail ────────────────────────────────────────────────────────────
 
   async findAll(query: Record<string, string>, tenantId: string) {
-    const page  = parseInt(query.page  ?? '1',  10);
+    const page = parseInt(query.page ?? '1', 10);
     const limit = parseInt(query.limit ?? '20', 10);
-    const skip  = (page - 1) * limit;
+    const skip = (page - 1) * limit;
 
     const { status, employeeId, leaveTypeId, search } = query;
 
     const where: Record<string, unknown> = { tenantId };
-    if (status)      where['status']      = status;
-    if (employeeId)  where['employeeId']  = employeeId;
+    if (status) where['status'] = status;
+    if (employeeId) where['employeeId'] = employeeId;
     if (leaveTypeId) where['leaveTypeId'] = leaveTypeId;
     if (search) {
       where['employee'] = {
         OR: [
           { firstName: { contains: search } },
-          { lastName:  { contains: search } },
+          { lastName: { contains: search } },
           { employeeCode: { contains: search } },
         ],
       };
@@ -47,8 +42,18 @@ export class HrLeaveService {
         take: limit,
         orderBy: { createdAt: 'desc' },
         include: {
-          employee:  { select: { id: true, firstName: true, lastName: true, employeeCode: true, department: true } },
-          leaveType: { select: { id: true, name: true, nameEn: true, code: true, color: true, isPaid: true } },
+          employee: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              employeeCode: true,
+              department: true,
+            },
+          },
+          leaveType: {
+            select: { id: true, name: true, nameEn: true, code: true, color: true, isPaid: true },
+          },
         },
       }),
       (this.prisma as any).hrLeaveRequest.count({ where }),
@@ -61,8 +66,26 @@ export class HrLeaveService {
     const request = await (this.prisma as any).hrLeaveRequest.findFirst({
       where: { id, tenantId },
       include: {
-        employee:  { select: { id: true, firstName: true, lastName: true, employeeCode: true, department: true } },
-        leaveType: { select: { id: true, name: true, nameEn: true, code: true, color: true, isPaid: true, requiresDoc: true } },
+        employee: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            employeeCode: true,
+            department: true,
+          },
+        },
+        leaveType: {
+          select: {
+            id: true,
+            name: true,
+            nameEn: true,
+            code: true,
+            color: true,
+            isPaid: true,
+            requiresDoc: true,
+          },
+        },
       },
     });
     if (!request) throw new NotFoundException(`Leave request ${id} not found`);
@@ -72,12 +95,14 @@ export class HrLeaveService {
   // ─── Leave Balance ────────────────────────────────────────────────────────────
 
   async getLeaveBalance(employeeId: string, tenantId: string, year?: number) {
-    const employee = await (this.prisma.employee as any).findFirst({ where: { id: employeeId, tenantId } });
+    const employee = await (this.prisma.employee as any).findFirst({
+      where: { id: employeeId, tenantId },
+    });
     if (!employee) throw new NotFoundException(`Employee ${employeeId} not found`);
 
     const targetYear = year ?? new Date().getFullYear();
-    const yearStart  = new Date(`${targetYear}-01-01`);
-    const yearEnd    = new Date(`${targetYear}-12-31`);
+    const yearStart = new Date(`${targetYear}-01-01`);
+    const yearEnd = new Date(`${targetYear}-12-31`);
 
     // Fetch all leave types for this tenant
     const leaveTypes = await (this.prisma as any).hrLeaveType.findMany({
@@ -98,13 +123,13 @@ export class HrLeaveService {
       const used = approvedLeaves
         .filter((lr: any) => lr.leaveTypeId === lt.id)
         .reduce((sum: number, lr: any) => sum + lr.totalDays, 0);
-      const total     = lt.maxDaysPerYear ?? 0;
+      const total = lt.maxDaysPerYear ?? 0;
       const remaining = Math.max(0, total - used);
       return {
-        leaveTypeId:   lt.id,
+        leaveTypeId: lt.id,
         leaveTypeName: lt.name,
-        code:          lt.code,
-        color:         lt.color,
+        code: lt.code,
+        color: lt.color,
         total,
         used,
         remaining,
@@ -117,7 +142,9 @@ export class HrLeaveService {
   // ─── CRUD ────────────────────────────────────────────────────────────────────
 
   async create(dto: CreateHrLeaveRequestDto, tenantId: string) {
-    const employee = await (this.prisma.employee as any).findFirst({ where: { id: dto.employeeId, tenantId } });
+    const employee = await (this.prisma.employee as any).findFirst({
+      where: { id: dto.employeeId, tenantId },
+    });
     if (!employee) throw new NotFoundException(`Employee ${dto.employeeId} not found`);
 
     const leaveType = await (this.prisma as any).hrLeaveType.findFirst({
@@ -126,23 +153,23 @@ export class HrLeaveService {
     if (!leaveType) throw new NotFoundException(`Leave type ${dto.leaveTypeId} not found`);
 
     const start = new Date(dto.startDate);
-    const end   = new Date(dto.endDate);
+    const end = new Date(dto.endDate);
     if (end < start) throw new BadRequestException('End date must be on or after start date');
 
     const request = await (this.prisma as any).hrLeaveRequest.create({
       data: {
         tenantId,
-        employeeId:  dto.employeeId,
+        employeeId: dto.employeeId,
         leaveTypeId: dto.leaveTypeId,
-        startDate:   start,
-        endDate:     end,
-        totalDays:   dto.totalDays,
-        reason:      dto.reason      ?? null,
+        startDate: start,
+        endDate: end,
+        totalDays: dto.totalDays,
+        reason: dto.reason ?? null,
         substituteId: dto.substituteId ?? null,
-        status:      'pending',
+        status: 'pending',
       },
       include: {
-        employee:  { select: { id: true, firstName: true, lastName: true } },
+        employee: { select: { id: true, firstName: true, lastName: true } },
         leaveType: { select: { id: true, name: true, code: true, color: true } },
       },
     });
@@ -160,12 +187,12 @@ export class HrLeaveService {
     return (this.prisma as any).hrLeaveRequest.update({
       where: { id },
       data: {
-        ...(dto.startDate    && { startDate: new Date(dto.startDate) }),
-        ...(dto.endDate      && { endDate: new Date(dto.endDate) }),
-        ...(dto.totalDays    !== undefined && { totalDays: dto.totalDays }),
-        ...(dto.reason       !== undefined && { reason: dto.reason }),
+        ...(dto.startDate && { startDate: new Date(dto.startDate) }),
+        ...(dto.endDate && { endDate: new Date(dto.endDate) }),
+        ...(dto.totalDays !== undefined && { totalDays: dto.totalDays }),
+        ...(dto.reason !== undefined && { reason: dto.reason }),
         ...(dto.substituteId !== undefined && { substituteId: dto.substituteId }),
-        ...(dto.leaveTypeId  && { leaveTypeId: dto.leaveTypeId }),
+        ...(dto.leaveTypeId && { leaveTypeId: dto.leaveTypeId }),
       },
     });
   }
@@ -189,12 +216,12 @@ export class HrLeaveService {
     const updated = await (this.prisma as any).hrLeaveRequest.update({
       where: { id },
       data: {
-        status:     'approved',
+        status: 'approved',
         approvedBy: approverId,
         approvedAt: new Date(),
       },
       include: {
-        employee:  { select: { id: true, firstName: true, lastName: true } },
+        employee: { select: { id: true, firstName: true, lastName: true } },
         leaveType: { select: { id: true, name: true } },
       },
     });
@@ -212,13 +239,13 @@ export class HrLeaveService {
     const updated = await (this.prisma as any).hrLeaveRequest.update({
       where: { id },
       data: {
-        status:       'rejected',
-        rejectedBy:   rejectorId,
-        rejectedAt:   new Date(),
+        status: 'rejected',
+        rejectedBy: rejectorId,
+        rejectedAt: new Date(),
         rejectReason: dto.reason,
       },
       include: {
-        employee:  { select: { id: true, firstName: true, lastName: true } },
+        employee: { select: { id: true, firstName: true, lastName: true } },
         leaveType: { select: { id: true, name: true } },
       },
     });

@@ -1,4 +1,10 @@
-import { Injectable, CanActivate, ExecutionContext, ForbiddenException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  CanActivate,
+  ExecutionContext,
+  ForbiddenException,
+  Logger,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { FeatureAccessService } from '../feature-access/feature-access.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
@@ -70,12 +76,15 @@ export class SubscriptionGuard implements CanActivate {
       const writeMethods = ['POST', 'PUT', 'PATCH', 'DELETE'];
 
       if (writeMethods.includes(method)) {
-        this.logger.warn(`Blocked write (${method}) for tenant ${tenantId} — subscription expired (read-only mode)`);
+        this.logger.warn(
+          `Blocked write (${method}) for tenant ${tenantId} — subscription expired (read-only mode)`,
+        );
         throw new ForbiddenException({
           success: false,
           error: {
             code: 'SUBSCRIPTION_READ_ONLY',
-            message: 'Your subscription has expired. You can view data but cannot make changes. Please renew your subscription.',
+            message:
+              'Your subscription has expired. You can view data but cannot make changes. Please renew your subscription.',
           },
         });
       }

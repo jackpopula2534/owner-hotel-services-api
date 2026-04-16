@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-  ConflictException,
-} from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateHrDepartmentDto } from './dto/create-hr-department.dto';
 import { UpdateHrDepartmentDto } from './dto/update-hr-department.dto';
@@ -75,7 +70,9 @@ export class HrMasterDataService {
       },
     });
 
-    this.logger.log(`Created department: ${department.name} (${department.code}) for tenant ${tenantId}`);
+    this.logger.log(
+      `Created department: ${department.name} (${department.code}) for tenant ${tenantId}`,
+    );
     return { success: true, data: department };
   }
 
@@ -454,36 +451,122 @@ export class HrMasterDataService {
     this.logger.log(`Initializing default HR master data for tenant: ${tenantId}`);
 
     const created: Record<string, number> = {
-      departments: 0, positions: 0, leaveTypes: 0,
-      shiftTypes: 0, allowanceTypes: 0, deductionTypes: 0,
+      departments: 0,
+      positions: 0,
+      leaveTypes: 0,
+      shiftTypes: 0,
+      allowanceTypes: 0,
+      deductionTypes: 0,
     };
     const skipped: Record<string, number> = {
-      departments: 0, positions: 0, leaveTypes: 0,
-      shiftTypes: 0, allowanceTypes: 0, deductionTypes: 0,
+      departments: 0,
+      positions: 0,
+      leaveTypes: 0,
+      shiftTypes: 0,
+      allowanceTypes: 0,
+      deductionTypes: 0,
     };
 
     // ─── Department + Position templates ───────────────────────────────────────
     const departmentTemplates = [
-      { name: 'ฝ่ายต้อนรับ', nameEn: 'Front Office', code: 'FO', color: '#8B5CF6', sortOrder: 1, description: 'บริการต้อนรับแขก เช็คอิน/เช็คเอาท์ คอนเซียจ' },
-      { name: 'ฝ่ายซ่อมบำรุง / ทำความสะอาด', nameEn: 'Housekeeping & Maintenance', code: 'HK', color: '#10B981', sortOrder: 2, description: 'ทำความสะอาดห้องพัก พื้นที่ส่วนกลาง ซักรีด และซ่อมบำรุงทั่วไป' },
-      { name: 'ฝ่ายอาหารและเครื่องดื่ม', nameEn: 'Food & Beverage', code: 'FB', color: '#F59E0B', sortOrder: 3, description: 'ร้านอาหาร บาร์ รูมเซอร์วิส จัดเลี้ยง' },
-      { name: 'ฝ่ายวิศวกรรม', nameEn: 'Engineering', code: 'ENG', color: '#EF4444', sortOrder: 4, description: 'บำรุงรักษา ระบบไฟฟ้า ประปา HVAC ไอที' },
-      { name: 'ฝ่ายทรัพยากรบุคคล', nameEn: 'Human Resources', code: 'HR', color: '#EC4899', sortOrder: 5, description: 'สรรหา ฝึกอบรม เงินเดือน สวัสดิการ' },
-      { name: 'ฝ่ายการเงินและบัญชี', nameEn: 'Finance & Accounting', code: 'FIN', color: '#06B6D4', sortOrder: 6, description: 'บัญชี การเงิน จัดซื้อ คลังสินค้า' },
-      { name: 'ฝ่ายขายและการตลาด', nameEn: 'Sales & Marketing', code: 'SM', color: '#F97316', sortOrder: 7, description: 'ขาย การตลาด ประชาสัมพันธ์ OTA จัดการ' },
-      { name: 'ฝ่ายรักษาความปลอดภัย', nameEn: 'Security', code: 'SEC', color: '#6B7280', sortOrder: 8, description: 'รักษาความปลอดภัย ควบคุมการเข้าออก' },
-      { name: 'ฝ่ายสปาและนันทนาการ', nameEn: 'Spa & Recreation', code: 'SPA', color: '#A78BFA', sortOrder: 9, description: 'สปา ฟิตเนส สระว่ายน้ำ กิจกรรมแขก' },
-      { name: 'ฝ่ายบริหาร', nameEn: 'Management', code: 'MGT', color: '#1D4ED8', sortOrder: 10, description: 'ผู้บริหารระดับสูง ผู้จัดการทั่วไป' },
+      {
+        name: 'ฝ่ายต้อนรับ',
+        nameEn: 'Front Office',
+        code: 'FO',
+        color: '#8B5CF6',
+        sortOrder: 1,
+        description: 'บริการต้อนรับแขก เช็คอิน/เช็คเอาท์ คอนเซียจ',
+      },
+      {
+        name: 'ฝ่ายซ่อมบำรุง / ทำความสะอาด',
+        nameEn: 'Housekeeping & Maintenance',
+        code: 'HK',
+        color: '#10B981',
+        sortOrder: 2,
+        description: 'ทำความสะอาดห้องพัก พื้นที่ส่วนกลาง ซักรีด และซ่อมบำรุงทั่วไป',
+      },
+      {
+        name: 'ฝ่ายอาหารและเครื่องดื่ม',
+        nameEn: 'Food & Beverage',
+        code: 'FB',
+        color: '#F59E0B',
+        sortOrder: 3,
+        description: 'ร้านอาหาร บาร์ รูมเซอร์วิส จัดเลี้ยง',
+      },
+      {
+        name: 'ฝ่ายวิศวกรรม',
+        nameEn: 'Engineering',
+        code: 'ENG',
+        color: '#EF4444',
+        sortOrder: 4,
+        description: 'บำรุงรักษา ระบบไฟฟ้า ประปา HVAC ไอที',
+      },
+      {
+        name: 'ฝ่ายทรัพยากรบุคคล',
+        nameEn: 'Human Resources',
+        code: 'HR',
+        color: '#EC4899',
+        sortOrder: 5,
+        description: 'สรรหา ฝึกอบรม เงินเดือน สวัสดิการ',
+      },
+      {
+        name: 'ฝ่ายการเงินและบัญชี',
+        nameEn: 'Finance & Accounting',
+        code: 'FIN',
+        color: '#06B6D4',
+        sortOrder: 6,
+        description: 'บัญชี การเงิน จัดซื้อ คลังสินค้า',
+      },
+      {
+        name: 'ฝ่ายขายและการตลาด',
+        nameEn: 'Sales & Marketing',
+        code: 'SM',
+        color: '#F97316',
+        sortOrder: 7,
+        description: 'ขาย การตลาด ประชาสัมพันธ์ OTA จัดการ',
+      },
+      {
+        name: 'ฝ่ายรักษาความปลอดภัย',
+        nameEn: 'Security',
+        code: 'SEC',
+        color: '#6B7280',
+        sortOrder: 8,
+        description: 'รักษาความปลอดภัย ควบคุมการเข้าออก',
+      },
+      {
+        name: 'ฝ่ายสปาและนันทนาการ',
+        nameEn: 'Spa & Recreation',
+        code: 'SPA',
+        color: '#A78BFA',
+        sortOrder: 9,
+        description: 'สปา ฟิตเนส สระว่ายน้ำ กิจกรรมแขก',
+      },
+      {
+        name: 'ฝ่ายบริหาร',
+        nameEn: 'Management',
+        code: 'MGT',
+        color: '#1D4ED8',
+        sortOrder: 10,
+        description: 'ผู้บริหารระดับสูง ผู้จัดการทั่วไป',
+      },
     ];
 
-    const positionTemplates: Record<string, Array<{ name: string; nameEn: string; level: number; sortOrder: number }>> = {
+    const positionTemplates: Record<
+      string,
+      Array<{ name: string; nameEn: string; level: number; sortOrder: number }>
+    > = {
       FO: [
         { name: 'ผู้จัดการฝ่ายต้อนรับ', nameEn: 'Front Office Manager', level: 8, sortOrder: 1 },
         { name: 'ผู้จัดการเวร', nameEn: 'Duty Manager', level: 7, sortOrder: 2 },
         { name: 'พนักงานต้อนรับ (กะกลางวัน)', nameEn: 'Front Desk Agent', level: 4, sortOrder: 3 },
         { name: 'พนักงานต้อนรับ (กะกลางคืน)', nameEn: 'Night Auditor', level: 4, sortOrder: 4 },
         { name: 'คอนเซียจ', nameEn: 'Concierge', level: 5, sortOrder: 5 },
-        { name: 'เจ้าหน้าที่ Guest Relations', nameEn: 'Guest Relations Officer', level: 5, sortOrder: 6 },
+        {
+          name: 'เจ้าหน้าที่ Guest Relations',
+          nameEn: 'Guest Relations Officer',
+          level: 5,
+          sortOrder: 6,
+        },
         { name: 'พนักงานยกกระเป๋า', nameEn: 'Bellman', level: 3, sortOrder: 7 },
         { name: 'เจ้าหน้าที่จองห้องพัก', nameEn: 'Reservation Agent', level: 4, sortOrder: 8 },
       ],
@@ -493,7 +576,12 @@ export class HrMasterDataService {
         { name: 'หัวหน้าชั้น', nameEn: 'Floor Supervisor', level: 6, sortOrder: 3 },
         { name: 'แม่บ้านห้องพัก', nameEn: 'Room Attendant', level: 3, sortOrder: 4 },
         { name: 'พนักงานซักรีด', nameEn: 'Laundry Attendant', level: 3, sortOrder: 5 },
-        { name: 'พนักงานทำความสะอาดพื้นที่ส่วนกลาง', nameEn: 'Public Area Cleaner', level: 2, sortOrder: 6 },
+        {
+          name: 'พนักงานทำความสะอาดพื้นที่ส่วนกลาง',
+          nameEn: 'Public Area Cleaner',
+          level: 2,
+          sortOrder: 6,
+        },
       ],
       FB: [
         { name: 'ผู้จัดการอาหารและเครื่องดื่ม', nameEn: 'F&B Manager', level: 8, sortOrder: 1 },
@@ -533,7 +621,12 @@ export class HrMasterDataService {
       ],
       SEC: [
         { name: 'ผู้จัดการรักษาความปลอดภัย', nameEn: 'Security Manager', level: 7, sortOrder: 1 },
-        { name: 'หัวหน้าเวรรักษาความปลอดภัย', nameEn: 'Security Supervisor', level: 6, sortOrder: 2 },
+        {
+          name: 'หัวหน้าเวรรักษาความปลอดภัย',
+          nameEn: 'Security Supervisor',
+          level: 6,
+          sortOrder: 2,
+        },
         { name: 'พนักงานรักษาความปลอดภัย', nameEn: 'Security Officer', level: 3, sortOrder: 3 },
       ],
       SPA: [
@@ -545,45 +638,267 @@ export class HrMasterDataService {
       MGT: [
         { name: 'ผู้จัดการทั่วไป', nameEn: 'General Manager', level: 10, sortOrder: 1 },
         { name: 'ผู้จัดการโรงแรม', nameEn: 'Resident Manager', level: 9, sortOrder: 2 },
-        { name: 'ผู้ช่วยผู้จัดการทั่วไป', nameEn: 'Assistant General Manager', level: 8, sortOrder: 3 },
+        {
+          name: 'ผู้ช่วยผู้จัดการทั่วไป',
+          nameEn: 'Assistant General Manager',
+          level: 8,
+          sortOrder: 3,
+        },
       ],
     };
 
     const leaveTypeTemplates = [
-      { name: 'ลาพักร้อน', nameEn: 'Annual Leave', code: 'ANNUAL', maxDaysPerYear: 15, isPaid: true, requiresDoc: false, color: '#10B981', sortOrder: 1, description: 'ลาพักร้อนประจำปี' },
-      { name: 'ลาป่วย', nameEn: 'Sick Leave', code: 'SICK', maxDaysPerYear: 30, isPaid: true, requiresDoc: false, color: '#EF4444', sortOrder: 2, description: 'ลาเนื่องจากเจ็บป่วย' },
-      { name: 'ลากิจ', nameEn: 'Personal Leave', code: 'PERSONAL', maxDaysPerYear: 3, isPaid: true, requiresDoc: false, color: '#F59E0B', sortOrder: 3, description: 'ลากิจส่วนตัว' },
-      { name: 'ลาคลอด', nameEn: 'Maternity Leave', code: 'MATERNITY', maxDaysPerYear: 90, isPaid: true, requiresDoc: true, color: '#EC4899', sortOrder: 4, description: 'ลาคลอดบุตร' },
-      { name: 'ลาเพื่อดูแลภรรยาคลอด', nameEn: 'Paternity Leave', code: 'PATERNITY', maxDaysPerYear: 15, isPaid: true, requiresDoc: true, color: '#3B82F6', sortOrder: 5, description: 'ลาเพื่อดูแลภรรยาคลอด' },
-      { name: 'ลาแต่งงาน', nameEn: 'Marriage Leave', code: 'MARRIAGE', maxDaysPerYear: 3, isPaid: true, requiresDoc: true, color: '#A78BFA', sortOrder: 6, description: 'ลาแต่งงาน' },
-      { name: 'ลาไว้ทุกข์', nameEn: 'Bereavement Leave', code: 'BEREAVEMENT', maxDaysPerYear: 3, isPaid: true, requiresDoc: false, color: '#6B7280', sortOrder: 7, description: 'ลาไว้ทุกข์' },
-      { name: 'ลาอบรม/สัมมนา', nameEn: 'Training Leave', code: 'TRAINING', maxDaysPerYear: null, isPaid: true, requiresDoc: false, color: '#06B6D4', sortOrder: 8, description: 'ลาเพื่อเข้ารับการอบรม' },
-      { name: 'ลาไม่รับเงินเดือน', nameEn: 'Unpaid Leave', code: 'UNPAID', maxDaysPerYear: null, isPaid: false, requiresDoc: false, color: '#D1D5DB', sortOrder: 9, description: 'ลาโดยไม่รับเงินเดือน' },
+      {
+        name: 'ลาพักร้อน',
+        nameEn: 'Annual Leave',
+        code: 'ANNUAL',
+        maxDaysPerYear: 15,
+        isPaid: true,
+        requiresDoc: false,
+        color: '#10B981',
+        sortOrder: 1,
+        description: 'ลาพักร้อนประจำปี',
+      },
+      {
+        name: 'ลาป่วย',
+        nameEn: 'Sick Leave',
+        code: 'SICK',
+        maxDaysPerYear: 30,
+        isPaid: true,
+        requiresDoc: false,
+        color: '#EF4444',
+        sortOrder: 2,
+        description: 'ลาเนื่องจากเจ็บป่วย',
+      },
+      {
+        name: 'ลากิจ',
+        nameEn: 'Personal Leave',
+        code: 'PERSONAL',
+        maxDaysPerYear: 3,
+        isPaid: true,
+        requiresDoc: false,
+        color: '#F59E0B',
+        sortOrder: 3,
+        description: 'ลากิจส่วนตัว',
+      },
+      {
+        name: 'ลาคลอด',
+        nameEn: 'Maternity Leave',
+        code: 'MATERNITY',
+        maxDaysPerYear: 90,
+        isPaid: true,
+        requiresDoc: true,
+        color: '#EC4899',
+        sortOrder: 4,
+        description: 'ลาคลอดบุตร',
+      },
+      {
+        name: 'ลาเพื่อดูแลภรรยาคลอด',
+        nameEn: 'Paternity Leave',
+        code: 'PATERNITY',
+        maxDaysPerYear: 15,
+        isPaid: true,
+        requiresDoc: true,
+        color: '#3B82F6',
+        sortOrder: 5,
+        description: 'ลาเพื่อดูแลภรรยาคลอด',
+      },
+      {
+        name: 'ลาแต่งงาน',
+        nameEn: 'Marriage Leave',
+        code: 'MARRIAGE',
+        maxDaysPerYear: 3,
+        isPaid: true,
+        requiresDoc: true,
+        color: '#A78BFA',
+        sortOrder: 6,
+        description: 'ลาแต่งงาน',
+      },
+      {
+        name: 'ลาไว้ทุกข์',
+        nameEn: 'Bereavement Leave',
+        code: 'BEREAVEMENT',
+        maxDaysPerYear: 3,
+        isPaid: true,
+        requiresDoc: false,
+        color: '#6B7280',
+        sortOrder: 7,
+        description: 'ลาไว้ทุกข์',
+      },
+      {
+        name: 'ลาอบรม/สัมมนา',
+        nameEn: 'Training Leave',
+        code: 'TRAINING',
+        maxDaysPerYear: null,
+        isPaid: true,
+        requiresDoc: false,
+        color: '#06B6D4',
+        sortOrder: 8,
+        description: 'ลาเพื่อเข้ารับการอบรม',
+      },
+      {
+        name: 'ลาไม่รับเงินเดือน',
+        nameEn: 'Unpaid Leave',
+        code: 'UNPAID',
+        maxDaysPerYear: null,
+        isPaid: false,
+        requiresDoc: false,
+        color: '#D1D5DB',
+        sortOrder: 9,
+        description: 'ลาโดยไม่รับเงินเดือน',
+      },
     ];
 
     const shiftTypeTemplates = [
-      { name: 'กะเช้า', nameEn: 'Morning Shift', code: 'MORNING', startTime: '07:00', endTime: '15:00', breakMinutes: 60, color: '#F59E0B', sortOrder: 1, description: '07:00-15:00 น.' },
-      { name: 'กะบ่าย', nameEn: 'Afternoon Shift', code: 'AFTERNOON', startTime: '15:00', endTime: '23:00', breakMinutes: 60, color: '#8B5CF6', sortOrder: 2, description: '15:00-23:00 น.' },
-      { name: 'กะดึก', nameEn: 'Night Shift', code: 'NIGHT', startTime: '23:00', endTime: '07:00', breakMinutes: 60, color: '#1E40AF', sortOrder: 3, description: '23:00-07:00 น.' },
-      { name: 'เวลาทำการปกติ', nameEn: 'Office Hours', code: 'OFFICE', startTime: '09:00', endTime: '18:00', breakMinutes: 60, color: '#10B981', sortOrder: 4, description: '09:00-18:00 น.' },
-      { name: 'ยืดหยุ่น', nameEn: 'Flexible Hours', code: 'FLEXIBLE', startTime: '08:00', endTime: '17:00', breakMinutes: 60, color: '#6B7280', sortOrder: 5, description: 'เวลาทำงานยืดหยุ่น' },
+      {
+        name: 'กะเช้า',
+        nameEn: 'Morning Shift',
+        code: 'MORNING',
+        startTime: '07:00',
+        endTime: '15:00',
+        breakMinutes: 60,
+        color: '#F59E0B',
+        sortOrder: 1,
+        description: '07:00-15:00 น.',
+      },
+      {
+        name: 'กะบ่าย',
+        nameEn: 'Afternoon Shift',
+        code: 'AFTERNOON',
+        startTime: '15:00',
+        endTime: '23:00',
+        breakMinutes: 60,
+        color: '#8B5CF6',
+        sortOrder: 2,
+        description: '15:00-23:00 น.',
+      },
+      {
+        name: 'กะดึก',
+        nameEn: 'Night Shift',
+        code: 'NIGHT',
+        startTime: '23:00',
+        endTime: '07:00',
+        breakMinutes: 60,
+        color: '#1E40AF',
+        sortOrder: 3,
+        description: '23:00-07:00 น.',
+      },
+      {
+        name: 'เวลาทำการปกติ',
+        nameEn: 'Office Hours',
+        code: 'OFFICE',
+        startTime: '09:00',
+        endTime: '18:00',
+        breakMinutes: 60,
+        color: '#10B981',
+        sortOrder: 4,
+        description: '09:00-18:00 น.',
+      },
+      {
+        name: 'ยืดหยุ่น',
+        nameEn: 'Flexible Hours',
+        code: 'FLEXIBLE',
+        startTime: '08:00',
+        endTime: '17:00',
+        breakMinutes: 60,
+        color: '#6B7280',
+        sortOrder: 5,
+        description: 'เวลาทำงานยืดหยุ่น',
+      },
     ];
 
     const allowanceTypeTemplates = [
-      { name: 'เซอร์วิสชาร์จ', nameEn: 'Service Charge', code: 'SERVICE_CHARGE', isTaxable: true, sortOrder: 1, description: 'ค่าบริการแบ่งให้พนักงาน' },
-      { name: 'ค่าอาหาร', nameEn: 'Meal Allowance', code: 'MEAL', isTaxable: false, sortOrder: 2, description: 'เบี้ยเลี้ยงค่าอาหาร' },
-      { name: 'ค่าเดินทาง', nameEn: 'Transportation Allowance', code: 'TRANSPORT', isTaxable: false, sortOrder: 3, description: 'ค่าใช้จ่ายการเดินทาง' },
-      { name: 'ค่าล่วงเวลา', nameEn: 'Overtime Pay', code: 'OVERTIME', isTaxable: true, sortOrder: 4, description: 'ค่าจ้างการทำงานล่วงเวลา' },
-      { name: 'เบี้ยกะ', nameEn: 'Shift Allowance', code: 'SHIFT', isTaxable: false, sortOrder: 5, description: 'เบี้ยเลี้ยงสำหรับการทำงานกะ' },
-      { name: 'โบนัสประจำปี', nameEn: 'Annual Bonus', code: 'BONUS', isTaxable: true, sortOrder: 6, description: 'โบนัสประจำปีตามผลประกอบการ' },
+      {
+        name: 'เซอร์วิสชาร์จ',
+        nameEn: 'Service Charge',
+        code: 'SERVICE_CHARGE',
+        isTaxable: true,
+        sortOrder: 1,
+        description: 'ค่าบริการแบ่งให้พนักงาน',
+      },
+      {
+        name: 'ค่าอาหาร',
+        nameEn: 'Meal Allowance',
+        code: 'MEAL',
+        isTaxable: false,
+        sortOrder: 2,
+        description: 'เบี้ยเลี้ยงค่าอาหาร',
+      },
+      {
+        name: 'ค่าเดินทาง',
+        nameEn: 'Transportation Allowance',
+        code: 'TRANSPORT',
+        isTaxable: false,
+        sortOrder: 3,
+        description: 'ค่าใช้จ่ายการเดินทาง',
+      },
+      {
+        name: 'ค่าล่วงเวลา',
+        nameEn: 'Overtime Pay',
+        code: 'OVERTIME',
+        isTaxable: true,
+        sortOrder: 4,
+        description: 'ค่าจ้างการทำงานล่วงเวลา',
+      },
+      {
+        name: 'เบี้ยกะ',
+        nameEn: 'Shift Allowance',
+        code: 'SHIFT',
+        isTaxable: false,
+        sortOrder: 5,
+        description: 'เบี้ยเลี้ยงสำหรับการทำงานกะ',
+      },
+      {
+        name: 'โบนัสประจำปี',
+        nameEn: 'Annual Bonus',
+        code: 'BONUS',
+        isTaxable: true,
+        sortOrder: 6,
+        description: 'โบนัสประจำปีตามผลประกอบการ',
+      },
     ];
 
     const deductionTypeTemplates = [
-      { name: 'ภาษีเงินได้บุคคลธรรมดา', nameEn: 'Personal Income Tax', code: 'INCOME_TAX', isRequired: true, sortOrder: 1, description: 'ภาษีเงินได้หัก ณ ที่จ่าย' },
-      { name: 'ประกันสังคม', nameEn: 'Social Security', code: 'SOCIAL_SECURITY', isRequired: true, sortOrder: 2, description: 'เงินสมทบกองทุนประกันสังคม 5%' },
-      { name: 'กองทุนสำรองเลี้ยงชีพ', nameEn: 'Provident Fund', code: 'PROVIDENT_FUND', isRequired: false, sortOrder: 3, description: 'เงินสะสมกองทุนสำรองเลี้ยงชีพ' },
-      { name: 'เงินกู้พนักงาน', nameEn: 'Employee Loan', code: 'EMPLOYEE_LOAN', isRequired: false, sortOrder: 4, description: 'หักคืนเงินกู้จากโรงแรม' },
-      { name: 'หักขาดงาน', nameEn: 'Absence Deduction', code: 'ABSENCE', isRequired: false, sortOrder: 5, description: 'หักเงินกรณีขาดงานโดยไม่มีเหตุ' },
+      {
+        name: 'ภาษีเงินได้บุคคลธรรมดา',
+        nameEn: 'Personal Income Tax',
+        code: 'INCOME_TAX',
+        isRequired: true,
+        sortOrder: 1,
+        description: 'ภาษีเงินได้หัก ณ ที่จ่าย',
+      },
+      {
+        name: 'ประกันสังคม',
+        nameEn: 'Social Security',
+        code: 'SOCIAL_SECURITY',
+        isRequired: true,
+        sortOrder: 2,
+        description: 'เงินสมทบกองทุนประกันสังคม 5%',
+      },
+      {
+        name: 'กองทุนสำรองเลี้ยงชีพ',
+        nameEn: 'Provident Fund',
+        code: 'PROVIDENT_FUND',
+        isRequired: false,
+        sortOrder: 3,
+        description: 'เงินสะสมกองทุนสำรองเลี้ยงชีพ',
+      },
+      {
+        name: 'เงินกู้พนักงาน',
+        nameEn: 'Employee Loan',
+        code: 'EMPLOYEE_LOAN',
+        isRequired: false,
+        sortOrder: 4,
+        description: 'หักคืนเงินกู้จากโรงแรม',
+      },
+      {
+        name: 'หักขาดงาน',
+        nameEn: 'Absence Deduction',
+        code: 'ABSENCE',
+        isRequired: false,
+        sortOrder: 5,
+        description: 'หักเงินกรณีขาดงานโดยไม่มีเหตุ',
+      },
     ];
 
     // ─── Upsert Departments + Positions ────────────────────────────────────────
@@ -624,7 +939,10 @@ export class HrMasterDataService {
       const existing = await this.prisma.hrLeaveType.findUnique({
         where: { tenantId_code: { tenantId, code: lt.code } },
       });
-      if (existing) { skipped.leaveTypes++; continue; }
+      if (existing) {
+        skipped.leaveTypes++;
+        continue;
+      }
       await this.prisma.hrLeaveType.create({ data: { ...lt, tenantId, isActive: true } });
       created.leaveTypes++;
     }
@@ -634,7 +952,10 @@ export class HrMasterDataService {
       const existing = await this.prisma.hrShiftType.findUnique({
         where: { tenantId_code: { tenantId, code: st.code } },
       });
-      if (existing) { skipped.shiftTypes++; continue; }
+      if (existing) {
+        skipped.shiftTypes++;
+        continue;
+      }
       await this.prisma.hrShiftType.create({ data: { ...st, tenantId, isActive: true } });
       created.shiftTypes++;
     }
@@ -644,7 +965,10 @@ export class HrMasterDataService {
       const existing = await this.prisma.hrAllowanceType.findUnique({
         where: { tenantId_code: { tenantId, code: at.code } },
       });
-      if (existing) { skipped.allowanceTypes++; continue; }
+      if (existing) {
+        skipped.allowanceTypes++;
+        continue;
+      }
       await this.prisma.hrAllowanceType.create({ data: { ...at, tenantId, isActive: true } });
       created.allowanceTypes++;
     }
@@ -654,20 +978,26 @@ export class HrMasterDataService {
       const existing = await this.prisma.hrDeductionType.findUnique({
         where: { tenantId_code: { tenantId, code: dt.code } },
       });
-      if (existing) { skipped.deductionTypes++; continue; }
+      if (existing) {
+        skipped.deductionTypes++;
+        continue;
+      }
       await this.prisma.hrDeductionType.create({ data: { ...dt, tenantId, isActive: true } });
       created.deductionTypes++;
     }
 
     const totalCreated = Object.values(created).reduce((a, b) => a + b, 0);
-    this.logger.log(`Initialized HR defaults for tenant ${tenantId}: ${totalCreated} records created`);
+    this.logger.log(
+      `Initialized HR defaults for tenant ${tenantId}: ${totalCreated} records created`,
+    );
 
     return {
       success: true,
       data: { created, skipped },
-      message: totalCreated > 0
-        ? `สร้างข้อมูลเริ่มต้นสำเร็จ: ${created.departments} แผนก, ${created.positions} ตำแหน่ง, ${created.leaveTypes} ประเภทการลา`
-        : 'ข้อมูลเริ่มต้นมีอยู่แล้วทั้งหมด ไม่มีการสร้างใหม่',
+      message:
+        totalCreated > 0
+          ? `สร้างข้อมูลเริ่มต้นสำเร็จ: ${created.departments} แผนก, ${created.positions} ตำแหน่ง, ${created.leaveTypes} ประเภทการลา`
+          : 'ข้อมูลเริ่มต้นมีอยู่แล้วทั้งหมด ไม่มีการสร้างใหม่',
     };
   }
 }

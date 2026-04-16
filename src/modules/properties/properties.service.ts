@@ -6,7 +6,10 @@ import { AuditLogService } from '../../audit-log/audit-log.service';
 
 @Injectable()
 export class PropertiesService {
-  constructor(private prisma: PrismaService, private auditLogService: AuditLogService) {}
+  constructor(
+    private prisma: PrismaService,
+    private auditLogService: AuditLogService,
+  ) {}
 
   private buildWhere(tenantId: string, search?: string, includeDeleted = false) {
     const where: any = { tenantId };
@@ -173,7 +176,9 @@ export class PropertiesService {
       this.prisma.room.count({ where: roomWhere }),
       this.prisma.room.count({ where: { ...roomWhere, status: 'available' } }),
       this.prisma.room.count({ where: { ...roomWhere, status: 'occupied' } }),
-      this.prisma.room.count({ where: { ...roomWhere, status: { in: ['maintenance', 'out_of_order'] } } }),
+      this.prisma.room.count({
+        where: { ...roomWhere, status: { in: ['maintenance', 'out_of_order'] } },
+      }),
       this.prisma.room.count({ where: { ...roomWhere, status: 'cleaning' } }),
       this.prisma.booking.count({
         where: {
@@ -321,7 +326,12 @@ export class PropertiesService {
     }
   }
 
-  async update(id: string, updatePropertyDto: UpdatePropertyDto, tenantId?: string, userId?: string) {
+  async update(
+    id: string,
+    updatePropertyDto: UpdatePropertyDto,
+    tenantId?: string,
+    userId?: string,
+  ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID is required');
     }

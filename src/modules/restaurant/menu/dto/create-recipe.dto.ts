@@ -24,12 +24,18 @@ export class CreateRecipeIngredientDto {
   @Type(() => Number)
   quantity?: number;
 
-  @ApiPropertyOptional({ example: 'ml', description: 'Unit of measurement (e.g. g, ml, cup, tbsp)' })
+  @ApiPropertyOptional({
+    example: 'ml',
+    description: 'Unit of measurement (e.g. g, ml, cup, tbsp)',
+  })
   @IsString()
   @IsOptional()
   unit?: string;
 
-  @ApiPropertyOptional({ example: 'Full-fat preferred', description: 'Extra note for this ingredient' })
+  @ApiPropertyOptional({
+    example: 'Full-fat preferred',
+    description: 'Extra note for this ingredient',
+  })
   @IsString()
   @IsOptional()
   notes?: string;
@@ -51,7 +57,8 @@ export class CreateRecipeDto {
   servings?: number;
 
   @ApiPropertyOptional({
-    example: '1. Heat oil in a wok over medium-high heat.\n2. Add curry paste and fry until fragrant...',
+    example:
+      '1. Heat oil in a wok over medium-high heat.\n2. Add curry paste and fry until fragrant...',
     description: 'Step-by-step cooking instructions (supports multi-line)',
   })
   @IsString()

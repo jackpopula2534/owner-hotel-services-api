@@ -14,7 +14,7 @@ import { SubscriptionStatus } from '../subscriptions/entities/subscription.entit
 import { InvoiceStatus } from '../invoices/entities/invoice.entity';
 import { PaymentMethod, PaymentStatus } from '../payments/entities/payment.entity';
 import { PrismaService } from '../prisma/prisma.service';
-import { CostCenterType, CostCategory, WarehouseType } from '@prisma/client';
+import { CostCenterType, CostCategory, WarehouseType, PurchaseRequisitionStatus, PurchaseOrderStatus, SupplierQuoteStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -59,6 +59,7 @@ export class SeederService {
       await this.seedHrPerformanceData();
       await this.seedRestaurantData();
       await this.seedInventoryData();
+      await this.seedPurchaseRequisitionData();
       await this.seedCostAccountingData();
 
       this.logger.log('✅ Database seeding completed successfully!');
@@ -5040,6 +5041,382 @@ export class SeederService {
     }
 
     this.logger.log(`✅ Inventory seed complete: warehouses, ${itemDefs.length} items, templates`);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PURCHASE REQUISITION & SUPPLIER QUOTES SEEDER
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Seed Purchase Requisition (PR), Supplier Quotes, and Price Comparison data.
+   * Depends on: seedInventoryData() (needs suppliers, items, warehouses).
+   */
+  private async seedPurchaseRequisitionData(): Promise<void> {
+    this.logger.log('📋 Seeding Purchase Requisition & Supplier Quotes data...');
+
+    // ── Find tenant (same as inventory seeder — Mountain View Resort SUB-002)
+    const ownerUser = await this.prisma.user.findUnique({
+      where: { email: 'premium.test@email.com' },
+    });
+    if (!ownerUser?.tenantId) {
+      this.logger.warn('  ⚠️ premium.test@email.com not found — skipping PR seed');
+      return;
+    }
+    const tenantId = ownerUser.tenantId;
+    const userId = ownerUser.id;
+
+    const property = await this.prisma.property.findFirst({
+      where: { tenantId },
+    });
+    if (!property) {
+      this.logger.warn('  ⚠️ No property for demo tenant — skipping PR seed');
+      return;
+    }
+    const propertyId = property.id;
+
+    // ── Load existing inventory data
+    const suppliers = await this.prisma.supplier.findMany({ where: { tenantId, deletedAt: null } });
+    const items = await this.prisma.inventoryItem.findMany({ where: { tenantId } });
+    const warehouses = await this.prisma.warehouse.findMany({ where: { tenantId } });
+
+    if (suppliers.length < 2 || items.length < 3 || warehouses.length === 0) {
+      this.logger.warn('  ⚠️ Insufficient inventory data — skipping PR seed');
+      return;
+    }
+
+    const mainWarehouse = warehouses.find(w => w.code === 'WH-MAIN') || warehouses[0];
+
+    // Helper: find item by SKU prefix
+    const findItem = (skuPrefix: string) => items.find(i => i.sku.startsWith(skuPrefix));
+    const findSupplier = (code: string) => suppliers.find(s => s.code === code);
+
+    // ── Generate document number
+    const generateDocNumber = async (prefix: string, docType: string): Promise<string> => {
+      const now = new Date();
+      const ym = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
+      const seq = await this.prisma.documentSequence.upsert({
+        where: { tenantId_docType_yearMonth: { tenantId, docType, yearMonth: ym } },
+        update: { lastNumber: { increment: 1 } },
+        create: { tenantId, docType, prefix, yearMonth: ym, lastNumber: 1 },
+      });
+      return `${prefix}-${ym}-${String(seq.lastNumber).padStart(4, '0')}`;
+    };
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // PR-1: ใบขอซื้อวัสดุห้องพัก — สถานะ PO_CREATED (completed workflow)
+    // ══════════════════════════════════════════════════════════════════════════
+    const soapItem = findItem('SOAP');
+    const shampooItem = findItem('SHMP');
+    const towelItem = findItem('TWL-200');
+    const supHotel = findSupplier('SUP-HOTEL');
+    const supMakro = findSupplier('SUP-MAKRO');
+
+    if (soapItem && shampooItem && towelItem && supHotel && supMakro) {
+      const pr1Number = await generateDocNumber('PR', 'PURCHASE_REQUISITION');
+      const pr1 = await this.prisma.purchaseRequisition.create({
+        data: {
+          tenantId,
+          propertyId,
+          prNumber: pr1Number,
+          status: PurchaseRequisitionStatus.PO_CREATED,
+          priority: 'HIGH',
+          requiredDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+          purpose: 'เติมสต็อกวัสดุห้องพักประจำเดือน',
+          department: 'แม่บ้าน (Housekeeping)',
+          notes: 'สต็อกสบู่และแชมพูเหลือน้อย ต้องเติมก่อนสิ้นเดือน',
+          requestedBy: userId,
+          approvedBy: userId,
+          approvedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
+        },
+      });
+
+      // PR-1 Items
+      await this.prisma.purchaseRequisitionItem.createMany({
+        data: [
+          { purchaseRequisitionId: pr1.id, itemId: soapItem.id, quantity: 200, estimatedUnitPrice: 15, estimatedTotalPrice: 3000 },
+          { purchaseRequisitionId: pr1.id, itemId: shampooItem.id, quantity: 200, estimatedUnitPrice: 25, estimatedTotalPrice: 5000 },
+          { purchaseRequisitionId: pr1.id, itemId: towelItem.id, quantity: 50, estimatedUnitPrice: 150, estimatedTotalPrice: 7500 },
+        ],
+      });
+
+      // Supplier Quotes for PR-1 (2 suppliers competed)
+      const sq1Hotel = await this.prisma.supplierQuote.create({
+        data: {
+          tenantId,
+          purchaseRequisitionId: pr1.id,
+          supplierId: supHotel.id,
+          quoteNumber: 'QT-HOTEL-2604-001',
+          status: SupplierQuoteStatus.SELECTED,
+          quotedDate: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000),
+          validUntil: new Date(Date.now() + 26 * 24 * 60 * 60 * 1000),
+          deliveryDays: 5,
+          paymentTerms: 'NET30',
+          subtotal: 14500,
+          taxAmount: 1015,
+          discountAmount: 500,
+          totalAmount: 15015,
+          receivedAt: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000),
+          selectedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
+        },
+      });
+
+      // Quote items for Hotel Amenities
+      await this.prisma.supplierQuoteItem.createMany({
+        data: [
+          { supplierQuoteId: sq1Hotel.id, itemId: soapItem.id, quantity: 200, unitPrice: 12, discount: 0, taxRate: 7, totalPrice: 2568 },
+          { supplierQuoteId: sq1Hotel.id, itemId: shampooItem.id, quantity: 200, unitPrice: 20, discount: 0, taxRate: 7, totalPrice: 4280 },
+          { supplierQuoteId: sq1Hotel.id, itemId: towelItem.id, quantity: 50, unitPrice: 140, discount: 500, taxRate: 7, totalPrice: 7167 },
+        ],
+      });
+
+      const sq1Makro = await this.prisma.supplierQuote.create({
+        data: {
+          tenantId,
+          purchaseRequisitionId: pr1.id,
+          supplierId: supMakro.id,
+          quoteNumber: 'QT-MAKRO-2604-088',
+          status: SupplierQuoteStatus.REJECTED,
+          quotedDate: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000),
+          validUntil: new Date(Date.now() + 26 * 24 * 60 * 60 * 1000),
+          deliveryDays: 2,
+          paymentTerms: 'NET30',
+          subtotal: 16000,
+          taxAmount: 1120,
+          discountAmount: 0,
+          totalAmount: 17120,
+          receivedAt: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000),
+          rejectedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
+          rejectionReason: 'ราคาสูงกว่าคู่แข่ง',
+        },
+      });
+
+      await this.prisma.supplierQuoteItem.createMany({
+        data: [
+          { supplierQuoteId: sq1Makro.id, itemId: soapItem.id, quantity: 200, unitPrice: 18, discount: 0, taxRate: 7, totalPrice: 3852 },
+          { supplierQuoteId: sq1Makro.id, itemId: shampooItem.id, quantity: 200, unitPrice: 28, discount: 0, taxRate: 7, totalPrice: 5992 },
+          { supplierQuoteId: sq1Makro.id, itemId: towelItem.id, quantity: 50, unitPrice: 160, discount: 0, taxRate: 7, totalPrice: 8560 },
+        ],
+      });
+
+      // Price Comparison for PR-1
+      await this.prisma.priceComparison.create({
+        data: {
+          tenantId,
+          purchaseRequisitionId: pr1.id,
+          comparisonNumber: await generateDocNumber('PC', 'PRICE_COMPARISON'),
+          selectedQuoteId: sq1Hotel.id,
+          selectionReason: 'ราคาต่ำกว่า ส่วนลดผ้าเช็ดหน้า และเป็นซัพพลายเออร์เฉพาะทาง',
+          comparedBy: userId,
+          comparedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
+          approvedBy: userId,
+          approvedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
+        },
+      });
+
+      // PO created from this PR
+      const po1Number = await generateDocNumber('PO', 'PURCHASE_ORDER');
+      await this.prisma.purchaseOrder.create({
+        data: {
+          tenantId,
+          propertyId,
+          poNumber: po1Number,
+          supplierId: supHotel.id,
+          warehouseId: mainWarehouse.id,
+          status: PurchaseOrderStatus.APPROVED,
+          expectedDate: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000),
+          subtotal: 14500,
+          taxAmount: 1015,
+          totalAmount: 15015,
+          requestedBy: userId,
+          approvedBy: userId,
+          approvedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
+          quotationNumber: 'QT-HOTEL-2604-001',
+          quotationDate: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000),
+          purchaseRequisitionId: pr1.id,
+          notes: 'สร้างจาก PR ' + pr1Number,
+          items: {
+            create: [
+              { itemId: soapItem.id, quantity: 200, unitPrice: 12, discount: 0, taxRate: 7, totalPrice: 2568 },
+              { itemId: shampooItem.id, quantity: 200, unitPrice: 20, discount: 0, taxRate: 7, totalPrice: 4280 },
+              { itemId: towelItem.id, quantity: 50, unitPrice: 140, discount: 5, taxRate: 7, totalPrice: 7167 },
+            ],
+          },
+        },
+      });
+
+      this.logger.log(`  ✓ PR-1 (${pr1Number}): วัสดุห้องพัก — PO_CREATED + 2 quotes + comparison`);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // PR-2: ใบขอซื้อน้ำยาทำความสะอาด — สถานะ QUOTES_RECEIVED (ready to compare)
+    // ══════════════════════════════════════════════════════════════════════════
+    const detergentItem = findItem('DET');
+    const floorCleanItem = findItem('FLR-CLN');
+    const toiletCleanItem = findItem('TLT-CLN');
+    const supClean = findSupplier('SUP-CLEAN');
+    const supBigc = findSupplier('SUP-BIGC');
+
+    if (detergentItem && floorCleanItem && supClean && supBigc) {
+      const pr2Number = await generateDocNumber('PR', 'PURCHASE_REQUISITION');
+      const pr2 = await this.prisma.purchaseRequisition.create({
+        data: {
+          tenantId,
+          propertyId,
+          prNumber: pr2Number,
+          status: PurchaseRequisitionStatus.QUOTES_RECEIVED,
+          priority: 'NORMAL',
+          requiredDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+          purpose: 'สั่งซื้อน้ำยาทำความสะอาดรอบ Q2',
+          department: 'แม่บ้าน (Housekeeping)',
+          notes: 'เตรียมสต็อกสำหรับไตรมาสที่ 2',
+          requestedBy: userId,
+          approvedBy: userId,
+          approvedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
+        },
+      });
+
+      const pr2Items = [
+        { purchaseRequisitionId: pr2.id, itemId: detergentItem.id, quantity: 30, estimatedUnitPrice: 250, estimatedTotalPrice: 7500 },
+        { purchaseRequisitionId: pr2.id, itemId: floorCleanItem.id, quantity: 20, estimatedUnitPrice: 180, estimatedTotalPrice: 3600 },
+      ];
+      if (toiletCleanItem) {
+        pr2Items.push({ purchaseRequisitionId: pr2.id, itemId: toiletCleanItem.id, quantity: 25, estimatedUnitPrice: 120, estimatedTotalPrice: 3000 });
+      }
+      await this.prisma.purchaseRequisitionItem.createMany({ data: pr2Items });
+
+      // Quote from SupplyClean — lower price
+      const sq2Clean = await this.prisma.supplierQuote.create({
+        data: {
+          tenantId,
+          purchaseRequisitionId: pr2.id,
+          supplierId: supClean.id,
+          quoteNumber: 'QT-SC-2604-045',
+          status: SupplierQuoteStatus.RECEIVED,
+          quotedDate: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000),
+          validUntil: new Date(Date.now() + 29 * 24 * 60 * 60 * 1000),
+          deliveryDays: 3,
+          paymentTerms: 'NET15',
+          subtotal: 12800,
+          taxAmount: 896,
+          discountAmount: 800,
+          totalAmount: 12896,
+          receivedAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000),
+        },
+      });
+
+      const sq2CleanItems = [
+        { supplierQuoteId: sq2Clean.id, itemId: detergentItem.id, quantity: 30, unitPrice: 230, discount: 5, taxRate: 7, totalPrice: 7009.5 },
+        { supplierQuoteId: sq2Clean.id, itemId: floorCleanItem.id, quantity: 20, unitPrice: 165, discount: 0, taxRate: 7, totalPrice: 3531 },
+      ];
+      if (toiletCleanItem) {
+        sq2CleanItems.push({ supplierQuoteId: sq2Clean.id, itemId: toiletCleanItem.id, quantity: 25, unitPrice: 110, discount: 0, taxRate: 7, totalPrice: 2942.5 });
+      }
+      await this.prisma.supplierQuoteItem.createMany({ data: sq2CleanItems });
+
+      // Quote from BigC — faster delivery but higher price
+      const sq2Bigc = await this.prisma.supplierQuote.create({
+        data: {
+          tenantId,
+          purchaseRequisitionId: pr2.id,
+          supplierId: supBigc.id,
+          quoteNumber: 'QT-BIGC-2604-112',
+          status: SupplierQuoteStatus.RECEIVED,
+          quotedDate: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000),
+          validUntil: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+          deliveryDays: 1,
+          paymentTerms: 'COD',
+          subtotal: 14500,
+          taxAmount: 1015,
+          discountAmount: 0,
+          totalAmount: 15515,
+          receivedAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000),
+        },
+      });
+
+      const sq2BigcItems = [
+        { supplierQuoteId: sq2Bigc.id, itemId: detergentItem.id, quantity: 30, unitPrice: 270, discount: 0, taxRate: 7, totalPrice: 8667 },
+        { supplierQuoteId: sq2Bigc.id, itemId: floorCleanItem.id, quantity: 20, unitPrice: 200, discount: 0, taxRate: 7, totalPrice: 4280 },
+      ];
+      if (toiletCleanItem) {
+        sq2BigcItems.push({ supplierQuoteId: sq2Bigc.id, itemId: toiletCleanItem.id, quantity: 25, unitPrice: 130, discount: 0, taxRate: 7, totalPrice: 3477.5 });
+      }
+      await this.prisma.supplierQuoteItem.createMany({ data: sq2BigcItems });
+
+      this.logger.log(`  ✓ PR-2 (${pr2Number}): น้ำยาทำความสะอาด — QUOTES_RECEIVED (2 quotes, ready to compare)`);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // PR-3: ใบขอซื้อวัตถุดิบอาหาร — สถานะ APPROVED (waiting for quotes)
+    // ══════════════════════════════════════════════════════════════════════════
+    const riceItem = findItem('RICE');
+    const flourItem = findItem('FLOUR');
+    const oilItem = findItem('OIL');
+    const sugarItem = findItem('SUGAR');
+
+    if (riceItem && flourItem) {
+      const pr3Number = await generateDocNumber('PR', 'PURCHASE_REQUISITION');
+      const pr3 = await this.prisma.purchaseRequisition.create({
+        data: {
+          tenantId,
+          propertyId,
+          prNumber: pr3Number,
+          status: PurchaseRequisitionStatus.APPROVED,
+          priority: 'NORMAL',
+          requiredDate: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000),
+          purpose: 'สั่งซื้อวัตถุดิบอาหารประจำสัปดาห์',
+          department: 'ครัว (Kitchen)',
+          notes: 'สต็อกข้าวสารเหลือน้อยกว่า reorder point',
+          requestedBy: userId,
+          approvedBy: userId,
+          approvedAt: new Date(),
+        },
+      });
+
+      const pr3Items = [
+        { purchaseRequisitionId: pr3.id, itemId: riceItem.id, quantity: 10, estimatedUnitPrice: 45, estimatedTotalPrice: 450 },
+        { purchaseRequisitionId: pr3.id, itemId: flourItem.id, quantity: 5, estimatedUnitPrice: 35, estimatedTotalPrice: 175 },
+      ];
+      if (oilItem) pr3Items.push({ purchaseRequisitionId: pr3.id, itemId: oilItem.id, quantity: 8, estimatedUnitPrice: 65, estimatedTotalPrice: 520 });
+      if (sugarItem) pr3Items.push({ purchaseRequisitionId: pr3.id, itemId: sugarItem.id, quantity: 5, estimatedUnitPrice: 30, estimatedTotalPrice: 150 });
+
+      await this.prisma.purchaseRequisitionItem.createMany({ data: pr3Items });
+
+      this.logger.log(`  ✓ PR-3 (${pr3Number}): วัตถุดิบอาหาร — APPROVED (ready to request quotes)`);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // PR-4: ใบขอซื้ออุปกรณ์ซ่อมบำรุง — สถานะ DRAFT
+    // ══════════════════════════════════════════════════════════════════════════
+    const bulbItem = findItem('LED');
+    const filterItem = findItem('AC-FLT');
+
+    if (bulbItem && filterItem) {
+      const pr4Number = await generateDocNumber('PR', 'PURCHASE_REQUISITION');
+      const pr4 = await this.prisma.purchaseRequisition.create({
+        data: {
+          tenantId,
+          propertyId,
+          prNumber: pr4Number,
+          status: PurchaseRequisitionStatus.DRAFT,
+          priority: 'LOW',
+          requiredDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          purpose: 'เตรียมสต็อกอุปกรณ์ซ่อมบำรุงล่วงหน้า',
+          department: 'ช่างซ่อมบำรุง (Maintenance)',
+          requestedBy: userId,
+        },
+      });
+
+      await this.prisma.purchaseRequisitionItem.createMany({
+        data: [
+          { purchaseRequisitionId: pr4.id, itemId: bulbItem.id, quantity: 50, estimatedUnitPrice: 85, estimatedTotalPrice: 4250 },
+          { purchaseRequisitionId: pr4.id, itemId: filterItem.id, quantity: 20, estimatedUnitPrice: 350, estimatedTotalPrice: 7000 },
+        ],
+      });
+
+      this.logger.log(`  ✓ PR-4 (${pr4Number}): อุปกรณ์ซ่อมบำรุง — DRAFT`);
+    }
+
+    this.logger.log('✅ Purchase Requisition & Supplier Quotes seed complete');
   }
 
   // ═══════════════════════════════════════════════════════════════════════════

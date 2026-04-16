@@ -127,11 +127,7 @@ describe('HrService', () => {
         .mockResolvedValueOnce({ id: 'emp-other' }); // conflict
 
       await expect(
-        service.update(
-          'emp-1',
-          { employeeCode: 'EMP-0002' } as any,
-          'tenant-1',
-        ),
+        service.update('emp-1', { employeeCode: 'EMP-0002' } as any, 'tenant-1'),
       ).rejects.toThrow(ConflictException);
     });
 
