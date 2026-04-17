@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE `suppliers` ADD COLUMN `emoji` VARCHAR(191) NULL DEFAULT '🏢',
+    ADD COLUMN `tags` VARCHAR(191) NULL;

@@ -2298,6 +2298,8 @@ model Supplier {
   leadTimeDays  Int?    // Average delivery lead time
   rating        Decimal? @db.Decimal(3, 2) // 0.00 - 5.00
   notes         String?  @db.Text
+  tags          String?  // JSON array of tag IDs e.g. '["cleaning","preferred"]'
+  emoji         String?  @default("🏢") // Display icon for UI
   isActive      Boolean  @default(true)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -2418,6 +2420,16 @@ enum PurchaseOrderStatus {
   CLOSED
 }
 
+enum PurchaseOrderDiscountMode {
+  BEFORE_VAT
+  AFTER_VAT
+}
+
+enum PurchaseOrderDiscountType {
+  PERCENT
+  AMOUNT
+}
+
 model PurchaseOrder {
   id            String              @id @default(uuid())
   tenantId      String
@@ -2430,7 +2442,13 @@ model PurchaseOrder {
   expectedDate  DateTime?           // Expected delivery date
   subtotal      Decimal             @default(0) @db.Decimal(12, 2)
   taxAmount     Decimal             @default(0) @db.Decimal(10, 2)
-  discountAmount Decimal            @default(0) @db.Decimal(10, 2)
+  discountAmount Decimal            @default(0) @db.Decimal(10, 2) // legacy total discount
+  // ─── New discount / VAT fields (2026-04) ─────────────────────
+  discountMode          PurchaseOrderDiscountMode  @default(BEFORE_VAT)
+  headerDiscount        Decimal                    @default(0) @db.Decimal(12, 2)
+  headerDiscountType    PurchaseOrderDiscountType  @default(AMOUNT)
+  calculationBreakdown  Json?                      // Step-by-step calc audit
+  // ──────────────────────────────────────────────────────────────
   totalAmount   Decimal             @default(0) @db.Decimal(12, 2)
   currency      String              @default("THB")
   notes         String?             @db.Text
@@ -2470,6 +2488,7 @@ model PurchaseOrderItem {
   receivedQty     Int     @default(0) // Track how much has been received
   unitPrice       Decimal @db.Decimal(10, 2)
   discount        Decimal @default(0) @db.Decimal(10, 2)
+  discountType    PurchaseOrderDiscountType @default(PERCENT)
   taxRate         Decimal @default(0) @db.Decimal(5, 2) // e.g. 7.00 for 7%
   totalPrice      Decimal @db.Decimal(12, 2)
   notes           String? @db.Text
@@ -3310,7 +3329,12 @@ model DocumentSettings {
   // Logo
   logoUrl         String?           // URL ของ Logo
   logoWidth       Int?     @default(40) // ความกว้าง Logo (mm) ใน PDF
-  logoPosition    String   @default("left") // left | center | right
+  logoHeight      Int?     @default(40) // ความสูง Logo (mm) ใน PDF
+  logoOffsetX     Float?   @default(0)  // ตำแหน่งเยื้องแนวนอน (mm) — รองรับ 0.5 step
+  logoOffsetY     Float?   @default(0)  // ตำแหน่งเยื้องแนวตั้ง (mm) — รองรับ 0.5 step
+  logoPosition    String   @default("left")   // left | center | right
+  logoFrameStyle  String   @default("plain")  // plain | framed
+  logoVerticalAlign String @default("center") // top | center | bottom
 
   // Payment / Bank Info
   bankName        String?           // ชื่อธนาคาร

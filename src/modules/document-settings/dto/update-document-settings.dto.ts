@@ -4,6 +4,7 @@ import {
   IsBoolean,
   IsInt,
   IsIn,
+  IsNumber,
   MaxLength,
   Min,
   Max,
@@ -83,15 +84,48 @@ export class UpdateDocumentSettingsDto {
   @ApiPropertyOptional({ description: 'ความกว้าง Logo (mm) ใน PDF', example: 40 })
   @IsOptional()
   @IsInt()
-  @Min(10)
-  @Max(80)
+  @Min(5)
+  @Max(120)
   logoWidth?: number;
+
+  @ApiPropertyOptional({ description: 'ความสูง Logo (mm) ใน PDF', example: 40 })
+  @IsOptional()
+  @IsInt()
+  @Min(5)
+  @Max(120)
+  logoHeight?: number;
+
+  @ApiPropertyOptional({ description: 'ตำแหน่งเยื้องแนวนอน (mm)', example: 0 })
+  @IsOptional()
+  @IsNumber()
+  @Min(-30)
+  @Max(30)
+  logoOffsetX?: number;
+
+  @ApiPropertyOptional({ description: 'ตำแหน่งเยื้องแนวตั้ง (mm)', example: 0 })
+  @IsOptional()
+  @IsNumber()
+  @Min(-30)
+  @Max(30)
+  logoOffsetY?: number;
 
   @ApiPropertyOptional({ description: 'ตำแหน่ง Logo', enum: ['left', 'center', 'right'] })
   @IsOptional()
   @IsString()
   @IsIn(['left', 'center', 'right'])
   logoPosition?: string;
+
+  @ApiPropertyOptional({ description: 'สไตล์กรอบ Logo', enum: ['plain', 'framed'] })
+  @IsOptional()
+  @IsString()
+  @IsIn(['plain', 'framed'])
+  logoFrameStyle?: string;
+
+  @ApiPropertyOptional({ description: 'การจัดตำแหน่งแนวตั้ง Logo', enum: ['top', 'center', 'bottom'] })
+  @IsOptional()
+  @IsString()
+  @IsIn(['top', 'center', 'bottom'])
+  logoVerticalAlign?: string;
 
   // ── Bank Info ──
   @ApiPropertyOptional({ description: 'ชื่อธนาคาร', example: 'ธนาคารกสิกรไทย' })

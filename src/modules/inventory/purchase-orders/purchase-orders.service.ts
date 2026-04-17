@@ -1,9 +1,49 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
+import {
+  calculatePurchaseOrderTotals,
+  CalculationBreakdown,
+  DiscountMode,
+  DiscountType,
+  LineBreakdown,
+} from '@/common/purchase-order/po-calculation';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { QueryPurchaseOrderDto, PurchaseOrderStatus } from './dto/query-purchase-order.dto';
+
+type PurchaseOrderItemInput = {
+  itemId: string;
+  quantity: number;
+  unitPrice: number;
+  discount?: number;
+  discountType?: DiscountType;
+  taxRate?: number;
+  notes?: string;
+};
+
+/**
+ * Row shape of a persisted PurchaseOrder after the 20260417 migration adds
+ * `discountMode`, `headerDiscount`, `headerDiscountType`, and
+ * `calculationBreakdown`. Used by this service to read the new columns
+ * without waiting for a local `prisma generate` — the runtime client
+ * returns them as soon as the migration is applied.
+ */
+type PurchaseOrderWithDiscount = Prisma.PurchaseOrderGetPayload<Record<string, never>> & {
+  discountMode: DiscountMode;
+  headerDiscount: Prisma.Decimal | number | null;
+  headerDiscountType: DiscountType;
+  calculationBreakdown: Prisma.JsonValue | null;
+};
+
+/**
+ * Row shape of a PurchaseOrderItem after the migration adds `discountType`.
+ */
+type PurchaseOrderItemWithDiscountType = Prisma.PurchaseOrderItemGetPayload<
+  Record<string, never>
+> & {
+  discountType: DiscountType;
+};
 
 @Injectable()
 export class PurchaseOrdersService {
@@ -15,7 +55,9 @@ export class PurchaseOrdersService {
    * Resolve user UUIDs to full names (firstName + lastName).
    * Returns a Map<userId, fullName>.
    */
-  private async resolveUserNames(userIds: (string | null | undefined)[]): Promise<Map<string, string>> {
+  private async resolveUserNames(
+    userIds: (string | null | undefined)[],
+  ): Promise<Map<string, string>> {
     const validIds = userIds.filter((id): id is string => !!id);
     if (validIds.length === 0) return new Map();
 
@@ -32,11 +74,50 @@ export class PurchaseOrdersService {
     return map;
   }
 
+  /**
+   * Compute totals + breakdown from a DTO's items + header discount.
+   * Shared helper used by create() and update() so the math lives
+   * in exactly one place.
+   */
+  private computeTotals(
+    items: PurchaseOrderItemInput[],
+    headerDiscount: number,
+    headerDiscountType: DiscountType,
+    discountMode: DiscountMode,
+  ): CalculationBreakdown {
+    return calculatePurchaseOrderTotals({
+      discountMode,
+      headerDiscount: {
+        value: headerDiscount,
+        type: headerDiscountType,
+      },
+      lines: items.map((item) => ({
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        discountValue: item.discount ?? 0,
+        discountType: item.discountType ?? 'PERCENT',
+        taxRate: item.taxRate ?? 0,
+      })),
+    });
+  }
+
   async findAll(
     tenantId: string,
     query: QueryPurchaseOrderDto,
   ): Promise<{
-    data: any[];
+    data: Array<{
+      id: string;
+      poNumber: string;
+      status: string;
+      supplierId: string;
+      supplierName: string;
+      propertyId: string;
+      warehouseId: string;
+      expectedDate: Date | null;
+      createdAt: Date;
+      totalAmount: Prisma.Decimal;
+      itemCount: number;
+    }>;
     meta: { page: number; limit: number; total: number };
   }> {
     const page = query.page || 1;
@@ -104,8 +185,11 @@ export class PurchaseOrdersService {
     };
   }
 
-  async findOne(id: string, tenantId: string): Promise<any> {
-    const po = await this.prisma.purchaseOrder.findUnique({
+  async findOne(id: string, tenantId: string): Promise<Record<string, unknown>> {
+    // `discountType` on items and `discountMode`/`headerDiscount*`/`calculationBreakdown`
+    // on the PO are newly-added columns (see migration 20260417). They are cast via
+    // the widened row types below until `prisma generate` runs against the updated schema.
+    const poRaw = await this.prisma.purchaseOrder.findUnique({
       where: { id },
       include: {
         items: {
@@ -121,18 +205,23 @@ export class PurchaseOrdersService {
             quantity: true,
             unitPrice: true,
             discount: true,
+            discountType: true,
             taxRate: true,
             totalPrice: true,
             notes: true,
-          },
+          } as unknown as Prisma.PurchaseOrderItemSelect,
         },
         supplier: {
           select: {
             id: true,
             name: true,
+            code: true,
             contactPerson: true,
             email: true,
             phone: true,
+            address: true,
+            taxId: true,
+            paymentTerms: true,
           },
         },
         goodsReceives: {
@@ -146,15 +235,30 @@ export class PurchaseOrdersService {
       },
     });
 
-    if (!po || po.tenantId !== tenantId) {
+    if (!poRaw || poRaw.tenantId !== tenantId) {
       throw new NotFoundException('Purchase order not found');
     }
 
+    const po = poRaw as unknown as PurchaseOrderWithDiscount & {
+      items: (PurchaseOrderItemWithDiscountType & {
+        item?: { name: string; sku: string } | null;
+      })[];
+      supplier: {
+        id: string;
+        name: string;
+        code: string | null;
+        contactPerson: string | null;
+        email: string | null;
+        phone: string | null;
+        address: string | null;
+        taxId: string | null;
+        paymentTerms: string | null;
+      } | null;
+      goodsReceives: Array<{ id: string; grNumber: string; status: string; receiveDate: Date }>;
+    };
+
     // Resolve user names for approvedBy and requestedBy
-    const userNameMap = await this.resolveUserNames([
-      po.approvedBy,
-      po.requestedBy,
-    ]);
+    const userNameMap = await this.resolveUserNames([po.approvedBy, po.requestedBy]);
 
     return {
       id: po.id,
@@ -165,20 +269,30 @@ export class PurchaseOrdersService {
       supplierName: po.supplier?.name,
       supplier: po.supplier,
       warehouseId: po.warehouseId,
+      orderDate: po.orderDate,
       expectedDate: po.expectedDate,
       notes: po.notes,
       internalNotes: po.internalNotes,
       subtotal: po.subtotal,
+      discountAmount: po.discountAmount,
+      discountMode: po.discountMode,
+      headerDiscount: po.headerDiscount,
+      headerDiscountType: po.headerDiscountType,
+      calculationBreakdown: po.calculationBreakdown,
       taxAmount: po.taxAmount,
       totalAmount: po.totalAmount,
+      currency: po.currency,
+      cancelReason: po.cancelReason,
+      cancelledAt: po.cancelledAt,
       items: po.items.map((item) => ({
         id: item.id,
         itemId: item.itemId,
-        itemName: (item as any).item?.name,
-        itemSku: (item as any).item?.sku,
+        itemName: item.item?.name,
+        itemSku: item.item?.sku,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
         discount: item.discount,
+        discountType: item.discountType,
         taxRate: item.taxRate,
         lineTotal: item.totalPrice,
         notes: item.notes,
@@ -194,7 +308,11 @@ export class PurchaseOrdersService {
     };
   }
 
-  async create(dto: CreatePurchaseOrderDto, userId: string, tenantId: string): Promise<any> {
+  async create(
+    dto: CreatePurchaseOrderDto,
+    userId: string,
+    tenantId: string,
+  ): Promise<Record<string, unknown>> {
     // Auto-resolve propertyId if not provided — use tenant's first property
     let propertyId = dto.propertyId;
     if (!propertyId) {
@@ -245,29 +363,25 @@ export class PurchaseOrdersService {
       throw new NotFoundException('One or more inventory items not found');
     }
 
-    // Calculate totals
-    let subtotal = 0;
-    let taxAmount = 0;
-
-    dto.items.forEach((item) => {
-      const linePrice = item.quantity * item.unitPrice;
-      const discountAmount = linePrice * ((item.discount || 0) / 100);
-      const discountedPrice = linePrice - discountAmount;
-      const itemTax = discountedPrice * ((item.taxRate || 0) / 100);
-
-      subtotal += discountedPrice;
-      taxAmount += itemTax;
-    });
-
-    const totalAmount = subtotal + taxAmount;
+    // Calculate totals using shared module
+    const discountMode: DiscountMode = dto.discountMode ?? 'BEFORE_VAT';
+    const headerDiscountType: DiscountType = dto.headerDiscountType ?? 'AMOUNT';
+    const breakdown = this.computeTotals(
+      dto.items,
+      dto.headerDiscount ?? 0,
+      headerDiscountType,
+      discountMode,
+    );
 
     // Create in transaction: generate PO number, create PO and items
     const po = await this.prisma.$transaction(async (tx) => {
-      // Generate PO number
       const poNumber = await this.generateDocNumber(tenantId, 'PURCHASE_ORDER', 'PO', tx);
 
-      // Create purchase order
       const newPo = await tx.purchaseOrder.create({
+        // `discountMode`, `headerDiscount`, `headerDiscountType`, and
+        // `calculationBreakdown` are new columns (migration 20260417). Once
+        // `prisma generate` runs in CI/deploy against the updated schema the
+        // cast below becomes a no-op.
         data: {
           tenantId,
           poNumber,
@@ -281,42 +395,28 @@ export class PurchaseOrdersService {
           quotationDate: dto.quotationDate ? new Date(dto.quotationDate) : null,
           purchaseRequisitionId: dto.purchaseRequisitionId || null,
           status: PurchaseOrderStatus.DRAFT,
-          subtotal,
-          taxAmount,
-          totalAmount,
+          subtotal: breakdown.subtotal,
+          discountAmount: breakdown.totalLineDiscount + breakdown.headerDiscountAmount,
+          discountMode,
+          headerDiscount: breakdown.headerDiscountAmount,
+          headerDiscountType,
+          calculationBreakdown: breakdown as unknown as Prisma.InputJsonValue,
+          taxAmount: breakdown.vatAmount,
+          totalAmount: breakdown.grandTotal,
           requestedBy: userId,
-        },
+        } as unknown as Prisma.PurchaseOrderUncheckedCreateInput,
       });
 
-      // Create PO items
       await tx.purchaseOrderItem.createMany({
-        data: dto.items.map((item) => {
-          const linePrice = item.quantity * item.unitPrice;
-          const discountAmount = linePrice * ((item.discount || 0) / 100);
-          const discountedPrice = linePrice - discountAmount;
-
-          return {
-            purchaseOrderId: newPo.id,
-            itemId: item.itemId,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            discount: item.discount || 0,
-            taxRate: item.taxRate || 0,
-            totalPrice: discountedPrice,
-            notes: item.notes || null,
-          };
-        }),
+        data: dto.items.map((item, idx) => this.buildItemRow(newPo.id, item, breakdown.lines[idx])),
       });
 
-      // Update PR status to PO_CREATED if linked to a purchase requisition
       if (dto.purchaseRequisitionId) {
         await tx.purchaseRequisition.update({
           where: { id: dto.purchaseRequisitionId },
           data: { status: 'PO_CREATED' },
         });
-        this.logger.log(
-          `PR ${dto.purchaseRequisitionId} status updated to PO_CREATED`,
-        );
+        this.logger.log(`PR ${dto.purchaseRequisitionId} status updated to PO_CREATED`);
       }
 
       return newPo;
@@ -326,16 +426,22 @@ export class PurchaseOrdersService {
     return this.findOne(po.id, tenantId);
   }
 
-  async update(id: string, dto: UpdatePurchaseOrderDto, tenantId: string): Promise<any> {
-    const po = await this.prisma.purchaseOrder.findUnique({
+  async update(
+    id: string,
+    dto: UpdatePurchaseOrderDto,
+    tenantId: string,
+  ): Promise<Record<string, unknown>> {
+    const poRaw = await this.prisma.purchaseOrder.findUnique({
       where: { id },
     });
 
-    if (!po || po.tenantId !== tenantId) {
+    if (!poRaw || poRaw.tenantId !== tenantId) {
       throw new NotFoundException('Purchase order not found');
     }
 
-    // Only allow update if status is DRAFT or PENDING_APPROVAL
+    // See note on PurchaseOrderWithDiscount at the top of this file.
+    const po = poRaw as unknown as PurchaseOrderWithDiscount;
+
     if (
       ![PurchaseOrderStatus.DRAFT, PurchaseOrderStatus.PENDING_APPROVAL].includes(
         po.status as PurchaseOrderStatus,
@@ -346,80 +452,84 @@ export class PurchaseOrdersService {
       );
     }
 
-    // Prepare update data
-    const updateData: Prisma.PurchaseOrderUpdateInput = {
+    // Using a widened record here because discount fields are new (see migration
+    // 20260417); we still cast to Prisma's input type at the boundary below.
+    const updateData: Record<string, unknown> = {
       expectedDate: dto.expectedDate ? new Date(dto.expectedDate) : undefined,
       notes: dto.notes,
       internalNotes: dto.internalNotes,
       updatedAt: new Date(),
     };
 
-    // If items are being updated, recalculate totals
-    if (dto.items && dto.items.length > 0) {
-      // Verify all items exist
-      const itemIds = dto.items.map((item) => item.itemId);
-      const existingItems = await this.prisma.inventoryItem.findMany({
-        where: { id: { in: itemIds }, tenantId },
-        select: { id: true },
-      });
+    // If items or discount fields are being updated, recalculate totals
+    const willRecalculate =
+      (dto.items && dto.items.length > 0) ||
+      dto.discountMode !== undefined ||
+      dto.headerDiscount !== undefined ||
+      dto.headerDiscountType !== undefined;
 
-      if (existingItems.length !== itemIds.length) {
-        throw new NotFoundException('One or more inventory items not found');
+    let breakdown: CalculationBreakdown | null = null;
+    const discountMode: DiscountMode =
+      dto.discountMode ?? (po.discountMode as DiscountMode) ?? 'BEFORE_VAT';
+    const headerDiscountType: DiscountType =
+      dto.headerDiscountType ?? (po.headerDiscountType as DiscountType) ?? 'AMOUNT';
+    const headerDiscountValue =
+      dto.headerDiscount ?? (po.headerDiscount ? Number(po.headerDiscount) : 0);
+
+    if (willRecalculate) {
+      let items: PurchaseOrderItemInput[] = [];
+      if (dto.items && dto.items.length > 0) {
+        const itemIds = dto.items.map((item) => item.itemId);
+        const existingItems = await this.prisma.inventoryItem.findMany({
+          where: { id: { in: itemIds }, tenantId },
+          select: { id: true },
+        });
+        if (existingItems.length !== itemIds.length) {
+          throw new NotFoundException('One or more inventory items not found');
+        }
+        items = dto.items;
+      } else {
+        // No new items — reuse existing items from DB for recalc
+        const existingRaw = await this.prisma.purchaseOrderItem.findMany({
+          where: { purchaseOrderId: id },
+        });
+        const existing = existingRaw as unknown as PurchaseOrderItemWithDiscountType[];
+        items = existing.map((i) => ({
+          itemId: i.itemId,
+          quantity: i.quantity,
+          unitPrice: Number(i.unitPrice),
+          discount: Number(i.discount),
+          discountType: (i.discountType ?? 'PERCENT') as DiscountType,
+          taxRate: Number(i.taxRate),
+          notes: i.notes ?? undefined,
+        }));
       }
 
-      // Calculate new totals
-      let subtotal = 0;
-      let taxAmount = 0;
+      breakdown = this.computeTotals(items, headerDiscountValue, headerDiscountType, discountMode);
 
-      dto.items.forEach((item) => {
-        const linePrice = item.quantity * item.unitPrice;
-        const discountAmount = linePrice * ((item.discount || 0) / 100);
-        const discountedPrice = linePrice - discountAmount;
-        const itemTax = discountedPrice * ((item.taxRate || 0) / 100);
-
-        subtotal += discountedPrice;
-        taxAmount += itemTax;
-      });
-
-      const totalAmount = subtotal + taxAmount;
-
-      updateData.subtotal = subtotal;
-      updateData.taxAmount = taxAmount;
-      updateData.totalAmount = totalAmount;
+      updateData.subtotal = breakdown.subtotal;
+      updateData.discountAmount = breakdown.totalLineDiscount + breakdown.headerDiscountAmount;
+      updateData.discountMode = discountMode;
+      updateData.headerDiscount = breakdown.headerDiscountAmount;
+      updateData.headerDiscountType = headerDiscountType;
+      updateData.calculationBreakdown = breakdown as unknown as Prisma.InputJsonValue;
+      updateData.taxAmount = breakdown.vatAmount;
+      updateData.totalAmount = breakdown.grandTotal;
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      // Update PO
       const updatedPo = await tx.purchaseOrder.update({
         where: { id },
-        data: updateData,
+        data: updateData as unknown as Prisma.PurchaseOrderUncheckedUpdateInput,
       });
 
-      // If items are being updated, replace them
-      if (dto.items && dto.items.length > 0) {
-        // Delete old items
+      if (dto.items && dto.items.length > 0 && breakdown) {
         await tx.purchaseOrderItem.deleteMany({
           where: { purchaseOrderId: id },
         });
 
-        // Create new items
         await tx.purchaseOrderItem.createMany({
-          data: dto.items.map((item) => {
-            const linePrice = item.quantity * item.unitPrice;
-            const discountAmount = linePrice * ((item.discount || 0) / 100);
-            const discountedPrice = linePrice - discountAmount;
-
-            return {
-              purchaseOrderId: id,
-              itemId: item.itemId,
-              quantity: item.quantity,
-              unitPrice: item.unitPrice,
-              discount: item.discount || 0,
-              taxRate: item.taxRate || 0,
-              totalPrice: discountedPrice,
-              notes: item.notes || null,
-            };
-          }),
+          data: dto.items.map((item, idx) => this.buildItemRow(id, item, breakdown!.lines[idx])),
         });
       }
 
@@ -430,7 +540,7 @@ export class PurchaseOrdersService {
     return this.findOne(updated.id, tenantId);
   }
 
-  async submitForApproval(id: string, tenantId: string): Promise<any> {
+  async submitForApproval(id: string, tenantId: string): Promise<Record<string, unknown>> {
     const po = await this.prisma.purchaseOrder.findUnique({
       where: { id },
     });
@@ -455,7 +565,7 @@ export class PurchaseOrdersService {
     return this.findOne(updated.id, tenantId);
   }
 
-  async approve(id: string, userId: string, tenantId: string): Promise<any> {
+  async approve(id: string, userId: string, tenantId: string): Promise<Record<string, unknown>> {
     const po = await this.prisma.purchaseOrder.findUnique({
       where: { id },
     });
@@ -482,7 +592,12 @@ export class PurchaseOrdersService {
     return this.findOne(updated.id, tenantId);
   }
 
-  async cancel(id: string, userId: string, reason: string, tenantId: string): Promise<any> {
+  async cancel(
+    id: string,
+    userId: string,
+    reason: string,
+    tenantId: string,
+  ): Promise<Record<string, unknown>> {
     const po = await this.prisma.purchaseOrder.findUnique({
       where: { id },
     });
@@ -511,7 +626,7 @@ export class PurchaseOrdersService {
     return this.findOne(updated.id, tenantId);
   }
 
-  async close(id: string, tenantId: string): Promise<any> {
+  async close(id: string, tenantId: string): Promise<Record<string, unknown>> {
     const po = await this.prisma.purchaseOrder.findUnique({
       where: { id },
     });
@@ -533,6 +648,29 @@ export class PurchaseOrdersService {
 
     this.logger.log(`Purchase order closed: ${id} (${updated.poNumber})`);
     return this.findOne(updated.id, tenantId);
+  }
+
+  /**
+   * Build a single PurchaseOrderItem row from DTO + computed line breakdown.
+   * `discountType` is a new column (migration 20260417) and is not yet in the
+   * generated input type until `prisma generate` runs — cast at the boundary.
+   */
+  private buildItemRow(
+    purchaseOrderId: string,
+    item: PurchaseOrderItemInput,
+    lineBreakdown: LineBreakdown,
+  ): Prisma.PurchaseOrderItemCreateManyInput {
+    return {
+      purchaseOrderId,
+      itemId: item.itemId,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      discount: item.discount ?? 0,
+      discountType: (item.discountType ?? 'PERCENT') as DiscountType,
+      taxRate: item.taxRate ?? 0,
+      totalPrice: lineBreakdown.lineTotal,
+      notes: item.notes || null,
+    } as unknown as Prisma.PurchaseOrderItemCreateManyInput;
   }
 
   private async generateDocNumber(

@@ -1,5 +1,6 @@
-import { IsString, IsOptional, IsEmail, IsInt, Min, MaxLength } from 'class-validator';
+import { IsString, IsOptional, IsEmail, IsInt, Min, MaxLength, IsArray } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 
 export class CreateSupplierDto {
   @ApiProperty({
@@ -89,4 +90,31 @@ export class CreateSupplierDto {
   @IsString()
   @MaxLength(1000)
   notes?: string;
+
+  @ApiPropertyOptional({
+    description: 'Tag IDs for categorizing supplier (stored as JSON array string)',
+    example: ['cleaning', 'preferred'],
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @Transform(({ value }) => {
+    // รับทั้ง array และ JSON string
+    if (Array.isArray(value)) return value;
+    if (typeof value === 'string') {
+      try { return JSON.parse(value); } catch { return []; }
+    }
+    return [];
+  })
+  tags?: string[];
+
+  @ApiPropertyOptional({
+    description: 'Emoji icon for display in UI',
+    example: '🏢',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  emoji?: string;
 }

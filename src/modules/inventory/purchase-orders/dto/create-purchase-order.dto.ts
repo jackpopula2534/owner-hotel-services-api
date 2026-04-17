@@ -5,12 +5,17 @@ import {
   IsArray,
   ValidateNested,
   IsNumber,
+  IsEnum,
   Min,
   Max,
   ArrayMinSize,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import type { DiscountMode, DiscountType } from '@/common/purchase-order/po-calculation';
+
+export const DISCOUNT_MODES = ['BEFORE_VAT', 'AFTER_VAT'] as const;
+export const DISCOUNT_TYPES = ['PERCENT', 'AMOUNT'] as const;
 
 export class PurchaseOrderItemDto {
   @ApiProperty({
@@ -30,21 +35,28 @@ export class PurchaseOrderItemDto {
   @Min(0)
   unitPrice: number;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: 10,
-    description: 'Discount percentage (0-100)',
-    required: false,
+    description:
+      'Discount value — interpreted as percent (0-100) when discountType=PERCENT, or as absolute amount (in currency) when discountType=AMOUNT',
   })
   @IsOptional()
   @IsNumber()
   @Min(0)
-  @Max(100)
   discount?: number;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
+    enum: DISCOUNT_TYPES,
+    default: 'PERCENT',
+    description: 'Whether the line discount is a percentage or a fixed amount in currency',
+  })
+  @IsOptional()
+  @IsEnum(DISCOUNT_TYPES)
+  discountType?: DiscountType;
+
+  @ApiPropertyOptional({
     example: 7,
     description: 'Tax rate percentage (0-100)',
-    required: false,
   })
   @IsOptional()
   @IsNumber()
@@ -52,10 +64,9 @@ export class PurchaseOrderItemDto {
   @Max(100)
   taxRate?: number;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: 'High-quality linens',
     description: 'Item-specific notes',
-    required: false,
   })
   @IsOptional()
   @IsString()
@@ -63,10 +74,9 @@ export class PurchaseOrderItemDto {
 }
 
 export class CreatePurchaseOrderDto {
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: '123e4567-e89b-12d3-a456-426614174000',
     description: 'Property ID (auto-resolved from tenant if not provided)',
-    required: false,
   })
   @IsOptional()
   @IsString()
@@ -86,59 +96,82 @@ export class CreatePurchaseOrderDto {
   @IsString()
   warehouseId: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: '2026-05-01',
     description: 'Expected delivery date (ISO 8601)',
-    required: false,
   })
   @IsOptional()
   @IsISO8601()
   expectedDate?: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: 'Urgent order for kitchen supplies',
     description: 'Public notes visible to suppliers',
-    required: false,
   })
   @IsOptional()
   @IsString()
   notes?: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: 'Follow up on delivery status by phone',
     description: 'Internal notes for hotel staff only',
-    required: false,
   })
   @IsOptional()
   @IsString()
   internalNotes?: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: 'QT-202604-0001',
     description: 'Quotation number (เลขที่ใบเสนอราคา)',
-    required: false,
   })
   @IsOptional()
   @IsString()
   quotationNumber?: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: '2026-04-10',
     description: 'Quotation date (ISO 8601)',
-    required: false,
   })
   @IsOptional()
   @IsISO8601()
   quotationDate?: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: '123e4567-e89b-12d3-a456-426614174999',
     description: 'Purchase requisition ID (link to PR)',
-    required: false,
   })
   @IsOptional()
   @IsString()
   purchaseRequisitionId?: string;
+
+  // ─── Discount / VAT configuration ────────────────────────────
+  @ApiPropertyOptional({
+    enum: DISCOUNT_MODES,
+    default: 'BEFORE_VAT',
+    description:
+      'Discount vs VAT order. BEFORE_VAT (default) — discounts reduce VAT base. AFTER_VAT — VAT computed on gross then discounts applied post-tax.',
+  })
+  @IsOptional()
+  @IsEnum(DISCOUNT_MODES)
+  discountMode?: DiscountMode;
+
+  @ApiPropertyOptional({
+    example: 500,
+    description: 'Header-level discount value (interpreted based on headerDiscountType)',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  headerDiscount?: number;
+
+  @ApiPropertyOptional({
+    enum: DISCOUNT_TYPES,
+    default: 'AMOUNT',
+    description: 'Whether headerDiscount is a percentage (0-100) or absolute amount',
+  })
+  @IsOptional()
+  @IsEnum(DISCOUNT_TYPES)
+  headerDiscountType?: DiscountType;
 
   @ApiProperty({
     type: [PurchaseOrderItemDto],

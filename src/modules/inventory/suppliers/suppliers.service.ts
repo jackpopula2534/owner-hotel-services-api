@@ -10,6 +10,27 @@ import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
 import { Supplier } from '@prisma/client';
 
+/** แปลง tags array → JSON string สำหรับเก็บใน DB */
+function serializeTags(tags?: string[]): string | undefined {
+  if (!tags) return undefined;
+  return JSON.stringify(tags);
+}
+
+/** แปลง JSON string → tags array สำหรับส่งออก */
+function deserializeSupplier<T extends { tags?: string | null }>(
+  supplier: T,
+): Omit<T, 'tags'> & { tags: string[] } {
+  let tags: string[] = [];
+  if (typeof supplier.tags === 'string') {
+    try {
+      tags = JSON.parse(supplier.tags);
+    } catch {
+      tags = [];
+    }
+  }
+  return { ...supplier, tags };
+}
+
 interface PaginatedResponse<T> {
   data: T[];
   meta: {
@@ -63,7 +84,7 @@ export class SuppliersService {
     ]);
 
     return {
-      data,
+      data: data.map(deserializeSupplier),
       meta: {
         page,
         limit,
@@ -105,7 +126,7 @@ export class SuppliersService {
       throw new NotFoundException(`Supplier with ID ${id} not found for tenant ${tenantId}`);
     }
 
-    return supplier;
+    return deserializeSupplier(supplier);
   }
 
   async create(dto: CreateSupplierDto, tenantId: string): Promise<Supplier> {
@@ -126,6 +147,7 @@ export class SuppliersService {
       const supplier = await this.prisma.supplier.create({
         data: {
           ...dto,
+          tags: serializeTags(dto.tags),
           tenantId,
         },
       });
@@ -134,7 +156,7 @@ export class SuppliersService {
         `Created supplier ${supplier.id} (code: ${supplier.code}) for tenant ${tenantId}`,
       );
 
-      return supplier;
+      return deserializeSupplier(supplier) as unknown as Supplier;
     } catch (error) {
       this.logger.error(`Failed to create supplier for tenant ${tenantId}`, error);
       throw error;
@@ -176,12 +198,15 @@ export class SuppliersService {
     try {
       const updated = await this.prisma.supplier.update({
         where: { id },
-        data: dto,
+        data: {
+          ...dto,
+          tags: serializeTags(dto.tags),
+        },
       });
 
       this.logger.log(`Updated supplier ${id} for tenant ${tenantId}`);
 
-      return updated;
+      return deserializeSupplier(updated) as unknown as Supplier;
     } catch (error) {
       this.logger.error(`Failed to update supplier ${id}`, error);
       throw error;
