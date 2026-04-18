@@ -55,6 +55,15 @@ export class QuerySupplierQuoteDto {
   purchaseRequisitionId?: string;
 
   @ApiProperty({
+    example: '123e4567-e89b-12d3-a456-426614174003',
+    description: 'Filter by request for quotation (RFQ) ID',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  requestForQuotationId?: string;
+
+  @ApiProperty({
     enum: SupplierQuoteStatus,
     description: 'Filter by quote status',
     required: false,

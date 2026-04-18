@@ -8,12 +8,16 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
 import { SubmitQuoteDto, QuerySupplierQuoteDto } from './dto';
+import { RfqsService } from '../rfqs/rfqs.service';
 
 @Injectable()
 export class SupplierQuotesService {
   private readonly logger = new Logger(SupplierQuotesService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly rfqsService: RfqsService,
+  ) {}
 
   async findAll(
     tenantId: string,
@@ -32,6 +36,9 @@ export class SupplierQuotesService {
       ...(query.purchaseRequisitionId && {
         purchaseRequisitionId: query.purchaseRequisitionId,
       }),
+      ...(query.requestForQuotationId && {
+        requestForQuotationId: query.requestForQuotationId,
+      }),
       ...(query.status && { status: query.status }),
     };
 
@@ -44,11 +51,18 @@ export class SupplierQuotesService {
           id: true,
           quoteNumber: true,
           status: true,
+          quotedDate: true,
+          paymentTerms: true,
+          attachmentUrl: true,
+          requestForQuotationId: true,
           supplierId: true,
           supplier: {
-            select: { name: true },
+            select: { id: true, name: true, code: true, email: true },
           },
           purchaseRequisitionId: true,
+          purchaseRequisition: {
+            select: { id: true, prNumber: true },
+          },
           totalAmount: true,
           deliveryDays: true,
           validUntil: true,
@@ -69,9 +83,28 @@ export class SupplierQuotesService {
         id: quote.id,
         quoteNumber: quote.quoteNumber,
         status: quote.status,
+        quotedDate: quote.quotedDate,
+        paymentTerms: quote.paymentTerms,
+        attachmentUrl: quote.attachmentUrl,
+        requestForQuotationId: quote.requestForQuotationId,
         supplierId: quote.supplierId,
+        // Flat (legacy compat) + nested (Inbox UI uses .supplier.name / .supplier.code)
         supplierName: quote.supplier?.name || 'Unknown',
+        supplier: quote.supplier
+          ? {
+              id: quote.supplier.id,
+              name: quote.supplier.name,
+              code: quote.supplier.code,
+              email: quote.supplier.email,
+            }
+          : null,
         purchaseRequisitionId: quote.purchaseRequisitionId,
+        purchaseRequisition: quote.purchaseRequisition
+          ? {
+              id: quote.purchaseRequisition.id,
+              prNumber: quote.purchaseRequisition.prNumber,
+            }
+          : null,
         totalAmount: quote.totalAmount,
         deliveryDays: quote.deliveryDays,
         validUntil: quote.validUntil,
@@ -282,6 +315,23 @@ export class SupplierQuotesService {
 
         return updatedQuote;
       });
+
+      // After commit: roll up RFQ status if this quote is linked to an RFQ
+      if (quote.requestForQuotationId) {
+        try {
+          await this.rfqsService.markResponseReceived(
+            tenantId,
+            quote.requestForQuotationId,
+            quote.supplierId,
+          );
+        } catch (err) {
+          this.logger.warn(
+            `Failed to roll up RFQ status for quote ${id}: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+      }
 
       return result;
     } catch (error) {
@@ -593,6 +643,24 @@ export class SupplierQuotesService {
         this.logger.log(`Quote ${id} updated. New total: ${totalAmount}`);
         return updatedQuote;
       });
+
+      // Only roll up when this is the FIRST transition REQUESTED → RECEIVED
+      const didJustReceive = quote.status === 'REQUESTED';
+      if (didJustReceive && quote.requestForQuotationId) {
+        try {
+          await this.rfqsService.markResponseReceived(
+            tenantId,
+            quote.requestForQuotationId,
+            quote.supplierId,
+          );
+        } catch (err) {
+          this.logger.warn(
+            `Failed to roll up RFQ status for quote ${id}: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+      }
 
       return result;
     } catch (error) {

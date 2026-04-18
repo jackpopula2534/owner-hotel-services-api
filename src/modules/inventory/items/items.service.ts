@@ -9,6 +9,7 @@ import { PrismaService } from '@/prisma/prisma.service';
 import { CreateItemDto } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
 import { QueryItemDto, SortField, SortOrder } from './dto/query-item.dto';
+import { SearchItemDto } from './dto/search-item.dto';
 
 export interface PaginatedResponse<T> {
   data: T[];
@@ -45,6 +46,20 @@ export interface ItemWithStock {
   category: { id: string; name: string } | null;
   totalStock: number;
   lowStock: boolean;
+}
+
+export interface ItemSearchResult {
+  id: string;
+  sku: string;
+  name: string;
+  unit: string;
+  barcode: string | null;
+  categoryId: string | null;
+  category: { id: string; name: string } | null;
+  imageUrl: string | null;
+  isPerishable: boolean;
+  defaultShelfLifeDays: number | null;
+  reorderPoint: number;
 }
 
 export interface StockSummary {
@@ -141,6 +156,71 @@ export class ItemsService {
       };
     } catch (error) {
       this.logger.error(`Error finding items: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
+  /**
+   * Lightweight typeahead search for dropdowns (Goods Receive, Purchase Order, etc.).
+   *
+   * Trade-offs vs `findAll`:
+   *   - No pagination metadata, no stock aggregation, no warehouseStocks join.
+   *   - Requires `q` with at least 2 characters (enforced by SearchItemDto).
+   *   - Capped at 50 results to protect the DB and keep payloads <10KB.
+   *   - Only returns active, non-deleted items by default.
+   *
+   * Matches against `name`, `sku`, and `barcode` (case-insensitive for name/sku,
+   * exact for barcode so scanners work). Ordering favours name matches first
+   * — callers that need richer sorting should use `findAll`.
+   */
+  async searchItems(tenantId: string, dto: SearchItemDto): Promise<ItemSearchResult[]> {
+    try {
+      const limit = dto.limit ?? 20;
+      const isActive = dto.isActive ?? true;
+      const query = dto.q.trim();
+
+      const where: Record<string, unknown> = {
+        tenantId,
+        deletedAt: null,
+        isActive,
+        OR: [
+          { name: { contains: query, mode: 'insensitive' } },
+          { sku: { contains: query, mode: 'insensitive' } },
+          { barcode: { equals: query } },
+        ],
+      };
+
+      if (dto.categoryId) {
+        where.categoryId = dto.categoryId;
+      }
+
+      const items = await this.prisma.inventoryItem.findMany({
+        where,
+        select: {
+          id: true,
+          sku: true,
+          name: true,
+          unit: true,
+          barcode: true,
+          categoryId: true,
+          imageUrl: true,
+          isPerishable: true,
+          defaultShelfLifeDays: true,
+          reorderPoint: true,
+          category: { select: { id: true, name: true } },
+        },
+        take: limit,
+        orderBy: [{ name: 'asc' }, { sku: 'asc' }],
+      });
+
+      return items.map((item) => ({
+        ...item,
+        category: item.category ?? null,
+      }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'unknown error';
+      const stack = error instanceof Error ? error.stack : undefined;
+      this.logger.error(`Error searching items: ${message}`, stack);
       throw error;
     }
   }

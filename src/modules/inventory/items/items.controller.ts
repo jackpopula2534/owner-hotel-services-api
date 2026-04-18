@@ -12,10 +12,11 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
-import { ItemsService, ItemWithStock, StockSummary, PaginatedResponse } from './items.service';
+import { ItemsService, ItemWithStock, ItemSearchResult, StockSummary, PaginatedResponse } from './items.service';
 import { CreateItemDto } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
 import { QueryItemDto } from './dto/query-item.dto';
+import { SearchItemDto } from './dto/search-item.dto';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AddonGuard } from '@/common/guards/addon.guard';
 import { RequireAddon } from '@/common/decorators/require-addon.decorator';
@@ -152,6 +153,52 @@ export class ItemsController {
   })
   async getStockSummary(@CurrentUser() user: JwtPayload, @Query('propertyId') propertyId?: string): Promise<{ success: boolean; data: StockSummary }> {
     const data = await this.itemsService.getStockSummary(user.tenantId, propertyId);
+    return { success: true, data };
+  }
+
+  @Get('search')
+  @ApiOperation({
+    summary: 'Lightweight typeahead search for dropdowns (min 2 chars)',
+    description:
+      'Returns up to 50 active items matching the query against name/SKU/barcode. ' +
+      'Intended for typeahead inputs (e.g. Goods Receive item picker) where the ' +
+      'full paginated list with stock aggregation would be wasteful. Callers ' +
+      'should debounce input and require at least 2 characters before firing.',
+  })
+  @ApiQuery({ name: 'q', required: true, type: String, description: 'Search query (min 2 chars)' })
+  @ApiQuery({ name: 'limit', required: false, type: Number, example: 20 })
+  @ApiQuery({ name: 'categoryId', required: false, description: 'Filter by category ID' })
+  @ApiQuery({ name: 'isActive', required: false, type: Boolean, description: 'Default: true' })
+  @ApiResponse({
+    status: 200,
+    description: 'List of matching items (slim shape — no stock join)',
+    schema: {
+      example: {
+        success: true,
+        data: [
+          {
+            id: 'uuid',
+            sku: 'SKU-001',
+            name: 'Tomato Fresh',
+            unit: 'KG',
+            barcode: '1234567890123',
+            categoryId: 'uuid',
+            category: { id: 'uuid', name: 'Vegetables' },
+            imageUrl: null,
+            isPerishable: true,
+            defaultShelfLifeDays: 7,
+            reorderPoint: 10,
+          },
+        ],
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'q too short or missing' })
+  async search(
+    @CurrentUser() user: JwtPayload,
+    @Query() query: SearchItemDto,
+  ): Promise<{ success: boolean; data: ItemSearchResult[] }> {
+    const data = await this.itemsService.searchItems(user.tenantId, query);
     return { success: true, data };
   }
 

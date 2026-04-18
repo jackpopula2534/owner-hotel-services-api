@@ -16,6 +16,7 @@ import { DemandForecastModule } from './demand-forecast/demand-forecast.module';
 import { SupplierQuotesModule } from './supplier-quotes/supplier-quotes.module';
 import { PriceComparisonsModule } from './price-comparisons/price-comparisons.module';
 import { PurchaseRequisitionsModule } from './purchase-requisitions/purchase-requisitions.module';
+import { RfqsModule } from './rfqs/rfqs.module';
 import { InventoryEventListener } from './events/inventory-event.listener';
 // New 2026-Q2 modules
 import { LotsModule } from './lots/lots.module';
@@ -48,6 +49,7 @@ import { PrismaModule } from '@/prisma/prisma.module';
     SupplierQuotesModule,
     PriceComparisonsModule,
     PurchaseRequisitionsModule,
+    RfqsModule,
     // 2026-Q2 new modules
     LotsModule,
     QRModule,
@@ -76,6 +78,7 @@ import { PrismaModule } from '@/prisma/prisma.module';
     SupplierQuotesModule,
     PriceComparisonsModule,
     PurchaseRequisitionsModule,
+    RfqsModule,
     LotsModule,
     QRModule,
     QCModule,

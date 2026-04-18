@@ -2313,6 +2313,7 @@ model Supplier {
   itemSuppliers  ItemSupplier[]
   purchaseOrders PurchaseOrder[]
   supplierQuotes SupplierQuote[]
+  rfqRecipients  RfqSupplierRecipient[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -3192,6 +3193,7 @@ model PurchaseRequisition {
   supplierQuotes  SupplierQuote[]
   priceComparisons PriceComparison[]
   purchaseOrders  PurchaseOrder[]
+  rfqLinks        RfqPurchaseRequisition[]
 
   @@unique([tenantId, prNumber])
   @@index([tenantId])
@@ -3236,6 +3238,8 @@ model SupplierQuote {
   id                      String              @id @default(uuid())
   tenantId                String
   purchaseRequisitionId   String
+  requestForQuotationId   String?             // Link ไปยัง RFQ (optional สำหรับ legacy data)
+  round                   Int                 @default(1)  // รอบการขอใบเสนอราคา (1 = รอบแรก)
   supplierId              String
   quoteNumber             String?             // เลขที่ใบเสนอราคาจากซัพพลายเออร์
   status                  SupplierQuoteStatus @default(REQUESTED)
@@ -3258,14 +3262,16 @@ model SupplierQuote {
   createdAt               DateTime            @default(now())
   updatedAt               DateTime            @updatedAt
 
-  purchaseRequisition PurchaseRequisition @relation(fields: [purchaseRequisitionId], references: [id])
+  purchaseRequisition PurchaseRequisition  @relation(fields: [purchaseRequisitionId], references: [id])
+  requestForQuotation RequestForQuotation? @relation(fields: [requestForQuotationId], references: [id])
   supplier            Supplier             @relation(fields: [supplierId], references: [id])
   items               SupplierQuoteItem[]
   priceComparisons    PriceComparison[]
 
-  @@unique([tenantId, purchaseRequisitionId, supplierId])
+  @@unique([tenantId, purchaseRequisitionId, supplierId, round], map: "supplier_quotes_tenant_pr_supplier_round_key")
   @@index([tenantId])
   @@index([purchaseRequisitionId])
+  @@index([requestForQuotationId])
   @@index([supplierId])
   @@index([status])
   @@map("supplier_quotes")
@@ -3290,6 +3296,93 @@ model SupplierQuoteItem {
   @@index([supplierQuoteId])
   @@index([itemId])
   @@map("supplier_quote_items")
+}
+
+// ─── Request For Quotation (RFQ) ─────────────────────────────────────────────
+
+enum RfqStatus {
+  DRAFT              // ร่าง ยังไม่ส่ง
+  SENT               // ส่งให้ซัพพลายเออร์แล้ว
+  PARTIAL_RESPONSE   // ตอบกลับมาบางราย
+  FULLY_RESPONDED    // ตอบกลับมาครบทุกราย
+  EXPIRED            // หมดเขตตอบกลับ
+  CANCELLED          // ยกเลิก
+}
+
+model RequestForQuotation {
+  id            String     @id @default(uuid())
+  tenantId      String
+  propertyId    String
+  rfqNumber     String     // Auto: RFQ-YYMM-XXXX
+  status        RfqStatus  @default(DRAFT)
+  round         Int        @default(1)  // รอบที่ 1, 2, 3 ... (สำหรับ re-solicit)
+  parentRfqId   String?    // ถ้าเป็น re-solicit จะ link ไป RFQ รอบก่อน
+  subject       String?    // หัวข้อ RFQ (เช่น "ขอใบเสนอราคาเครื่องครัว")
+  coverLetter   String?    @db.Text  // ข้อความเปิด/หมายเหตุถึงซัพพลายเออร์
+  customTerms   String?    @db.Text  // เงื่อนไขเฉพาะของ RFQ นี้
+  templateId    String?    // อ้างอิง template (ถ้ามี)
+  issuedAt      DateTime?  // วันที่ส่งจริง
+  deadline      DateTime?  // วันสุดท้ายที่รับใบเสนอราคา
+  createdBy     String     // User ID
+  cancelledBy   String?
+  cancelledAt   DateTime?
+  cancelReason  String?    @db.Text
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  parentRfq      RequestForQuotation?     @relation("RfqResolicit", fields: [parentRfqId], references: [id])
+  childRfqs      RequestForQuotation[]    @relation("RfqResolicit")
+  prLinks        RfqPurchaseRequisition[]
+  recipients     RfqSupplierRecipient[]
+  supplierQuotes SupplierQuote[]
+
+  @@unique([tenantId, rfqNumber])
+  @@index([tenantId])
+  @@index([propertyId])
+  @@index([status])
+  @@index([createdBy])
+  @@index([parentRfqId])
+  @@map("request_for_quotations")
+}
+
+// Join table: RFQ ↔ PR (รองรับ batching หลาย PR ใน RFQ เดียว)
+model RfqPurchaseRequisition {
+  id                      String   @id @default(uuid())
+  requestForQuotationId   String
+  purchaseRequisitionId   String
+  createdAt               DateTime @default(now())
+
+  requestForQuotation RequestForQuotation @relation(fields: [requestForQuotationId], references: [id], onDelete: Cascade)
+  purchaseRequisition PurchaseRequisition @relation(fields: [purchaseRequisitionId], references: [id], onDelete: Cascade)
+
+  @@unique([requestForQuotationId, purchaseRequisitionId], map: "rfq_pr_rfqId_prId_key")
+  @@index([requestForQuotationId])
+  @@index([purchaseRequisitionId])
+  @@map("rfq_purchase_requisitions")
+}
+
+// Recipients: ซัพพลายเออร์ที่ถูกส่ง RFQ ไปหา + สถานะตอบกลับ
+model RfqSupplierRecipient {
+  id                      String    @id @default(uuid())
+  requestForQuotationId   String
+  supplierId              String
+  sentAt                  DateTime?           // เวลาที่ส่งจริง (null ถ้ายังไม่ได้ส่ง)
+  remindedAt              DateTime?           // เวลาเตือนล่าสุด
+  remindCount             Int       @default(0)
+  respondedAt             DateTime?           // ซัพพลายเออร์ตอบกลับเมื่อไร
+  declinedAt              DateTime?           // ซัพพลายเออร์ปฏิเสธ
+  declineReason           String?   @db.Text
+  notes                   String?   @db.Text
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  requestForQuotation RequestForQuotation @relation(fields: [requestForQuotationId], references: [id], onDelete: Cascade)
+  supplier            Supplier            @relation(fields: [supplierId], references: [id])
+
+  @@unique([requestForQuotationId, supplierId])
+  @@index([requestForQuotationId])
+  @@index([supplierId])
+  @@map("rfq_supplier_recipients")
 }
 
 // ─── Price Comparison ───────────────────────────────────────────────────────
