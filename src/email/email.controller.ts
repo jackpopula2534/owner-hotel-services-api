@@ -26,7 +26,7 @@ import {
 } from './dto/send-email.dto';
 
 @ApiTags('Email Notifications')
-@Controller('api/v1/notifications/email')
+@Controller('notifications/email')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @ApiBearerAuth()
 export class EmailController {

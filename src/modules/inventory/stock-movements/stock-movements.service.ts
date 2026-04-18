@@ -584,13 +584,94 @@ export class StockMovementsService {
   }
 
   /**
-   * Private: Generate UUID v4
+   * Private: Generate UUID v4 — uses crypto.randomUUID() (secure, no Math.random)
    */
   private generateUUID(): string {
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-      const r = (Math.random() * 16) | 0;
-      const v = c === 'x' ? r : (r & 0x3) | 0x8;
-      return v.toString(16);
+    return crypto.randomUUID();
+  }
+
+  // ─── FEFO lot picker: returns lots in First-Expiry-First-Out order ────────────
+  async pickLotsForIssue(
+    tenantId: string,
+    itemId: string,
+    warehouseId: string,
+    qty: number,
+  ): Promise<Array<{ lotId: string; qty: number; unitCost: number }>> {
+    const lots = await this.prisma.inventoryLot.findMany({
+      where: {
+        tenantId,
+        itemId,
+        warehouseId,
+        status: 'ACTIVE',
+        remainingQty: { gt: 0 },
+      },
+      orderBy: [{ expiryDate: 'asc' }, { receivedDate: 'asc' }],
     });
+
+    const totalAvailable = lots.reduce((sum, l) => sum + l.remainingQty, 0);
+    if (totalAvailable < qty) {
+      throw new BadRequestException(
+        `สต็อก lot ไม่เพียงพอ ต้องการ ${qty} แต่มีอยู่ ${totalAvailable}`,
+      );
+    }
+
+    const result: Array<{ lotId: string; qty: number; unitCost: number }> = [];
+    let remaining = qty;
+
+    for (const lot of lots) {
+      if (remaining <= 0) break;
+      const take = Math.min(remaining, lot.remainingQty);
+      result.push({ lotId: lot.id, qty: take, unitCost: Number(lot.unitCost) });
+      remaining -= take;
+    }
+
+    return result;
+  }
+
+  // ─── Create outbound movement with FEFO auto-pick ─────────────────────────────
+  async createWithFEFO(
+    dto: CreateStockMovementDto & { lotId?: string },
+    userId: string,
+    tenantId: string,
+  ) {
+    const OUTBOUND_TYPES = ['GOODS_ISSUE', 'TRANSFER_OUT', 'WASTE', 'ADJUSTMENT_OUT', 'RETURN_SUPPLIER'];
+
+    if (!OUTBOUND_TYPES.includes(dto.type)) {
+      // Not outbound — use normal create
+      return this.createMovement(dto, userId, tenantId);
+    }
+
+    const item = await this.prisma.inventoryItem.findFirst({
+      where: { id: dto.itemId, tenantId, deletedAt: null },
+    });
+
+    if (!item || !(item.isPerishable || (item as any).requiresLotTracking)) {
+      // Not a tracked item — normal flow
+      return this.createMovement(dto, userId, tenantId);
+    }
+
+    if (dto.lotId) {
+      // Explicit lot provided — validate and deduct
+      return this.createMovement(dto as any, userId, tenantId);
+    }
+
+    // Auto FEFO pick
+    const lots = await this.pickLotsForIssue(tenantId, dto.itemId, dto.warehouseId, dto.quantity);
+
+    if (lots.length === 1) {
+      return this.createMovement({ ...dto, lotId: lots[0].lotId } as any, userId, tenantId);
+    }
+
+    // Multiple lots — create multiple movements
+    const movements = [];
+    for (const pick of lots) {
+      const mv = await this.createMovement(
+        { ...dto, quantity: pick.qty, unitCost: pick.unitCost, lotId: pick.lotId } as any,
+        userId,
+        tenantId,
+      );
+      movements.push(mv);
+    }
+    return { consumedLots: movements };
   }
 }

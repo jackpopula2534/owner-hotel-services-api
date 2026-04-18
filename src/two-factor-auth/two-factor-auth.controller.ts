@@ -20,7 +20,7 @@ import {
 import { Public } from '../common/decorators/public.decorator';
 
 @ApiTags('Two-Factor Authentication')
-@Controller('api/v1/auth/2fa')
+@Controller('auth/2fa')
 export class TwoFactorAuthController {
   constructor(private readonly twoFactorAuthService: TwoFactorAuthService) {}
 

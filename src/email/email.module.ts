@@ -19,6 +19,16 @@ import { PrismaModule } from '../prisma/prisma.module';
           host: configService.get('REDIS_HOST', 'localhost'),
           port: configService.get('REDIS_PORT', 6379),
           password: configService.get('REDIS_PASSWORD', undefined),
+          // Limit reconnect attempts so seeder / test runs don't flood logs.
+          // In production the process restarts anyway if Redis is permanently down.
+          retryStrategy: (times: number) => {
+            if (times > 5) return null; // stop retrying after 5 attempts
+            return Math.min(times * 500, 5000); // 500ms → 5 000ms back-off
+          },
+          // Do not block startup waiting for the ready ping
+          enableReadyCheck: false,
+          // Don't throw on commands when the connection is not yet ready
+          maxRetriesPerRequest: null,
         },
       }),
       inject: [ConfigService],

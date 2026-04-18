@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { BullModule } from '@nestjs/bull';
 import { AddonModule } from '@/modules/addons/addon.module';
 import { CategoriesModule } from './categories/categories.module';
 import { ItemsModule } from './items/items.module';
@@ -16,10 +17,22 @@ import { SupplierQuotesModule } from './supplier-quotes/supplier-quotes.module';
 import { PriceComparisonsModule } from './price-comparisons/price-comparisons.module';
 import { PurchaseRequisitionsModule } from './purchase-requisitions/purchase-requisitions.module';
 import { InventoryEventListener } from './events/inventory-event.listener';
+// New 2026-Q2 modules
+import { LotsModule } from './lots/lots.module';
+import { QRModule } from './qr/qr.module';
+import { QCModule } from './qc/qc.module';
+import {
+  InventoryDashboardController,
+  InventoryReportsController,
+} from './dashboard/inventory-dashboard.controller';
+import { InventoryQueueProcessor, INVENTORY_QUEUE } from './queue/inventory.queue.processor';
+import { InventoryQueueScheduler } from './queue/inventory.queue.scheduler';
+import { PrismaModule } from '@/prisma/prisma.module';
 
 @Module({
   imports: [
     AddonModule,
+    PrismaModule,
     CategoriesModule,
     ItemsModule,
     WarehousesModule,
@@ -35,8 +48,18 @@ import { InventoryEventListener } from './events/inventory-event.listener';
     SupplierQuotesModule,
     PriceComparisonsModule,
     PurchaseRequisitionsModule,
+    // 2026-Q2 new modules
+    LotsModule,
+    QRModule,
+    QCModule,
+    BullModule.registerQueue({ name: INVENTORY_QUEUE }),
   ],
-  providers: [InventoryEventListener],
+  controllers: [InventoryDashboardController, InventoryReportsController],
+  providers: [
+    InventoryEventListener,
+    InventoryQueueProcessor,
+    InventoryQueueScheduler,
+  ],
   exports: [
     CategoriesModule,
     ItemsModule,
@@ -53,6 +76,9 @@ import { InventoryEventListener } from './events/inventory-event.listener';
     SupplierQuotesModule,
     PriceComparisonsModule,
     PurchaseRequisitionsModule,
+    LotsModule,
+    QRModule,
+    QCModule,
   ],
 })
 export class InventoryModule {}

@@ -2178,6 +2178,7 @@ model Warehouse {
   stockMovements  StockMovement[]
   goodsReceives   GoodsReceive[]
   stockCounts     StockCount[]
+  inventoryLots   InventoryLot[]
 
   @@unique([tenantId, propertyId, code])
   @@index([tenantId])
@@ -2256,6 +2257,9 @@ model InventoryItem {
   imageUrl      String?
   isPerishable  Boolean    @default(false)
   defaultShelfLifeDays Int?            // Default shelf life for perishable items
+  requiresLotTracking  Boolean  @default(false)  // Force lot tracking (independent from isPerishable)
+  requiresQC           Boolean  @default(false)  // Force QC record before accepting into stock
+  defaultQCTemplateId  String?                   // Default QC template for this item
   isActive      Boolean    @default(true)
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
@@ -2273,6 +2277,7 @@ model InventoryItem {
   wasteRecords               WasteRecord[]
   purchaseRequisitionItems PurchaseRequisitionItem[]
   supplierQuoteItems       SupplierQuoteItem[]
+  inventoryLots    InventoryLot[]
 
   @@unique([tenantId, sku])
   @@index([tenantId])
@@ -2391,13 +2396,15 @@ model StockMovement {
   // Transfer: link to destination/source warehouse
   transferWarehouseId String?
   notes         String?           @db.Text
-  batchNumber   String?           // Lot/batch tracking
-  expiryDate    DateTime?         // For perishable items
+  batchNumber   String?           // Lot/batch tracking (legacy)
+  expiryDate    DateTime?         // For perishable items (legacy)
+  lotId         String?           // Link to InventoryLot (lot tracking)
   createdBy     String            // User ID who created
   createdAt     DateTime          @default(now())
 
-  warehouse Warehouse     @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
-  item      InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  warehouse Warehouse      @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  item      InventoryItem  @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  lot       InventoryLot?  @relation("LotStockMovements", fields: [lotId], references: [id])
 
   @@index([tenantId])
   @@index([warehouseId])
@@ -2405,6 +2412,7 @@ model StockMovement {
   @@index([type])
   @@index([referenceType, referenceId])
   @@index([createdAt])
+  @@index([lotId])
   @@map("stock_movements")
 }
 
@@ -2560,11 +2568,15 @@ model GoodsReceiveItem {
   notes          String? @db.Text
   createdAt      DateTime @default(now())
 
+  lotId          String?
+  qcRecordId     String?
+
   goodsReceive GoodsReceive  @relation(fields: [goodsReceiveId], references: [id], onDelete: Cascade)
   item         InventoryItem @relation(fields: [itemId], references: [id])
 
   @@index([goodsReceiveId])
   @@index([itemId])
+  @@index([lotId])
   @@map("goods_receive_items")
 }
 
@@ -3363,4 +3375,134 @@ model DocumentSettings {
   @@index([tenantId])
   @@index([propertyId])
   @@map("document_settings")
+}
+
+// ─── Inventory Lot Tracking ───────────────────────────────────────────────────
+
+enum InventoryLotStatus {
+  ACTIVE        // ใช้งานได้
+  QUARANTINED   // รอ QC / กักกัน
+  EXHAUSTED     // remainingQty = 0
+  EXPIRED       // เลย expiryDate
+  DISPOSED      // ทำลายแล้ว (waste)
+}
+
+model InventoryLot {
+  id              String             @id @default(uuid())
+  tenantId        String
+  itemId          String
+  warehouseId     String
+  lotNumber       String             // Auto: LOT-YYYYMM-NNNN
+  batchNumber     String?            // เลข batch จาก supplier (ถ้ามี)
+  grItemId        String?            // Link to GoodsReceiveItem
+  supplierId      String?
+  receivedDate    DateTime           @default(now())
+  manufactureDate DateTime?
+  expiryDate      DateTime?
+  initialQty      Int
+  remainingQty    Int
+  unitCost        Decimal            @db.Decimal(10, 2)
+  status          InventoryLotStatus @default(ACTIVE)
+  qrPayload       String?            @db.Text  // pre-signed payload for fast lookup
+  notes           String?            @db.Text
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  item            InventoryItem      @relation(fields: [itemId], references: [id])
+  warehouse       Warehouse          @relation(fields: [warehouseId], references: [id])
+  stockMovements  StockMovement[]    @relation("LotStockMovements")
+  qcRecords       QCRecord[]
+
+  @@unique([tenantId, lotNumber])
+  @@index([tenantId, itemId, warehouseId, status])
+  @@index([expiryDate])
+  @@index([grItemId])
+  @@map("inventory_lots")
+}
+
+// ─── Quality Control (QC) ─────────────────────────────────────────────────────
+
+model QCTemplate {
+  id           String            @id @default(uuid())
+  tenantId     String
+  name         String
+  appliesTo    String            // 'CATEGORY' | 'ITEM'
+  categoryId   String?
+  itemId       String?
+  isActive     Boolean           @default(true)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  checklistItems QCChecklistItem[]
+  records        QCRecord[]
+
+  @@index([tenantId, appliesTo])
+  @@map("qc_templates")
+}
+
+model QCChecklistItem {
+  id            String      @id @default(uuid())
+  templateId    String
+  label         String      // เช่น "สี/กลิ่นปกติ", "อุณหภูมิ ≤ 4°C"
+  type          String      // 'BOOLEAN' | 'NUMERIC' | 'TEXT' | 'PHOTO'
+  required      Boolean     @default(true)
+  passCondition Json?       // เช่น { op: "lte", value: 4 } สำหรับ NUMERIC
+  orderIndex    Int         @default(0)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  template      QCTemplate  @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  results       QCResult[]
+
+  @@index([templateId])
+  @@map("qc_checklist_items")
+}
+
+enum QCRecordStatus {
+  PENDING
+  PASSED
+  PARTIAL_FAIL
+  FAILED
+}
+
+model QCRecord {
+  id              String          @id @default(uuid())
+  tenantId        String
+  templateId      String
+  goodsReceiveId  String?
+  lotId           String?
+  status          QCRecordStatus  @default(PENDING)
+  inspectedBy     String
+  inspectedAt     DateTime        @default(now())
+  notes           String?         @db.Text
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  template        QCTemplate      @relation(fields: [templateId], references: [id])
+  lot             InventoryLot?   @relation(fields: [lotId], references: [id])
+  results         QCResult[]
+
+  @@index([tenantId])
+  @@index([goodsReceiveId])
+  @@index([lotId])
+  @@map("qc_records")
+}
+
+model QCResult {
+  id                String          @id @default(uuid())
+  recordId          String
+  checklistItemId   String
+  valueBool         Boolean?
+  valueNumeric      Decimal?        @db.Decimal(10, 2)
+  valueText         String?         @db.Text
+  photoUrls         Json?           // array of Firebase Storage URLs
+  passed            Boolean
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  record            QCRecord        @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  checklistItem     QCChecklistItem @relation(fields: [checklistItemId], references: [id])
+
+  @@index([recordId])
+  @@map("qc_results")
 }

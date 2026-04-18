@@ -24,7 +24,7 @@ import {
 } from './dto/mobile.dto';
 
 @ApiTags('Mobile API')
-@Controller('api/v1/mobile')
+@Controller('mobile')
 @SkipSubscriptionCheck()
 export class MobileApiController {
   constructor(private readonly mobileApiService: MobileApiService) {}

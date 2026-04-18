@@ -8,6 +8,7 @@ import {
 import { PrismaService } from '@/prisma/prisma.service';
 import { CreateGoodsReceiveDto } from './dto/create-goods-receive.dto';
 import { QueryGoodsReceiveDto } from './dto/query-goods-receive.dto';
+import { InventoryLotStatus } from '@prisma/client';
 
 export interface PaginatedResponse<T> {
   data: T[];
@@ -51,6 +52,18 @@ export class GoodsReceivesService {
   /**
    * Generate Goods Receive document number (GR-YYYYMM-NNNN)
    */
+  // ─── Generate Lot Number (LOT-YYYYMM-NNNN) ─────────────────────────────────
+  private async generateLotNumber(tenantId: string, tx: any): Promise<string> {
+    const now = new Date();
+    const yearMonth = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const seq = await tx.documentSequence.upsert({
+      where: { tenantId_docType_yearMonth: { tenantId, docType: 'LOT', yearMonth } },
+      update: { currentNumber: { increment: 1 } },
+      create: { tenantId, docType: 'LOT', yearMonth, currentNumber: 1 },
+    });
+    return `LOT-${yearMonth}-${String(seq.currentNumber).padStart(4, '0')}`;
+  }
+
   private async generateGRNumber(tenantId: string, tx: any): Promise<string> {
     const now = new Date();
     const yearMonth = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -271,8 +284,49 @@ export class GoodsReceivesService {
         // Create StockMovement for accepted quantity
         const acceptedQty = item.receivedQty - (item.rejectedQty || 0);
         if (acceptedQty > 0) {
+          // ─── Auto-create InventoryLot if item is perishable or requiresLotTracking ─
+          let lotId: string | undefined;
+          if (invItem.isPerishable || (invItem as any).requiresLotTracking) {
+            const lotNumber = await this.generateLotNumber(tenantId, tx);
+            let expiryDate: Date | undefined;
+            if (item.expiryDate) {
+              expiryDate = new Date(item.expiryDate);
+            } else if (invItem.isPerishable && invItem.defaultShelfLifeDays) {
+              expiryDate = new Date();
+              expiryDate.setDate(expiryDate.getDate() + invItem.defaultShelfLifeDays);
+            }
+
+            const lot = await tx.inventoryLot.create({
+              data: {
+                tenantId,
+                itemId: item.itemId,
+                warehouseId: dto.warehouseId,
+                lotNumber,
+                batchNumber: item.batchNumber,
+                grItemId: grItem.id,
+                supplierId: po?.supplierId,
+                initialQty: acceptedQty,
+                remainingQty: acceptedQty,
+                unitCost: item.unitCost,
+                manufactureDate: undefined,
+                expiryDate,
+                status: InventoryLotStatus.ACTIVE,
+              },
+            });
+            lotId = lot.id;
+
+            // Update GR item with lotId (field added after last prisma generate)
+            await tx.goodsReceiveItem.update({
+              where: { id: grItem.id },
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              data: { lotId: lot.id } as any,
+            });
+          }
+
           await tx.stockMovement.create({
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             data: {
+              id: crypto.randomUUID(),
               tenantId,
               warehouse: { connect: { id: dto.warehouseId } },
               item: { connect: { id: item.itemId } },
@@ -284,9 +338,10 @@ export class GoodsReceivesService {
               referenceId: goodsReceive.id,
               batchNumber: item.batchNumber,
               expiryDate: item.expiryDate ? new Date(item.expiryDate) : null,
+              lotId: lotId ?? null, // field added after last prisma generate
               notes: item.notes,
               createdBy: userId,
-            },
+            } as any,
           });
 
           // Update or create WarehouseStock

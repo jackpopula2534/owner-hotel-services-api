@@ -4,7 +4,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { QueryPerformanceService } from './query-performance.service';
 
 @ApiTags('Database Performance (Admin)')
-@Controller('api/v1/admin/database')
+@Controller('admin/database')
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class DatabaseOptimizationController {
