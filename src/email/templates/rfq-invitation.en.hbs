@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Request for Quotation {{rfqNumber}}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #f4f4f4;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f4f4f4; padding: 20px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+          <tr>
+            <td style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center;">
+              <h1 style="color: #ffffff; margin: 0; font-size: 22px;">{{hotelName}}</h1>
+              <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0; font-size: 14px;">Request for Quotation (RFQ)</p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding: 36px 30px;">
+              <h2 style="color: #333; margin: 0 0 16px 0; font-size: 18px;">
+                Dear {{supplierName}},
+              </h2>
+
+              <p style="color: #555; line-height: 1.7; margin: 0 0 18px 0;">
+                We would like to request a quotation for the items listed below.
+                Please click the button to submit your quote through our portal.
+              </p>
+
+              <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8f9fa; border-radius: 8px; margin: 20px 0;">
+                <tr>
+                  <td style="padding: 22px;">
+                    <p style="margin: 0 0 8px 0; color: #333;"><strong>RFQ number:</strong> {{rfqNumber}}</p>
+                    {{#if subject}}<p style="margin: 0 0 8px 0; color: #333;"><strong>Subject:</strong> {{subject}}</p>{{/if}}
+                    {{#if deadline}}<p style="margin: 0 0 8px 0; color: #c0392b;"><strong>Deadline:</strong> {{deadline}}</p>{{/if}}
+                    {{#if customTerms}}<p style="margin: 8px 0 0 0; color: #555; font-size: 13px;"><strong>Terms:</strong> {{customTerms}}</p>{{/if}}
+                  </td>
+                </tr>
+              </table>
+
+              {{#if coverLetter}}
+              <div style="background: #fffbe6; border-left: 4px solid #f1c40f; padding: 14px 16px; border-radius: 4px; margin: 20px 0; color: #555; line-height: 1.6; white-space: pre-wrap;">{{coverLetter}}</div>
+              {{/if}}
+
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin: 28px 0 12px 0;">
+                <tr>
+                  <td align="center">
+                    <a href="{{portalUrl}}" style="display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #ffffff; padding: 14px 32px; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 15px;">
+                      Submit your quote
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="color: #888; font-size: 12px; line-height: 1.6; text-align: center; margin: 18px 0 0 0;">
+                This link is valid until {{expiresAt}} and is single-use.<br/>
+                If it expires, please contact our procurement team.
+              </p>
+
+              <p style="color: #aaa; font-size: 11px; line-height: 1.6; margin: 18px 0 0 0; word-break: break-all;">
+                If the button doesn't work, copy this URL: {{portalUrl}}
+              </p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="background: #f8f9fa; padding: 20px; text-align: center; color: #888; font-size: 12px;">
+              <p style="margin: 0;">{{hotelName}}</p>
+              <p style="margin: 4px 0 0 0;">This is an automated message — please do not reply.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

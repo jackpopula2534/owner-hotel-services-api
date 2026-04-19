@@ -144,6 +144,24 @@ export class CreatePurchaseOrderDto {
   @IsString()
   purchaseRequisitionId?: string;
 
+  @ApiPropertyOptional({
+    example: 'NET 30',
+    description:
+      'Payment terms for this PO (e.g. "COD", "NET 30"). If omitted, the service falls back to Supplier.paymentTerms.',
+  })
+  @IsOptional()
+  @IsString()
+  paymentTerms?: string;
+
+  @ApiPropertyOptional({
+    example: '99/9 ถนนราชดำริ แขวงลุมพินี เขตปทุมวัน กรุงเทพมหานคร 10330',
+    description:
+      'Ship-to address for this PO. If omitted, the service falls back to the warehouse address, then the tenant address.',
+  })
+  @IsOptional()
+  @IsString()
+  deliveryAddress?: string;
+
   // ─── Discount / VAT configuration ────────────────────────────
   @ApiPropertyOptional({
     enum: DISCOUNT_MODES,

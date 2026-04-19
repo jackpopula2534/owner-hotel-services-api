@@ -2314,6 +2314,7 @@ model Supplier {
   purchaseOrders PurchaseOrder[]
   supplierQuotes SupplierQuote[]
   rfqRecipients  RfqSupplierRecipient[]
+  quoteTokens    SupplierQuoteToken[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -2471,6 +2472,10 @@ model PurchaseOrder {
   quotationNumber   String?             // เลขที่ใบเสนอราคาจากซัพพลายเออร์
   quotationDate     DateTime?           // วันที่ใบเสนอราคา
   purchaseRequisitionId String?         // Link to PR that generated this PO
+  // Payment / delivery terms (PO-specific; auto-filled from Supplier or SupplierQuote,
+  // but admin may override per-PO). Added 2026-04 to fix PDF showing "-" for these.
+  paymentTerms    String?             // e.g. "COD", "NET 30"
+  deliveryAddress String?  @db.Text    // Ship-to address for this PO
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
 
@@ -3267,6 +3272,7 @@ model SupplierQuote {
   supplier            Supplier             @relation(fields: [supplierId], references: [id])
   items               SupplierQuoteItem[]
   priceComparisons    PriceComparison[]
+  accessTokens        SupplierQuoteToken[]
 
   @@unique([tenantId, purchaseRequisitionId, supplierId, round], map: "supplier_quotes_tenant_pr_supplier_round_key")
   @@index([tenantId])
@@ -3335,6 +3341,7 @@ model RequestForQuotation {
   prLinks        RfqPurchaseRequisition[]
   recipients     RfqSupplierRecipient[]
   supplierQuotes SupplierQuote[]
+  accessTokens   SupplierQuoteToken[]
 
   @@unique([tenantId, rfqNumber])
   @@index([tenantId])
@@ -3383,6 +3390,35 @@ model RfqSupplierRecipient {
   @@index([requestForQuotationId])
   @@index([supplierId])
   @@map("rfq_supplier_recipients")
+}
+
+// ─── Supplier Quote Access Token (magic link) ───────────────────────────────
+// Single-use-ish token ที่ส่งใน email ให้ supplier กรอก quote ผ่าน public portal
+// หมดอายุผูกกับ RFQ.deadline (+ buffer optional). admin revoke ได้
+model SupplierQuoteToken {
+  id                      String    @id @default(uuid())
+  tenantId                String
+  supplierQuoteId         String
+  requestForQuotationId   String
+  supplierId              String
+  tokenHash               String    @unique              // sha256(rawToken)
+  expiresAt               DateTime
+  usedAt                  DateTime?                      // supplier submit แล้ว
+  revokedAt               DateTime?                      // admin revoke / regen
+  lastAccessedAt          DateTime?                      // GET session ครั้งล่าสุด
+  accessCount             Int       @default(0)
+  createdAt               DateTime  @default(now())
+
+  supplierQuote       SupplierQuote       @relation(fields: [supplierQuoteId], references: [id], onDelete: Cascade)
+  requestForQuotation RequestForQuotation @relation(fields: [requestForQuotationId], references: [id], onDelete: Cascade)
+  supplier            Supplier            @relation(fields: [supplierId], references: [id])
+
+  @@index([tenantId])
+  @@index([supplierQuoteId])
+  @@index([requestForQuotationId])
+  @@index([supplierId])
+  @@index([expiresAt])
+  @@map("supplier_quote_tokens")
 }
 
 // ─── Price Comparison ───────────────────────────────────────────────────────

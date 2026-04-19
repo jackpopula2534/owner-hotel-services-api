@@ -14,6 +14,7 @@ import { RoomTypeTemplatesModule } from './room-type-templates/room-type-templat
 import { RecipesModule } from './recipes/recipes.module';
 import { DemandForecastModule } from './demand-forecast/demand-forecast.module';
 import { SupplierQuotesModule } from './supplier-quotes/supplier-quotes.module';
+import { SupplierPortalModule } from './supplier-portal/supplier-portal.module';
 import { PriceComparisonsModule } from './price-comparisons/price-comparisons.module';
 import { PurchaseRequisitionsModule } from './purchase-requisitions/purchase-requisitions.module';
 import { RfqsModule } from './rfqs/rfqs.module';
@@ -47,6 +48,7 @@ import { PrismaModule } from '@/prisma/prisma.module';
     RecipesModule,
     DemandForecastModule,
     SupplierQuotesModule,
+    SupplierPortalModule,
     PriceComparisonsModule,
     PurchaseRequisitionsModule,
     RfqsModule,
@@ -57,11 +59,7 @@ import { PrismaModule } from '@/prisma/prisma.module';
     BullModule.registerQueue({ name: INVENTORY_QUEUE }),
   ],
   controllers: [InventoryDashboardController, InventoryReportsController],
-  providers: [
-    InventoryEventListener,
-    InventoryQueueProcessor,
-    InventoryQueueScheduler,
-  ],
+  providers: [InventoryEventListener, InventoryQueueProcessor, InventoryQueueScheduler],
   exports: [
     CategoriesModule,
     ItemsModule,
@@ -76,6 +74,7 @@ import { PrismaModule } from '@/prisma/prisma.module';
     RecipesModule,
     DemandForecastModule,
     SupplierQuotesModule,
+    SupplierPortalModule,
     PriceComparisonsModule,
     PurchaseRequisitionsModule,
     RfqsModule,

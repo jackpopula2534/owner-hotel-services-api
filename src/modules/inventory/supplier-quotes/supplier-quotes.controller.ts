@@ -13,6 +13,7 @@ import {
   UploadedFile,
   BadRequestException,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname, join } from 'path';
@@ -51,10 +52,7 @@ export class SupplierQuotesController {
     @Query() query: QuerySupplierQuoteDto,
     @CurrentUser() user: { tenantId: string },
   ): Promise<{ success: boolean; data: unknown; meta: unknown }> {
-    const result = await this.supplierQuotesService.findAll(
-      user.tenantId,
-      query,
-    );
+    const result = await this.supplierQuotesService.findAll(user.tenantId, query);
     return {
       success: true,
       data: result.data,
@@ -64,8 +62,7 @@ export class SupplierQuotesController {
 
   @Get('by-pr/:prId')
   @ApiOperation({
-    summary:
-      'Get all supplier quotes for a purchase requisition (for price comparison)',
+    summary: 'Get all supplier quotes for a purchase requisition (for price comparison)',
   })
   @ApiParam({ name: 'prId', description: 'Purchase requisition ID' })
   @ApiResponse({
@@ -77,10 +74,7 @@ export class SupplierQuotesController {
     @Param('prId') prId: string,
     @CurrentUser() user: { tenantId: string },
   ): Promise<{ success: boolean; data: unknown }> {
-    const data = await this.supplierQuotesService.findByPR(
-      prId,
-      user.tenantId,
-    );
+    const data = await this.supplierQuotesService.findByPR(prId, user.tenantId);
     return { success: true, data };
   }
 
@@ -100,11 +94,7 @@ export class SupplierQuotesController {
     @Body('status') status: string,
     @CurrentUser() user: { tenantId: string },
   ): Promise<{ success: boolean; data: unknown }> {
-    const data = await this.supplierQuotesService.updateStatus(
-      id,
-      status,
-      user.tenantId,
-    );
+    const data = await this.supplierQuotesService.updateStatus(id, status, user.tenantId);
     return { success: true, data };
   }
 
@@ -125,11 +115,7 @@ export class SupplierQuotesController {
     @Body() dto: SubmitQuoteDto,
     @CurrentUser() user: { tenantId: string },
   ): Promise<{ success: boolean; data: unknown }> {
-    const data = await this.supplierQuotesService.submitQuote(
-      id,
-      dto,
-      user.tenantId,
-    );
+    const data = await this.supplierQuotesService.submitQuote(id, dto, user.tenantId);
     return { success: true, data };
   }
 
@@ -141,8 +127,7 @@ export class SupplierQuotesController {
   @ApiParam({ name: 'id', description: 'Supplier quote ID' })
   @ApiResponse({
     status: 200,
-    description:
-      'Quote selected, other quotes for same PR rejected, PR updated to QUOTES_RECEIVED',
+    description: 'Quote selected, other quotes for same PR rejected, PR updated to QUOTES_RECEIVED',
   })
   @ApiResponse({ status: 404, description: 'Quote not found' })
   @ApiResponse({ status: 400, description: 'Invalid status or request' })
@@ -150,11 +135,33 @@ export class SupplierQuotesController {
     @Param('id') id: string,
     @CurrentUser() user: { id: string; tenantId: string },
   ): Promise<{ success: boolean; data: unknown }> {
-    const data = await this.supplierQuotesService.selectQuote(
-      id,
-      user.id,
-      user.tenantId,
-    );
+    const data = await this.supplierQuotesService.selectQuote(id, user.id, user.tenantId);
+    return { success: true, data };
+  }
+
+  @Post(':id/reopen')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({
+    summary:
+      'Reopen a submitted supplier quote (RECEIVED → REQUESTED). ' +
+      'Revokes old magic-link tokens and resends a fresh invitation to the supplier.',
+  })
+  @ApiParam({ name: 'id', description: 'Supplier quote ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Quote reopened, old tokens revoked, new invitation email dispatched',
+  })
+  @ApiResponse({ status: 404, description: 'Quote not found' })
+  @ApiResponse({
+    status: 400,
+    description: 'Quote is not in a reopenable status (must be RECEIVED)',
+  })
+  async reopen(
+    @Param('id') id: string,
+    @CurrentUser() user: { tenantId: string },
+  ): Promise<{ success: boolean; data: unknown }> {
+    const data = await this.supplierQuotesService.reopenQuote(id, user.tenantId);
     return { success: true, data };
   }
 
@@ -170,11 +177,7 @@ export class SupplierQuotesController {
     @Body('reason') reason: string,
     @CurrentUser() user: { tenantId: string },
   ): Promise<{ success: boolean; data: unknown }> {
-    const data = await this.supplierQuotesService.rejectQuote(
-      id,
-      reason,
-      user.tenantId,
-    );
+    const data = await this.supplierQuotesService.rejectQuote(id, reason, user.tenantId);
     return { success: true, data };
   }
 
@@ -189,11 +192,7 @@ export class SupplierQuotesController {
     FileInterceptor('file', {
       storage: diskStorage({
         destination: (_req, _file, cb) => {
-          const uploadPath = join(
-            process.cwd(),
-            'uploads',
-            'supplier-quotes',
-          );
+          const uploadPath = join(process.cwd(), 'uploads', 'supplier-quotes');
           if (!existsSync(uploadPath)) {
             mkdirSync(uploadPath, { recursive: true });
           }
@@ -213,9 +212,7 @@ export class SupplierQuotesController {
           )
         ) {
           return cb(
-            new BadRequestException(
-              'อนุญาตเฉพาะไฟล์ภาพ (JPG, PNG, WebP), PDF หรือ Excel เท่านั้น',
-            ),
+            new BadRequestException('อนุญาตเฉพาะไฟล์ภาพ (JPG, PNG, WebP), PDF หรือ Excel เท่านั้น'),
             false,
           );
         }
@@ -235,11 +232,7 @@ export class SupplierQuotesController {
     const attachmentUrl = `/uploads/supplier-quotes/${file.filename}`;
 
     // Update quote with attachment URL
-    await this.supplierQuotesService.updateAttachment(
-      id,
-      attachmentUrl,
-      user.tenantId,
-    );
+    await this.supplierQuotesService.updateAttachment(id, attachmentUrl, user.tenantId);
 
     return { success: true, data: { attachmentUrl } };
   }
@@ -276,11 +269,7 @@ export class SupplierQuotesController {
     @Body() dto: SubmitQuoteDto,
     @CurrentUser() user: { tenantId: string },
   ): Promise<{ success: boolean; data: unknown }> {
-    const data = await this.supplierQuotesService.updateQuote(
-      id,
-      dto,
-      user.tenantId,
-    );
+    const data = await this.supplierQuotesService.updateQuote(id, dto, user.tenantId);
     return { success: true, data };
   }
 }

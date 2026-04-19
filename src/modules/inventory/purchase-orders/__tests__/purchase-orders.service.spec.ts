@@ -248,5 +248,47 @@ describe('PurchaseOrdersService — discount mode & breakdown', () => {
       };
       await expect(service.create(dto, userId, tenantId)).rejects.toBeInstanceOf(NotFoundException);
     });
+
+    it('snapshots paymentTerms from DTO and deliveryAddress as-is', async () => {
+      mockPrismaService.supplier.findUnique.mockResolvedValueOnce({
+        id: supplierId,
+        tenantId,
+        paymentTerms: 'NET 30',
+      });
+      const dto: CreatePurchaseOrderDto = {
+        propertyId,
+        supplierId,
+        warehouseId,
+        paymentTerms: 'COD',
+        deliveryAddress: '99/9 ถนนราชดำริ',
+        items: [{ itemId: itemId1, quantity: 1, unitPrice: 100 }],
+      };
+
+      await service.create(dto, userId, tenantId);
+
+      const data = mockPrismaService.purchaseOrder.create.mock.calls[0][0].data;
+      expect(data.paymentTerms).toBe('COD');
+      expect(data.deliveryAddress).toBe('99/9 ถนนราชดำริ');
+    });
+
+    it('falls back to supplier.paymentTerms when DTO omits it', async () => {
+      mockPrismaService.supplier.findUnique.mockResolvedValueOnce({
+        id: supplierId,
+        tenantId,
+        paymentTerms: 'NET 30',
+      });
+      const dto: CreatePurchaseOrderDto = {
+        propertyId,
+        supplierId,
+        warehouseId,
+        items: [{ itemId: itemId1, quantity: 1, unitPrice: 100 }],
+      };
+
+      await service.create(dto, userId, tenantId);
+
+      const data = mockPrismaService.purchaseOrder.create.mock.calls[0][0].data;
+      expect(data.paymentTerms).toBe('NET 30');
+      expect(data.deliveryAddress).toBeNull();
+    });
   });
 });

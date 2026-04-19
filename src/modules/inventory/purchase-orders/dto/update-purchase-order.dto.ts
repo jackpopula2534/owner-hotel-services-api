@@ -97,6 +97,22 @@ export class UpdatePurchaseOrderDto {
   internalNotes?: string;
 
   @ApiPropertyOptional({
+    example: 'NET 30',
+    description: 'Payment terms — overrides supplier default for this PO',
+  })
+  @IsOptional()
+  @IsString()
+  paymentTerms?: string;
+
+  @ApiPropertyOptional({
+    example: '99/9 ถนนราชดำริ แขวงลุมพินี เขตปทุมวัน กรุงเทพมหานคร 10330',
+    description: 'Ship-to address for this PO',
+  })
+  @IsOptional()
+  @IsString()
+  deliveryAddress?: string;
+
+  @ApiPropertyOptional({
     enum: DISCOUNT_MODES,
     description:
       'Discount vs VAT order. BEFORE_VAT (default) — discounts reduce VAT base. AFTER_VAT — VAT computed first, discounts applied post-tax.',

@@ -1,12 +1,16 @@
 import {
   BadRequestException,
   ConflictException,
+  forwardRef,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma, RfqStatus } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
+import { EmailService } from '@/email/email.service';
+import { SupplierPortalService } from '../supplier-portal/supplier-portal.service';
 import {
   CancelRfqDto,
   CreateRfqDto,
@@ -34,7 +38,14 @@ interface RfqListItem {
 export class RfqsService {
   private readonly logger = new Logger(RfqsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    // forwardRef breaks the SupplierPortal ↔ Rfqs cycle (SupplierQuotesModule
+    // sits between the two). See rfqs.module.ts for the matching import.
+    @Inject(forwardRef(() => SupplierPortalService))
+    private readonly supplierPortalService: SupplierPortalService,
+    private readonly emailService: EmailService,
+  ) {}
 
   async create(
     tenantId: string,
@@ -43,7 +54,7 @@ export class RfqsService {
   ): Promise<{ id: string; rfqNumber: string; status: RfqStatus }> {
     const sendImmediately = dto.sendImmediately ?? false;
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       // Validate PRs exist and belong to tenant
       const prs = await tx.purchaseRequisition.findMany({
         where: {
@@ -130,6 +141,20 @@ export class RfqsService {
 
       return rfq;
     });
+
+    // Email dispatch happens AFTER the transaction commits so a slow SMTP
+    // round-trip can't hold the DB connection / lock the transaction.
+    if (sendImmediately) {
+      await this.dispatchInvitations(tenantId, result.id).catch((err) => {
+        this.logger.error(
+          `Failed to dispatch RFQ invitations for ${result.id}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      });
+    }
+
+    return result;
   }
 
   async quickFromPr(
@@ -169,10 +194,7 @@ export class RfqsService {
       ...(query.propertyId && { propertyId: query.propertyId }),
       ...(query.status && { status: query.status }),
       ...(query.search && {
-        OR: [
-          { rfqNumber: { contains: query.search } },
-          { subject: { contains: query.search } },
-        ],
+        OR: [{ rfqNumber: { contains: query.search } }, { subject: { contains: query.search } }],
       }),
       ...(query.supplierId && {
         recipients: { some: { supplierId: query.supplierId } },
@@ -279,11 +301,7 @@ export class RfqsService {
     return rfq;
   }
 
-  async update(
-    id: string,
-    tenantId: string,
-    dto: UpdateRfqDto,
-  ): Promise<unknown> {
+  async update(id: string, tenantId: string, dto: UpdateRfqDto): Promise<unknown> {
     const rfq = await this.ensureExists(id, tenantId);
     if (rfq.status !== RfqStatus.DRAFT) {
       throw new BadRequestException('แก้ไขได้เฉพาะ RFQ ที่อยู่ในสถานะ DRAFT');
@@ -300,7 +318,7 @@ export class RfqsService {
   }
 
   async send(id: string, tenantId: string): Promise<unknown> {
-    return this.prisma.$transaction(async (tx) => {
+    const updated = await this.prisma.$transaction(async (tx) => {
       const rfq = await tx.requestForQuotation.findFirst({
         where: { id, tenantId },
         include: { prLinks: true, recipients: true },
@@ -342,21 +360,156 @@ export class RfqsService {
 
       return updated;
     });
+
+    await this.dispatchInvitations(tenantId, id).catch((err) => {
+      this.logger.error(
+        `Failed to dispatch RFQ invitations for ${id}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    });
+
+    return updated;
   }
 
-  async remind(
+  /**
+   * Generate magic-link tokens for every recipient that has an email and
+   * kick off the invitation emails (queued via EmailService / Bull).
+   * Called after send() / create(sendImmediately) + by admin resend.
+   */
+  async dispatchInvitations(tenantId: string, rfqId: string): Promise<void> {
+    const rfq = await this.prisma.requestForQuotation.findFirst({
+      where: { id: rfqId, tenantId },
+      select: {
+        rfqNumber: true,
+        subject: true,
+        coverLetter: true,
+        customTerms: true,
+        deadline: true,
+      },
+    });
+    if (!rfq) return;
+
+    const results = await this.supplierPortalService.generateTokensForRfq(tenantId, rfqId);
+
+    const deadlineStr = rfq.deadline
+      ? rfq.deadline.toLocaleDateString('th-TH', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+        })
+      : null;
+
+    for (const res of results) {
+      if (!res.supplierEmail) {
+        this.logger.warn(
+          `Supplier ${res.supplierId} (${res.supplierName}) has no email — skipping invitation`,
+        );
+        continue;
+      }
+      try {
+        await this.emailService.sendRfqInvitation({
+          to: res.supplierEmail,
+          supplierName: res.supplierName,
+          rfqNumber: rfq.rfqNumber,
+          portalUrl: res.portalUrl,
+          subject: rfq.subject,
+          coverLetter: rfq.coverLetter,
+          customTerms: rfq.customTerms,
+          deadline: deadlineStr,
+          expiresAt: res.expiresAt.toLocaleString('th-TH'),
+          tenantId,
+        });
+      } catch (err) {
+        this.logger.error(
+          `Failed to queue invitation email for supplier ${res.supplierId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Admin-triggered resend of the magic-link invitation. If supplierId is
+   * provided, regenerate and email only that supplier (e.g. supplier lost
+   * the link). Otherwise dispatch fresh tokens to all recipients.
+   *
+   * Old tokens for the affected supplier(s) are revoked so the previously
+   * emailed link stops working — the supplier must use the latest one.
+   */
+  async resendInvitation(
     id: string,
     tenantId: string,
     supplierId?: string,
-  ): Promise<{ reminded: number }> {
+  ): Promise<{ resent: number; skipped: number }> {
     const rfq = await this.ensureExists(id, tenantId);
-    if (
-      rfq.status !== RfqStatus.SENT &&
-      rfq.status !== RfqStatus.PARTIAL_RESPONSE
-    ) {
-      throw new BadRequestException(
-        'เตือนได้เฉพาะ RFQ ที่ส่งแล้วและยังไม่ปิด',
+    if (rfq.status !== RfqStatus.SENT && rfq.status !== RfqStatus.PARTIAL_RESPONSE) {
+      throw new BadRequestException('สามารถส่งลิงก์ซ้ำได้เฉพาะ RFQ ที่ส่งแล้วและยังไม่ปิด');
+    }
+
+    // "All suppliers" path reuses dispatchInvitations — it already revokes
+    // stale tokens via generateTokensForRfq().
+    if (!supplierId) {
+      const recipientCount = await this.prisma.rfqSupplierRecipient.count({
+        where: { requestForQuotationId: id },
+      });
+      await this.dispatchInvitations(tenantId, id);
+      this.logger.log(`Admin resent RFQ invitation for ${id} to ${recipientCount} recipients`);
+      // dispatchInvitations swallows per-supplier errors, so we report the
+      // target count. The caller can still inspect logs for skipped ones.
+      return { resent: recipientCount, skipped: 0 };
+    }
+
+    // Single-supplier path: use regenerateTokenForSupplier + send one email.
+    const res = await this.supplierPortalService.regenerateTokenForSupplier(
+      tenantId,
+      id,
+      supplierId,
+    );
+
+    if (!res.supplierEmail) {
+      this.logger.warn(`Admin tried to resend to supplier ${supplierId} but it has no email`);
+      return { resent: 0, skipped: 1 };
+    }
+
+    const deadlineStr = rfq.deadline
+      ? rfq.deadline.toLocaleDateString('th-TH', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+        })
+      : null;
+
+    try {
+      await this.emailService.sendRfqInvitation({
+        to: res.supplierEmail,
+        supplierName: res.supplierName,
+        rfqNumber: rfq.rfqNumber,
+        portalUrl: res.portalUrl,
+        subject: rfq.subject,
+        coverLetter: rfq.coverLetter,
+        customTerms: rfq.customTerms,
+        deadline: deadlineStr,
+        expiresAt: res.expiresAt.toLocaleString('th-TH'),
+        tenantId,
+      });
+      this.logger.log(`Admin resent RFQ ${id} invitation to supplier ${supplierId}`);
+      return { resent: 1, skipped: 0 };
+    } catch (err) {
+      this.logger.error(
+        `Failed to resend invitation for supplier ${supplierId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
       );
+      throw new BadRequestException('ส่งอีเมลไม่สำเร็จ กรุณาลองใหม่');
+    }
+  }
+
+  async remind(id: string, tenantId: string, supplierId?: string): Promise<{ reminded: number }> {
+    const rfq = await this.ensureExists(id, tenantId);
+    if (rfq.status !== RfqStatus.SENT && rfq.status !== RfqStatus.PARTIAL_RESPONSE) {
+      throw new BadRequestException('เตือนได้เฉพาะ RFQ ที่ส่งแล้วและยังไม่ปิด');
     }
 
     const now = new Date();
@@ -375,39 +528,24 @@ export class RfqsService {
     return { reminded: result.count };
   }
 
-  async extendDeadline(
-    id: string,
-    tenantId: string,
-    dto: ExtendDeadlineDto,
-  ): Promise<unknown> {
+  async extendDeadline(id: string, tenantId: string, dto: ExtendDeadlineDto): Promise<unknown> {
     const rfq = await this.ensureExists(id, tenantId);
     const newDeadline = new Date(dto.deadline);
     if (rfq.deadline && newDeadline <= rfq.deadline) {
-      throw new BadRequestException(
-        'Deadline ใหม่ต้องหลังจาก deadline เดิม',
-      );
+      throw new BadRequestException('Deadline ใหม่ต้องหลังจาก deadline เดิม');
     }
     return this.prisma.requestForQuotation.update({
       where: { id },
       data: {
         deadline: newDeadline,
-        status:
-          rfq.status === RfqStatus.EXPIRED ? RfqStatus.SENT : rfq.status,
+        status: rfq.status === RfqStatus.EXPIRED ? RfqStatus.SENT : rfq.status,
       },
     });
   }
 
-  async cancel(
-    id: string,
-    tenantId: string,
-    userId: string,
-    dto: CancelRfqDto,
-  ): Promise<unknown> {
+  async cancel(id: string, tenantId: string, userId: string, dto: CancelRfqDto): Promise<unknown> {
     const rfq = await this.ensureExists(id, tenantId);
-    if (
-      rfq.status === RfqStatus.CANCELLED ||
-      rfq.status === RfqStatus.FULLY_RESPONDED
-    ) {
+    if (rfq.status === RfqStatus.CANCELLED || rfq.status === RfqStatus.FULLY_RESPONDED) {
       throw new ConflictException('RFQ ถูกปิดไปแล้ว');
     }
     return this.prisma.requestForQuotation.update({
@@ -441,10 +579,8 @@ export class RfqsService {
     if (!parent) throw new NotFoundException('ไม่พบ RFQ ต้นทาง');
 
     const prIds =
-      overrides.purchaseRequisitionIds ??
-      parent.prLinks.map((p) => p.purchaseRequisitionId);
-    const supplierIds =
-      overrides.supplierIds ?? parent.recipients.map((r) => r.supplierId);
+      overrides.purchaseRequisitionIds ?? parent.prLinks.map((p) => p.purchaseRequisitionId);
+    const supplierIds = overrides.supplierIds ?? parent.recipients.map((r) => r.supplierId);
 
     return this.prisma.$transaction(async (tx) => {
       const rfqNumber = await this.generateRfqNumber(tenantId, tx);
@@ -459,9 +595,7 @@ export class RfqsService {
           subject: overrides.subject ?? parent.subject,
           coverLetter: overrides.coverLetter ?? parent.coverLetter,
           customTerms: overrides.customTerms ?? parent.customTerms,
-          deadline: overrides.deadline
-            ? new Date(overrides.deadline)
-            : parent.deadline,
+          deadline: overrides.deadline ? new Date(overrides.deadline) : parent.deadline,
           createdBy: userId,
           prLinks: {
             create: prIds.map((prId) => ({ purchaseRequisitionId: prId })),
@@ -480,11 +614,7 @@ export class RfqsService {
    * Called when a SupplierQuote is submitted/received.
    * Marks the recipient row as responded and rolls up the RFQ status.
    */
-  async markResponseReceived(
-    tenantId: string,
-    rfqId: string,
-    supplierId: string,
-  ): Promise<void> {
+  async markResponseReceived(tenantId: string, rfqId: string, supplierId: string): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
       const rfq = await tx.requestForQuotation.findFirst({
         where: { id: rfqId, tenantId },
@@ -503,10 +633,9 @@ export class RfqsService {
       });
 
       const total = rfq.recipients.length;
-      const responded =
-        rfq.recipients.filter(
-          (r) => r.respondedAt !== null || r.supplierId === supplierId,
-        ).length;
+      const responded = rfq.recipients.filter(
+        (r) => r.respondedAt !== null || r.supplierId === supplierId,
+      ).length;
 
       let next: RfqStatus = rfq.status;
       if (responded >= total && total > 0) next = RfqStatus.FULLY_RESPONDED;
@@ -537,8 +666,7 @@ export class RfqsService {
       supplierIds: string[];
     },
   ): Promise<void> {
-    const { tenantId, rfqId, round, purchaseRequisitionIds, supplierIds } =
-      input;
+    const { tenantId, rfqId, round, purchaseRequisitionIds, supplierIds } = input;
     if (purchaseRequisitionIds.length === 0 || supplierIds.length === 0) return;
 
     const rows: Prisma.SupplierQuoteCreateManyInput[] = [];
@@ -569,14 +697,12 @@ export class RfqsService {
     return rfq;
   }
 
-  private async generateRfqNumber(
-    tenantId: string,
-    tx: Prisma.TransactionClient,
-  ): Promise<string> {
+  private async generateRfqNumber(tenantId: string, tx: Prisma.TransactionClient): Promise<string> {
     const now = new Date();
-    const yearMonth = `${String(now.getFullYear()).slice(2)}${String(
-      now.getMonth() + 1,
-    ).padStart(2, '0')}`;
+    const yearMonth = `${String(now.getFullYear()).slice(2)}${String(now.getMonth() + 1).padStart(
+      2,
+      '0',
+    )}`;
     const seq = await tx.documentSequence.upsert({
       where: {
         tenantId_docType_yearMonth: {

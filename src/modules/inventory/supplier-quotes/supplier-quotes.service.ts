@@ -3,7 +3,8 @@ import {
   NotFoundException,
   BadRequestException,
   Logger,
-  ConflictException,
+  forwardRef,
+  Inject,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
@@ -16,6 +17,9 @@ export class SupplierQuotesService {
 
   constructor(
     private readonly prisma: PrismaService,
+    // forwardRef matches supplier-quotes.module.ts — RfqsModule is
+    // forward-ref'd to break the 3-module cycle with SupplierPortalModule.
+    @Inject(forwardRef(() => RfqsService))
     private readonly rfqsService: RfqsService,
   ) {}
 
@@ -206,11 +210,7 @@ export class SupplierQuotesService {
     };
   }
 
-  async submitQuote(
-    id: string,
-    dto: SubmitQuoteDto,
-    tenantId: string,
-  ): Promise<any> {
+  async submitQuote(id: string, dto: SubmitQuoteDto, tenantId: string): Promise<any> {
     const quote = await this.prisma.supplierQuote.findUnique({
       where: { id },
     });
@@ -220,9 +220,7 @@ export class SupplierQuotesService {
     }
 
     if (quote.status !== 'REQUESTED') {
-      throw new BadRequestException(
-        `Cannot submit quote with status ${quote.status}`,
-      );
+      throw new BadRequestException(`Cannot submit quote with status ${quote.status}`);
     }
 
     // Validate all items exist
@@ -309,9 +307,7 @@ export class SupplierQuotesService {
           },
         });
 
-        this.logger.log(
-          `Quote ${id} submitted with status RECEIVED. Total: ${totalAmount}`,
-        );
+        this.logger.log(`Quote ${id} submitted with status RECEIVED. Total: ${totalAmount}`);
 
         return updatedQuote;
       });
@@ -353,9 +349,7 @@ export class SupplierQuotesService {
     }
 
     if (quote.status !== 'RECEIVED') {
-      throw new BadRequestException(
-        `Cannot select quote with status ${quote.status}`,
-      );
+      throw new BadRequestException(`Cannot select quote with status ${quote.status}`);
     }
 
     try {
@@ -412,11 +406,7 @@ export class SupplierQuotesService {
     }
   }
 
-  async rejectQuote(
-    id: string,
-    reason: string,
-    tenantId: string,
-  ): Promise<any> {
+  async rejectQuote(id: string, reason: string, tenantId: string): Promise<any> {
     const quote = await this.prisma.supplierQuote.findUnique({
       where: { id },
     });
@@ -426,9 +416,7 @@ export class SupplierQuotesService {
     }
 
     if (!['RECEIVED', 'REQUESTED'].includes(quote.status)) {
-      throw new BadRequestException(
-        `Cannot reject quote with status ${quote.status}`,
-      );
+      throw new BadRequestException(`Cannot reject quote with status ${quote.status}`);
     }
 
     const result = await this.prisma.supplierQuote.update({
@@ -483,9 +471,7 @@ export class SupplierQuotesService {
     });
 
     if (quotes.length === 0) {
-      throw new NotFoundException(
-        `No supplier quotes found for PR ${prId}`,
-      );
+      throw new NotFoundException(`No supplier quotes found for PR ${prId}`);
     }
 
     return quotes.map((quote) => ({
@@ -521,11 +507,7 @@ export class SupplierQuotesService {
     }));
   }
 
-  async updateAttachment(
-    id: string,
-    attachmentUrl: string,
-    tenantId: string,
-  ): Promise<unknown> {
+  async updateAttachment(id: string, attachmentUrl: string, tenantId: string): Promise<unknown> {
     const quote = await this.prisma.supplierQuote.findFirst({
       where: { id, tenantId },
     });
@@ -543,19 +525,13 @@ export class SupplierQuotesService {
   /**
    * Update quote data (prices, items, details) — allows editing RECEIVED quotes
    */
-  async updateQuote(
-    id: string,
-    dto: SubmitQuoteDto,
-    tenantId: string,
-  ): Promise<unknown> {
+  async updateQuote(id: string, dto: SubmitQuoteDto, tenantId: string): Promise<unknown> {
     const quote = await this.prisma.supplierQuote.findFirst({
       where: { id, tenantId },
     });
 
     if (!quote) {
-      this.logger.warn(
-        `Supplier quote ${id} not found for tenant ${tenantId}`,
-      );
+      this.logger.warn(`Supplier quote ${id} not found for tenant ${tenantId}`);
       throw new NotFoundException(`Supplier quote ${id} not found`);
     }
 
@@ -672,11 +648,7 @@ export class SupplierQuotesService {
   /**
    * Update quote status manually
    */
-  async updateStatus(
-    id: string,
-    status: string,
-    tenantId: string,
-  ): Promise<unknown> {
+  async updateStatus(id: string, status: string, tenantId: string): Promise<unknown> {
     const validStatuses = ['REQUESTED', 'RECEIVED', 'SELECTED', 'REJECTED', 'EXPIRED'];
     if (!validStatuses.includes(status)) {
       throw new BadRequestException(
@@ -716,5 +688,90 @@ export class SupplierQuotesService {
 
     this.logger.log(`Quote ${id} status changed: ${quote.status} → ${status}`);
     return result;
+  }
+
+  /**
+   * Reopen a submitted quote so the supplier can edit and resubmit.
+   *
+   * Allowed only from status RECEIVED (supplier has submitted but we haven't
+   * selected a winner yet). Not allowed from SELECTED or REJECTED — those
+   * are terminal and require explicit admin action to reset.
+   *
+   * Flow:
+   *   1. Validate current status
+   *   2. Revert status RECEIVED → REQUESTED inside a tx, revoking any
+   *      still-active magic-link tokens for this quote
+   *   3. Clear the submitted timestamps so the quote looks "fresh" to the
+   *      supplier portal
+   *   4. Regenerate a new token + resend the invitation email via
+   *      RfqsService.resendInvitation
+   */
+  async reopenQuote(
+    id: string,
+    tenantId: string,
+  ): Promise<{ quoteId: string; resent: number; skipped: number }> {
+    const quote = await this.prisma.supplierQuote.findFirst({
+      where: { id, tenantId },
+      select: {
+        id: true,
+        status: true,
+        supplierId: true,
+        requestForQuotationId: true,
+      },
+    });
+
+    if (!quote) {
+      throw new NotFoundException('Supplier quote not found');
+    }
+    if (!quote.requestForQuotationId) {
+      throw new BadRequestException('Cannot reopen a quote that is not attached to an RFQ');
+    }
+    if (quote.status !== 'RECEIVED') {
+      throw new BadRequestException(
+        `Cannot reopen quote with status ${quote.status} (only RECEIVED can be reopened)`,
+      );
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.supplierQuote.update({
+        where: { id },
+        data: {
+          status: 'REQUESTED',
+          receivedAt: null,
+        },
+      });
+
+      // Also clear the RFQ recipient's respondedAt so remind() and roll-up
+      // counters see this supplier as "not responded yet" again.
+      await tx.rfqSupplierRecipient.updateMany({
+        where: {
+          requestForQuotationId: quote.requestForQuotationId!,
+          supplierId: quote.supplierId,
+        },
+        data: { respondedAt: null },
+      });
+
+      // Revoke any tokens still alive for this quote so the previous link
+      // stops working. The new token is minted by resendInvitation below.
+      await tx.supplierQuoteToken.updateMany({
+        where: {
+          supplierQuoteId: id,
+          usedAt: null,
+          revokedAt: null,
+        },
+        data: { revokedAt: new Date() },
+      });
+    });
+
+    this.logger.log(`Quote ${id} reopened (RECEIVED → REQUESTED)`);
+
+    // Regenerate token + send fresh invite email to this supplier only.
+    const mail = await this.rfqsService.resendInvitation(
+      quote.requestForQuotationId,
+      tenantId,
+      quote.supplierId,
+    );
+
+    return { quoteId: id, resent: mail.resent, skipped: mail.skipped };
   }
 }

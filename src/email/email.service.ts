@@ -727,6 +727,49 @@ export class EmailService implements OnModuleInit {
     });
   }
 
+  /**
+   * Send an RFQ magic-link invitation to a supplier. The portal URL embeds
+   * a single-use token; do not log the full URL in audit trails.
+   */
+  async sendRfqInvitation(params: {
+    to: string;
+    supplierName: string;
+    rfqNumber: string;
+    portalUrl: string;
+    subject?: string | null;
+    coverLetter?: string | null;
+    customTerms?: string | null;
+    deadline?: string | null;
+    expiresAt: string;
+    language?: 'th' | 'en';
+    tenantId?: string;
+    hotelName?: string;
+  }): Promise<{ success: boolean; emailLogId: string }> {
+    const subjectLine =
+      params.language === 'en'
+        ? `Request for Quotation ${params.rfqNumber}`
+        : `ขอใบเสนอราคา ${params.rfqNumber}`;
+
+    return this.sendEmail({
+      to: params.to,
+      subject: subjectLine,
+      template: EmailTemplate.RFQ_INVITATION,
+      context: {
+        supplierName: params.supplierName,
+        rfqNumber: params.rfqNumber,
+        portalUrl: params.portalUrl,
+        subject: params.subject ?? null,
+        coverLetter: params.coverLetter ?? null,
+        customTerms: params.customTerms ?? null,
+        deadline: params.deadline ?? null,
+        expiresAt: params.expiresAt,
+        hotelName: params.hotelName,
+      },
+      language: params.language ?? 'th',
+      tenantId: params.tenantId,
+    });
+  }
+
   // ==========================================
   // Email Preferences Management
   // ==========================================

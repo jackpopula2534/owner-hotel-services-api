@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ขอใบเสนอราคา {{rfqNumber}}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #f4f4f4;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f4f4f4; padding: 20px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+          <!-- Header -->
+          <tr>
+            <td style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center;">
+              <h1 style="color: #ffffff; margin: 0; font-size: 22px;">{{hotelName}}</h1>
+              <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0; font-size: 14px;">ขอใบเสนอราคา (RFQ)</p>
+            </td>
+          </tr>
+
+          <!-- Content -->
+          <tr>
+            <td style="padding: 36px 30px;">
+              <h2 style="color: #333; margin: 0 0 16px 0; font-size: 18px;">
+                เรียน {{supplierName}}
+              </h2>
+
+              <p style="color: #555; line-height: 1.7; margin: 0 0 18px 0;">
+                ทางโรงแรมมีความประสงค์จะขอใบเสนอราคาจากท่านตามรายการที่แนบมาพร้อมนี้
+                กรุณาคลิกปุ่มด้านล่างเพื่อกรอกใบเสนอราคาในระบบของเรา
+              </p>
+
+              <!-- Summary card -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8f9fa; border-radius: 8px; margin: 20px 0;">
+                <tr>
+                  <td style="padding: 22px;">
+                    <p style="margin: 0 0 8px 0; color: #333;"><strong>เลขที่ RFQ:</strong> {{rfqNumber}}</p>
+                    {{#if subject}}<p style="margin: 0 0 8px 0; color: #333;"><strong>หัวข้อ:</strong> {{subject}}</p>{{/if}}
+                    {{#if deadline}}<p style="margin: 0 0 8px 0; color: #c0392b;"><strong>กำหนดส่ง:</strong> {{deadline}}</p>{{/if}}
+                    {{#if customTerms}}<p style="margin: 8px 0 0 0; color: #555; font-size: 13px;"><strong>เงื่อนไข:</strong> {{customTerms}}</p>{{/if}}
+                  </td>
+                </tr>
+              </table>
+
+              {{#if coverLetter}}
+              <div style="background: #fffbe6; border-left: 4px solid #f1c40f; padding: 14px 16px; border-radius: 4px; margin: 20px 0; color: #555; line-height: 1.6; white-space: pre-wrap;">{{coverLetter}}</div>
+              {{/if}}
+
+              <!-- CTA -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin: 28px 0 12px 0;">
+                <tr>
+                  <td align="center">
+                    <a href="{{portalUrl}}" style="display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #ffffff; padding: 14px 32px; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 15px;">
+                      กรอกใบเสนอราคา
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="color: #888; font-size: 12px; line-height: 1.6; text-align: center; margin: 18px 0 0 0;">
+                ลิงก์นี้ใช้ได้จนถึง {{expiresAt}} และใช้ได้ครั้งเดียวเท่านั้น<br/>
+                หากลิงก์หมดอายุ กรุณาติดต่อเจ้าหน้าที่จัดซื้อของโรงแรม
+              </p>
+
+              <p style="color: #aaa; font-size: 11px; line-height: 1.6; margin: 18px 0 0 0; word-break: break-all;">
+                ถ้าปุ่มใช้ไม่ได้ ให้ copy ลิงก์นี้: {{portalUrl}}
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background: #f8f9fa; padding: 20px; text-align: center; color: #888; font-size: 12px;">
+              <p style="margin: 0;">{{hotelName}}</p>
+              <p style="margin: 4px 0 0 0;">อีเมลนี้ถูกส่งจากระบบอัตโนมัติ กรุณาอย่าตอบกลับ</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

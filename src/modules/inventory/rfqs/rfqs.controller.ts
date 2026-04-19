@@ -11,13 +11,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import {
-  ApiBearerAuth,
-  ApiOperation,
-  ApiParam,
-  ApiResponse,
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { RfqsService } from './rfqs.service';
 import {
@@ -71,19 +65,14 @@ export class RfqsController {
   @HttpCode(HttpStatus.CREATED)
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @ApiOperation({
-    summary:
-      'Quick-create and send RFQ from a single PR (used by PR detail modal)',
+    summary: 'Quick-create and send RFQ from a single PR (used by PR detail modal)',
   })
   @ApiResponse({ status: 201, description: 'RFQ created and sent' })
   async quickFromPr(
     @Body() dto: QuickRfqFromPrDto,
     @CurrentUser() user: { id: string; tenantId: string },
   ): Promise<{ success: boolean; data: unknown }> {
-    const data = await this.rfqsService.quickFromPr(
-      user.tenantId,
-      user.id,
-      dto,
-    );
+    const data = await this.rfqsService.quickFromPr(user.tenantId, user.id, dto);
     return { success: true, data };
   }
 
@@ -116,6 +105,26 @@ export class RfqsController {
     return { success: true, data };
   }
 
+  @Post(':id/resend-invitation')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({
+    summary:
+      'Regenerate magic-link token and resend the RFQ invitation email. ' +
+      'If supplierId is provided, resend to only that supplier; otherwise to all.',
+  })
+  @ApiParam({ name: 'id', description: 'RFQ id' })
+  @ApiResponse({ status: 200, description: 'Invitation(s) resent' })
+  @ApiResponse({ status: 400, description: 'RFQ not in a resendable status' })
+  async resendInvitation(
+    @Param('id') id: string,
+    @Body('supplierId') supplierId: string | undefined,
+    @CurrentUser() user: { tenantId: string },
+  ): Promise<{ success: boolean; data: unknown }> {
+    const data = await this.rfqsService.resendInvitation(id, user.tenantId, supplierId);
+    return { success: true, data };
+  }
+
   @Patch(':id/extend-deadline')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Extend RFQ deadline' })
@@ -125,19 +134,14 @@ export class RfqsController {
     @Body() dto: ExtendDeadlineDto,
     @CurrentUser() user: { tenantId: string },
   ): Promise<{ success: boolean; data: unknown }> {
-    const data = await this.rfqsService.extendDeadline(
-      id,
-      user.tenantId,
-      dto,
-    );
+    const data = await this.rfqsService.extendDeadline(id, user.tenantId, dto);
     return { success: true, data };
   }
 
   @Post(':id/resolicit')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
-    summary:
-      'Create a follow-up RFQ (round N+1) linked back to the original RFQ',
+    summary: 'Create a follow-up RFQ (round N+1) linked back to the original RFQ',
   })
   @ApiParam({ name: 'id', description: 'Parent RFQ id' })
   async resolicit(
@@ -145,12 +149,7 @@ export class RfqsController {
     @Body() overrides: Partial<CreateRfqDto>,
     @CurrentUser() user: { id: string; tenantId: string },
   ): Promise<{ success: boolean; data: unknown }> {
-    const data = await this.rfqsService.resolicit(
-      id,
-      user.tenantId,
-      user.id,
-      overrides,
-    );
+    const data = await this.rfqsService.resolicit(id, user.tenantId, user.id, overrides);
     return { success: true, data };
   }
 
@@ -163,12 +162,7 @@ export class RfqsController {
     @Body() dto: CancelRfqDto,
     @CurrentUser() user: { id: string; tenantId: string },
   ): Promise<{ success: boolean; data: unknown }> {
-    const data = await this.rfqsService.cancel(
-      id,
-      user.tenantId,
-      user.id,
-      dto,
-    );
+    const data = await this.rfqsService.cancel(id, user.tenantId, user.id, dto);
     return { success: true, data };
   }
 
@@ -206,12 +200,7 @@ export class RfqsController {
     @Param('id') id: string,
     @CurrentUser() user: { id: string; tenantId: string },
   ): Promise<{ success: boolean; data: unknown }> {
-    const data = await this.rfqsService.cancel(
-      id,
-      user.tenantId,
-      user.id,
-      {},
-    );
+    const data = await this.rfqsService.cancel(id, user.tenantId, user.id, {});
     return { success: true, data };
   }
 }

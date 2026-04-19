@@ -240,6 +240,8 @@ export class PurchaseOrdersService {
     }
 
     const po = poRaw as unknown as PurchaseOrderWithDiscount & {
+      paymentTerms: string | null;
+      deliveryAddress: string | null;
       items: (PurchaseOrderItemWithDiscountType & {
         item?: { name: string; sku: string } | null;
       })[];
@@ -273,6 +275,11 @@ export class PurchaseOrdersService {
       expectedDate: po.expectedDate,
       notes: po.notes,
       internalNotes: po.internalNotes,
+      paymentTerms: po.paymentTerms ?? po.supplier?.paymentTerms ?? null,
+      deliveryAddress: po.deliveryAddress,
+      quotationNumber: po.quotationNumber,
+      quotationDate: po.quotationDate,
+      purchaseRequisitionId: po.purchaseRequisitionId,
       subtotal: po.subtotal,
       discountAmount: po.discountAmount,
       discountMode: po.discountMode,
@@ -377,6 +384,13 @@ export class PurchaseOrdersService {
     const po = await this.prisma.$transaction(async (tx) => {
       const poNumber = await this.generateDocNumber(tenantId, 'PURCHASE_ORDER', 'PO', tx);
 
+      // Payment terms: explicit DTO wins, fall back to supplier default so
+      // the PO carries a sticky value even if the supplier's master data
+      // changes later. Delivery address: only what the DTO says — admin is
+      // expected to pick or type it in the UI.
+      const paymentTerms = dto.paymentTerms ?? supplier.paymentTerms ?? null;
+      const deliveryAddress = dto.deliveryAddress ?? null;
+
       const newPo = await tx.purchaseOrder.create({
         // `discountMode`, `headerDiscount`, `headerDiscountType`, and
         // `calculationBreakdown` are new columns (migration 20260417). Once
@@ -394,6 +408,8 @@ export class PurchaseOrdersService {
           quotationNumber: dto.quotationNumber || null,
           quotationDate: dto.quotationDate ? new Date(dto.quotationDate) : null,
           purchaseRequisitionId: dto.purchaseRequisitionId || null,
+          paymentTerms,
+          deliveryAddress,
           status: PurchaseOrderStatus.DRAFT,
           subtotal: breakdown.subtotal,
           discountAmount: breakdown.totalLineDiscount + breakdown.headerDiscountAmount,
@@ -454,10 +470,15 @@ export class PurchaseOrdersService {
 
     // Using a widened record here because discount fields are new (see migration
     // 20260417); we still cast to Prisma's input type at the boundary below.
+    // `paymentTerms` and `deliveryAddress` are also new (migration 20260419) —
+    // only included when DTO has them so we don't overwrite existing values with
+    // undefined. Admin may explicitly null them out by sending an empty string.
     const updateData: Record<string, unknown> = {
       expectedDate: dto.expectedDate ? new Date(dto.expectedDate) : undefined,
       notes: dto.notes,
       internalNotes: dto.internalNotes,
+      ...(dto.paymentTerms !== undefined && { paymentTerms: dto.paymentTerms || null }),
+      ...(dto.deliveryAddress !== undefined && { deliveryAddress: dto.deliveryAddress || null }),
       updatedAt: new Date(),
     };
 
