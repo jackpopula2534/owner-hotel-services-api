@@ -1,4 +1,15 @@
-import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Patch,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { GuestsService } from './guests.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -30,8 +41,11 @@ export class GuestsController {
   @Post()
   @ApiOperation({ summary: 'Create a new guest' })
   @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
-  async create(@Body() createGuestDto: any, @CurrentUser() user: { tenantId?: string }) {
-    return this.guestsService.create(createGuestDto, user?.tenantId);
+  async create(
+    @Body() createGuestDto: any,
+    @CurrentUser() user: { id?: string; tenantId?: string },
+  ) {
+    return this.guestsService.create(createGuestDto, user?.tenantId, user?.id);
   }
 
   @Put(':id')
@@ -40,10 +54,10 @@ export class GuestsController {
   async updatePut(
     @Param('id') id: string,
     @Body() updateGuestDto: any,
-    @CurrentUser() user: { tenantId?: string },
+    @CurrentUser() user: { id?: string; tenantId?: string },
   ) {
     console.log(`Update (PUT) called for ID: ${id}, tenantId: ${user?.tenantId}`);
-    return this.guestsService.update(id, updateGuestDto, user?.tenantId);
+    return this.guestsService.update(id, updateGuestDto, user?.tenantId, user?.id);
   }
 
   @Patch(':id')
@@ -52,10 +66,10 @@ export class GuestsController {
   async updatePatch(
     @Param('id') id: string,
     @Body() updateGuestDto: any,
-    @CurrentUser() user: { tenantId?: string },
+    @CurrentUser() user: { id?: string; tenantId?: string },
   ) {
     console.log(`Update (PATCH) called for ID: ${id}, tenantId: ${user?.tenantId}`);
-    return this.guestsService.update(id, updateGuestDto, user?.tenantId);
+    return this.guestsService.update(id, updateGuestDto, user?.tenantId, user?.id);
   }
 
   @Patch('*')

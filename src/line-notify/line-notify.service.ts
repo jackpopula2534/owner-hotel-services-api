@@ -1,7 +1,7 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
-import axios from 'axios';
+import { httpClient } from '@internal/http-client';
 import {
   LineNotifyEventType,
   SendLineNotifyDto,
@@ -60,11 +60,16 @@ export class LineNotifyService {
         client_secret: this.clientSecret,
       });
 
-      const response = await axios.post(this.tokenUrl, params.toString(), {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
+      const response = await httpClient.post<LineNotifyTokenResponseDto>(
+        this.tokenUrl,
+        params.toString(),
+        {
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          enforceHttps: true,
         },
-      });
+      );
 
       return response.data;
     } catch (error) {
@@ -78,10 +83,11 @@ export class LineNotifyService {
    */
   async getTokenStatus(accessToken: string): Promise<LineNotifyStatusResponseDto> {
     try {
-      const response = await axios.get(this.statusUrl, {
+      const response = await httpClient.get<LineNotifyStatusResponseDto>(this.statusUrl, {
         headers: {
           Authorization: `Bearer ${accessToken}`,
         },
+        enforceHttps: true,
       });
       return response.data;
     } catch (error) {
@@ -192,10 +198,11 @@ export class LineNotifyService {
     if (token) {
       // Revoke token on Line side
       try {
-        await axios.post(this.revokeUrl, null, {
+        await httpClient.post(this.revokeUrl, null, {
           headers: {
             Authorization: `Bearer ${token.accessToken}`,
           },
+          enforceHttps: true,
         });
       } catch (error) {
         this.logger.warn(`Failed to revoke Line Notify token: ${error.message}`);
@@ -310,11 +317,12 @@ export class LineNotifyService {
         params.append('stickerId', dto.stickerId);
       }
 
-      await axios.post(this.notifyApiUrl, params.toString(), {
+      await httpClient.post(this.notifyApiUrl, params.toString(), {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
           Authorization: `Bearer ${accessToken}`,
         },
+        enforceHttps: true,
       });
 
       return true;

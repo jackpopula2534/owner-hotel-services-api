@@ -159,12 +159,18 @@ export class CreateBookingDto {
   @IsOptional()
   children?: number;
 
-  @ApiPropertyOptional({ example: [{ date: '2026-04-13', dayName: 'Sunday', appliedRate: 4000 }], description: 'Optional booking pricing breakdown from frontend' })
+  @ApiPropertyOptional({
+    example: [{ date: '2026-04-13', dayName: 'Sunday', appliedRate: 4000 }],
+    description: 'Optional booking pricing breakdown from frontend',
+  })
   @Allow()
   @IsOptional()
   pricingBreakdown?: Record<string, any>;
 
-  @ApiPropertyOptional({ example: ['2026-04-13'], description: 'Optional holiday dates used for pricing override' })
+  @ApiPropertyOptional({
+    example: ['2026-04-13'],
+    description: 'Optional holiday dates used for pricing override',
+  })
   @Allow()
   @IsOptional()
   holidayDates?: string[];
@@ -204,12 +210,20 @@ export class CreateBookingDto {
   @IsOptional()
   dateRange?: { from?: string; to?: string };
 
-  @ApiPropertyOptional({ example: '14:00', description: 'Requested check-in time (HH:mm) — overrides property standard time for scheduledCheckIn' })
+  @ApiPropertyOptional({
+    example: '14:00',
+    description:
+      'Requested check-in time (HH:mm) — overrides property standard time for scheduledCheckIn',
+  })
   @IsOptional()
   @IsString()
   checkInTime?: string;
 
-  @ApiPropertyOptional({ example: '12:00', description: 'Requested check-out time (HH:mm) — overrides property standard time for scheduledCheckOut' })
+  @ApiPropertyOptional({
+    example: '12:00',
+    description:
+      'Requested check-out time (HH:mm) — overrides property standard time for scheduledCheckOut',
+  })
   @IsOptional()
   @IsString()
   checkOutTime?: string;

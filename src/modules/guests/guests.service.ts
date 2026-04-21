@@ -1,9 +1,13 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AuditLogService } from '../../audit-log/audit-log.service';
 
 @Injectable()
 export class GuestsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private readonly auditLogService: AuditLogService,
+  ) {}
 
   private buildWhere(tenantId: string, search?: string) {
     const where: any = { tenantId };
@@ -92,7 +96,7 @@ export class GuestsService {
     }
   }
 
-  async create(createGuestDto: any, tenantId?: string) {
+  async create(createGuestDto: any, tenantId?: string, userId?: string) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID is required');
     }
@@ -100,9 +104,16 @@ export class GuestsService {
     const data: any = { ...createGuestDto, tenantId };
 
     try {
-      return await this.prisma.guest.create({
+      const result = await this.prisma.guest.create({
         data,
       });
+
+      // Audit logging (non-blocking)
+      this.auditLogService.logGuestCreate(result, userId, tenantId).catch(() => {
+        // Silently ignore audit log errors to prevent blocking guest creation
+      });
+
+      return result;
     } catch (error) {
       // Handle Prisma errors
       if (error.code === 'P2021' || error.code === 'P2022') {
@@ -112,16 +123,23 @@ export class GuestsService {
     }
   }
 
-  async update(id: string, updateGuestDto: any, tenantId?: string) {
-    await this.findOne(id, tenantId);
+  async update(id: string, updateGuestDto: any, tenantId?: string, userId?: string) {
+    const oldGuest = await this.findOne(id, tenantId);
 
     const data: any = { ...updateGuestDto };
 
     try {
-      return await this.prisma.guest.update({
+      const result = await this.prisma.guest.update({
         where: { id },
         data,
       });
+
+      // Audit logging (non-blocking)
+      this.auditLogService.logGuestUpdate(id, oldGuest, result, userId, tenantId).catch(() => {
+        // Silently ignore audit log errors to prevent blocking guest update
+      });
+
+      return result;
     } catch (error) {
       // Handle Prisma errors
       if (error.code === 'P2021' || error.code === 'P2022') {

@@ -1,10 +1,12 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
 import { AdminPanelService } from './admin-panel.service';
+import { SkipSubscriptionCheck } from '../common/decorators/skip-subscription-check.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 
 @Controller('admin-panel')
+@SkipSubscriptionCheck()
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('platform_admin')
 export class AdminPanelController {

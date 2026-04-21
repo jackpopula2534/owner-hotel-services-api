@@ -1,6 +1,17 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+  UseGuards,
+  Query,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { PaymentsService } from './payments.service';
+import { SkipSubscriptionCheck } from '../common/decorators/skip-subscription-check.decorator';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
 import { ApprovePaymentDto } from './dto/approve-payment.dto';
@@ -12,6 +23,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 @ApiTags('payments')
 @ApiBearerAuth('JWT-auth')
 @Controller({ path: 'payments', version: '1' })
+@SkipSubscriptionCheck()
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class PaymentsController {
   constructor(private readonly paymentsService: PaymentsService) {}
@@ -40,21 +52,32 @@ export class PaymentsController {
   @Get('invoice/:invoiceId')
   @ApiOperation({ summary: 'Get payments by invoice ID' })
   @Roles('admin', 'manager', 'tenant_admin', 'platform_admin')
-  findByInvoiceId(@Param('invoiceId') invoiceId: string, @CurrentUser() user: { tenantId?: string }) {
+  findByInvoiceId(
+    @Param('invoiceId') invoiceId: string,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
     return this.paymentsService.findByInvoiceId(invoiceId, user?.tenantId);
   }
 
   @Post(':id/approve')
   @ApiOperation({ summary: 'Approve payment' })
   @Roles('admin', 'platform_admin', 'tenant_admin')
-  approve(@Param('id') id: string, @Body() approvePaymentDto: ApprovePaymentDto, @CurrentUser() user: { tenantId?: string }) {
+  approve(
+    @Param('id') id: string,
+    @Body() approvePaymentDto: ApprovePaymentDto,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
     return this.paymentsService.approvePayment(id, approvePaymentDto.adminId, user?.tenantId);
   }
 
   @Post(':id/reject')
   @ApiOperation({ summary: 'Reject payment' })
   @Roles('admin', 'platform_admin', 'tenant_admin')
-  reject(@Param('id') id: string, @Body() approvePaymentDto: ApprovePaymentDto, @CurrentUser() user: { tenantId?: string }) {
+  reject(
+    @Param('id') id: string,
+    @Body() approvePaymentDto: ApprovePaymentDto,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
     return this.paymentsService.rejectPayment(id, approvePaymentDto.adminId, user?.tenantId);
   }
 

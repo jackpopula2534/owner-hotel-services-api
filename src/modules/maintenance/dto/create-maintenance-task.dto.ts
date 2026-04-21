@@ -1,21 +1,13 @@
-import {
-  IsString,
-  IsOptional,
-  IsEnum,
-  IsNumber,
-  IsDateString,
-  IsDecimal,
-  Min,
-  Max,
-} from 'class-validator';
+import { IsString, IsOptional, IsEnum, IsNumber, IsDateString, Min } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
 
 export enum MaintenanceCategory {
   AC = 'ac',
+  HVAC = 'hvac', // alias ใช้แทน ac ได้
   PLUMBING = 'plumbing',
   ELECTRICAL = 'electrical',
   FURNITURE = 'furniture',
+  APPLIANCE = 'appliance', // เครื่องใช้ไฟฟ้า
   STRUCTURAL = 'structural',
   PEST = 'pest',
   SAFETY = 'safety',
@@ -31,11 +23,13 @@ export enum MaintenancePriority {
 
 export class CreateMaintenanceTaskDto {
   @ApiProperty({
-    description: 'Property ID',
+    description: 'Property ID (optional — resolved from tenant default if omitted)',
     example: 'property-123',
+    required: false,
   })
   @IsString()
-  propertyId: string;
+  @IsOptional()
+  propertyId?: string;
 
   @ApiProperty({
     description: 'Room ID (optional)',
@@ -78,7 +72,16 @@ export class CreateMaintenanceTaskDto {
   })
   @IsEnum(MaintenancePriority)
   @IsOptional()
-  priority?: MaintenancePriority = MaintenancePriority.MEDIUM;
+  priority?: MaintenancePriority;
+
+  @ApiProperty({
+    description: 'Location description (e.g. "ห้อง 201", "ล็อบบี้")',
+    example: 'ห้อง 201',
+    required: false,
+  })
+  @IsString()
+  @IsOptional()
+  location?: string;
 
   @ApiProperty({
     description: 'Assigned technician ID',

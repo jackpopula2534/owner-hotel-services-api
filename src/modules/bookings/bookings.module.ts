@@ -12,7 +12,16 @@ import { NotificationsModule } from '../../notifications/notifications.module';
 import { PaymentsModule } from '../../payments/payments.module';
 
 @Module({
-  imports: [PrismaModule, EmailModule, AuditLogModule, InvoicesModule, HousekeepingModule, LoyaltyModule, NotificationsModule, PaymentsModule],
+  imports: [
+    PrismaModule,
+    EmailModule,
+    AuditLogModule,
+    InvoicesModule,
+    HousekeepingModule,
+    LoyaltyModule,
+    NotificationsModule,
+    PaymentsModule,
+  ],
   controllers: [BookingsController],
   providers: [BookingsService, GuestFolioService],
   exports: [BookingsService, GuestFolioService],

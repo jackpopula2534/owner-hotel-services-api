@@ -82,14 +82,14 @@ export class PropertiesController {
   async update(
     @Param('id') id: string,
     @Body() updatePropertyDto: UpdatePropertyDto,
-    @CurrentUser() user: { tenantId?: string },
+    @CurrentUser() user: { tenantId?: string; id?: string },
   ) {
     if (!user?.tenantId) {
       throw new BadRequestException(
         'No tenant found. Please complete the onboarding process first to set up your hotel.',
       );
     }
-    return this.propertiesService.update(id, updatePropertyDto, user.tenantId);
+    return this.propertiesService.update(id, updatePropertyDto, user.tenantId, user.id);
   }
 
   @Patch(':id')
@@ -99,14 +99,14 @@ export class PropertiesController {
   async partialUpdate(
     @Param('id') id: string,
     @Body() updatePropertyDto: UpdatePropertyDto,
-    @CurrentUser() user: { tenantId?: string },
+    @CurrentUser() user: { tenantId?: string; id?: string },
   ) {
     if (!user?.tenantId) {
       throw new BadRequestException(
         'No tenant found. Please complete the onboarding process first to set up your hotel.',
       );
     }
-    return this.propertiesService.update(id, updatePropertyDto, user.tenantId);
+    return this.propertiesService.update(id, updatePropertyDto, user.tenantId, user.id);
   }
 
   @Delete(':id')

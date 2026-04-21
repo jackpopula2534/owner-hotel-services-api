@@ -1,5 +1,5 @@
 import { Controller, Get, Query, Param, UseGuards, Request, Res, HttpStatus } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { Response } from 'express';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -8,7 +8,7 @@ import { AuditLogService } from './audit-log.service';
 import { AuditLogQueryDto } from './dto/audit-log.dto';
 
 @ApiTags('Audit Logs')
-@Controller('api/v1/audit-logs')
+@Controller({ path: 'audit-logs', version: '1' })
 @UseGuards(JwtAuthGuard, RolesGuard)
 @ApiBearerAuth()
 export class AuditLogController {
@@ -19,9 +19,23 @@ export class AuditLogController {
   @ApiOperation({ summary: 'Get audit logs with filtering and pagination' })
   @ApiResponse({ status: 200, description: 'Audit logs retrieved' })
   async getLogs(@Query() query: AuditLogQueryDto, @Request() req: any) {
-    // Platform admins can see all logs, tenant admins can only see their tenant's logs
     const tenantId = req.user?.role === 'platform_admin' ? undefined : req.user?.tenantId;
     return this.auditLogService.getLogs(query, tenantId);
+  }
+
+  @Get('stats')
+  @Roles('platform_admin', 'tenant_admin')
+  @ApiOperation({ summary: 'Get audit log statistics' })
+  @ApiResponse({ status: 200, description: 'Audit log statistics retrieved' })
+  @ApiQuery({ name: 'startDate', required: false, description: 'Start date (ISO string)' })
+  @ApiQuery({ name: 'endDate', required: false, description: 'End date (ISO string)' })
+  async getStats(
+    @Query('startDate') startDate: string | undefined,
+    @Query('endDate') endDate: string | undefined,
+    @Request() req: any,
+  ) {
+    const tenantId = req.user?.role === 'platform_admin' ? undefined : req.user?.tenantId;
+    return this.auditLogService.getStats({ startDate, endDate }, tenantId);
   }
 
   @Get('export')

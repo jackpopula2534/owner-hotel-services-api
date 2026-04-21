@@ -1,10 +1,12 @@
 import { Controller, Post, Body, Get, Param, Patch, UseGuards } from '@nestjs/common';
 import { OnboardingService } from './onboarding.service';
+import { SkipSubscriptionCheck } from '../common/decorators/skip-subscription-check.decorator';
 import { CreateTenantDto } from '../tenants/dto/create-tenant.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 
 @Controller('onboarding')
+@SkipSubscriptionCheck()
 export class OnboardingController {
   constructor(private readonly onboardingService: OnboardingService) {}
 

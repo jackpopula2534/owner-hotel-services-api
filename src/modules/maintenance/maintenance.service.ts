@@ -1,13 +1,14 @@
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-  BadRequestException,
-} from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateMaintenanceTaskDto } from './dto/create-maintenance-task.dto';
 import { UpdateMaintenanceTaskDto, MaintenanceTaskStatus } from './dto/update-maintenance-task.dto';
 import { normalizePagination } from '../../common/utils/pagination.util';
+import { AuditLogService } from '../../audit-log/audit-log.service';
+import {
+  INVENTORY_EVENTS,
+  MaintenanceTaskCompletedEvent,
+} from '../inventory/events/inventory.events';
 
 interface MaintenanceQuery {
   status?: string;
@@ -36,7 +37,11 @@ interface DashboardData {
 export class MaintenanceService {
   private readonly logger = new Logger(MaintenanceService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private auditLogService: AuditLogService,
+    private eventEmitter: EventEmitter2,
+  ) {}
 
   /**
    * Get all maintenance tasks with filtering and pagination
@@ -144,28 +149,49 @@ export class MaintenanceService {
   }
 
   /**
+   * Resolve propertyId — ถ้าไม่ส่งมาให้ใช้ property แรกของ tenant
+   */
+  private async resolvePropertyId(
+    propertyId: string | undefined,
+    tenantId: string,
+  ): Promise<string> {
+    if (propertyId) {
+      const property = await this.prisma.property.findFirst({
+        where: { id: propertyId, tenantId },
+      });
+      if (!property) {
+        throw new NotFoundException(`Property with ID ${propertyId} not found`);
+      }
+      return property.id;
+    }
+
+    // auto-resolve: ดึง property แรกของ tenant
+    const defaultProperty = await this.prisma.property.findFirst({
+      where: { tenantId },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (!defaultProperty) {
+      throw new NotFoundException('No property found for this tenant');
+    }
+    return defaultProperty.id;
+  }
+
+  /**
    * Create a new maintenance task
    */
-  async create(dto: CreateMaintenanceTaskDto, tenantId: string): Promise<any> {
+  async create(dto: CreateMaintenanceTaskDto, tenantId: string, userId?: string): Promise<any> {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID is required');
     }
 
-    // Verify property exists
-    const property = await this.prisma.property.findFirst({
-      where: { id: dto.propertyId, tenantId },
-    });
+    // Resolve propertyId (optional field — fall back to tenant default)
+    const resolvedPropertyId = await this.resolvePropertyId(dto.propertyId, tenantId);
 
-    if (!property) {
-      throw new NotFoundException(`Property with ID ${dto.propertyId} not found`);
-    }
-
-    // Verify room exists (if provided)
+    // Verify room exists and belongs to property (if provided)
     if (dto.roomId) {
       const room = await this.prisma.room.findFirst({
-        where: { id: dto.roomId, propertyId: dto.propertyId },
+        where: { id: dto.roomId, propertyId: resolvedPropertyId },
       });
-
       if (!room) {
         throw new NotFoundException(`Room with ID ${dto.roomId} not found in this property`);
       }
@@ -175,7 +201,7 @@ export class MaintenanceService {
       const task = await this.prisma.maintenanceTask.create({
         data: {
           tenantId,
-          propertyId: dto.propertyId,
+          propertyId: resolvedPropertyId,
           roomId: dto.roomId,
           title: dto.title,
           description: dto.description,
@@ -186,7 +212,11 @@ export class MaintenanceService {
           scheduledDate: dto.scheduledDate ? new Date(dto.scheduledDate) : undefined,
           estimatedDuration: dto.estimatedDuration,
           estimatedCost: dto.estimatedCost ? parseFloat(dto.estimatedCost) : undefined,
-          notes: dto.notes,
+          notes: dto.notes
+            ? `${dto.notes}${dto.location ? ` | สถานที่: ${dto.location}` : ''}`
+            : dto.location
+              ? `สถานที่: ${dto.location}`
+              : undefined,
         },
         include: {
           property: true,
@@ -203,6 +233,7 @@ export class MaintenanceService {
         });
       }
 
+      this.auditLogService.logMaintenanceCreate(task, userId, tenantId);
       this.logger.log(`Created maintenance task ${task.id} (${task.title})`);
       return task;
     } catch (error) {
@@ -214,7 +245,12 @@ export class MaintenanceService {
   /**
    * Update a maintenance task
    */
-  async update(id: string, dto: UpdateMaintenanceTaskDto, tenantId: string): Promise<any> {
+  async update(
+    id: string,
+    dto: UpdateMaintenanceTaskDto,
+    tenantId: string,
+    userId?: string,
+  ): Promise<any> {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID is required');
     }
@@ -266,6 +302,45 @@ export class MaintenanceService {
         });
       }
 
+      // Emit event for inventory integration (auto-deduct parts)
+      if (dto.status === MaintenanceTaskStatus.COMPLETED) {
+        try {
+          // Parse partsUsed JSON field if present
+          let partsUsed: Array<{ itemId: string; quantity: number }> = [];
+          if (task.partsUsed) {
+            try {
+              const parsed =
+                typeof task.partsUsed === 'string' ? JSON.parse(task.partsUsed) : task.partsUsed;
+              if (Array.isArray(parsed)) {
+                partsUsed = parsed
+                  .filter((p: Record<string, unknown>) => p.itemId && p.qty)
+                  .map((p: Record<string, unknown>) => ({
+                    itemId: String(p.itemId),
+                    quantity: Number(p.qty) || 0,
+                  }));
+              }
+            } catch {
+              // partsUsed is not valid JSON — skip
+            }
+          }
+
+          const event: MaintenanceTaskCompletedEvent = {
+            taskId: id,
+            tenantId,
+            propertyId: task.propertyId,
+            roomId: task.roomId || undefined,
+            partsUsed,
+            completedBy: userId || 'system',
+          };
+          this.eventEmitter.emit(INVENTORY_EVENTS.MAINTENANCE_TASK_COMPLETED, event);
+        } catch (eventError) {
+          this.logger.warn(
+            `Failed to emit maintenance completion event: ${(eventError as Error).message}`,
+          );
+        }
+      }
+
+      this.auditLogService.logMaintenanceUpdate(id, existing, task, userId, tenantId);
       this.logger.log(`Updated maintenance task ${id}`);
       return task;
     } catch (error) {

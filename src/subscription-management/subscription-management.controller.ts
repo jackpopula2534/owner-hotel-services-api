@@ -1,10 +1,12 @@
 import { Controller, Post, Body, Param } from '@nestjs/common';
 import { SubscriptionManagementService } from './subscription-management.service';
+import { SkipSubscriptionCheck } from '../common/decorators/skip-subscription-check.decorator';
 import { UpgradePlanDto } from './dto/upgrade-plan.dto';
 import { AddFeatureDto } from './dto/add-feature.dto';
 import { DowngradePlanDto } from './dto/downgrade-plan.dto';
 
 @Controller('subscription-management')
+@SkipSubscriptionCheck()
 export class SubscriptionManagementController {
   constructor(private readonly subscriptionManagementService: SubscriptionManagementService) {}
 

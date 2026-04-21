@@ -24,7 +24,13 @@ describe('CreateBookingDto', () => {
     });
 
     expect(errors.map((error) => error.property)).toEqual(
-      expect.not.arrayContaining(['property', 'roomTypeIds', 'guestName', 'checkInDate', 'checkOutDate']),
+      expect.not.arrayContaining([
+        'property',
+        'roomTypeIds',
+        'guestName',
+        'checkInDate',
+        'checkOutDate',
+      ]),
     );
   });
 });

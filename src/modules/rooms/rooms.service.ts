@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AuditLogService } from '../../audit-log/audit-log.service';
 import { CreateRoomDto } from './dto/create-room.dto';
 import { UpdateRoomDto } from './dto/update-room.dto';
 import { Prisma } from '@prisma/client';
@@ -8,7 +9,10 @@ import { Prisma } from '@prisma/client';
 export class RoomsService {
   private readonly logger = new Logger(RoomsService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private readonly auditLogService: AuditLogService,
+  ) {}
 
   async findAll(query: any, tenantId?: string) {
     // ถ้าไม่มี tenantId (ผู้ใช้ใหม่) ให้ส่ง empty array กลับไป
@@ -103,7 +107,7 @@ export class RoomsService {
     return room;
   }
 
-  async create(createRoomDto: CreateRoomDto, tenantId?: string) {
+  async create(createRoomDto: CreateRoomDto, tenantId?: string, userId?: string) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID is required');
     }
@@ -224,14 +228,19 @@ export class RoomsService {
         childNoExtraChargeNote: childPricing.childNoExtraChargeNote,
       }),
     };
-    return this.prisma.room.create({
+    const result = await this.prisma.room.create({
       data,
       include: { property: true },
     });
+
+    await this.auditLogService.logRoomCreate(result, userId, tenantId);
+
+    return result;
   }
 
-  async update(id: string, updateRoomDto: UpdateRoomDto, tenantId?: string) {
+  async update(id: string, updateRoomDto: UpdateRoomDto, tenantId?: string, userId?: string) {
     const room = await this.findOne(id, tenantId);
+    const oldRoom = { ...room };
 
     if (updateRoomDto.number) {
       const existingRoom = await this.prisma.room.findFirst({
@@ -297,15 +306,19 @@ export class RoomsService {
         childNoExtraChargeNote: childPricing.childNoExtraChargeNote,
       }),
     };
-    return this.prisma.room.update({
+    const result = await this.prisma.room.update({
       where: { id },
       data: updateData,
       include: { property: true },
     });
+
+    await this.auditLogService.logRoomUpdate(id, oldRoom, result, userId, tenantId);
+
+    return result;
   }
 
-  async remove(id: string, tenantId?: string) {
-    await this.findOne(id, tenantId);
+  async remove(id: string, tenantId?: string, userId?: string) {
+    const room = await this.findOne(id, tenantId);
 
     const activeBookings = await this.prisma.booking.findFirst({
       where: {
@@ -319,18 +332,27 @@ export class RoomsService {
       throw new BadRequestException('Cannot delete room with active bookings');
     }
 
-    return this.prisma.room.delete({
+    const deletedRoom = await this.prisma.room.delete({
       where: { id },
     });
+
+    await this.auditLogService.logRoomDelete(deletedRoom, userId, tenantId);
+
+    return deletedRoom;
   }
 
-  async updateStatus(id: string, status: string, tenantId?: string) {
-    await this.findOne(id, tenantId);
+  async updateStatus(id: string, status: string, tenantId?: string, userId?: string) {
+    const room = await this.findOne(id, tenantId);
+    const oldStatus = room.status;
 
-    return this.prisma.room.update({
+    const result = await this.prisma.room.update({
       where: { id },
       data: { status },
     });
+
+    await this.auditLogService.logRoomStatusChange(result, oldStatus, status, userId, tenantId);
+
+    return result;
   }
 
   async getAvailableRooms(

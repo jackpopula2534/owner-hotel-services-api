@@ -35,7 +35,7 @@ async function bootstrap() {
          FROM information_schema.TABLES
          WHERE TABLE_SCHEMA = ?
          AND TABLE_TYPE = 'BASE TABLE'
-         AND TABLE_NAME NOT IN ('typeorm_metadata', 'engine_cost', 'server_cost')`,
+         AND TABLE_NAME NOT IN ('engine_cost', 'server_cost')`,
         [database],
       );
 
@@ -160,9 +160,7 @@ async function bootstrap() {
         logger.log('user_tenants → tenants FK already exists');
       }
     } catch (fkError) {
-      logger.warn(
-        'Could not re-add user_tenants FK: ' + (fkError as Error).message,
-      );
+      logger.warn('Could not re-add user_tenants FK: ' + (fkError as Error).message);
     } finally {
       await fkRunner.release();
     }

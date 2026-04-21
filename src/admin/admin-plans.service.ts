@@ -332,9 +332,7 @@ export class AdminPlansService {
 
     await this.planFeaturesRepository.save(planFeature);
 
-    this.logger.log(
-      `Assigned feature "${feature.name}" to plan "${plan.name}" (${plan.code})`,
-    );
+    this.logger.log(`Assigned feature "${feature.name}" to plan "${plan.name}" (${plan.code})`);
 
     return this.findOne(planId);
   }
@@ -379,9 +377,7 @@ export class AdminPlansService {
 
     await this.planFeaturesRepository.remove(planFeature);
 
-    this.logger.log(
-      `Removed feature "${feature.name}" from plan "${plan.name}" (${plan.code})`,
-    );
+    this.logger.log(`Removed feature "${feature.name}" from plan "${plan.name}" (${plan.code})`);
 
     return {
       message: `Feature "${feature.name}" removed from plan "${plan.name}" successfully`,

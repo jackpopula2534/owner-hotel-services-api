@@ -11,6 +11,20 @@ yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
 
+tsconfig.build.tsbuildinfo
+
+uploads/rooms/*.jpeg
+uploads/rooms/*.jpg
+uploads/rooms/*.webp
+uploads/rooms/*.png
+uploads/rooms/*.gif
+uploads/rooms/*.bmp
+uploads/rooms/*.tiff
+uploads/rooms/*.svg
+uploads/rooms/*.ico
+uploads/rooms/*.heic
+uploads/rooms/*.heif
+
 # OS
 .DS_Store
 

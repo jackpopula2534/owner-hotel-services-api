@@ -18,10 +18,19 @@ export enum AuditAction {
 
   // Booking
   BOOKING_CREATE = 'booking_create',
+  BOOKING_CONFIRM = 'booking_confirm',
   BOOKING_UPDATE = 'booking_update',
   BOOKING_CANCEL = 'booking_cancel',
   BOOKING_CHECKIN = 'booking_checkin',
   BOOKING_CHECKOUT = 'booking_checkout',
+  BOOKING_EARLY_CHECKIN_REQUEST = 'booking_early_checkin_request',
+  BOOKING_EARLY_CHECKIN_APPROVE = 'booking_early_checkin_approve',
+  BOOKING_LATE_CHECKOUT_REQUEST = 'booking_late_checkout_request',
+  BOOKING_LATE_CHECKOUT_APPROVE = 'booking_late_checkout_approve',
+  BOOKING_FOLIO_CHARGE = 'booking_folio_charge',
+  BOOKING_FOLIO_FINALIZE = 'booking_folio_finalize',
+  BOOKING_PAYMENT = 'booking_payment',
+  BOOKING_NOTE_UPDATE = 'booking_note_update',
   HOUSEKEEPING_TASK_COMPLETE = 'housekeeping_task_complete',
 
   // Payment
@@ -32,12 +41,29 @@ export enum AuditAction {
   REFUND_APPROVE = 'refund_approve',
 
   // Room
+  ROOM_CREATE = 'room_create',
+  ROOM_UPDATE = 'room_update',
+  ROOM_DELETE = 'room_delete',
   ROOM_STATUS_CHANGE = 'room_status_change',
 
   // Guest
   GUEST_CREATE = 'guest_create',
   GUEST_UPDATE = 'guest_update',
+  GUEST_DELETE = 'guest_delete',
   GUEST_DATA_ACCESS = 'guest_data_access',
+
+  // Restaurant
+  ORDER_CREATE = 'order_create',
+  ORDER_UPDATE = 'order_update',
+  ORDER_CANCEL = 'order_cancel',
+  MENU_CREATE = 'menu_create',
+  MENU_UPDATE = 'menu_update',
+  MENU_DELETE = 'menu_delete',
+
+  // Maintenance
+  MAINTENANCE_CREATE = 'maintenance_create',
+  MAINTENANCE_UPDATE = 'maintenance_update',
+  MAINTENANCE_COMPLETE = 'maintenance_complete',
 
   // Settings
   SETTINGS_UPDATE = 'settings_update',
@@ -46,6 +72,15 @@ export enum AuditAction {
   EMPLOYEE_CREATE = 'employee_create',
   EMPLOYEE_UPDATE = 'employee_update',
   EMPLOYEE_DELETE = 'employee_delete',
+
+  // Staff
+  STAFF_CREATE = 'staff_create',
+  STAFF_UPDATE = 'staff_update',
+  STAFF_DELETE = 'staff_delete',
+
+  // Properties
+  PROPERTY_CREATE = 'property_create',
+  PROPERTY_UPDATE = 'property_update',
 
   // Permissions
   ROLE_CHANGE = 'role_change',
@@ -58,6 +93,11 @@ export enum AuditAction {
   SUBSCRIPTION_CANCEL = 'subscription_cancel',
   PLAN_UPGRADE = 'plan_upgrade',
   PLAN_DOWNGRADE = 'plan_downgrade',
+
+  // User
+  USER_CREATE = 'user_create',
+  USER_UPDATE = 'user_update',
+  USER_DELETE = 'user_delete',
 }
 
 export enum AuditResource {
@@ -76,6 +116,28 @@ export enum AuditResource {
   CHANNEL = 'channel',
   REVIEW = 'review',
   HOUSEKEEPING_TASK = 'housekeeping_task',
+  MAINTENANCE_TASK = 'maintenance_task',
+  ORDER = 'order',
+  MENU = 'menu',
+  STAFF = 'staff',
+}
+
+/** Category tags for grouping audit logs by system area */
+export enum AuditCategory {
+  AUTH = 'auth',
+  ROOMS = 'rooms',
+  GUESTS = 'guests',
+  BOOKINGS = 'bookings',
+  RESTAURANT = 'restaurant',
+  HOUSEKEEPING = 'housekeeping',
+  MAINTENANCE = 'maintenance',
+  PAYMENTS = 'payments',
+  HR = 'hr',
+  STAFF = 'staff',
+  PROPERTIES = 'properties',
+  SETTINGS = 'settings',
+  USERS = 'users',
+  GENERAL = 'general',
 }
 
 export class CreateAuditLogDto {
@@ -91,6 +153,11 @@ export class CreateAuditLogDto {
   @IsOptional()
   @IsString()
   resourceId?: string;
+
+  @ApiPropertyOptional({ enum: AuditCategory, description: 'Category tag for grouping' })
+  @IsOptional()
+  @IsEnum(AuditCategory)
+  category?: AuditCategory;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -144,18 +211,21 @@ export class AuditLogQueryDto {
 
   @ApiPropertyOptional({ enum: AuditAction })
   @IsOptional()
-  @IsEnum(AuditAction)
-  action?: AuditAction;
+  action?: string;
 
   @ApiPropertyOptional({ enum: AuditResource })
   @IsOptional()
-  @IsEnum(AuditResource)
-  resource?: AuditResource;
+  resource?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
   resourceId?: string;
+
+  @ApiPropertyOptional({ enum: AuditCategory, description: 'Filter by category tag' })
+  @IsOptional()
+  @IsString()
+  category?: string;
 
   @ApiPropertyOptional({ description: 'Search in description' })
   @IsOptional()

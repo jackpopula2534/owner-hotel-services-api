@@ -119,11 +119,9 @@ export class PaymentsService {
     }
 
     // Log payment approval (async, non-blocking)
-    this.auditLogService
-      .logPaymentApprove(approvedPayment, adminId)
-      .catch((err) => {
-        this.logger.error(`Failed to log payment approval: ${err.message}`);
-      });
+    this.auditLogService.logPaymentApprove(approvedPayment, adminId).catch((err) => {
+      this.logger.error(`Failed to log payment approval: ${err.message}`);
+    });
 
     // Send payment receipt email (async, non-blocking)
     this.sendPaymentReceiptEmail(approvedPayment).catch((err) => {
@@ -204,7 +202,9 @@ export class PaymentsService {
 
       // Fallback: search by tenant and recent pending booking if direct lookup failed
       if (!booking) {
-        this.logger.debug(`No booking_id found on invoice ${invoiceId}, searching by tenant and status`);
+        this.logger.debug(
+          `No booking_id found on invoice ${invoiceId}, searching by tenant and status`,
+        );
         booking = await this.prisma.booking.findFirst({
           where: {
             tenantId: invoice.tenant_id,
@@ -237,7 +237,9 @@ export class PaymentsService {
   /**
    * Send payment receipt email to tenant
    */
-  private async sendPaymentReceiptEmail(payment: Prisma.paymentsGetPayload<{ include: { invoices: true } }>): Promise<void> {
+  private async sendPaymentReceiptEmail(
+    payment: Prisma.paymentsGetPayload<{ include: { invoices: true } }>,
+  ): Promise<void> {
     try {
       if (!payment.tenant_id) {
         this.logger.warn(`Cannot send receipt email for payment ${payment.id}: tenant_id missing`);

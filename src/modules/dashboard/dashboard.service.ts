@@ -257,7 +257,8 @@ export class DashboardService {
           checkOut: { gte: yesterday },
         },
       });
-      const yesterdayOccupancy = totalRooms > 0 ? Math.round((yesterdayOccupied / totalRooms) * 100) : 0;
+      const yesterdayOccupancy =
+        totalRooms > 0 ? Math.round((yesterdayOccupied / totalRooms) * 100) : 0;
       const occupancyTrend = occupancyRate - yesterdayOccupancy;
 
       const todayBookings = await this.prisma.booking.findMany({
@@ -286,11 +287,15 @@ export class DashboardService {
         0,
       );
       const revenueTrend =
-        yesterdayRevenue > 0 ? Math.round(((todayRevenue - yesterdayRevenue) / yesterdayRevenue) * 100) : 0;
+        yesterdayRevenue > 0
+          ? Math.round(((todayRevenue - yesterdayRevenue) / yesterdayRevenue) * 100)
+          : 0;
 
       const adr = occupiedBookings > 0 ? Math.round(todayRevenue / occupiedBookings) : 0;
-      const yesterdayAdr = yesterdayOccupied > 0 ? Math.round(yesterdayRevenue / yesterdayOccupied) : 0;
-      const adrTrend = yesterdayAdr > 0 ? Math.round(((adr - yesterdayAdr) / yesterdayAdr) * 100) : 0;
+      const yesterdayAdr =
+        yesterdayOccupied > 0 ? Math.round(yesterdayRevenue / yesterdayOccupied) : 0;
+      const adrTrend =
+        yesterdayAdr > 0 ? Math.round(((adr - yesterdayAdr) / yesterdayAdr) * 100) : 0;
 
       const revpar = totalRooms > 0 ? Math.round(todayRevenue / totalRooms) : 0;
 
@@ -340,7 +345,9 @@ export class DashboardService {
         inHouseGuests,
       };
     } catch (error: unknown) {
-      this.logger.error(`Error fetching metrics: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      this.logger.error(
+        `Error fetching metrics: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
       return {
         occupancyRate: 0,
         occupancyTrend: 0,
@@ -417,7 +424,9 @@ export class DashboardService {
 
       return { events };
     } catch (error: unknown) {
-      this.logger.error(`Error fetching timeline: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      this.logger.error(
+        `Error fetching timeline: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
       return { events: [] };
     }
   }
@@ -469,14 +478,17 @@ export class DashboardService {
       const summary = {
         vacantClean: rooms.filter((r) => r.status === 'available').length,
         vacantDirty: rooms.filter((r) => r.status === 'dirty').length,
-        occupied: rooms.filter((r) => r.status === 'occupied' || (r.bookings?.length ?? 0) > 0).length,
+        occupied: rooms.filter((r) => r.status === 'occupied' || (r.bookings?.length ?? 0) > 0)
+          .length,
         outOfOrder: rooms.filter((r) => r.status === 'out_of_order').length,
         total: rooms.length,
       };
 
       return { floors, summary };
     } catch (error: unknown) {
-      this.logger.error(`Error fetching room heatmap: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      this.logger.error(
+        `Error fetching room heatmap: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
       return {
         floors: [],
         summary: { vacantClean: 0, vacantDirty: 0, occupied: 0, outOfOrder: 0, total: 0 },
@@ -484,7 +496,11 @@ export class DashboardService {
     }
   }
 
-  async getActivityFeed(tenantId?: string, propertyId?: string, limit = 20): Promise<ActivityFeedResponse> {
+  async getActivityFeed(
+    tenantId?: string,
+    propertyId?: string,
+    limit = 20,
+  ): Promise<ActivityFeedResponse> {
     if (!tenantId) return { activities: [] };
 
     try {
@@ -526,7 +542,9 @@ export class DashboardService {
 
       return { activities };
     } catch (error: unknown) {
-      this.logger.error(`Error fetching activity feed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      this.logger.error(
+        `Error fetching activity feed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
       return { activities: [] };
     }
   }

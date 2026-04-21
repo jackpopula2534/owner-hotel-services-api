@@ -17,12 +17,15 @@ import { UpdateRestaurantDto } from './dto/update-restaurant.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { AddonGuard } from '../../common/guards/addon.guard';
+import { RequireAddon } from '../../common/decorators/require-addon.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @ApiTags('restaurant')
 @ApiBearerAuth('JWT-auth')
-@Controller({ path: 'restaurant', version: '1' })
-@UseGuards(JwtAuthGuard, RolesGuard)
+@Controller({ path: 'restaurants', version: '1' })
+@UseGuards(JwtAuthGuard, RolesGuard, AddonGuard)
+@RequireAddon('RESTAURANT_MODULE')
 export class RestaurantController {
   constructor(private readonly restaurantService: RestaurantService) {}
 

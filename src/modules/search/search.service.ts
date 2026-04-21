@@ -125,7 +125,9 @@ export class SearchService {
         })),
       };
     } catch (error: unknown) {
-      this.logger.error(`Error in global search: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      this.logger.error(
+        `Error in global search: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
       return { guests: [], bookings: [], rooms: [] };
     }
   }

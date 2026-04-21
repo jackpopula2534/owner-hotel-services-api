@@ -1,200 +1,95 @@
-# 🌱 Database Seeder Guide
+# 🌱 Database Seeder Guide (Updated)
 
-## ข้อมูลที่ Seeder จะสร้าง
-
-### 1️⃣ Plans (แพ็กเกจหลัก)
-- **Plan S (Starter)** - 990 บาท/เดือน, 20 ห้อง, 3 users
-- **Plan M (Medium)** - 1,990 บาท/เดือน, 50 ห้อง, 5 users
-- **Plan L (Large)** - 3,990 บาท/เดือน, 100 ห้อง, 10 users
-
-### 2️⃣ Features (ฟีเจอร์เสริม)
-- `ota_booking` - OTA Booking Integration (500 บาท/เดือน)
-- `automation` - Automation System (300 บาท/เดือน)
-- `tax_invoice` - Tax Invoice (200 บาท/เดือน)
-- `extra_user` - Extra User (100 บาท/เดือน)
-- `api_access` - API Access (400 บาท/เดือน)
-- `advanced_report` - Advanced Report (250 บาท/เดือน)
-- `housekeeping` - Housekeeping Management (150 บาท/เดือน)
-- `basic_report` - Basic Report (ฟรี)
-
-### 3️⃣ Plan Features (ฟีเจอร์ที่แถมมากับ plan)
-- **Plan S**: Basic Report
-- **Plan M**: Basic Report + Housekeeping
-- **Plan L**: Basic Report + Housekeeping + Advanced Report
-
-### 4️⃣ Admin Users
-- **Super Admin** - admin@hotelservices.com
-- **Finance Admin** - finance@hotelservices.com
-- **Support Admin** - support@hotelservices.com
-
-### 5️⃣ Sample Data (สำหรับทดสอบ)
-- Sample Hotel (โรงแรมตัวอย่าง) - Trial status, 14 วัน
+ข้อมูลสำหรับ Database Seeder เพื่อใช้ในการพัฒนาและทดสอบระบบ (Development Environment)
 
 ---
 
-## 🚀 วิธีใช้งาน
+## 📦 ข้อมูลที่ Seeder จะสร้าง
 
-### วิธีที่ 1: ผ่าน Command Line (แนะนำ)
+### 1️⃣ Subscription Plans (แพ็กเกจหลัก)
+| Plan | Code | Monthly Price | Max Rooms | Max Users |
+|------|------|---------------|-----------|-----------|
+| **Starter** | `S` | 1,990 บาท | 20 | 3 |
+| **Professional** | `M` | 4,990 บาท | 50 | 10 |
+| **Enterprise** | `L` | 9,990 บาท | 200 | 50 |
+| **Free Trial**| `FREE`| 0 บาท | 5 | 2 |
 
+### 2️⃣ Features & Add-ons (ฟีเจอร์เสริม 11 รายการ)
+- `ota_booking` - OTA Booking Integration (990 THB)
+- `extra_analytics` - Extra Analytics (990 THB)
+- `custom_branding` - Custom Branding (1490 THB)
+- `automation` - Automation System (990 THB)
+- `api_access` - API Access (1500 THB)
+- `tax_invoice` - Tax Invoice (500 THB)
+- `extra_user` - Extra User (200 THB)
+- `advanced_report` - Advanced Report (500 THB)
+- `housekeeping` - Housekeeping Management (500 THB)
+- `basic_report` - Basic Report (FREE)
+- `HR_MODULE` - HR Module (1200 THB)
+
+---
+
+## 🔑 Test Login Credentials
+
+> [!IMPORTANT]
+> **Admin (Platform)** และ **User (Hotel Owner/Staff)** ใช้ตารางแยกกัน และเข้าสู่ระบบผ่าน Endpoint คนละตัว
+
+### 📌 1. Platform Admin
+**Login via:** `POST /api/v1/auth/admin/login`
+
+| Email | Password | Role |
+|-------|----------|------|
+| `admin@hotelservices.com` | `Admin@123` | Super Admin |
+| `finance@hotelservices.com` | `Finance@123` | Finance Admin |
+| `support@hotelservices.com` | `Support@123` | Support Admin |
+
+### 📌 2. Hotel Owners (Tenant Admin)
+**Login via:** `POST /api/v1/auth/login`
+**Password:** `password123` (สำหรับเจ้าของทุกคน)
+
+| Email | Hotel Name | Plan | Features |
+|-------|------------|------|----------|
+| **`premium.test@email.com`** | **Mountain View Resort** | **Enterprise (L)** | **ครบทุก Add-on (11 ตัว)** |
+| `somchai@email.com` | โรงแรมสุขใจ (Sukjai Hotel) | Professional (M) | Analytics, Branding |
+| `seaside@email.com` | บ้านพักริมทะเล (Seaside Stay) | Starter (S) | Trial Mode |
+| `garden@email.com` | Garden Resort & Spa | Professional (M) | - |
+
+### 📌 3. Hotel Staff
+**Email Format:** `{role}.{tenant_slug}@hotel.test`
+**Password:** `Staff@123`
+
+- **Manager**: `manager.mountain@hotel.test`, `manager.sukjai@hotel.test`
+- **Receptionist**: `receptionist.mountain@hotel.test`, `receptionist.sukjai@hotel.test`
+
+---
+
+## 🚀 วิธีรัน Seeder
+
+### วิธีที่ 1: Fresh Start (ล้างข้อมูลเก่าและลงใหม่ - แนะนำ)
+คำสั่งนี้จะ Drop ตารางทั้งหมด, Migrate ใหม่ และ Seed ข้อมูลที่ถูกต้องที่สุด
+```bash
+npm run db:refresh
+```
+
+### วิธีที่ 2: เพิ่มข้อมูลใหม่ (ไม่ลบของเดิม)
 ```bash
 npm run seed
 ```
 
-### วิธีที่ 2: ผ่าน API Endpoint
+---
 
-```bash
-# ต้องรัน server ก่อน
-npm run start:dev
+## 🛠️ โครงสร้างข้อมูลทดสอบ (Demo Data)
 
-# จากนั้นเรียก API
-curl -X POST http://localhost:3000/seeder/run
-```
+- **Hotels**: สร้างไว้ 4 แห่ง (Active, Trial, Pending)
+- **Guests**: สร้างแขกตัวอย่าง 10 คน (ไทย + ต่างชาติ)
+- **Bookings**: สร้างการจอง 10-20 รายการ เพื่อทดสอบ Dashboard
+- **Reviews**: สร้างรีวิวตัวอย่าง 5 รายการ
+- **HR Data**: สร้างข้อมูลมาสเตอร์ HR (แผนก, ตำแหน่ง, ประเภทการลา) ให้ครบทุกโรงแรม
 
 ---
 
-## 📋 ขั้นตอนการ Seed
-
-1. **ตรวจสอบว่า Database เชื่อมต่อได้**
-   ```bash
-   # ตรวจสอบ .env
-   cat .env
-   ```
-
-2. **รัน Seeder**
-   ```bash
-   npm run seed
-   ```
-
-3. **ตรวจสอบผลลัพธ์**
-   - ดู log ใน console
-   - ตรวจสอบใน phpMyAdmin หรือ MySQL client
-
----
-
-## ✅ ข้อมูลที่ถูกสร้าง
-
-### Plans
-```sql
-SELECT * FROM plans;
--- จะเห็น 3 plans: S, M, L
-```
-
-### Features
-```sql
-SELECT * FROM features;
--- จะเห็น 8 features
-```
-
-### Plan Features
-```sql
-SELECT pf.*, p.code as plan_code, f.code as feature_code
-FROM plan_features pf
-JOIN plans p ON pf.plan_id = p.id
-JOIN features f ON pf.feature_id = f.id;
-```
-
-### Admins
-```sql
-SELECT * FROM admins;
--- จะเห็น 3 admins
-```
-
----
-
-## 🔄 Re-seed (Seed ซ้ำ)
-
-Seeder ถูกออกแบบให้ **ไม่สร้างข้อมูลซ้ำ**:
-- ถ้ามีข้อมูลอยู่แล้ว → ข้าม (แสดง `⊙ already exists`)
-- ถ้ายังไม่มี → สร้างใหม่ (แสดง `✓ Created`)
-
-**ตัวอย่าง Output:**
-```
-🌱 Starting database seeding...
-📦 Seeding Plans...
-  ✓ Created plan: S - Starter Plan
-  ⊙ Plan already exists: M
-  ✓ Created plan: L - Large Plan
-⚙️ Seeding Features...
-  ✓ Created feature: ota_booking - OTA Booking Integration
-  ...
-✅ Database seeding completed successfully!
-```
-
----
-
-## ⚠️ หมายเหตุ
-
-1. **Development Only**: Seeder ควรใช้เฉพาะ development environment
-2. **ไม่ลบข้อมูลเดิม**: Seeder จะไม่ลบข้อมูลที่มีอยู่แล้ว
-3. **Sample Data**: Sample tenant จะถูกสร้างถ้ายังไม่มี
-
----
-
-## 🛠️ Customize Seeder
-
-ถ้าต้องการแก้ไขข้อมูลที่ seed:
-
-1. แก้ไขไฟล์ `src/seeder/seeder.service.ts`
-2. เพิ่ม/แก้ไขข้อมูลใน methods:
-   - `seedPlans()` - แก้ไข plans
-   - `seedFeatures()` - แก้ไข features
-   - `seedPlanFeatures()` - แก้ไข plan-feature relationships
-   - `seedAdmins()` - แก้ไข admins
-   - `seedSampleData()` - แก้ไข sample data
-
----
-
-## 🧪 Testing
-
-หลังจาก seed แล้ว ทดสอบ:
-
-```bash
-# ตรวจสอบ Plans
-curl http://localhost:3000/plans
-
-# ตรวจสอบ Features
-curl http://localhost:3000/features
-
-# ตรวจสอบ Admins
-curl http://localhost:3000/admins
-
-# ตรวจสอบ Feature Access
-curl "http://localhost:3000/feature-access/check?tenantId=xxx&featureCode=ota_booking"
-```
-
----
-
-## 📝 Checklist
-
-- [ ] Database เชื่อมต่อได้
-- [ ] รัน `npm run seed` สำเร็จ
-- [ ] ตรวจสอบข้อมูลใน database
-- [ ] ทดสอบ API endpoints
-
----
-
-## 🚨 Troubleshooting
-
-### Error: Cannot connect to database
-- ตรวจสอบ MAMP ทำงานอยู่
-- ตรวจสอบ `.env` ตั้งค่าถูกต้อง
-- ตรวจสอบ database `hotel_services_db` สร้างแล้ว
-
-### Error: Duplicate entry
-- ไม่เป็นไร Seeder จะข้ามข้อมูลที่มีอยู่แล้ว
-
-### Error: Feature not found
-- ตรวจสอบว่า seed features ก่อน plan features
-
----
-
-## 🎯 Next Steps
-
-หลังจาก seed สำเร็จ:
-
-1. ทดสอบ API endpoints
-2. สร้าง tenant ใหม่ผ่าน `/onboarding/register`
-3. ทดสอบ feature access
-4. ทดสอบ admin approval flow
-
-
+## 📝 Checklist หลัง Seed
+1. [ ] เข้าสู่ระบบด้วย `admin@hotelservices.com` เพื่อดูภาพรวมระบบ (Admin Panel)
+2. [ ] เข้าสู่ระบบด้วย `premium.test@email.com` เพื่อทดสอบฟีเจอร์ระดับ Enterprise + Add-ons ทั้งหมด
+3. [ ] ตรวจสอบว่า `users` ในระบบมีจำนวนน้อยลง (ประมาณ 8-10 User) เพื่อความคลีนของข้อมูล
+4. [ ] ตรวจสอบว่า Email ของ User ทั้งหมดไม่มีภาษาไทยปนอยู่ใน Slug

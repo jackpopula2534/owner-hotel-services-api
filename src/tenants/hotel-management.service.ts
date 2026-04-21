@@ -15,6 +15,7 @@ import {
   HotelListStatusBadge,
 } from './dto/hotel-list-response.dto';
 import { PrismaService } from '../prisma/prisma.service';
+import { TenantDefaultDataService } from './tenant-default-data.service';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 
@@ -32,6 +33,7 @@ export class HotelManagementService {
     @InjectRepository(Plan)
     private plansRepository: Repository<Plan>,
     private prisma: PrismaService,
+    private readonly tenantDefaultDataService: TenantDefaultDataService,
   ) {}
 
   // ===== ADD PROPERTY TO EXISTING TENANT =====
@@ -269,7 +271,16 @@ export class HotelManagementService {
       );
     }
 
-    // 8. Return formatted response
+    // 8. Seed default HR master data (departments, positions, leave types, shifts, etc.)
+    try {
+      await this.tenantDefaultDataService.seedDefaultData(savedTenant.id);
+    } catch (err) {
+      this.logger.warn(
+        `Failed to seed default data for tenant ${savedTenant.id}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    // 9. Return formatted response
     return {
       success: true,
       message: `Hotel "${dto.name}" created successfully with ${trialDays}-day trial`,
@@ -704,10 +715,7 @@ export class HotelManagementService {
     };
   }
 
-  private mapPropertyToListItem(
-    prop: any,
-    tenant: Tenant | null,
-  ): HotelListItemDto {
+  private mapPropertyToListItem(prop: any, tenant: Tenant | null): HotelListItemDto {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -743,9 +751,7 @@ export class HotelManagementService {
         ? {
             code: tenant.subscription.plan.code,
             name: tenant.subscription.plan.name,
-            nameTh:
-              planNameTh[tenant.subscription.plan.code] ||
-              tenant.subscription.plan.name,
+            nameTh: planNameTh[tenant.subscription.plan.code] || tenant.subscription.plan.name,
           }
         : null,
       trial: {
@@ -764,9 +770,7 @@ export class HotelManagementService {
     };
   }
 
-  private async getPropertySummaryStats(
-    tenantId: string,
-  ): Promise<HotelSummaryStatsDto> {
+  private async getPropertySummaryStats(tenantId: string): Promise<HotelSummaryStatsDto> {
     const [total, active, trial] = await Promise.all([
       this.prisma.property.count({ where: { tenantId, deletedAt: null } }),
       this.prisma.property.count({ where: { tenantId, status: 'active', deletedAt: null } }),
@@ -785,9 +789,7 @@ export class HotelManagementService {
     };
   }
 
-  private async getPropertyFilterOptions(
-    tenantId: string,
-  ): Promise<HotelFilterOptionsDto> {
+  private async getPropertyFilterOptions(tenantId: string): Promise<HotelFilterOptionsDto> {
     // Get distinct statuses from properties
     const properties = await this.prisma.property.groupBy({
       by: ['status'],

@@ -4,6 +4,13 @@ import { CacheService } from '@/cache/cache.service';
 
 export const ADDON_CODES = {
   HR_MODULE: 'HR_MODULE',
+  POS_MODULE: 'POS_MODULE',
+  RESTAURANT_MODULE: 'RESTAURANT_MODULE',
+  HOUSEKEEPING_MODULE: 'HOUSEKEEPING_MODULE',
+  CHANNEL_MANAGER: 'CHANNEL_MANAGER',
+  LOYALTY_MODULE: 'LOYALTY_MODULE',
+  INVENTORY_MODULE: 'INVENTORY_MODULE',
+  COST_ACCOUNTING_MODULE: 'COST_ACCOUNTING_MODULE',
 } as const;
 
 export type AddonCode = (typeof ADDON_CODES)[keyof typeof ADDON_CODES];
@@ -95,13 +102,14 @@ export class AddonService {
    * Invalidate add-on cache for a tenant (call after subscription change).
    */
   async invalidateAddonCache(tenantId: string): Promise<void> {
+    const allCodes = Object.values(ADDON_CODES);
     const delKeys = [
-      { key: `${tenantId}:${ADDON_CODES.HR_MODULE}`, ns: this.CACHE_NS },
+      ...allCodes.map((code) => ({ key: `${tenantId}:${code}`, ns: this.CACHE_NS })),
       { key: `${tenantId}:all`, ns: this.CACHE_NS },
     ];
     for (const { key, ns } of delKeys) {
       await this.cacheService.del(key, ns);
     }
-    this.logger.log(`Addon cache invalidated for tenant ${tenantId}`);
+    this.logger.log(`Addon cache invalidated for tenant ${tenantId} (${allCodes.length + 1} keys)`);
   }
 }

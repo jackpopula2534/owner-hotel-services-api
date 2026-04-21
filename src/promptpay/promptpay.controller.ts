@@ -25,7 +25,7 @@ import {
 } from './dto/promptpay.dto';
 
 @ApiTags('PromptPay Payment')
-@Controller('api/v1/payments/promptpay')
+@Controller('payments/promptpay')
 export class PromptPayController {
   constructor(private readonly promptPayService: PromptPayService) {}
 

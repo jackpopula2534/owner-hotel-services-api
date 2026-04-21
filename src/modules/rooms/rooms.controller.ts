@@ -89,8 +89,11 @@ export class RoomsController {
   @ApiOperation({ summary: 'Create a new room' })
   @ApiResponse({ status: 201, description: 'Room created successfully' })
   @Roles('admin', 'manager', 'tenant_admin', 'platform_admin')
-  async create(@Body() createRoomDto: CreateRoomDto, @CurrentUser() user: { tenantId?: string }) {
-    return this.roomsService.create(createRoomDto, user?.tenantId);
+  async create(
+    @Body() createRoomDto: CreateRoomDto,
+    @CurrentUser() user: { tenantId?: string; id?: string },
+  ) {
+    return this.roomsService.create(createRoomDto, user?.tenantId, user?.id);
   }
 
   @Patch(':id')
@@ -100,9 +103,9 @@ export class RoomsController {
   async update(
     @Param('id') id: string,
     @Body() updateRoomDto: UpdateRoomDto,
-    @CurrentUser() user: { tenantId?: string },
+    @CurrentUser() user: { tenantId?: string; id?: string },
   ) {
-    return this.roomsService.update(id, updateRoomDto, user?.tenantId);
+    return this.roomsService.update(id, updateRoomDto, user?.tenantId, user?.id);
   }
 
   @Patch(':id/status')
@@ -112,17 +115,17 @@ export class RoomsController {
   async updateStatus(
     @Param('id') id: string,
     @Body('status') status: string,
-    @CurrentUser() user: { tenantId?: string },
+    @CurrentUser() user: { tenantId?: string; id?: string },
   ) {
-    return this.roomsService.updateStatus(id, status, user?.tenantId);
+    return this.roomsService.updateStatus(id, status, user?.tenantId, user?.id);
   }
 
   @Delete(':id')
   @ApiOperation({ summary: 'Delete room' })
   @ApiResponse({ status: 200, description: 'Room deleted successfully' })
   @Roles('admin', 'tenant_admin', 'platform_admin')
-  async remove(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
-    return this.roomsService.remove(id, user?.tenantId);
+  async remove(@Param('id') id: string, @CurrentUser() user: { tenantId?: string; id?: string }) {
+    return this.roomsService.remove(id, user?.tenantId, user?.id);
   }
 
   @Post(':id/images')
@@ -159,7 +162,7 @@ export class RoomsController {
   async uploadImages(
     @Param('id') id: string,
     @UploadedFiles() files: MulterFile[],
-    @CurrentUser() user: { tenantId?: string },
+    @CurrentUser() user: { tenantId?: string; id?: string },
   ) {
     if (!files || files.length === 0) {
       throw new BadRequestException('No image files provided');
@@ -173,9 +176,11 @@ export class RoomsController {
     // Note: Prisma type doesn't reflect `images` yet — regenerate after migration
     const room = await this.roomsService.findOne(id, user?.tenantId);
     const roomAny = room as unknown as Record<string, unknown>;
-    const existingImages: string[] = Array.isArray(roomAny.images) ? (roomAny.images as string[]) : [];
+    const existingImages: string[] = Array.isArray(roomAny.images)
+      ? (roomAny.images as string[])
+      : [];
     const updatedImages = [...existingImages, ...imageUrls].slice(0, 8);
 
-    return this.roomsService.update(id, { images: updatedImages }, user?.tenantId);
+    return this.roomsService.update(id, { images: updatedImages }, user?.tenantId, user?.id);
   }
 }

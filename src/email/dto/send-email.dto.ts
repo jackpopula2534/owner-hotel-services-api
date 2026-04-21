@@ -24,6 +24,7 @@ export enum EmailTemplate {
   SUBSCRIPTION_WELCOME = 'subscription-welcome',
   SUBSCRIPTION_RENEWAL = 'subscription-renewal',
   SUBSCRIPTION_EXPIRING = 'subscription-expiring',
+  RFQ_INVITATION = 'rfq-invitation',
 }
 
 export class SendEmailDto {

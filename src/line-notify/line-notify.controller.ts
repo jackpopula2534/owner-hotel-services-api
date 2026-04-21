@@ -23,7 +23,7 @@ import {
 } from './dto/line-notify.dto';
 
 @ApiTags('Line Notify')
-@Controller('api/v1/line-notify')
+@Controller('line-notify')
 export class LineNotifyController {
   constructor(private readonly lineNotifyService: LineNotifyService) {}
 

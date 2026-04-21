@@ -11,6 +11,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { SkipSubscriptionCheck } from '../common/decorators/skip-subscription-check.decorator';
 import { AdminRefundCreditService } from './admin-refund-credit.service';
 import {
   CreateRefundDto,
@@ -29,6 +30,7 @@ import {
 @ApiTags('Admin - Refund & Credit System')
 @ApiBearerAuth('JWT-auth')
 @Controller({ path: 'admin', version: '1' })
+@SkipSubscriptionCheck()
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('platform_admin')
 export class AdminRefundCreditController {

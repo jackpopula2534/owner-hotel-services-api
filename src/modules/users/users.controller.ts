@@ -43,10 +43,10 @@ export class UsersController {
   async update(
     @Param('id') id: string,
     @Body() updateUserDto: any,
-    @CurrentUser() user: { tenantId?: string; role?: string },
+    @CurrentUser() user: { tenantId?: string; role?: string; id?: string },
   ) {
     const tenantId = user.role === 'platform_admin' ? undefined : user?.tenantId;
-    return this.usersService.update(id, updateUserDto, tenantId);
+    return this.usersService.update(id, updateUserDto, tenantId, user.id);
   }
 
   @Delete(':id')

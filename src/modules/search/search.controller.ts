@@ -46,8 +46,18 @@ export class SearchController {
   @Get('global')
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'receptionist', 'staff', 'user')
   @ApiOperation({ summary: 'Global search across guests, bookings, rooms' })
-  @ApiQuery({ name: 'q', required: true, type: 'string', description: 'Search query (minimum 2 characters)' })
-  @ApiQuery({ name: 'limit', required: false, type: 'number', description: 'Max results per category (default: 10)' })
+  @ApiQuery({
+    name: 'q',
+    required: true,
+    type: 'string',
+    description: 'Search query (minimum 2 characters)',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: 'number',
+    description: 'Max results per category (default: 10)',
+  })
   @ApiResponse({ status: 200, description: 'Search results retrieved successfully' })
   async globalSearch(
     @CurrentUser() user: CurrentUserType,

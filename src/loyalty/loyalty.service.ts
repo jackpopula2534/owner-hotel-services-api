@@ -50,15 +50,11 @@ export class LoyaltyService {
    * Calculates points based on booking amount: 1 point per 100 THB
    * Updates tier if point threshold reached
    */
-  async addPointsForStay(
-    guestId: string,
-    tenantId: string,
-    bookingAmount: number,
-  ): Promise<any> {
+  async addPointsForStay(guestId: string, tenantId: string, bookingAmount: number): Promise<any> {
     try {
       if (!guestId || !tenantId) {
         this.logger.warn(
-          `Cannot add loyalty points: missing guestId (${guestId}) or tenantId (${tenantId})`
+          `Cannot add loyalty points: missing guestId (${guestId}) or tenantId (${tenantId})`,
         );
         return null;
       }
@@ -103,14 +99,12 @@ export class LoyaltyService {
 
       this.logger.log(
         `Added ${pointsEarned} loyalty points to guest ${guestId}. ` +
-        `Total: ${newPoints} (Tier: ${newTier})`
+          `Total: ${newPoints} (Tier: ${newTier})`,
       );
 
       return updated;
     } catch (error) {
-      this.logger.error(
-        `Failed to add loyalty points for guest ${guestId}: ${error.message}`
-      );
+      this.logger.error(`Failed to add loyalty points for guest ${guestId}: ${error.message}`);
       // Don't throw - loyalty points shouldn't block checkout
       return null;
     }

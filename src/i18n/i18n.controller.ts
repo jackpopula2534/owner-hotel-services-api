@@ -11,7 +11,7 @@ import {
 } from './dto/i18n.dto';
 
 @ApiTags('i18n / Translations')
-@Controller('api/v1/i18n')
+@Controller('i18n')
 export class I18nController {
   constructor(private readonly i18nService: I18nService) {}
 

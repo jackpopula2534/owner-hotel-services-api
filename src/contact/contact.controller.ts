@@ -1,11 +1,13 @@
 import { Controller, Post, Body, Get, UseGuards } from '@nestjs/common';
 import { ContactService } from './contact.service';
+import { SkipSubscriptionCheck } from '../common/decorators/skip-subscription-check.decorator';
 import { CreateDemoBookingDto, CreateContactMessageDto } from './dto/contact.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 
 @Controller('contact')
+@SkipSubscriptionCheck()
 export class ContactController {
   constructor(private readonly contactService: ContactService) {}
 

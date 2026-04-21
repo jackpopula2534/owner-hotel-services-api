@@ -1,7 +1,9 @@
 import { Controller, Post } from '@nestjs/common';
 import { SeederService } from './seeder.service';
+import { SkipSubscriptionCheck } from '../common/decorators/skip-subscription-check.decorator';
 
 @Controller('seeder')
+@SkipSubscriptionCheck()
 export class SeederController {
   constructor(private readonly seederService: SeederService) {}
 

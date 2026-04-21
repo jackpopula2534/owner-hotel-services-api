@@ -23,7 +23,7 @@ import {
 } from './dto/push-notification.dto';
 
 @ApiTags('Push Notifications')
-@Controller('api/v1/push-notifications')
+@Controller('push-notifications')
 export class PushNotificationsController {
   constructor(private readonly pushNotificationsService: PushNotificationsService) {}
 

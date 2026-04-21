@@ -184,7 +184,10 @@ export class EmailEventsService {
 
       this.logger.log(`Check-in confirmation email sent for booking ${booking.id}`);
     } catch (error) {
-      this.logger.error(`Failed to send check-in confirmation email for ${booking.id}:`, error.message);
+      this.logger.error(
+        `Failed to send check-in confirmation email for ${booking.id}:`,
+        error.message,
+      );
     }
   }
 
@@ -370,7 +373,9 @@ export class EmailEventsService {
       );
 
       if (!canSend) {
-        this.logger.log(`Guest ${booking.guestEmail} has opted out of promotional emails, skipping review request`);
+        this.logger.log(
+          `Guest ${booking.guestEmail} has opted out of promotional emails, skipping review request`,
+        );
         return;
       }
 
@@ -420,11 +425,7 @@ export class EmailEventsService {
       if (!params.to) return;
 
       // Check email preferences
-      const canSend = await this.checkEmailPreference(
-        params.to,
-        'paymentReceipt',
-        params.tenantId,
-      );
+      const canSend = await this.checkEmailPreference(params.to, 'paymentReceipt', params.tenantId);
 
       if (!canSend) {
         this.logger.log(`Recipient ${params.to} has opted out of payment receipt emails`);

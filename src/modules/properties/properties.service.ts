@@ -2,10 +2,14 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreatePropertyDto } from './dto/create-property.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
+import { AuditLogService } from '../../audit-log/audit-log.service';
 
 @Injectable()
 export class PropertiesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private auditLogService: AuditLogService,
+  ) {}
 
   private buildWhere(tenantId: string, search?: string, includeDeleted = false) {
     const where: any = { tenantId };
@@ -172,7 +176,9 @@ export class PropertiesService {
       this.prisma.room.count({ where: roomWhere }),
       this.prisma.room.count({ where: { ...roomWhere, status: 'available' } }),
       this.prisma.room.count({ where: { ...roomWhere, status: 'occupied' } }),
-      this.prisma.room.count({ where: { ...roomWhere, status: { in: ['maintenance', 'out_of_order'] } } }),
+      this.prisma.room.count({
+        where: { ...roomWhere, status: { in: ['maintenance', 'out_of_order'] } },
+      }),
       this.prisma.room.count({ where: { ...roomWhere, status: 'cleaning' } }),
       this.prisma.booking.count({
         where: {
@@ -320,12 +326,17 @@ export class PropertiesService {
     }
   }
 
-  async update(id: string, updatePropertyDto: UpdatePropertyDto, tenantId?: string) {
+  async update(
+    id: string,
+    updatePropertyDto: UpdatePropertyDto,
+    tenantId?: string,
+    userId?: string,
+  ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID is required');
     }
 
-    await this.findOne(id, tenantId);
+    const oldData = await this.findOne(id, tenantId);
 
     if (updatePropertyDto.code) {
       const existing = await this.prisma.property.findFirst({
@@ -345,10 +356,13 @@ export class PropertiesService {
     }
 
     // Strip fields not yet in DB schema (pending migration: SC/VAT settings)
-    return this.prisma.property.update({
+    const result = await this.prisma.property.update({
       where: { id },
       data: updatePropertyDto,
     });
+
+    this.auditLogService.logPropertyUpdate(id, oldData, result, userId, tenantId);
+    return result;
   }
 
   async remove(id: string, tenantId?: string) {

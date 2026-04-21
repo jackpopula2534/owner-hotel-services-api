@@ -48,24 +48,12 @@ export class OnboardingService {
       trialEndsAt,
     });
 
-    // 2. ให้เป็น Trial Plan แบบ Full Experience แต่ Limit ห้องและคนน้อยมากๆ
-    let trialPlan = await this.plansService.findByCode('TRIAL');
+    // 2. ใช้ Free Trial Plan ที่ Admin กำหนดไว้ (code: FREE)
+    const trialPlan = await this.plansService.findByCode('FREE');
     if (!trialPlan) {
-      // Auto-create a stub Plan TRIAL so that registration never fails
-      const newPlan = await this.prisma.plans.create({
-        data: {
-          id: 'trial-plan-' + Date.now(),
-          code: 'TRIAL',
-          name: 'Free Trial (Full Access)',
-          price_monthly: 0,
-          max_rooms: 5, // Limit rooms to 5
-          max_users: 2, // Limit users to 2
-          max_properties: 2,
-          is_active: 1,
-          description: 'Try all enterprise features with limited capacity',
-        },
-      });
-      trialPlan = newPlan as any;
+      throw new Error(
+        'Free Trial plan (code: FREE) not found. Please run the database seeder first.',
+      );
     }
 
     // 3. สร้าง Trial Subscription
@@ -80,27 +68,6 @@ export class OnboardingService {
       endDate: endDate,
       autoRenew: false,
     });
-
-    // ให้สิทธิ์การเข้าถึง Features ทั้งหมดที่มีในระบบ (Full Experience)
-    try {
-      const allFeatures = await this.prisma.features.findMany({ where: { is_active: 1 } });
-      if (allFeatures.length > 0) {
-        const { randomUUID } = require('crypto');
-        await this.prisma.subscription_features.createMany({
-          data: allFeatures.map((f) => ({
-            id: randomUUID(),
-            subscription_id: subscription.id,
-            feature_id: f.id,
-            price: 0,
-          })),
-          skipDuplicates: true,
-        });
-      }
-    } catch (err) {
-      this.logger.warn(
-        `Failed to add full features to trial subscription: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
 
     // 4. Auto-create default property from tenant data
     const propertyCode =
