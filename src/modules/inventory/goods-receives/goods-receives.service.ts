@@ -34,6 +34,8 @@ export interface GoodsReceiveDetail {
   itemCount: number;
   totalReceivedQty: number;
   totalRejectedQty: number;
+  subtotal: number;
+  totalAmount: number;
   notes?: string;
   createdBy: string;
   createdAt: Date;
@@ -53,15 +55,21 @@ export class GoodsReceivesService {
    * Generate Goods Receive document number (GR-YYYYMM-NNNN)
    */
   // ─── Generate Lot Number (LOT-YYYYMM-NNNN) ─────────────────────────────────
+  // NOTE: DocumentSequence uses `lastNumber` + required `prefix` (see
+  // prisma/schema.prisma › model DocumentSequence). An earlier version of this
+  // method referenced a non-existent `currentNumber` field and omitted
+  // `prefix`, which caused Prisma to throw PrismaClientValidationError (which
+  // the global filter surfaces as "VALIDATION_ERROR: ข้อมูลไม่ถูกต้องตามโครงสร้าง
+  // ฐานข้อมูล") whenever a perishable / lot-tracked item was received.
   private async generateLotNumber(tenantId: string, tx: any): Promise<string> {
     const now = new Date();
     const yearMonth = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
     const seq = await tx.documentSequence.upsert({
       where: { tenantId_docType_yearMonth: { tenantId, docType: 'LOT', yearMonth } },
-      update: { currentNumber: { increment: 1 } },
-      create: { tenantId, docType: 'LOT', yearMonth, currentNumber: 1 },
+      update: { lastNumber: { increment: 1 } },
+      create: { tenantId, docType: 'LOT', prefix: 'LOT', yearMonth, lastNumber: 1 },
     });
-    return `LOT-${yearMonth}-${String(seq.currentNumber).padStart(4, '0')}`;
+    return `LOT-${yearMonth}-${String(seq.lastNumber).padStart(4, '0')}`;
   }
 
   private async generateGRNumber(tenantId: string, tx: any): Promise<string> {
@@ -191,6 +199,13 @@ export class GoodsReceivesService {
     userId: string,
     tenantId: string,
   ): Promise<GoodsReceiveDetail> {
+    if (!userId) {
+      throw new BadRequestException('Authenticated user ID is required to create a goods receive');
+    }
+    if (!tenantId) {
+      throw new BadRequestException('Tenant context is required to create a goods receive');
+    }
+
     return await this.prisma.$transaction(async (tx) => {
       // 1. Validate warehouse
       const warehouse = await tx.warehouse.findUnique({
@@ -402,6 +417,22 @@ export class GoodsReceivesService {
         }
       }
 
+      // 5b. Persist computed monetary totals on the GR header so list views
+      // and dashboards don't have to recompute from items on every read.
+      // `totalCost` already excludes rejected qty (see grItem.create above).
+      const computedTotal = grItems.reduce(
+        (sum: number, it: any) => sum + Number(it.totalCost ?? 0),
+        0,
+      );
+      if (computedTotal > 0) {
+        await tx.goodsReceive.update({
+          where: { id: goodsReceive.id },
+          data: { subtotal: computedTotal, totalAmount: computedTotal },
+        });
+        goodsReceive.subtotal = computedTotal as any;
+        goodsReceive.totalAmount = computedTotal as any;
+      }
+
       // 6. Update PO status if all items received
       if (po) {
         const poItems = await tx.purchaseOrderItem.findMany({
@@ -508,6 +539,8 @@ export class GoodsReceivesService {
       itemCount: items.length,
       totalReceivedQty,
       totalRejectedQty,
+      subtotal: Number(receive.subtotal ?? 0),
+      totalAmount: Number(receive.totalAmount ?? 0),
       notes: receive.notes,
       createdBy: receive.receivedBy,
       createdAt: receive.createdAt,

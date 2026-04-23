@@ -28,14 +28,23 @@ model User {
   tenantId       String? // activeTenantId for current session context
   timezone       String?
   // ── System Access Control ─────────────────────────────────────────────────
-  // JSON-encoded array: ["main"] | ["pos"] | ["main","pos"]
+  // JSON-encoded array: ["main"] | ["pos"] | ["main","pos"] | ["main","procurement"]
   // Controls which system(s) this user may log into.
-  // main = hotel management dashboard, pos = Point-of-Sale terminal
+  // main = hotel management dashboard, pos = Point-of-Sale terminal, procurement = purchasing workspace
   allowedSystems String         @default("[\"main\"]") @db.VarChar(255)
+  // ─────────────────────────────────────────────────────────────────────────
+  // ── Procurement ───────────────────────────────────────────────────────────
+  // Per-user approval limit (null = inherit from role). Used when this user is
+  // assigned as approver on a PR / Price Comparison / PO document flow.
+  approvalLimit          Decimal?  @db.Decimal(12, 2)
+  // JSON-encoded array of fine-grained procurement permission keys, e.g.
+  // ["pr.create","pr.approve","po.create","po.approve","grn.create","supplier.manage","report.view"]
+  procurementPermissions String?   @db.Text
   // ─────────────────────────────────────────────────────────────────────────
   refreshTokens  RefreshToken[]
   notifications  Notification[]
   userTenants    UserTenant[] // Junction table for multi-tenant support
+  approvalStepAssignments ApprovalFlowStepApprover[]
 
   @@map("users")
 }
@@ -3462,6 +3471,10 @@ model DocumentSettings {
   branchNumber    String?           // เลขที่สาขา
   address         String?  @db.Text // ที่อยู่บริษัท
   addressEn       String?  @db.Text // ที่อยู่บริษัท (English)
+  // Shipping / Delivery address — used as default ship-to in PO when admin
+  // selects "ที่อยู่จัดส่ง" instead of the billing/company address.
+  shippingAddress   String? @db.Text // ที่อยู่จัดส่ง (ภาษาไทย)
+  shippingAddressEn String? @db.Text // ที่อยู่จัดส่ง (English)
   phone           String?           // เบอร์โทร
   fax             String?           // เบอร์แฟกซ์
   email           String?           // อีเมล
@@ -3635,3 +3648,88 @@ model QCResult {
   @@index([recordId])
   @@map("qc_results")
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PROCUREMENT APPROVAL FLOW
+// ══════════════════════════════════════════════════════════════════════════════
+
+enum ApprovalDocumentType {
+  PURCHASE_REQUISITION
+  PRICE_COMPARISON
+  PURCHASE_ORDER
+}
+
+enum ApproverType {
+  SPECIFIC_USER
+  ROLE
+  DEPARTMENT_HEAD
+}
+
+/// Approval Flow Template.
+/// Tenant-wide rule describing how PR / Price Comparison / PO must be approved.
+/// Multiple flows per document type are allowed; the engine picks the best match
+/// by (documentType, amount within [minAmount, maxAmount], isActive, isDefault).
+model ApprovalFlow {
+  id            String               @id @default(uuid())
+  tenantId      String
+  propertyId    String?
+  name          String               @db.VarChar(150)
+  description   String?              @db.Text
+  documentType  ApprovalDocumentType
+  minAmount     Decimal?             @db.Decimal(12, 2)
+  maxAmount     Decimal?             @db.Decimal(12, 2)
+  isActive      Boolean              @default(true)
+  isDefault     Boolean              @default(false)
+  createdBy     String?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  steps         ApprovalFlowStep[]
+
+  @@index([tenantId, documentType])
+  @@index([tenantId, isActive])
+  @@map("approval_flows")
+}
+
+/// A single step in an approval flow (executed sequentially by stepOrder).
+/// If isParallel = true, ALL approvers assigned via ApprovalFlowStepApprover must
+/// approve (or a minApprovals threshold, whichever is lower).
+model ApprovalFlowStep {
+  id            String        @id @default(uuid())
+  flowId        String
+  stepOrder     Int
+  name          String        @db.VarChar(150)
+  approverType  ApproverType  @default(SPECIFIC_USER)
+  approverRole  String?
+  minApprovals  Int           @default(1)
+  isParallel    Boolean       @default(false)
+  slaHours      Int?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  flow          ApprovalFlow               @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  approvers     ApprovalFlowStepApprover[]
+
+  @@unique([flowId, stepOrder])
+  @@index([flowId])
+  @@map("approval_flow_steps")
+}
+
+/// Join table: which users are approvers for a given step.
+/// Only used when the parent step's approverType = SPECIFIC_USER.
+model ApprovalFlowStepApprover {
+  id        String           @id @default(uuid())
+  stepId    String
+  userId    String
+  order     Int              @default(0)
+  createdAt DateTime         @default(now())
+
+  step      ApprovalFlowStep @relation(fields: [stepId], references: [id], onDelete: Cascade)
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([stepId, userId])
+  @@index([userId])
+  @@map("approval_flow_step_approvers")
+}
+
+

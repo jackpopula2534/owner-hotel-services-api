@@ -94,9 +94,11 @@ export class ItemsService {
       };
 
       if (query.search) {
+        // mode: 'insensitive' is not supported by Prisma v5 + MySQL
+        // MySQL utf8mb4_unicode_ci is already case-insensitive by default
         where.OR = [
-          { name: { contains: query.search, mode: 'insensitive' } },
-          { sku: { contains: query.search, mode: 'insensitive' } },
+          { name: { contains: query.search } },
+          { sku: { contains: query.search } },
         ];
       }
 
@@ -179,13 +181,17 @@ export class ItemsService {
       const isActive = dto.isActive ?? true;
       const query = dto.q.trim();
 
+      // NOTE: `mode: 'insensitive'` is not supported by Prisma v5 with MySQL
+      // and throws a PrismaClientValidationError (→ 400 Bad Request).
+      // MySQL with utf8mb4_unicode_ci is already case-insensitive by default,
+      // so omitting the mode flag produces the same behavior without errors.
       const where: Record<string, unknown> = {
         tenantId,
         deletedAt: null,
         isActive,
         OR: [
-          { name: { contains: query, mode: 'insensitive' } },
-          { sku: { contains: query, mode: 'insensitive' } },
+          { name: { contains: query } },
+          { sku: { contains: query } },
           { barcode: { equals: query } },
         ],
       };

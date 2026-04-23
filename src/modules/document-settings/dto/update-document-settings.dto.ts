@@ -56,6 +56,22 @@ export class UpdateDocumentSettingsDto {
   @MaxLength(500)
   addressEn?: string;
 
+  @ApiPropertyOptional({
+    description: 'ที่อยู่จัดส่ง (ภาษาไทย) — ใช้เป็น default ship-to ใน PO',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  shippingAddress?: string;
+
+  @ApiPropertyOptional({
+    description: 'ที่อยู่จัดส่ง (English) — default ship-to address for PO',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  shippingAddressEn?: string;
+
   @ApiPropertyOptional({ description: 'เบอร์โทร', example: '02-123-4567' })
   @IsOptional()
   @IsString()

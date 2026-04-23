@@ -91,9 +91,9 @@ export class RecipesService {
     const where: any = { tenantId };
 
     if (query.search) {
+      // mode: 'insensitive' is not supported by Prisma v5 + MySQL
       where.menuItemName = {
         contains: query.search,
-        mode: 'insensitive',
       };
     }
 

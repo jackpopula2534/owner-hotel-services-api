@@ -59,6 +59,7 @@ export class SeederService {
       await this.seedHrPerformanceData();
       await this.seedRestaurantData();
       await this.seedInventoryData();
+      await this.seedProcurementUsersAndFlows();
       await this.seedPurchaseRequisitionData();
       await this.seedCostAccountingData();
 
@@ -5597,5 +5598,341 @@ export class SeederService {
     }
 
     this.logger.log('✅ Cost accounting seed complete: cost centers, types, entries, budgets');
+  }
+
+  /**
+   * Seed Procurement Users + Approval Flow templates for Mountain View Resort.
+   *
+   * Creates 6 procurement accounts (manager, buyers, approvers, receiver) and
+   * 3 default approval flow templates (PR / Price Comparison / PO). All records
+   * are idempotent — re-running the seed updates in place.
+   */
+  private async seedProcurementUsersAndFlows(): Promise<void> {
+    this.logger.log('🛒 Seeding Procurement Users & Approval Flows...');
+
+    const ownerUser = await this.prisma.user.findUnique({
+      where: { email: 'premium.test@email.com' },
+    });
+    if (!ownerUser?.tenantId) {
+      this.logger.warn('  ⚠️ premium.test@email.com not found — skipping procurement seed');
+      return;
+    }
+    const tenantId = ownerUser.tenantId;
+
+    // ── 1. Procurement user accounts ────────────────────────────────────────
+    const hashedPassword = await bcrypt.hash('procure123', 10);
+
+    interface ProcUserSeed {
+      email: string;
+      firstName: string;
+      lastName: string;
+      role: 'procurement_manager' | 'buyer' | 'approver' | 'receiver';
+      employeeId: string;
+      approvalLimit: number | null;
+      permissions: string[];
+    }
+
+    const procurementUsers: ProcUserSeed[] = [
+      {
+        email: 'procurement.manager@mountainviewresort.test',
+        firstName: 'ธนพล',
+        lastName: 'จัดซื้อเก่ง',
+        role: 'procurement_manager',
+        employeeId: 'MVR-PRC-M01',
+        approvalLimit: null, // unlimited
+        permissions: [
+          'pr.create', 'pr.approve',
+          'rfq.create', 'quote.compare',
+          'po.create', 'po.approve',
+          'supplier.manage', 'grn.view', 'report.view',
+          'approval-flow.manage', 'user.manage',
+        ],
+      },
+      {
+        email: 'buyer1@mountainviewresort.test',
+        firstName: 'สุดา',
+        lastName: 'ต่อรองดี',
+        role: 'buyer',
+        employeeId: 'MVR-PRC-B01',
+        approvalLimit: 50_000,
+        permissions: ['pr.create', 'rfq.create', 'quote.compare', 'po.create', 'supplier.view', 'report.view'],
+      },
+      {
+        email: 'buyer2@mountainviewresort.test',
+        firstName: 'อรุณ',
+        lastName: 'ซื้อคุ้ม',
+        role: 'buyer',
+        employeeId: 'MVR-PRC-B02',
+        approvalLimit: 50_000,
+        permissions: ['pr.create', 'rfq.create', 'quote.compare', 'po.create', 'supplier.view', 'report.view'],
+      },
+      {
+        email: 'approver1@mountainviewresort.test',
+        firstName: 'ชลธี',
+        lastName: 'ผู้อนุมัติ',
+        role: 'approver',
+        employeeId: 'MVR-PRC-A01',
+        approvalLimit: 500_000,
+        permissions: ['pr.approve', 'po.approve', 'quote.compare', 'report.view'],
+      },
+      {
+        email: 'approver2@mountainviewresort.test',
+        firstName: 'มาลี',
+        lastName: 'ตรวจละเอียด',
+        role: 'approver',
+        employeeId: 'MVR-PRC-A02',
+        approvalLimit: 1_000_000,
+        permissions: ['pr.approve', 'po.approve', 'quote.compare', 'report.view'],
+      },
+      {
+        email: 'receiver1@mountainviewresort.test',
+        firstName: 'วิชัย',
+        lastName: 'รับของ',
+        role: 'receiver',
+        employeeId: 'MVR-PRC-R01',
+        approvalLimit: 0,
+        permissions: ['grn.create', 'grn.view', 'qc.inspect'],
+      },
+    ];
+
+    let created = 0;
+    let updated = 0;
+    const userByEmail: Record<string, { id: string; role: string }> = {};
+
+    for (const u of procurementUsers) {
+      const allowedSystems = '["main","procurement"]';
+      const existing = await this.prisma.user.findUnique({ where: { email: u.email } });
+      if (!existing) {
+        const fresh = await this.prisma.user.create({
+          data: {
+            email: u.email,
+            password: hashedPassword,
+            firstName: u.firstName,
+            lastName: u.lastName,
+            role: u.role,
+            tenantId,
+            status: 'active',
+            employeeId: u.employeeId,
+            allowedSystems,
+            approvalLimit: u.approvalLimit === null ? null : (u.approvalLimit as unknown as any),
+            procurementPermissions: JSON.stringify(u.permissions),
+          } as any,
+        });
+        userByEmail[u.email] = { id: fresh.id, role: u.role };
+        created++;
+      } else {
+        const refreshed = await this.prisma.user.update({
+          where: { id: existing.id },
+          data: {
+            tenantId,
+            password: hashedPassword,
+            firstName: u.firstName,
+            lastName: u.lastName,
+            role: u.role,
+            employeeId: u.employeeId,
+            status: 'active',
+            allowedSystems,
+            approvalLimit: u.approvalLimit === null ? null : (u.approvalLimit as unknown as any),
+            procurementPermissions: JSON.stringify(u.permissions),
+          } as any,
+        });
+        userByEmail[u.email] = { id: refreshed.id, role: u.role };
+        updated++;
+      }
+    }
+
+    this.logger.log(
+      `  ✓ Procurement users: ${created} created, ${updated} updated ` +
+        `(password: procure123, systems: main+procurement)`,
+    );
+
+    // ── 2. Approval Flow templates ──────────────────────────────────────────
+    const approverA = userByEmail['approver1@mountainviewresort.test'];
+    const approverB = userByEmail['approver2@mountainviewresort.test'];
+    const manager = userByEmail['procurement.manager@mountainviewresort.test'];
+
+    if (!approverA || !approverB || !manager) {
+      this.logger.warn('  ⚠️ Approver/manager users missing — skipping approval flow seed');
+      return;
+    }
+
+    interface FlowStepSeed {
+      stepOrder: number;
+      name: string;
+      approverType: 'SPECIFIC_USER' | 'ROLE' | 'DEPARTMENT_HEAD';
+      approverRole?: string | null;
+      approverUserIds?: string[];
+      minApprovals?: number;
+      isParallel?: boolean;
+      slaHours?: number | null;
+    }
+    interface FlowSeed {
+      name: string;
+      description: string;
+      documentType: 'PURCHASE_REQUISITION' | 'PRICE_COMPARISON' | 'PURCHASE_ORDER';
+      minAmount: number;
+      maxAmount: number | null;
+      isDefault: boolean;
+      steps: FlowStepSeed[];
+    }
+
+    const flows: FlowSeed[] = [
+      {
+        name: 'Flow อนุมัติ PR (มาตรฐาน)',
+        description: 'Flow อนุมัติใบขอซื้อ (PR) แบบ sequential 2 ขั้น',
+        documentType: 'PURCHASE_REQUISITION',
+        minAmount: 0,
+        maxAmount: 500_000,
+        isDefault: true,
+        steps: [
+          {
+            stepOrder: 1,
+            name: 'หัวหน้าแผนกจัดซื้ออนุมัติ',
+            approverType: 'SPECIFIC_USER',
+            approverUserIds: [manager.id],
+            slaHours: 24,
+          },
+          {
+            stepOrder: 2,
+            name: 'ผู้อนุมัติขั้นสุดท้าย',
+            approverType: 'SPECIFIC_USER',
+            approverUserIds: [approverA.id, approverB.id],
+            minApprovals: 1,
+            isParallel: true,
+            slaHours: 48,
+          },
+        ],
+      },
+      {
+        name: 'Flow เปรียบเทียบราคา (Price Comparison)',
+        description: 'Flow อนุมัติใบเปรียบเทียบราคาผู้ขาย — 1 ขั้น',
+        documentType: 'PRICE_COMPARISON',
+        minAmount: 0,
+        maxAmount: 1_000_000,
+        isDefault: true,
+        steps: [
+          {
+            stepOrder: 1,
+            name: 'หัวหน้าจัดซื้ออนุมัติการเลือกผู้ขาย',
+            approverType: 'SPECIFIC_USER',
+            approverUserIds: [manager.id],
+            slaHours: 24,
+          },
+        ],
+      },
+      {
+        name: 'Flow อนุมัติใบสั่งซื้อ (PO)',
+        description: 'Flow อนุมัติใบสั่งซื้อ — 2 ขั้น sequential',
+        documentType: 'PURCHASE_ORDER',
+        minAmount: 0,
+        maxAmount: null,
+        isDefault: true,
+        steps: [
+          {
+            stepOrder: 1,
+            name: 'Approver ระดับแผนก',
+            approverType: 'SPECIFIC_USER',
+            approverUserIds: [approverA.id],
+            slaHours: 24,
+          },
+          {
+            stepOrder: 2,
+            name: 'ผู้มีอำนาจอนุมัติ PO',
+            approverType: 'SPECIFIC_USER',
+            approverUserIds: [approverB.id, manager.id],
+            minApprovals: 1,
+            isParallel: true,
+            slaHours: 48,
+          },
+        ],
+      },
+    ];
+
+    let flowsCreated = 0;
+    let flowsUpdated = 0;
+
+    for (const f of flows) {
+      const existing = await (this.prisma as any).approvalFlow.findFirst({
+        where: { tenantId, name: f.name, documentType: f.documentType },
+      });
+
+      if (existing) {
+        // Full replace of steps
+        await (this.prisma as any).approvalFlowStep.deleteMany({
+          where: { flowId: existing.id },
+        });
+        await (this.prisma as any).approvalFlow.update({
+          where: { id: existing.id },
+          data: {
+            description: f.description,
+            minAmount: f.minAmount as unknown as any,
+            maxAmount: f.maxAmount === null ? null : (f.maxAmount as unknown as any),
+            isActive: true,
+            isDefault: f.isDefault,
+            steps: {
+              create: f.steps.map((s) => ({
+                stepOrder: s.stepOrder,
+                name: s.name,
+                approverType: s.approverType,
+                approverRole: s.approverRole ?? null,
+                minApprovals: s.minApprovals ?? 1,
+                isParallel: s.isParallel ?? false,
+                slaHours: s.slaHours ?? null,
+                approvers:
+                  s.approverType === 'SPECIFIC_USER' && s.approverUserIds
+                    ? {
+                        create: s.approverUserIds.map((userId, idx) => ({
+                          userId,
+                          order: idx,
+                        })),
+                      }
+                    : undefined,
+              })),
+            },
+          },
+        });
+        flowsUpdated++;
+      } else {
+        await (this.prisma as any).approvalFlow.create({
+          data: {
+            tenantId,
+            name: f.name,
+            description: f.description,
+            documentType: f.documentType,
+            minAmount: f.minAmount as unknown as any,
+            maxAmount: f.maxAmount === null ? null : (f.maxAmount as unknown as any),
+            isActive: true,
+            isDefault: f.isDefault,
+            createdBy: manager.id,
+            steps: {
+              create: f.steps.map((s) => ({
+                stepOrder: s.stepOrder,
+                name: s.name,
+                approverType: s.approverType,
+                approverRole: s.approverRole ?? null,
+                minApprovals: s.minApprovals ?? 1,
+                isParallel: s.isParallel ?? false,
+                slaHours: s.slaHours ?? null,
+                approvers:
+                  s.approverType === 'SPECIFIC_USER' && s.approverUserIds
+                    ? {
+                        create: s.approverUserIds.map((userId, idx) => ({
+                          userId,
+                          order: idx,
+                        })),
+                      }
+                    : undefined,
+              })),
+            },
+          },
+        });
+        flowsCreated++;
+      }
+    }
+
+    this.logger.log(
+      `  ✓ Approval flows: ${flowsCreated} created, ${flowsUpdated} updated (PR / Price Comparison / PO)`,
+    );
+    this.logger.log('✅ Procurement users & approval flows seeded successfully');
   }
 }

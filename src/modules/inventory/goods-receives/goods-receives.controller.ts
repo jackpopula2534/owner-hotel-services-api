@@ -19,7 +19,8 @@ import { RequireAddon } from '@/common/decorators/require-addon.decorator';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
 
 interface JwtPayload {
-  sub: string;
+  id: string;
+  userId: string;
   tenantId: string;
   email: string;
   role: string;
@@ -138,7 +139,7 @@ export class GoodsReceivesController {
     description: 'Conflict: PO status invalid or stock conflict',
   })
   async create(@CurrentUser() user: JwtPayload, @Body() createDto: CreateGoodsReceiveDto): Promise<{ success: boolean; data: GoodsReceiveDetail }> {
-    const data = await this.goodsReceivesService.create(createDto, user.sub, user.tenantId);
+    const data = await this.goodsReceivesService.create(createDto, user.userId, user.tenantId);
     return { success: true, data };
   }
 
@@ -157,7 +158,7 @@ export class GoodsReceivesController {
     @Param('id') id: string,
     @Body('status') status: 'INSPECTING' | 'REJECTED',
   ): Promise<{ success: boolean; data: GoodsReceiveDetail }> {
-    const data = await this.goodsReceivesService.inspect(id, user.sub, user.tenantId, status);
+    const data = await this.goodsReceivesService.inspect(id, user.userId, user.tenantId, status);
     return { success: true, data };
   }
 }

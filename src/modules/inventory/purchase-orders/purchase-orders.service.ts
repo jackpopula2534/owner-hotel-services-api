@@ -200,6 +200,7 @@ export class PurchaseOrdersService {
               select: {
                 name: true,
                 sku: true,
+                unit: true,
               },
             },
             quantity: true,
@@ -296,6 +297,8 @@ export class PurchaseOrdersService {
         itemId: item.itemId,
         itemName: item.item?.name,
         itemSku: item.item?.sku,
+        // Include unit from the catalog item so GR form can pre-fill the unit label
+        itemUnit: (item.item as unknown as { unit?: string } | null)?.unit ?? undefined,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
         discount: item.discount,

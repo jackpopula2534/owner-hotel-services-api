@@ -57,10 +57,11 @@ export class SuppliersService {
     const where = {
       tenantId,
       deletedAt: null,
+      // mode: 'insensitive' is not supported by Prisma v5 + MySQL
       ...(search && {
         OR: [
-          { name: { contains: search, mode: 'insensitive' as const } },
-          { code: { contains: search, mode: 'insensitive' as const } },
+          { name: { contains: search } },
+          { code: { contains: search } },
         ],
       }),
     };
