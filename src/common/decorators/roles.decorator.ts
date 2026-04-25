@@ -16,6 +16,7 @@ export const ROLES_KEY = 'roles';
 // - staff: พนักงานทั่วไป
 // - user: ผู้ใช้ทั่วไป
 // - admin: legacy alias (รองรับค่าเดิมใน DB / seed)
+// - procurement_manager / buyer / approver / receiver: procurement workspace roles
 export type UserRole =
   | 'platform_admin'
   | 'tenant_admin'
@@ -30,6 +31,10 @@ export type UserRole =
   | 'accountant'
   | 'security'
   | 'staff'
-  | 'user';
+  | 'user'
+  | 'procurement_manager'
+  | 'buyer'
+  | 'approver'
+  | 'receiver';
 
 export const Roles = (...roles: UserRole[]) => SetMetadata(ROLES_KEY, roles);

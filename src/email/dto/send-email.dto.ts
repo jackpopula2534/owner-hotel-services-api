@@ -25,6 +25,9 @@ export enum EmailTemplate {
   SUBSCRIPTION_RENEWAL = 'subscription-renewal',
   SUBSCRIPTION_EXPIRING = 'subscription-expiring',
   RFQ_INVITATION = 'rfq-invitation',
+  PRICE_COMPARISON_PENDING_APPROVAL = 'price-comparison-pending-approval',
+  PRICE_COMPARISON_APPROVED = 'price-comparison-approved',
+  PRICE_COMPARISON_REJECTED = 'price-comparison-rejected',
 }
 
 export class SendEmailDto {
