@@ -149,6 +149,50 @@ export class AuthController {
     return { success: true, message: 'Logged out from POS system' };
   }
 
+  // ─── Purchasing / Procurement Sub-System ────────────────────────────────────
+
+  @Post('purchasing/login')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Login to Procurement Terminal',
+    description:
+      'Creates a session tagged systemContext="procurement". ' +
+      'Validates that the user has "procurement" in their allowedSystems. ' +
+      'Tokens issued here are scoped to the procurement sub-system only. ' +
+      'Logging out from this terminal will NOT affect the main dashboard session.',
+  })
+  @ApiResponse({ status: 200, description: 'Procurement login successful' })
+  @ApiResponse({ status: 401, description: 'Unauthorized or account not allowed to access Procurement system' })
+  async purchasingLogin(@Body() loginDto: LoginDto, @Req() req: Request) {
+    return this.authService.login(
+      loginDto,
+      {
+        ipAddress: req.ip ?? req.socket?.remoteAddress,
+        userAgent: req.headers['user-agent'],
+      },
+      'procurement',
+    );
+  }
+
+  @Post('purchasing/logout')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 50, ttl: 60 } })
+  @ApiBearerAuth('JWT-auth')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Logout from Procurement Terminal only',
+    description:
+      'Revokes only procurement session tokens. ' +
+      'The main hotel management dashboard session stays active.',
+  })
+  @ApiResponse({ status: 200, description: 'Procurement session ended' })
+  async purchasingLogout(@CurrentUser() user: any, @Body() body?: { refreshToken?: string }) {
+    await this.authService.logout(user.userId, body?.refreshToken, 'procurement');
+    return { success: true, message: 'Logged out from Procurement system' };
+  }
+
   @Post('forgot-password')
   @Public()
   @HttpCode(HttpStatus.OK)
