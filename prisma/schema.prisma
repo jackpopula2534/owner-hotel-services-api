@@ -28,9 +28,11 @@ model User {
   tenantId       String? // activeTenantId for current session context
   timezone       String?
   // ── System Access Control ─────────────────────────────────────────────────
-  // JSON-encoded array: ["main"] | ["pos"] | ["main","pos"] | ["main","procurement"]
+  // JSON-encoded array, valid values: "main" | "pos" | "procurement" | "warehouse"
+  // Examples: ["main"] | ["main","pos"] | ["main","procurement"] | ["main","warehouse"] | ["main","procurement","warehouse"]
   // Controls which system(s) this user may log into.
-  // main = hotel management dashboard, pos = Point-of-Sale terminal, procurement = purchasing workspace
+  // main = hotel management dashboard, pos = Point-of-Sale terminal,
+  // procurement = purchasing workspace, warehouse = warehouse / inventory operations terminal
   allowedSystems String         @default("[\"main\"]") @db.VarChar(255)
   // ─────────────────────────────────────────────────────────────────────────
   // ── Procurement ───────────────────────────────────────────────────────────
@@ -40,6 +42,14 @@ model User {
   // JSON-encoded array of fine-grained procurement permission keys, e.g.
   // ["pr.create","pr.approve","po.create","po.approve","grn.create","supplier.manage","report.view"]
   procurementPermissions String?   @db.Text
+  // ─────────────────────────────────────────────────────────────────────────
+  // ── Warehouse ─────────────────────────────────────────────────────────────
+  // JSON-encoded array of fine-grained warehouse permission keys, e.g.
+  // ["item.view","gr.view","gr.create","movement.view","qc.inspect","stock.count","lot.view","forecast.view"]
+  warehousePermissions   String?   @db.Text
+  // JSON-encoded array of warehouse IDs this user can operate in (multi-warehouse).
+  // null / empty array = access to all warehouses within the tenant.
+  warehouseIds           String?   @db.Text
   // ─────────────────────────────────────────────────────────────────────────
   refreshTokens  RefreshToken[]
   notifications  Notification[]
@@ -82,8 +92,9 @@ model RefreshToken {
   lastUsedAt    DateTime?
   lastUsedIp    String?   @db.VarChar(45)
   // ── System Context ────────────────────────────────────────────────────────
-  // Identifies which system issued this token: 'main' | 'pos'
-  // Logout from POS only revokes tokens where systemContext = 'pos'
+  // Identifies which system issued this token: 'main' | 'pos' | 'procurement' | 'warehouse'
+  // Logout from a Sub-System only revokes tokens with the matching systemContext,
+  // so the main dashboard session is preserved when a sub-system logs out.
   systemContext String    @default("main") @db.VarChar(20)
   // ─────────────────────────────────────────────────────────────────────────
   admin         Admin?    @relation(fields: [adminId], references: [id], onDelete: Cascade)
@@ -2485,6 +2496,11 @@ model PurchaseOrder {
   // but admin may override per-PO). Added 2026-04 to fix PDF showing "-" for these.
   paymentTerms    String?             // e.g. "COD", "NET 30"
   deliveryAddress String?  @db.Text    // Ship-to address for this PO
+  // ─── Sprint 4: Force close + variance tracking ──────────────────────────
+  forceClosedAt     DateTime?           // Set when admin force-closes a PO with outstanding qty
+  forceClosedBy     String?             // User ID who force-closed
+  forceClosedReason String?  @db.Text   // Required reason for closing with variance
+  // ────────────────────────────────────────────────────────────────────────
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
 
@@ -3432,6 +3448,13 @@ model SupplierQuoteToken {
 
 // ─── Price Comparison ───────────────────────────────────────────────────────
 
+enum PriceComparisonStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+}
+
 model PriceComparison {
   id                      String  @id @default(uuid())
   tenantId                String
@@ -3441,8 +3464,13 @@ model PriceComparison {
   selectionReason         String?             @db.Text  // เหตุผลที่เลือก
   comparedBy              String              // User ID
   comparedAt              DateTime            @default(now())
+  status                  PriceComparisonStatus @default(DRAFT)
+  submittedAt             DateTime?
   approvedBy              String?
   approvedAt              DateTime?
+  rejectedBy              String?
+  rejectedAt              DateTime?
+  rejectionReason         String?             @db.Text
   notes                   String?             @db.Text
   createdAt               DateTime            @default(now())
   updatedAt               DateTime            @updatedAt
@@ -3454,6 +3482,7 @@ model PriceComparison {
   @@unique([tenantId, purchaseRequisitionId])
   @@index([tenantId])
   @@index([purchaseRequisitionId])
+  @@index([status])
   @@map("price_comparisons")
 }
 

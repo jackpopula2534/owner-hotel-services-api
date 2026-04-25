@@ -60,6 +60,7 @@ import { MaintenanceModule } from './modules/maintenance/maintenance.module';
 import { AddonModule } from './modules/addons/addon.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { ProcurementUsersModule } from './modules/procurement-users/procurement-users.module';
+import { WarehouseUsersModule } from './modules/warehouse-users/warehouse-users.module';
 import { CostAccountingModule } from './modules/cost-accounting/cost-accounting.module';
 import { DocumentSettingsModule } from './modules/document-settings/document-settings.module';
 
@@ -131,6 +132,7 @@ import { DocumentSettingsModule } from './modules/document-settings/document-set
     AddonModule,
     InventoryModule,
     ProcurementUsersModule,
+    WarehouseUsersModule,
     CostAccountingModule,
     DocumentSettingsModule,
     ThrottlerModule.forRoot([

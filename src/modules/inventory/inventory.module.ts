@@ -23,6 +23,10 @@ import { InventoryEventListener } from './events/inventory-event.listener';
 import { LotsModule } from './lots/lots.module';
 import { QRModule } from './qr/qr.module';
 import { QCModule } from './qc/qc.module';
+// Sprint 3: procurement-side read aggregator over WarehouseStock + InventoryLot
+import { ProcurementStockModule } from './procurement-stock/procurement-stock.module';
+// Sprint 5: realtime WS broadcaster for gr.completed / po.received
+import { ProcurementEventsModule } from './procurement-events/procurement-events.module';
 import {
   InventoryDashboardController,
   InventoryReportsController,
@@ -56,6 +60,8 @@ import { PrismaModule } from '@/prisma/prisma.module';
     LotsModule,
     QRModule,
     QCModule,
+    ProcurementStockModule,
+    ProcurementEventsModule,
     BullModule.registerQueue({ name: INVENTORY_QUEUE }),
   ],
   controllers: [InventoryDashboardController, InventoryReportsController],
@@ -81,6 +87,8 @@ import { PrismaModule } from '@/prisma/prisma.module';
     LotsModule,
     QRModule,
     QCModule,
+    ProcurementStockModule,
+    ProcurementEventsModule,
   ],
 })
 export class InventoryModule {}
