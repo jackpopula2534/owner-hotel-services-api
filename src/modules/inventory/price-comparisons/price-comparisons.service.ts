@@ -1,12 +1,10 @@
-import {
-  Injectable,
-  NotFoundException,
-  BadRequestException,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
-import { CreatePriceComparisonDto, SelectQuoteDto } from './dto';
+import { AuditLogService } from '@/audit-log/audit-log.service';
+import { AuditAction, AuditCategory, AuditResource } from '@/audit-log/dto/audit-log.dto';
+import { NotificationsService } from '@/notifications/notifications.service';
+import { CreatePriceComparisonDto, SelectQuoteDto, RejectComparisonDto } from './dto';
 
 interface ComparisonMatrixItem {
   itemId: string;
@@ -35,13 +33,29 @@ interface ComparisonSummary {
   isRecommended: boolean;
 }
 
+/**
+ * Approval workflow status of the price comparison.
+ *
+ * The values mirror the Prisma `PriceComparisonStatus` enum. We mirror them
+ * locally as a string-literal union so this service remains type-safe even
+ * before `prisma generate` has been run against the new migration.
+ */
+type PriceComparisonStatusLiteral = 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED';
+
 @Injectable()
 export class PriceComparisonsService {
   private readonly logger = new Logger(PriceComparisonsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+    private readonly auditLogService: AuditLogService,
+  ) {}
 
-  async getByPR(prId: string, tenantId: string): Promise<{
+  async getByPR(
+    prId: string,
+    tenantId: string,
+  ): Promise<{
     comparison: unknown | null;
     quotes: unknown[];
     matrix: {
@@ -187,10 +201,9 @@ export class PriceComparisonsService {
       isRecommended: Number(quote.totalAmount) === lowestTotal,
     }));
 
-    this.logger.log(
-      `Price comparison retrieved for PR ${prId} with ${quotes.length} quotes`,
-    );
+    this.logger.log(`Price comparison retrieved for PR ${prId} with ${quotes.length} quotes`);
 
+    const comparisonRow = comparison as unknown as Record<string, unknown>;
     return {
       comparison: {
         id: comparison.id,
@@ -203,6 +216,11 @@ export class PriceComparisonsService {
         comparedAt: comparison.comparedAt,
         approvedBy: comparison.approvedBy,
         approvedAt: comparison.approvedAt,
+        status: comparisonRow.status,
+        submittedAt: comparisonRow.submittedAt,
+        rejectedBy: comparisonRow.rejectedBy,
+        rejectedAt: comparisonRow.rejectedAt,
+        rejectionReason: comparisonRow.rejectionReason,
         notes: comparison.notes,
         createdAt: comparison.createdAt,
         updatedAt: comparison.updatedAt,
@@ -224,11 +242,7 @@ export class PriceComparisonsService {
     };
   }
 
-  async create(
-    dto: CreatePriceComparisonDto,
-    userId: string,
-    tenantId: string,
-  ): Promise<any> {
+  async create(dto: CreatePriceComparisonDto, userId: string, tenantId: string): Promise<unknown> {
     // Verify PR exists
     const pr = await this.prisma.purchaseRequisition.findUnique({
       where: { id: dto.purchaseRequisitionId },
@@ -269,13 +283,8 @@ export class PriceComparisonsService {
           const selectedQuote = await this.prisma.supplierQuote.findUnique({
             where: { id: dto.selectedQuoteId },
           });
-          if (
-            !selectedQuote ||
-            selectedQuote.purchaseRequisitionId !== dto.purchaseRequisitionId
-          ) {
-            throw new BadRequestException(
-              'Selected quote does not belong to this PR',
-            );
+          if (!selectedQuote || selectedQuote.purchaseRequisitionId !== dto.purchaseRequisitionId) {
+            throw new BadRequestException('Selected quote does not belong to this PR');
           }
         }
         updateData.selectedQuoteId = dto.selectedQuoteId;
@@ -315,9 +324,7 @@ export class PriceComparisonsService {
     });
 
     if (quotes.length === 0) {
-      throw new BadRequestException(
-        'No supplier quotes found for this PR. Create quotes first.',
-      );
+      throw new BadRequestException('No supplier quotes found for this PR. Create quotes first.');
     }
 
     try {
@@ -336,13 +343,8 @@ export class PriceComparisonsService {
             where: { id: dto.selectedQuoteId },
           });
 
-          if (
-            !selectedQuote ||
-            selectedQuote.purchaseRequisitionId !== dto.purchaseRequisitionId
-          ) {
-            throw new BadRequestException(
-              'Selected quote does not belong to this PR',
-            );
+          if (!selectedQuote || selectedQuote.purchaseRequisitionId !== dto.purchaseRequisitionId) {
+            throw new BadRequestException('Selected quote does not belong to this PR');
           }
         }
 
@@ -383,7 +385,7 @@ export class PriceComparisonsService {
 
       return result;
     } catch (error) {
-      this.logger.error(`Error creating price comparison: ${error}`);
+      this.logger.error(`Error creating price comparison: ${String(error)}`);
       if (error instanceof BadRequestException) {
         throw error;
       }
@@ -396,7 +398,7 @@ export class PriceComparisonsService {
     dto: SelectQuoteDto,
     userId: string,
     tenantId: string,
-  ): Promise<any> {
+  ): Promise<unknown> {
     const comparison = await this.prisma.priceComparison.findUnique({
       where: { id },
     });
@@ -414,20 +416,26 @@ export class PriceComparisonsService {
       !selectedQuote ||
       selectedQuote.purchaseRequisitionId !== comparison.purchaseRequisitionId
     ) {
-      throw new BadRequestException(
-        'Selected quote does not belong to this comparison',
-      );
+      throw new BadRequestException('Selected quote does not belong to this comparison');
     }
 
+    let result: unknown;
     try {
-      const result = await this.prisma.$transaction(async (tx) => {
-        // Update comparison with selected quote
+      result = await this.prisma.$transaction(async (tx) => {
+        // Update comparison with selected quote and submit for approval.
+        // Reselect after a rejection clears prior rejection metadata so the
+        // comparison goes back into PENDING_APPROVAL cleanly.
         const updated = await tx.priceComparison.update({
           where: { id },
           data: {
             selectedQuoteId: dto.selectedQuoteId,
             selectionReason: dto.selectionReason,
-          },
+            status: 'PENDING_APPROVAL',
+            submittedAt: new Date(),
+            rejectedBy: null,
+            rejectedAt: null,
+            rejectionReason: null,
+          } as unknown as Prisma.PriceComparisonUncheckedUpdateInput,
           include: {
             purchaseRequisition: {
               select: {
@@ -495,18 +503,24 @@ export class PriceComparisonsService {
 
         return updated;
       });
-
-      return result;
     } catch (error) {
-      this.logger.error(`Error selecting quote in comparison: ${error}`);
+      this.logger.error(`Error selecting quote in comparison: ${String(error)}`);
       if (error instanceof BadRequestException) {
         throw error;
       }
       throw new BadRequestException('Failed to select quote');
     }
+
+    await this.notifyAndAuditSubmission(
+      { id: comparison.id, comparisonNumber: comparison.comparisonNumber },
+      userId,
+      tenantId,
+    );
+
+    return result;
   }
 
-  async approve(id: string, userId: string, tenantId: string): Promise<any> {
+  async approve(id: string, userId: string, tenantId: string): Promise<unknown> {
     const comparison = await this.prisma.priceComparison.findUnique({
       where: { id },
       include: {
@@ -520,20 +534,25 @@ export class PriceComparisonsService {
     }
 
     if (!comparison.selectedQuoteId) {
-      throw new BadRequestException(
-        'Cannot approve comparison without selecting a quote',
-      );
+      throw new BadRequestException('Cannot approve comparison without selecting a quote');
     }
 
+    const currentStatus = (comparison as unknown as { status?: PriceComparisonStatusLiteral })
+      .status;
+    if (currentStatus !== 'PENDING_APPROVAL') {
+      throw new BadRequestException('ใบเทียบราคาไม่อยู่ในสถานะรออนุมัติ');
+    }
+
+    let result: unknown;
     try {
-      const result = await this.prisma.$transaction(async (tx) => {
-        // Update comparison as approved
+      result = await this.prisma.$transaction(async (tx) => {
         const approved = await tx.priceComparison.update({
           where: { id },
           data: {
             approvedBy: userId,
             approvedAt: new Date(),
-          },
+            status: 'APPROVED',
+          } as unknown as Prisma.PriceComparisonUncheckedUpdateInput,
           include: {
             purchaseRequisition: {
               select: {
@@ -557,21 +576,256 @@ export class PriceComparisonsService {
           data: { status: 'COMPARING' },
         });
 
-        // If selected quote exists, we could auto-advance to next status
-        // For now, just mark as COMPARING
-        // The next status (e.g., CREATING_PO) would be handled by another workflow
-
         this.logger.log(
           `Price comparison ${comparison.comparisonNumber} approved for PR ${comparison.purchaseRequisitionId}`,
         );
 
         return approved;
       });
-
-      return result;
     } catch (error) {
-      this.logger.error(`Error approving price comparison: ${error}`);
+      this.logger.error(`Error approving price comparison: ${String(error)}`);
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
       throw new BadRequestException('Failed to approve comparison');
+    }
+
+    await this.notifyAndAuditApproval(
+      {
+        id: comparison.id,
+        comparisonNumber: comparison.comparisonNumber,
+        comparedBy: comparison.comparedBy,
+      },
+      userId,
+      tenantId,
+    );
+
+    return result;
+  }
+
+  async reject(
+    id: string,
+    dto: RejectComparisonDto,
+    userId: string,
+    tenantId: string,
+  ): Promise<unknown> {
+    const comparison = await this.prisma.priceComparison.findUnique({
+      where: { id },
+    });
+
+    if (!comparison || comparison.tenantId !== tenantId) {
+      throw new NotFoundException('Price comparison not found');
+    }
+
+    const currentStatus = (comparison as unknown as { status?: PriceComparisonStatusLiteral })
+      .status;
+    if (currentStatus !== 'PENDING_APPROVAL') {
+      throw new BadRequestException('ใบเทียบราคาไม่อยู่ในสถานะรออนุมัติ');
+    }
+
+    let result: unknown;
+    try {
+      result = await this.prisma.$transaction(async (tx) => {
+        const rejected = await tx.priceComparison.update({
+          where: { id },
+          data: {
+            status: 'REJECTED',
+            rejectedBy: userId,
+            rejectedAt: new Date(),
+            rejectionReason: dto.rejectionReason,
+          } as unknown as Prisma.PriceComparisonUncheckedUpdateInput,
+          include: {
+            purchaseRequisition: {
+              select: {
+                id: true,
+                prNumber: true,
+              },
+            },
+            selectedQuote: {
+              select: {
+                id: true,
+                quoteNumber: true,
+                supplierId: true,
+              },
+            },
+          },
+        });
+
+        this.logger.log(`Price comparison ${comparison.comparisonNumber} rejected by ${userId}`);
+
+        return rejected;
+      });
+    } catch (error) {
+      this.logger.error(`Error rejecting price comparison: ${String(error)}`);
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new BadRequestException('Failed to reject comparison');
+    }
+
+    await this.notifyAndAuditRejection(
+      {
+        id: comparison.id,
+        comparisonNumber: comparison.comparisonNumber,
+        comparedBy: comparison.comparedBy,
+      },
+      dto.rejectionReason,
+      userId,
+      tenantId,
+    );
+
+    return result;
+  }
+
+  async findPendingApprovals(tenantId: string): Promise<unknown[]> {
+    return this.prisma.priceComparison.findMany({
+      where: {
+        tenantId,
+        status: 'PENDING_APPROVAL',
+      } as unknown as Prisma.PriceComparisonWhereInput,
+      include: {
+        selectedQuote: {
+          include: {
+            supplier: {
+              select: {
+                id: true,
+                name: true,
+                code: true,
+              },
+            },
+          },
+        },
+        purchaseRequisition: {
+          select: {
+            id: true,
+            prNumber: true,
+            status: true,
+            requestedBy: true,
+            createdAt: true,
+          },
+        },
+      },
+      orderBy: {
+        submittedAt: 'desc',
+      } as unknown as Prisma.PriceComparisonOrderByWithRelationInput,
+    });
+  }
+
+  private async notifyAndAuditSubmission(
+    row: { id: string; comparisonNumber: string },
+    userId: string,
+    tenantId: string,
+  ): Promise<void> {
+    try {
+      await this.auditLogService.log({
+        action: AuditAction.PRICE_COMPARISON_SUBMITTED,
+        resource: AuditResource.PRICE_COMPARISON,
+        resourceId: row.id,
+        category: AuditCategory.PROCUREMENT,
+        tenantId,
+        userId,
+        description: `ส่ง ${row.comparisonNumber} เพื่อขออนุมัติ`,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Audit log failed for price comparison submission ${row.id}: ${String(error)}`,
+      );
+    }
+
+    try {
+      const managers = await this.prisma.user.findMany({
+        where: { tenantId, role: 'procurement_manager' },
+        select: { id: true },
+      });
+
+      await Promise.all(
+        managers.map((manager) =>
+          this.notificationsService.create({
+            userId: manager.id,
+            tenantId,
+            title: 'ใบเทียบราคารออนุมัติ',
+            message: `มีใบเทียบราคา ${row.comparisonNumber} รออนุมัติ`,
+            type: 'price_comparison_pending_approval',
+            category: 'procurement',
+          }),
+        ),
+      );
+    } catch (error) {
+      this.logger.warn(`Notify managers failed for price comparison ${row.id}: ${String(error)}`);
+    }
+  }
+
+  private async notifyAndAuditApproval(
+    row: { id: string; comparisonNumber: string; comparedBy: string },
+    userId: string,
+    tenantId: string,
+  ): Promise<void> {
+    try {
+      await this.auditLogService.log({
+        action: AuditAction.PRICE_COMPARISON_APPROVED,
+        resource: AuditResource.PRICE_COMPARISON,
+        resourceId: row.id,
+        category: AuditCategory.PROCUREMENT,
+        tenantId,
+        userId,
+        description: `อนุมัติใบเทียบราคา ${row.comparisonNumber}`,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Audit log failed for price comparison approval ${row.id}: ${String(error)}`,
+      );
+    }
+
+    try {
+      await this.notificationsService.create({
+        userId: row.comparedBy,
+        tenantId,
+        title: 'ใบเทียบราคาได้รับอนุมัติ',
+        message: `ใบเทียบราคา ${row.comparisonNumber} ได้รับอนุมัติแล้ว — สร้าง PO ได้`,
+        type: 'price_comparison_approved',
+        category: 'procurement',
+      });
+    } catch (error) {
+      this.logger.warn(`Notify buyer failed for price comparison ${row.id}: ${String(error)}`);
+    }
+  }
+
+  private async notifyAndAuditRejection(
+    row: { id: string; comparisonNumber: string; comparedBy: string },
+    rejectionReason: string,
+    userId: string,
+    tenantId: string,
+  ): Promise<void> {
+    try {
+      await this.auditLogService.log({
+        action: AuditAction.PRICE_COMPARISON_REJECTED,
+        resource: AuditResource.PRICE_COMPARISON,
+        resourceId: row.id,
+        category: AuditCategory.PROCUREMENT,
+        tenantId,
+        userId,
+        newValues: { rejectionReason },
+        description: `ปฏิเสธใบเทียบราคา ${row.comparisonNumber}`,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Audit log failed for price comparison rejection ${row.id}: ${String(error)}`,
+      );
+    }
+
+    try {
+      await this.notificationsService.create({
+        userId: row.comparedBy,
+        tenantId,
+        title: 'ใบเทียบราคาถูกปฏิเสธ',
+        message: `ใบเทียบราคา ${row.comparisonNumber} ถูกปฏิเสธ: ${rejectionReason}`,
+        type: 'price_comparison_rejected',
+        category: 'procurement',
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Notify buyer failed for price comparison rejection ${row.id}: ${String(error)}`,
+      );
     }
   }
 
