@@ -1,0 +1,1170 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>StaySync — Procurement ↔ Warehouse Link Design</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --brand:#7c3aed; --brand-50:#f5f3ff; --brand-100:#ede9fe; --brand-200:#ddd6fe;
+    --brand-600:#7c3aed; --brand-700:#6d28d9; --brand-900:#4c1d95;
+  }
+  html,body{font-family:'IBM Plex Sans Thai',system-ui,sans-serif;color:#1e293b;background:#f8fafc}
+  .mono{font-family:'JetBrains Mono',monospace}
+  .brand-bg{background:var(--brand-600)}
+  .brand-text{color:var(--brand-700)}
+  .brand-soft{background:var(--brand-50);color:var(--brand-700)}
+  .ring-brand{box-shadow:0 0 0 2px var(--brand-200)}
+  .grid-bg{background-image:radial-gradient(#cbd5e1 1px,transparent 1px);background-size:18px 18px}
+  .wireframe{border:1px dashed #cbd5e1;border-radius:14px;background:white}
+  .chip{display:inline-flex;align-items:center;gap:.35rem;padding:.15rem .55rem;border-radius:999px;font-size:.7rem;font-weight:600}
+  details>summary{cursor:pointer;list-style:none}
+  details>summary::-webkit-details-marker{display:none}
+  .toc a{display:block;padding:.35rem .75rem;border-radius:.5rem;color:#475569}
+  .toc a:hover{background:var(--brand-50);color:var(--brand-700)}
+  .mermaid{background:white;border:1px solid #e2e8f0;border-radius:14px;padding:18px}
+  .case-card{border:1px solid #e2e8f0;border-radius:12px;padding:14px;background:white}
+  .arrow-down::after{content:"▼";display:block;text-align:center;color:#94a3b8;font-size:.75rem;margin:6px 0}
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:.55rem .65rem;border-bottom:1px solid #f1f5f9;text-align:left;font-size:.85rem}
+  th{font-weight:600;color:#475569;background:#f8fafc;font-size:.75rem;text-transform:uppercase;letter-spacing:.05em}
+  .scrollbox{overflow:auto}
+  .api-block{background:#0f172a;color:#e2e8f0;border-radius:10px;padding:14px;font-family:'JetBrains Mono',monospace;font-size:.78rem;line-height:1.55;overflow:auto}
+  .api-block .verb-get{color:#38bdf8}
+  .api-block .verb-post{color:#34d399}
+  .api-block .verb-patch{color:#fbbf24}
+  .api-block .key{color:#a78bfa}
+  .badge-soft{padding:.18rem .5rem;border-radius:999px;font-size:.7rem;font-weight:600}
+  .b-draft{background:#f1f5f9;color:#475569}
+  .b-pending{background:#fef3c7;color:#92400e}
+  .b-approved{background:#dbeafe;color:#1e40af}
+  .b-partial{background:#e0e7ff;color:#4338ca}
+  .b-received{background:#d1fae5;color:#065f46}
+  .b-cancelled{background:#fee2e2;color:#991b1b}
+  .b-closed{background:#e2e8f0;color:#64748b}
+  .b-warn{background:#fee2e2;color:#991b1b}
+  .b-low{background:#fef3c7;color:#92400e}
+  .b-ok{background:#d1fae5;color:#065f46}
+  .b-info{background:#dbeafe;color:#1e40af}
+  .b-over{background:#ffedd5;color:#9a3412}
+  .progress{height:6px;background:#f1f5f9;border-radius:999px;overflow:hidden}
+  .progress>span{display:block;height:100%;background:linear-gradient(90deg,#a78bfa,#7c3aed);border-radius:999px}
+  .kbd{font-family:'JetBrains Mono',monospace;font-size:.7rem;border:1px solid #cbd5e1;border-bottom-width:2px;border-radius:6px;padding:.05rem .35rem;background:#f8fafc}
+  .nav-mock{background:white;border-right:1px solid #e2e8f0}
+  .nav-mock .item{padding:.45rem .8rem;border-radius:.5rem;font-size:.85rem;color:#475569;display:flex;align-items:center;gap:.55rem}
+  .nav-mock .item.active{background:var(--brand-50);color:var(--brand-700);font-weight:600}
+  .icon-square{width:18px;height:18px;border-radius:5px;background:#cbd5e1;display:inline-block}
+  .ev-pulse{position:relative}
+  .ev-pulse::before{content:"";position:absolute;left:-12px;top:50%;width:8px;height:8px;border-radius:999px;background:#10b981;transform:translateY(-50%);box-shadow:0 0 0 0 rgba(16,185,129,.5);animation:p 2s infinite}
+  @keyframes p{0%{box-shadow:0 0 0 0 rgba(16,185,129,.45)}70%{box-shadow:0 0 0 12px rgba(16,185,129,0)}100%{box-shadow:0 0 0 0 rgba(16,185,129,0)}}
+</style>
+</head>
+<body class="leading-relaxed">
+
+<!-- ─── COVER ─────────────────────────────────────────── -->
+<header class="brand-bg text-white">
+  <div class="max-w-6xl mx-auto px-8 py-12">
+    <div class="text-xs uppercase tracking-[.25em] opacity-80">StaySync · Design Document</div>
+    <h1 class="text-4xl font-bold mt-3">เชื่อมโยง Procurement ↔ Warehouse</h1>
+    <p class="mt-3 text-violet-100 max-w-2xl">
+      ออกแบบ flow + wireframe สำหรับให้ทีมจัดซื้อ <b>ติดตามการรับเข้าจริง</b>, ดู <b>Stock Balance</b>,
+      เห็น <b>ของใกล้หมด/Overstock/หมดอายุ</b>, และเชื่อม <b>PO ↔ GR ↔ Stock Movement</b> เป็น single source of truth
+    </p>
+    <div class="mt-6 flex gap-3 flex-wrap text-xs">
+      <span class="chip bg-white/15">Wireframe + Flow</span>
+      <span class="chip bg-white/15">5 หน้าใหม่ / ปรับ</span>
+      <span class="chip bg-white/15">8 API endpoints ใหม่</span>
+      <span class="chip bg-white/15">3 events ใหม่</span>
+    </div>
+  </div>
+</header>
+
+<!-- ─── TOC ─────────────────────────────────────────── -->
+<section class="max-w-6xl mx-auto px-8 py-8">
+  <div class="grid md:grid-cols-[260px_1fr] gap-6">
+    <aside class="bg-white border border-slate-200 rounded-xl p-3 toc h-fit sticky top-4">
+      <div class="text-[11px] uppercase tracking-wider text-slate-400 px-3 pb-2">สารบัญ</div>
+      <a href="#problem">1 · ปัญหาปัจจุบัน &amp; Gaps</a>
+      <a href="#flow">2 · System Flow (PO ↔ GR ↔ Stock)</a>
+      <a href="#states">3 · State Machine ของ PO</a>
+      <a href="#dashboard">4 · Procurement Dashboard (ปรับ)</a>
+      <a href="#tracking">5 · PO Receiving Tracking (ใหม่)</a>
+      <a href="#po-detail">6 · PO Detail + GR Reconcile</a>
+      <a href="#stock">7 · Stock Balance Report (ใหม่)</a>
+      <a href="#variance">8 · GR Variance / รับยังไม่หมด</a>
+      <a href="#events">9 · Event &amp; Notification Design</a>
+      <a href="#api">10 · API Contracts ใหม่</a>
+      <a href="#data">11 · Schema Additions</a>
+      <a href="#nav">12 · Sidebar Navigation</a>
+      <a href="#cases">13 · Cases Reference</a>
+    </aside>
+
+    <main class="space-y-14">
+
+<!-- ─── 1. PROBLEM ─────────────────────────────────────────── -->
+<section id="problem">
+  <div class="text-xs brand-text font-semibold uppercase tracking-widest">01</div>
+  <h2 class="text-2xl font-bold mt-1">ปัญหาปัจจุบัน &amp; Gaps</h2>
+  <p class="text-slate-600 mt-2">วันนี้เมื่อ approve PO แล้ว ระบบสร้าง <b>รายการรอรับเข้า</b> ในฝั่งคลัง แต่ฝั่งจัดซื้อยัง <b>ไม่เห็น</b> ว่ารับครบแล้วหรือยัง, ของในคลังเหลือเท่าไหร่, ใกล้หมดอายุชิ้นไหน — ต้องเดินไปถามคลัง</p>
+
+  <div class="mt-5 grid md:grid-cols-2 gap-4">
+    <div class="case-card">
+      <div class="flex items-center justify-between">
+        <h3 class="font-semibold">Procurement (ปัจจุบัน)</h3>
+        <span class="badge-soft b-info">มีอยู่</span>
+      </div>
+      <ul class="mt-2 text-sm text-slate-600 space-y-1.5 list-disc list-inside">
+        <li>สร้าง PR / RFQ / PO / เทียบราคา</li>
+        <li>เห็นสถานะ PO: DRAFT / PENDING / APPROVED ฯลฯ</li>
+        <li>มี GR list แต่<u>ไม่ผูกกลับ</u>มาแสดงในมุม PO</li>
+      </ul>
+    </div>
+    <div class="case-card">
+      <div class="flex items-center justify-between">
+        <h3 class="font-semibold">Warehouse (ปัจจุบัน)</h3>
+        <span class="badge-soft b-info">มีอยู่</span>
+      </div>
+      <ul class="mt-2 text-sm text-slate-600 space-y-1.5 list-disc list-inside">
+        <li><span class="mono">WarehouseStock</span>, <span class="mono">StockMovement</span>, <span class="mono">InventoryLot</span></li>
+        <li>GR + QC + Lot/Expiry tracking</li>
+        <li>Reorder alerts page (ภายในคลัง)</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="mt-5 case-card border-rose-200 bg-rose-50/40">
+    <h3 class="font-semibold text-rose-700">Gaps ที่ต้องเชื่อม</h3>
+    <ol class="mt-2 grid md:grid-cols-2 gap-x-6 gap-y-2 text-sm text-rose-900/80 list-decimal list-inside">
+      <li>PO ไม่ได้แสดง <b>receivedQty / pendingQty</b> ระดับบรรทัด</li>
+      <li>ไม่มีหน้า <b>"PO ที่รอรับเข้า"</b> รวมศูนย์</li>
+      <li>ฝั่งจัดซื้อไม่เห็น <b>Stock balance + ของใกล้หมด</b></li>
+      <li>ไม่มี <b>PO Aging</b> (รอนานกี่วัน, เกินกำหนด)</li>
+      <li>ไม่มี <b>variance report</b> (สั่ง vs รับ vs ยอด invoice)</li>
+      <li>ไม่มี <b>event push</b> เวลา GR เสร็จ → ฝั่ง PO refresh เอง</li>
+      <li>ของ <b>ใกล้หมดอายุ / หมดแล้ว</b> ไม่โผล่ฝั่งจัดซื้อให้ตัดสินใจซื้อใหม่/คืน</li>
+      <li><b>Overstock</b> ไม่มีสัญญาณเตือนกลับฝั่งจัดซื้อ → ซื้อซ้ำซ้อน</li>
+    </ol>
+  </div>
+</section>
+
+<!-- ─── 2. SYSTEM FLOW ─────────────────────────────────────────── -->
+<section id="flow">
+  <div class="text-xs brand-text font-semibold uppercase tracking-widest">02</div>
+  <h2 class="text-2xl font-bold mt-1">System Flow — PO ↔ GR ↔ Stock</h2>
+  <p class="text-slate-600 mt-2">ภาพรวมการไหลของข้อมูล + event ที่ต้องผูกระหว่างสอง sub-system</p>
+
+  <div class="mermaid mt-4">
+flowchart LR
+  subgraph PROC["🛒 Procurement"]
+    PR[PR — ใบขอซื้อ]
+    RFQ[RFQ + Quote]
+    PO[PO — ใบสั่งซื้อ]
+    PT[PO Tracking ⭐]
+    SR[Stock Report ⭐]
+  end
+  subgraph WH["📦 Warehouse"]
+    GR[GR — รับสินค้า]
+    QC[QC คุณภาพ]
+    STK[(WarehouseStock)]
+    MOV[(StockMovement)]
+    LOT[(InventoryLot)]
+  end
+  subgraph EVT["⚡ Event Bus"]
+    E1((po.approved))
+    E2((gr.completed))
+    E3((stock.low))
+    E4((lot.expiring))
+  end
+  PR --> RFQ --> PO -->|approve| E1
+  E1 -.->|create draft| GR
+  GR --> QC --> MOV --> STK
+  GR -.->|writes lot| LOT
+  GR -->|emit| E2
+  E2 -.->|update receivedQty| PO
+  E2 -.->|refresh| PT
+  STK -->|threshold| E3
+  LOT -->|days &lt; X| E4
+  E3 -.-> SR
+  E4 -.-> SR
+  E3 -.->|toast/inbox| PROC
+  E4 -.->|toast/inbox| PROC
+
+  classDef new fill:#ede9fe,stroke:#7c3aed,stroke-width:2px,color:#4c1d95;
+  class PT,SR new;
+  classDef event fill:#fef3c7,stroke:#d97706,color:#78350f;
+  class E1,E2,E3,E4 event;
+  </div>
+
+  <p class="text-xs text-slate-500 mt-2">⭐ = หน้าใหม่ที่จะออกแบบในเอกสารนี้ &nbsp;·&nbsp; เส้นประ = event-driven (async)</p>
+</section>
+
+<!-- ─── 3. STATE MACHINE ─────────────────────────────────────────── -->
+<section id="states">
+  <div class="text-xs brand-text font-semibold uppercase tracking-widest">03</div>
+  <h2 class="text-2xl font-bold mt-1">State Machine — PO Lifecycle</h2>
+  <p class="text-slate-600 mt-2">เพิ่มเฉพาะ trigger ที่มาจาก GR (เส้นประสีเขียว) — รัฐคงเดิมตาม Prisma enum</p>
+
+  <div class="mermaid mt-4">
+stateDiagram-v2
+  [*] --> DRAFT
+  DRAFT --> PENDING_APPROVAL: submit
+  PENDING_APPROVAL --> APPROVED: approve
+  PENDING_APPROVAL --> DRAFT: reject (with reason)
+  APPROVED --> PARTIALLY_RECEIVED: GR.complete (qty &lt; ordered)
+  APPROVED --> FULLY_RECEIVED: GR.complete (qty = ordered)
+  PARTIALLY_RECEIVED --> FULLY_RECEIVED: GR.complete (cumulative = ordered)
+  PARTIALLY_RECEIVED --> CLOSED: force close (with variance reason)
+  FULLY_RECEIVED --> CLOSED: invoice matched + paid
+  APPROVED --> CANCELLED: cancel before any GR
+  PENDING_APPROVAL --> CANCELLED: cancel
+  CANCELLED --> [*]
+  CLOSED --> [*]
+  </div>
+
+  <div class="mt-4 grid md:grid-cols-3 gap-3 text-sm">
+    <div class="case-card"><b>Trigger จาก GR</b><div class="text-slate-500 mt-1">เมื่อ GR ผ่าน QC (status=ACCEPTED) ระบบจะ recalculate <span class="mono">receivedQty</span> ของแต่ละ PO line แล้ว set status PO อัตโนมัติ</div></div>
+    <div class="case-card"><b>Force Close</b><div class="text-slate-500 mt-1">ถ้าซัพไม่ส่งครบและไม่จะรับเพิ่ม → ปิด PO (ระบุเหตุผล) แล้วยอดส่วนต่างจะปรากฏใน <i>Variance Report</i></div></div>
+    <div class="case-card"><b>Cancel</b><div class="text-slate-500 mt-1">อนุญาตยกเลิกได้ก่อนมี GR เท่านั้น — ถ้ามี GR แล้วต้องใช้ Force Close</div></div>
+  </div>
+</section>
+
+<!-- ─── 4. DASHBOARD ─────────────────────────────────────────── -->
+<section id="dashboard">
+  <div class="text-xs brand-text font-semibold uppercase tracking-widest">04</div>
+  <h2 class="text-2xl font-bold mt-1">Wireframe — Procurement Dashboard (ปรับ)</h2>
+  <p class="text-slate-600 mt-2">เพิ่ม strip ใหม่ "📦 สถานะคลัง" + "🚚 Receiving Pipeline" บน dashboard เดิม</p>
+
+  <div class="wireframe mt-4 overflow-hidden">
+    <div class="grid grid-cols-[200px_1fr]">
+      <!-- nav -->
+      <div class="nav-mock p-3 space-y-1 hidden md:block">
+        <div class="text-xs text-slate-400 px-2 mb-2">หลัก</div>
+        <div class="item active"><span class="icon-square" style="background:#7c3aed"></span>ภาพรวมจัดซื้อ</div>
+        <div class="item"><span class="icon-square"></span>ใบขอซื้อ (PR)</div>
+        <div class="item"><span class="icon-square"></span>ใบเสนอราคา</div>
+        <div class="item"><span class="icon-square"></span>ใบสั่งซื้อ (PO)</div>
+        <div class="item"><span class="icon-square"></span>📥 PO Tracking <span class="ml-auto text-[10px] bg-violet-100 text-violet-700 px-1.5 rounded">ใหม่</span></div>
+        <div class="item"><span class="icon-square"></span>รับสินค้า (GR)</div>
+        <div class="item"><span class="icon-square"></span>QC คุณภาพ</div>
+        <div class="text-xs text-slate-400 px-2 my-2">รายงาน</div>
+        <div class="item"><span class="icon-square"></span>📦 Stock Balance <span class="ml-auto text-[10px] bg-violet-100 text-violet-700 px-1.5 rounded">ใหม่</span></div>
+        <div class="item"><span class="icon-square"></span>📊 Variance <span class="ml-auto text-[10px] bg-violet-100 text-violet-700 px-1.5 rounded">ใหม่</span></div>
+      </div>
+      <!-- main -->
+      <div class="p-5 grid-bg">
+        <div class="text-xs text-slate-500">จัดซื้อ › ภาพรวม</div>
+        <h3 class="text-lg font-bold mt-1">สวัสดี, ทีมจัดซื้อ 👋</h3>
+
+        <!-- KPI Strip -->
+        <div class="mt-4 grid grid-cols-4 gap-3">
+          <div class="bg-white rounded-xl p-3 shadow-sm">
+            <div class="text-xs text-slate-500">PO รอรับเข้า</div>
+            <div class="text-2xl font-bold mt-1">14</div>
+            <div class="text-[11px] text-rose-600 mt-1">⚠ 2 เกินกำหนด</div>
+          </div>
+          <div class="bg-white rounded-xl p-3 shadow-sm">
+            <div class="text-xs text-slate-500">รับเข้าเดือนนี้</div>
+            <div class="text-2xl font-bold mt-1">฿1.84M</div>
+            <div class="text-[11px] text-emerald-600 mt-1">▲ 12% MoM</div>
+          </div>
+          <div class="bg-white rounded-xl p-3 shadow-sm">
+            <div class="text-xs text-slate-500">SKU ใกล้หมด</div>
+            <div class="text-2xl font-bold mt-1 text-amber-600">23</div>
+            <div class="text-[11px] text-slate-500 mt-1">ต่ำกว่า reorder</div>
+          </div>
+          <div class="bg-white rounded-xl p-3 shadow-sm">
+            <div class="text-xs text-slate-500">Lot ใกล้หมดอายุ</div>
+            <div class="text-2xl font-bold mt-1 text-rose-600">7</div>
+            <div class="text-[11px] text-slate-500 mt-1">≤ 30 วัน</div>
+          </div>
+        </div>
+
+        <!-- New: Receiving Pipeline -->
+        <div class="mt-5 bg-white rounded-xl p-4 shadow-sm">
+          <div class="flex items-center justify-between">
+            <h4 class="font-semibold">🚚 Receiving Pipeline</h4>
+            <a class="text-xs brand-text">เปิดหน้า PO Tracking →</a>
+          </div>
+          <div class="mt-3 grid grid-cols-4 gap-2 text-center">
+            <div class="rounded-lg bg-slate-50 p-3">
+              <div class="text-[10px] uppercase text-slate-500">Approved รอรับ</div>
+              <div class="text-xl font-bold mt-1">9</div>
+              <div class="progress mt-2"><span style="width:0%"></span></div>
+            </div>
+            <div class="rounded-lg bg-indigo-50 p-3">
+              <div class="text-[10px] uppercase text-indigo-700">รับครึ่ง</div>
+              <div class="text-xl font-bold mt-1 text-indigo-700">5</div>
+              <div class="progress mt-2"><span style="width:55%"></span></div>
+            </div>
+            <div class="rounded-lg bg-emerald-50 p-3">
+              <div class="text-[10px] uppercase text-emerald-700">รับครบ</div>
+              <div class="text-xl font-bold mt-1 text-emerald-700">42</div>
+              <div class="progress mt-2"><span style="width:100%;background:#10b981"></span></div>
+            </div>
+            <div class="rounded-lg bg-rose-50 p-3 ring-2 ring-rose-200">
+              <div class="text-[10px] uppercase text-rose-700">เกินกำหนด</div>
+              <div class="text-xl font-bold mt-1 text-rose-700">2</div>
+              <div class="text-[10px] text-rose-600 mt-2">⏰ &gt;7 วัน</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- New: Stock Health Strip -->
+        <div class="mt-4 bg-white rounded-xl p-4 shadow-sm">
+          <div class="flex items-center justify-between">
+            <h4 class="font-semibold">📦 สถานะคลัง — ที่จัดซื้อต้องรู้</h4>
+            <a class="text-xs brand-text">เปิด Stock Balance →</a>
+          </div>
+          <div class="mt-3 grid grid-cols-4 gap-2">
+            <div class="rounded-lg border border-amber-200 bg-amber-50/60 p-3">
+              <div class="text-[11px] font-semibold text-amber-700">ใกล้หมด</div>
+              <div class="text-xl font-bold mt-1">23 SKU</div>
+              <div class="text-[11px] text-amber-700 mt-1">ผ้าขนหนู, สบู่, เคมีฯ</div>
+            </div>
+            <div class="rounded-lg border border-orange-200 bg-orange-50/60 p-3">
+              <div class="text-[11px] font-semibold text-orange-700">Overstock</div>
+              <div class="text-xl font-bold mt-1">8 SKU</div>
+              <div class="text-[11px] text-orange-700 mt-1">เกิน max stock</div>
+            </div>
+            <div class="rounded-lg border border-rose-200 bg-rose-50/60 p-3">
+              <div class="text-[11px] font-semibold text-rose-700">หมดอายุ ≤30 วัน</div>
+              <div class="text-xl font-bold mt-1">7 lots</div>
+              <div class="text-[11px] text-rose-700 mt-1">฿42,800</div>
+            </div>
+            <div class="rounded-lg border border-slate-300 bg-slate-50 p-3">
+              <div class="text-[11px] font-semibold text-slate-600">หมดอายุแล้ว</div>
+              <div class="text-xl font-bold mt-1">2 lots</div>
+              <div class="text-[11px] text-slate-600 mt-1">รอจำหน่าย/คืน</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── 5. PO TRACKING ─────────────────────────────────────────── -->
+<section id="tracking">
+  <div class="text-xs brand-text font-semibold uppercase tracking-widest">05</div>
+  <h2 class="text-2xl font-bold mt-1">Wireframe — PO Receiving Tracking <span class="badge-soft b-info ml-2">หน้าใหม่</span></h2>
+  <p class="text-slate-600 mt-2">URL: <span class="mono">/purchasing/po-tracking</span> — มุมมอง <b>Kanban</b> / <b>Table</b> ของ PO ทุกใบที่ approve แล้วจน close</p>
+
+  <div class="wireframe mt-4 p-5 bg-white">
+    <!-- top -->
+    <div class="flex items-center justify-between gap-3 flex-wrap">
+      <div>
+        <h3 class="font-bold text-lg">📥 ติดตามการรับเข้า</h3>
+        <div class="text-xs text-slate-500">รวมทุก PO ที่ approve แล้ว · เชื่อมกับ GR แบบ realtime</div>
+      </div>
+      <div class="flex gap-2">
+        <div class="bg-slate-100 rounded-lg p-1 text-xs flex">
+          <button class="px-3 py-1 bg-white shadow-sm rounded-md font-semibold">📋 Kanban</button>
+          <button class="px-3 py-1 text-slate-500">▤ Table</button>
+          <button class="px-3 py-1 text-slate-500">📅 Timeline</button>
+        </div>
+        <button class="brand-bg text-white px-3 py-1.5 rounded-lg text-xs font-semibold">+ บันทึก GR</button>
+      </div>
+    </div>
+
+    <!-- filters -->
+    <div class="mt-3 flex gap-2 flex-wrap text-xs">
+      <input class="border border-slate-200 rounded-lg px-3 py-1.5 w-64" placeholder="🔍 PO เลขที่, ผู้ขาย, สินค้า..." />
+      <select class="border border-slate-200 rounded-lg px-2 py-1.5"><option>ทุกซัพพลายเออร์</option></select>
+      <select class="border border-slate-200 rounded-lg px-2 py-1.5"><option>ทุก Warehouse</option></select>
+      <span class="kbd">7d</span><span class="kbd">30d</span><span class="kbd">90d</span>
+      <span class="ml-auto chip b-warn">⚠ เกินกำหนด: 2</span>
+    </div>
+
+    <!-- Kanban -->
+    <div class="mt-4 grid md:grid-cols-4 gap-3">
+
+      <!-- col 1 -->
+      <div class="bg-slate-50 rounded-xl p-2">
+        <div class="flex items-center justify-between px-1 pb-2">
+          <div class="text-xs font-semibold text-slate-700">⏳ Approved รอส่ง</div>
+          <span class="text-[10px] text-slate-500">9</span>
+        </div>
+        <!-- card -->
+        <div class="bg-white rounded-lg p-3 shadow-sm border-l-4 border-blue-400 mb-2">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold mono">PO-2604-0031</div>
+            <span class="badge-soft b-approved">APPROVED</span>
+          </div>
+          <div class="text-[12px] text-slate-700 mt-1">เคมีภัณฑ์ทำความสะอาด</div>
+          <div class="text-[11px] text-slate-500">เอ็กซ์เพิร์ท เคมิคัล · ฿92,000</div>
+          <div class="mt-2 flex items-center justify-between text-[11px]">
+            <span>📦 0 / 6 บรรทัด</span>
+            <span class="text-slate-500">📅 30 เม.ย.</span>
+          </div>
+          <div class="progress mt-2"><span style="width:0%"></span></div>
+        </div>
+        <div class="bg-white rounded-lg p-3 shadow-sm border-l-4 border-blue-400">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold mono">PO-2604-0029</div>
+            <span class="badge-soft b-approved">APPROVED</span>
+          </div>
+          <div class="text-[12px] text-slate-700 mt-1">ผ้าขนหนู / ผ้าปูที่นอน</div>
+          <div class="text-[11px] text-slate-500">สยาม เท็กซ์ไทล์</div>
+          <div class="mt-2 flex items-center justify-between text-[11px]">
+            <span>📦 0 / 4 บรรทัด</span>
+            <span class="text-slate-500">📅 28 เม.ย.</span>
+          </div>
+          <div class="progress mt-2"><span style="width:0%"></span></div>
+        </div>
+      </div>
+
+      <!-- col 2 -->
+      <div class="bg-indigo-50 rounded-xl p-2">
+        <div class="flex items-center justify-between px-1 pb-2">
+          <div class="text-xs font-semibold text-indigo-700">⛓ รับบางส่วน</div>
+          <span class="text-[10px] text-indigo-600">5</span>
+        </div>
+        <div class="bg-white rounded-lg p-3 shadow-sm border-l-4 border-indigo-400 mb-2">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold mono">PO-2604-0024</div>
+            <span class="badge-soft b-partial">PARTIAL</span>
+          </div>
+          <div class="text-[12px] text-slate-700 mt-1">น้ำดื่ม + เครื่องดื่ม</div>
+          <div class="text-[11px] text-slate-500">ไทยฟู้ด ซัพพลาย</div>
+          <div class="mt-2 flex items-center justify-between text-[11px]">
+            <span>📦 60% (3/5)</span>
+            <span class="text-emerald-600 font-semibold">GR-0086</span>
+          </div>
+          <div class="progress mt-2"><span style="width:60%"></span></div>
+          <div class="mt-2 text-[10px] text-slate-500">รอเพิ่ม 200 ขวด · 1,200 กล่อง</div>
+        </div>
+        <div class="bg-white rounded-lg p-3 shadow-sm border-l-4 border-indigo-400">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold mono">PO-2604-0021</div>
+            <span class="badge-soft b-partial">PARTIAL</span>
+          </div>
+          <div class="text-[12px] text-slate-700 mt-1">อุปกรณ์ Spa</div>
+          <div class="text-[11px] text-slate-500">บูทีค สปา เซ็นเตอร์</div>
+          <div class="mt-2 flex items-center justify-between text-[11px]">
+            <span>📦 25% (1/4)</span>
+            <span class="text-emerald-600 font-semibold">GR-0079</span>
+          </div>
+          <div class="progress mt-2"><span style="width:25%"></span></div>
+        </div>
+      </div>
+
+      <!-- col 3 -->
+      <div class="bg-emerald-50 rounded-xl p-2">
+        <div class="flex items-center justify-between px-1 pb-2">
+          <div class="text-xs font-semibold text-emerald-700">✅ รับครบ</div>
+          <span class="text-[10px] text-emerald-600">42</span>
+        </div>
+        <div class="bg-white rounded-lg p-3 shadow-sm border-l-4 border-emerald-400 mb-2">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold mono">PO-2604-0019</div>
+            <span class="badge-soft b-received">FULL</span>
+          </div>
+          <div class="text-[12px] text-slate-700 mt-1">ของแต่งห้อง · ถ้วยกาแฟ</div>
+          <div class="text-[11px] text-slate-500">โฮมแอนด์ลิฟวิ่ง</div>
+          <div class="mt-2 flex items-center justify-between text-[11px]">
+            <span>📦 100% (4/4)</span>
+            <span class="text-emerald-600">GR-0084</span>
+          </div>
+          <div class="progress mt-2"><span style="width:100%;background:#10b981"></span></div>
+          <div class="mt-1 text-[10px] text-slate-500">22 เม.ย. · QC ผ่าน</div>
+        </div>
+        <div class="bg-white rounded-lg p-3 shadow-sm border-l-4 border-emerald-400 opacity-60">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold mono">PO-2604-0018</div>
+            <span class="badge-soft b-closed">CLOSED</span>
+          </div>
+          <div class="text-[12px] text-slate-700 mt-1">วัสดุก่อสร้างซ่อมห้อง</div>
+        </div>
+      </div>
+
+      <!-- col 4 -->
+      <div class="bg-rose-50 rounded-xl p-2 ring-2 ring-rose-200">
+        <div class="flex items-center justify-between px-1 pb-2">
+          <div class="text-xs font-semibold text-rose-700">⚠ เกินกำหนด</div>
+          <span class="text-[10px] text-rose-600">2</span>
+        </div>
+        <div class="bg-white rounded-lg p-3 shadow-sm border-l-4 border-rose-500 mb-2">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold mono">PO-2604-0028</div>
+            <span class="badge-soft b-warn">+5 วัน</span>
+          </div>
+          <div class="text-[12px] text-slate-700 mt-1">ผ้าห่มสีกรมท่า · 200 ผืน</div>
+          <div class="text-[11px] text-slate-500">โรงงานสิ่งทอ ABC</div>
+          <div class="mt-2 flex items-center justify-between text-[11px]">
+            <span>📦 0 / 1 บรรทัด</span>
+            <span class="text-rose-600 font-semibold">📞 ติดตาม</span>
+          </div>
+        </div>
+        <div class="bg-white rounded-lg p-3 shadow-sm border-l-4 border-rose-500">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold mono">PO-2604-0023</div>
+            <span class="badge-soft b-warn">+2 วัน</span>
+          </div>
+          <div class="text-[12px] text-slate-700 mt-1">เครื่องเขียนสำนักงาน</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- table view (collapsed preview) -->
+    <details class="mt-4">
+      <summary class="text-xs brand-text font-semibold">▸ แสดงตัวอย่าง Table View</summary>
+      <div class="mt-3 scrollbox">
+        <table>
+          <thead><tr>
+            <th>PO เลขที่</th><th>ซัพพลายเออร์</th><th>มูลค่า</th>
+            <th>สั่ง / รับ / ค้าง</th><th>%</th><th>สถานะ</th><th>กำหนด</th><th>GR ล่าสุด</th>
+          </tr></thead>
+          <tbody>
+            <tr><td class="mono">PO-2604-0031</td><td>เอ็กซ์เพิร์ท เคมิคัล</td><td>฿92,000</td><td>6 / 0 / 6</td><td>0%</td><td><span class="badge-soft b-approved">APPROVED</span></td><td>30 เม.ย.</td><td>—</td></tr>
+            <tr><td class="mono">PO-2604-0024</td><td>ไทยฟู้ด ซัพพลาย</td><td>฿138,500</td><td>5 / 3 / 2</td><td>60%</td><td><span class="badge-soft b-partial">PARTIAL</span></td><td>26 เม.ย.</td><td>GR-0086</td></tr>
+            <tr><td class="mono">PO-2604-0028</td><td>โรงงานสิ่งทอ ABC</td><td>฿135,000</td><td>1 / 0 / 1</td><td>0%</td><td><span class="badge-soft b-warn">⚠ +5 วัน</span></td><td>20 เม.ย.</td><td>—</td></tr>
+            <tr><td class="mono">PO-2604-0019</td><td>โฮมแอนด์ลิฟวิ่ง</td><td>฿58,200</td><td>4 / 4 / 0</td><td>100%</td><td><span class="badge-soft b-received">FULL</span></td><td>22 เม.ย.</td><td>GR-0084</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </details>
+  </div>
+</section>
+
+<!-- ─── 6. PO DETAIL ─────────────────────────────────────────── -->
+<section id="po-detail">
+  <div class="text-xs brand-text font-semibold uppercase tracking-widest">06</div>
+  <h2 class="text-2xl font-bold mt-1">Wireframe — PO Detail + GR Reconciliation</h2>
+  <p class="text-slate-600 mt-2">URL: <span class="mono">/purchasing/purchase-orders/[id]</span> — เพิ่ม Tab "📥 การรับเข้า" กับ "🔁 Reconciliation"</p>
+
+  <div class="wireframe mt-4 p-5 bg-white">
+    <div class="flex items-center justify-between flex-wrap gap-2">
+      <div>
+        <div class="text-xs text-slate-500">PO › รายละเอียด</div>
+        <div class="flex items-center gap-2 mt-1">
+          <h3 class="font-bold text-lg mono">PO-2604-0024</h3>
+          <span class="badge-soft b-partial">PARTIALLY_RECEIVED</span>
+          <span class="badge-soft b-info">60% รับแล้ว</span>
+        </div>
+        <div class="text-xs text-slate-500 mt-1">ไทยฟู้ด ซัพพลาย · ฿138,500 · กำหนดส่ง 26 เม.ย. 2026</div>
+      </div>
+      <div class="flex gap-2 text-xs">
+        <button class="border border-slate-300 rounded-lg px-3 py-1.5">PDF</button>
+        <button class="border border-slate-300 rounded-lg px-3 py-1.5">📞 ติดตาม</button>
+        <button class="brand-bg text-white rounded-lg px-3 py-1.5 font-semibold">+ สร้าง GR ต่อ</button>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="mt-4 border-b border-slate-200 flex gap-1 text-sm">
+      <div class="px-3 py-2 text-slate-500">รายละเอียด</div>
+      <div class="px-3 py-2 brand-text border-b-2 border-violet-600 font-semibold">📥 การรับเข้า (2 GR)</div>
+      <div class="px-3 py-2 text-slate-500">🔁 Reconciliation</div>
+      <div class="px-3 py-2 text-slate-500">Audit log</div>
+    </div>
+
+    <!-- progress strip -->
+    <div class="mt-4 grid grid-cols-3 gap-3 text-sm">
+      <div class="case-card"><div class="text-xs text-slate-500">สั่งซื้อ</div><div class="text-xl font-bold mt-1">5,200 หน่วย</div><div class="text-xs text-slate-500">฿138,500</div></div>
+      <div class="case-card"><div class="text-xs text-slate-500">รับแล้ว</div><div class="text-xl font-bold mt-1 text-emerald-700">3,120 หน่วย</div><div class="text-xs text-emerald-600">฿82,940 (60%)</div></div>
+      <div class="case-card border-amber-200 bg-amber-50/50"><div class="text-xs text-amber-700">คงค้าง</div><div class="text-xl font-bold mt-1 text-amber-700">2,080 หน่วย</div><div class="text-xs text-amber-700">฿55,560 — รอ 2 บรรทัด</div></div>
+    </div>
+
+    <!-- Line table -->
+    <div class="mt-4 scrollbox">
+      <table>
+        <thead><tr>
+          <th>SKU</th><th>สินค้า</th>
+          <th class="text-right">สั่ง</th>
+          <th class="text-right">รับแล้ว</th>
+          <th class="text-right">ค้าง</th>
+          <th class="text-right">QC</th>
+          <th>Lot / Expiry</th>
+          <th>สถานะ</th>
+        </tr></thead>
+        <tbody>
+          <tr>
+            <td class="mono">FB-WTR-500</td>
+            <td>น้ำดื่ม 500ml × 12</td>
+            <td class="text-right">2,000</td>
+            <td class="text-right text-emerald-700 font-semibold">2,000</td>
+            <td class="text-right">0</td>
+            <td class="text-right">✅ 100%</td>
+            <td class="text-xs text-slate-500">L-20260420-A · 2027-04</td>
+            <td><span class="badge-soft b-received">FULL</span></td>
+          </tr>
+          <tr>
+            <td class="mono">FB-WTR-1500</td>
+            <td>น้ำดื่ม 1.5L × 6</td>
+            <td class="text-right">800</td>
+            <td class="text-right text-indigo-700 font-semibold">600</td>
+            <td class="text-right text-amber-700">200</td>
+            <td class="text-right">✅ 100%</td>
+            <td class="text-xs text-slate-500">L-20260420-B</td>
+            <td><span class="badge-soft b-partial">PARTIAL</span></td>
+          </tr>
+          <tr>
+            <td class="mono">FB-CAN-COKE</td>
+            <td>โค้ก 325ml กระป๋อง</td>
+            <td class="text-right">1,200</td>
+            <td class="text-right text-indigo-700 font-semibold">520</td>
+            <td class="text-right text-amber-700">680</td>
+            <td class="text-right">✅ 100%</td>
+            <td class="text-xs text-slate-500">L-20260420-C · 2026-12</td>
+            <td><span class="badge-soft b-partial">PARTIAL</span></td>
+          </tr>
+          <tr>
+            <td class="mono">FB-SNK-PEA</td>
+            <td>ถั่วลิสงทาน 50g</td>
+            <td class="text-right">600</td>
+            <td class="text-right text-emerald-700 font-semibold">0</td>
+            <td class="text-right text-rose-700">600</td>
+            <td class="text-right">—</td>
+            <td class="text-xs text-slate-400">ยังไม่ได้รับ</td>
+            <td><span class="badge-soft b-pending">PENDING</span></td>
+          </tr>
+          <tr>
+            <td class="mono">FB-COFFEE-DR</td>
+            <td>เมล็ดกาแฟ Drip 250g</td>
+            <td class="text-right">600</td>
+            <td class="text-right text-emerald-700 font-semibold">0</td>
+            <td class="text-right text-rose-700">600</td>
+            <td class="text-right">—</td>
+            <td class="text-xs text-slate-400">ยังไม่ได้รับ</td>
+            <td><span class="badge-soft b-pending">PENDING</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- GR list -->
+    <div class="mt-5">
+      <div class="flex items-center justify-between">
+        <h4 class="font-semibold text-sm">📦 รายการ GR ที่ผูกอยู่</h4>
+        <span class="text-xs text-slate-500">2 รายการ · ดูในฝั่งคลัง →</span>
+      </div>
+      <div class="mt-2 grid md:grid-cols-2 gap-3">
+        <div class="case-card">
+          <div class="flex items-center justify-between">
+            <div class="mono text-sm font-semibold">GR-2604-0086</div>
+            <span class="badge-soft b-received">ACCEPTED</span>
+          </div>
+          <div class="text-xs text-slate-500 mt-1">22 เม.ย. 2026 · 14:08 · รับโดย คุณนิ่ม</div>
+          <div class="mt-2 text-xs">น้ำดื่ม 500ml: <b>2,000</b> · น้ำ 1.5L: <b>600</b> · โค้ก: <b>520</b></div>
+          <div class="mt-2 text-xs text-emerald-600">QC ผ่าน 100% · Invoice INV-9921</div>
+        </div>
+        <div class="case-card border-amber-200 bg-amber-50/40">
+          <div class="flex items-center justify-between">
+            <div class="mono text-sm font-semibold">GR-2604-0091 (Draft)</div>
+            <span class="badge-soft b-pending">รอ QC</span>
+          </div>
+          <div class="text-xs text-slate-500 mt-1">25 เม.ย. 2026 · 09:20 · รับโดย คุณตั้ม</div>
+          <div class="mt-2 text-xs">น้ำ 1.5L: 100, รอ inspect</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── 7. STOCK BALANCE ─────────────────────────────────────────── -->
+<section id="stock">
+  <div class="text-xs brand-text font-semibold uppercase tracking-widest">07</div>
+  <h2 class="text-2xl font-bold mt-1">Wireframe — Stock Balance Report (ฝั่งจัดซื้อ) <span class="badge-soft b-info ml-2">หน้าใหม่</span></h2>
+  <p class="text-slate-600 mt-2">URL: <span class="mono">/purchasing/stock-report</span> — read-only mirror ของ <span class="mono">WarehouseStock</span> + <span class="mono">InventoryLot</span> เพื่อให้ฝั่งจัดซื้อตัดสินใจสั่งซื้อ/หยุดซื้อ/คืน</p>
+
+  <div class="wireframe mt-4 p-5 bg-white">
+    <div class="flex items-center justify-between flex-wrap gap-2">
+      <div>
+        <h3 class="font-bold text-lg">📦 Stock Balance — มุมจัดซื้อ</h3>
+        <div class="text-xs text-slate-500">ข้อมูลจริงจากคลัง · อัปเดตทุก 30 วินาที <span class="ev-pulse ml-3"></span></div>
+      </div>
+      <div class="flex gap-2 text-xs">
+        <select class="border border-slate-200 rounded-lg px-2 py-1.5"><option>คลังหลัก</option><option>คลังร้านอาหาร</option></select>
+        <button class="border border-slate-300 rounded-lg px-3 py-1.5">📤 Export</button>
+        <button class="brand-bg text-white rounded-lg px-3 py-1.5 font-semibold">+ สร้าง PR ที่เลือก</button>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="mt-4 border-b border-slate-200 flex gap-1 text-sm">
+      <div class="px-4 py-2 text-slate-500">ทั้งหมด <span class="text-[10px] text-slate-400">847</span></div>
+      <div class="px-4 py-2 brand-text border-b-2 border-violet-600 font-semibold">⚠ ใกล้หมด <span class="text-[10px] bg-amber-100 text-amber-700 px-1.5 rounded">23</span></div>
+      <div class="px-4 py-2 text-slate-500">📈 Overstock <span class="text-[10px] bg-orange-100 text-orange-700 px-1.5 rounded">8</span></div>
+      <div class="px-4 py-2 text-slate-500">⏳ ใกล้หมดอายุ <span class="text-[10px] bg-rose-100 text-rose-700 px-1.5 rounded">7</span></div>
+      <div class="px-4 py-2 text-slate-500">⛔ หมดอายุแล้ว <span class="text-[10px] bg-slate-100 text-slate-700 px-1.5 rounded">2</span></div>
+    </div>
+
+    <!-- "Low stock" tab content -->
+    <div class="mt-4 scrollbox">
+      <table>
+        <thead><tr>
+          <th><input type="checkbox"/></th>
+          <th>SKU</th><th>สินค้า</th>
+          <th class="text-right">คงเหลือ</th>
+          <th class="text-right">ROP</th>
+          <th class="text-right">Min/Max</th>
+          <th>Bar</th>
+          <th>ซัพพลายเออร์หลัก</th>
+          <th>Lead</th>
+          <th>PO ค้าง</th>
+          <th></th>
+        </tr></thead>
+        <tbody>
+          <tr>
+            <td><input type="checkbox" checked/></td>
+            <td class="mono">HK-TWL-W-L</td>
+            <td>ผ้าขนหนูใหญ่ สีขาว</td>
+            <td class="text-right text-rose-700 font-bold">12</td>
+            <td class="text-right">50</td>
+            <td class="text-right text-xs text-slate-500">30 / 200</td>
+            <td><div class="progress" style="width:120px"><span style="width:6%;background:#ef4444"></span></div></td>
+            <td class="text-xs">สยาม เท็กซ์ไทล์</td>
+            <td class="text-xs">5 วัน</td>
+            <td class="text-xs"><a class="brand-text">PO-0029</a></td>
+            <td class="text-right"><button class="text-xs brand-text">+ PR</button></td>
+          </tr>
+          <tr>
+            <td><input type="checkbox" checked/></td>
+            <td class="mono">HK-CHEM-MOP</td>
+            <td>น้ำยาถูพื้น 5L</td>
+            <td class="text-right text-amber-700 font-bold">8</td>
+            <td class="text-right">15</td>
+            <td class="text-right text-xs text-slate-500">10 / 60</td>
+            <td><div class="progress" style="width:120px"><span style="width:13%;background:#f59e0b"></span></div></td>
+            <td class="text-xs">เอ็กซ์เพิร์ท เคมิคัล</td>
+            <td class="text-xs">3 วัน</td>
+            <td class="text-xs text-slate-400">—</td>
+            <td class="text-right"><button class="text-xs brand-text">+ PR</button></td>
+          </tr>
+          <tr>
+            <td><input type="checkbox"/></td>
+            <td class="mono">FB-WTR-500</td>
+            <td>น้ำดื่ม 500ml × 12</td>
+            <td class="text-right text-amber-700 font-bold">340</td>
+            <td class="text-right">500</td>
+            <td class="text-right text-xs text-slate-500">200 / 3,000</td>
+            <td><div class="progress" style="width:120px"><span style="width:11%;background:#f59e0b"></span></div></td>
+            <td class="text-xs">ไทยฟู้ด ซัพพลาย</td>
+            <td class="text-xs">2 วัน</td>
+            <td class="text-xs"><a class="brand-text">PO-0024</a></td>
+            <td class="text-right"><button class="text-xs brand-text">+ PR</button></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- side previews of OTHER tabs -->
+    <div class="mt-6 grid md:grid-cols-3 gap-3">
+      <div class="case-card border-orange-200 bg-orange-50/40">
+        <div class="text-xs font-semibold text-orange-700">📈 Overstock — ตัวอย่าง</div>
+        <div class="mt-2 text-sm">หมอนรองคอ Eco · 880 ชิ้น (max 400)</div>
+        <div class="text-[11px] text-orange-700 mt-1">สั่งเกิน 220% · หยุดซื้อ + แนะคืน</div>
+        <div class="text-[11px] text-slate-500 mt-1">มูลค่าค้าง ฿88,000</div>
+      </div>
+      <div class="case-card border-rose-200 bg-rose-50/40">
+        <div class="text-xs font-semibold text-rose-700">⏳ ใกล้หมดอายุ — ตัวอย่าง</div>
+        <div class="mt-2 text-sm">นมสด UHT 1L</div>
+        <div class="text-[11px] text-rose-700 mt-1">Lot L-20260201 · เหลือ 12 วัน · 240 กล่อง</div>
+        <div class="text-[11px] text-slate-500 mt-1">→ promo / ใช้ก่อน / คืนซัพ</div>
+      </div>
+      <div class="case-card border-slate-300 bg-slate-50">
+        <div class="text-xs font-semibold text-slate-700">⛔ หมดอายุแล้ว — ตัวอย่าง</div>
+        <div class="mt-2 text-sm">ขนมปังโฮลวีท</div>
+        <div class="text-[11px] text-slate-700 mt-1">Lot L-20260315 · หมด 23 เม.ย. · 18 ชิ้น</div>
+        <div class="text-[11px] text-slate-500 mt-1">→ บันทึก WASTE + แจ้งซัพ</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── 8. VARIANCE ─────────────────────────────────────────── -->
+<section id="variance">
+  <div class="text-xs brand-text font-semibold uppercase tracking-widest">08</div>
+  <h2 class="text-2xl font-bold mt-1">Wireframe — GR Variance / รับยังไม่หมด</h2>
+  <p class="text-slate-600 mt-2">URL: <span class="mono">/purchasing/reports/variance</span> — รายงานเปรียบเทียบ <b>สั่ง vs รับ vs Invoice</b> สำหรับเคสรับครึ่ง / รับเกิน / รับน้อยกว่า</p>
+
+  <div class="wireframe mt-4 p-5 bg-white">
+    <h3 class="font-bold">🔁 PO ↔ GR Variance Report</h3>
+    <p class="text-xs text-slate-500">ใช้ตอนปิดงบประจำเดือน + เคลม supplier</p>
+
+    <div class="mt-3 grid grid-cols-4 gap-3 text-sm">
+      <div class="case-card"><div class="text-[11px] text-slate-500">PO ในรอบ</div><div class="text-xl font-bold">63</div></div>
+      <div class="case-card"><div class="text-[11px] text-emerald-600">รับครบ</div><div class="text-xl font-bold text-emerald-700">42</div></div>
+      <div class="case-card"><div class="text-[11px] text-indigo-600">รับครึ่ง</div><div class="text-xl font-bold text-indigo-700">5</div></div>
+      <div class="case-card"><div class="text-[11px] text-rose-600">มี variance</div><div class="text-xl font-bold text-rose-700">7</div></div>
+    </div>
+
+    <div class="mt-4 scrollbox">
+      <table>
+        <thead><tr>
+          <th>PO</th><th>ซัพ</th>
+          <th class="text-right">สั่ง</th>
+          <th class="text-right">รับ</th>
+          <th class="text-right">Invoice</th>
+          <th class="text-right">Δ qty</th>
+          <th class="text-right">Δ ฿</th>
+          <th>เหตุผล</th>
+          <th>Action</th>
+        </tr></thead>
+        <tbody>
+          <tr>
+            <td class="mono">PO-2604-0024</td><td>ไทยฟู้ด</td>
+            <td class="text-right">5,200</td><td class="text-right">3,120</td><td class="text-right">3,120</td>
+            <td class="text-right text-amber-700">-2,080</td>
+            <td class="text-right text-amber-700">-฿55,560</td>
+            <td class="text-xs">ส่งไม่ครบ</td>
+            <td class="text-xs"><button class="brand-text">ติดตาม / Force close</button></td>
+          </tr>
+          <tr>
+            <td class="mono">PO-2604-0028</td><td>โรงงานสิ่งทอ ABC</td>
+            <td class="text-right">200</td><td class="text-right">0</td><td class="text-right">—</td>
+            <td class="text-right text-rose-700">-200</td>
+            <td class="text-right text-rose-700">-฿135,000</td>
+            <td class="text-xs">เกินกำหนด 5 วัน</td>
+            <td class="text-xs"><button class="brand-text">📞 ทวง</button></td>
+          </tr>
+          <tr>
+            <td class="mono">PO-2604-0017</td><td>โฮมแอนด์ลิฟวิ่ง</td>
+            <td class="text-right">100</td><td class="text-right">120</td><td class="text-right">120</td>
+            <td class="text-right text-emerald-700">+20</td>
+            <td class="text-right text-emerald-700">+฿4,000</td>
+            <td class="text-xs">ส่งเกิน</td>
+            <td class="text-xs"><button class="brand-text">รับเกิน → คืน?</button></td>
+          </tr>
+          <tr>
+            <td class="mono">PO-2604-0011</td><td>เอ็กซ์เพิร์ท</td>
+            <td class="text-right">50</td><td class="text-right">50</td><td class="text-right">52</td>
+            <td class="text-right text-slate-600">0</td>
+            <td class="text-right text-rose-700">+฿1,800 invoice</td>
+            <td class="text-xs">Invoice ไม่ตรง qty</td>
+            <td class="text-xs"><button class="brand-text">โต้แย้ง invoice</button></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="mt-4 grid md:grid-cols-3 gap-3 text-xs">
+      <div class="case-card"><b>เคส A — รับน้อยกว่าสั่ง</b><div class="text-slate-500 mt-1">ติดต่อซัพ → กำหนดส่งใหม่ หรือ Force close + เคลมเงินคืน</div></div>
+      <div class="case-card"><b>เคส B — รับเกินสั่ง</b><div class="text-slate-500 mt-1">ตัดสินใจ: รับไว้/คืน → บันทึกเป็น <span class="mono">RETURN_SUPPLIER</span> หรือเพิ่ม PO line</div></div>
+      <div class="case-card"><b>เคส C — Invoice ไม่ตรง GR</b><div class="text-slate-500 mt-1">โต้แย้ง invoice → ปรับยอดที่จ่ายจริงผ่าน 3-way match</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── 9. EVENTS ─────────────────────────────────────────── -->
+<section id="events">
+  <div class="text-xs brand-text font-semibold uppercase tracking-widest">09</div>
+  <h2 class="text-2xl font-bold mt-1">Event &amp; Notification Design</h2>
+  <p class="text-slate-600 mt-2">เชื่อมแบบ event-driven ผ่าน Bull queue + Socket.IO + push notification</p>
+
+  <div class="mermaid mt-4">
+sequenceDiagram
+  autonumber
+  participant U as ผู้ใช้คลัง
+  participant GR as GoodsReceiveService
+  participant DB as Prisma
+  participant BUS as EventBus (Bull)
+  participant PO as PurchaseOrderService
+  participant WS as Socket.IO
+  participant N as NotificationService
+  participant UI as ฝั่งจัดซื้อ
+
+  U->>GR: complete inspection (ACCEPTED)
+  GR->>DB: write GoodsReceiveItem + StockMovement + Lot
+  GR->>BUS: emit gr.completed { poId, items[] }
+  BUS->>PO: handler — recalc receivedQty
+  PO->>DB: update PurchaseOrder.status (PARTIAL/FULL)
+  PO->>BUS: emit po.received { poId, status }
+  BUS->>WS: broadcast room:procurement
+  BUS->>N: queue toast/email/LINE
+  WS-->>UI: live update PO Tracking card
+  N-->>UI: 🔔 inbox + push
+  </div>
+
+  <div class="mt-5 grid md:grid-cols-2 gap-3 text-sm">
+    <div class="case-card">
+      <div class="text-xs uppercase text-slate-500">Event</div>
+      <div class="font-semibold mono">gr.completed</div>
+      <div class="text-xs text-slate-600 mt-1">payload: <span class="mono">{ grId, poId, items: [{ poItemId, qty, lotId, expiry }] }</span></div>
+      <div class="text-xs mt-1">consumer: <span class="mono">PurchaseOrderService.recalcReceived</span>, <span class="mono">NotificationService</span></div>
+    </div>
+    <div class="case-card">
+      <div class="text-xs uppercase text-slate-500">Event</div>
+      <div class="font-semibold mono">po.received</div>
+      <div class="text-xs text-slate-600 mt-1">payload: <span class="mono">{ poId, oldStatus, newStatus, percent }</span></div>
+      <div class="text-xs mt-1">consumer: WS broadcast → procurement room</div>
+    </div>
+    <div class="case-card">
+      <div class="text-xs uppercase text-slate-500">Event</div>
+      <div class="font-semibold mono">stock.low</div>
+      <div class="text-xs text-slate-600 mt-1">trigger: <span class="mono">WarehouseStock.quantity ≤ item.reorderPoint</span> (post-write hook)</div>
+      <div class="text-xs mt-1">consumer: dashboard widget refresh + นำเสนอใน <i>Stock Report</i> tab "ใกล้หมด"</div>
+    </div>
+    <div class="case-card">
+      <div class="text-xs uppercase text-slate-500">Event</div>
+      <div class="font-semibold mono">lot.expiring</div>
+      <div class="text-xs text-slate-600 mt-1">trigger: cron daily — find lots where <span class="mono">expiryDate ≤ today + N days</span></div>
+      <div class="text-xs mt-1">consumer: ส่งเข้า inbox จัดซื้อ + ทำ flag ใน Stock Report</div>
+    </div>
+    <div class="case-card">
+      <div class="text-xs uppercase text-slate-500">Event</div>
+      <div class="font-semibold mono">po.overdue</div>
+      <div class="text-xs text-slate-600 mt-1">trigger: cron — PO APPROVED ที่ <span class="mono">expectedDate &lt; today</span> และ status ≠ FULL</div>
+      <div class="text-xs mt-1">consumer: highlight ใน Kanban "เกินกำหนด" + แจ้ง buyer + email supplier</div>
+    </div>
+    <div class="case-card">
+      <div class="text-xs uppercase text-slate-500">Channel</div>
+      <div class="font-semibold">การแจ้งเตือน</div>
+      <ul class="text-xs text-slate-600 mt-1 space-y-1 list-disc list-inside">
+        <li>Toast (real-time) — Socket.IO</li>
+        <li>Inbox bell — persistent</li>
+        <li>Email — daily digest</li>
+        <li>LINE Notify — สำหรับ overdue/expired</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ─── 10. API ─────────────────────────────────────────── -->
+<section id="api">
+  <div class="text-xs brand-text font-semibold uppercase tracking-widest">10</div>
+  <h2 class="text-2xl font-bold mt-1">API Contracts ใหม่</h2>
+  <p class="text-slate-600 mt-2">เพิ่มในโมดูล <span class="mono">inventory/purchase-orders</span> และโมดูลใหม่ <span class="mono">inventory/procurement-stock</span></p>
+
+  <div class="mt-4 grid gap-3">
+    <div class="api-block">
+<span class="verb-get">GET</span>  /api/v1/inventory/purchase-orders/tracking
+  ?status=APPROVED,PARTIALLY_RECEIVED&overdue=true&warehouseId=...
+  → { data: [{ poId, poNumber, supplier, totalQty, receivedQty,
+              percent, status, expectedDate, daysOverdue,
+              latestGr: { id, grNumber, status, qcPassed } }] }
+
+<span class="verb-get">GET</span>  /api/v1/inventory/purchase-orders/<span class="key">:id</span>/receiving
+  → ระดับ line: { items: [{ poItemId, sku, ordered, received,
+                            pending, qcPassed, lots: [...] }],
+                   grs: [{ grId, grNumber, status, items: [...] }] }
+
+<span class="verb-post">POST</span> /api/v1/inventory/purchase-orders/<span class="key">:id</span>/force-close
+  body: { reason, varianceQty, varianceAmount }
+  → 200 { status: CLOSED, audit: {...} }
+    </div>
+
+    <div class="api-block">
+<span class="verb-get">GET</span>  /api/v1/inventory/procurement-stock/balance
+  ?warehouseId=&filter=LOW|OVERSTOCK|NEAR_EXPIRY|EXPIRED|ALL
+  &daysToExpiry=30&page=1&limit=50
+  → { data: [{ itemId, sku, name, qty, reorderPoint,
+               minStock, maxStock, status: 'LOW'|'OK'|'OVER',
+               supplier: { id, name, leadDays },
+               openPo: { poId, poNumber, expectedDate } | null }] }
+
+<span class="verb-get">GET</span>  /api/v1/inventory/procurement-stock/expiring
+  ?days=30&warehouseId=
+  → [{ lotId, itemId, sku, qty, expiryDate, daysLeft,
+       value, status: 'NEAR'|'EXPIRED' }]
+
+<span class="verb-get">GET</span>  /api/v1/inventory/procurement-stock/summary
+  → { lowCount, overstockCount, expiringSoonCount, expiredCount,
+      stockValue, monthRcvValue }
+
+<span class="verb-post">POST</span> /api/v1/inventory/procurement-stock/create-pr-from-low
+  body: { itemIds: [...], warehouseId, requestedBy }
+  → 201 { prId, prNumber, items[] }   // สร้าง PR จากของใกล้หมดที่เลือก
+    </div>
+
+    <div class="api-block">
+<span class="verb-get">GET</span>  /api/v1/inventory/reports/po-variance
+  ?from=2026-04-01&to=2026-04-30
+  → [{ poId, poNumber, ordered, received, invoiced,
+       deltaQty, deltaAmount, reason, suggestedAction }]
+
+<span class="verb-post">POST</span> /api/v1/inventory/notifications/subscribe
+  body: { events: ['gr.completed','po.received','po.overdue',
+                   'stock.low','lot.expiring'] }
+  // socket.io room: 'procurement:{tenantId}'
+    </div>
+  </div>
+
+  <div class="mt-3 text-xs text-slate-500">
+    หมายเหตุ: endpoint <span class="mono">/tracking</span> กับ <span class="mono">/receiving</span> ตั้งใจให้ฝั่งจัดซื้อ "ดูอย่างเดียว" — การ <b>เขียน</b> stock ยังต้องผ่าน GoodsReceiveService เท่านั้น เพื่อรักษา single source of truth
+  </div>
+</section>
+
+<!-- ─── 11. DATA ADDITIONS ─────────────────────────────────────────── -->
+<section id="data">
+  <div class="text-xs brand-text font-semibold uppercase tracking-widest">11</div>
+  <h2 class="text-2xl font-bold mt-1">Schema Additions (ขั้นต่ำ)</h2>
+  <p class="text-slate-600 mt-2">ของเดิมรองรับเกือบครบแล้ว — เติมแค่ field สำหรับ Aging, ForceClose, Notification</p>
+
+  <div class="api-block mt-3">
+<span class="key">model</span> PurchaseOrder {
+  // ...existing fields
+  expectedDeliveryDate  DateTime?
+  forceClosedAt         DateTime?
+  forceClosedReason     String?
+  varianceQty           Int?       <span style="color:#64748b">// คำนวณ trigger</span>
+  varianceAmount        Decimal?   <span style="color:#64748b">// คำนวณ trigger</span>
+}
+
+<span class="key">model</span> PurchaseOrderItem {
+  // ...existing fields
+  receivedQty           Int       @default(0)   <span style="color:#64748b">// rollup จาก GR</span>
+  pendingQty            Int       @default(0)   <span style="color:#64748b">// generated</span>
+  lastReceivedAt        DateTime?
+}
+
+<span class="key">model</span> ProcurementSubscription {   <span style="color:#64748b">// ใหม่</span>
+  id        String   @id @default(cuid())
+  userId    String
+  events    String[]                 <span style="color:#64748b">// gr.completed, po.overdue, ...</span>
+  channel   String                   <span style="color:#64748b">// SOCKET | EMAIL | LINE</span>
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+  </div>
+
+  <div class="mt-3 text-xs text-slate-500">การคำนวณ <span class="mono">receivedQty</span> ทำใน service hook หลัง <span class="mono">GoodsReceive.complete</span> — ห้าม set จาก client</div>
+</section>
+
+<!-- ─── 12. NAV ─────────────────────────────────────────── -->
+<section id="nav">
+  <div class="text-xs brand-text font-semibold uppercase tracking-widest">12</div>
+  <h2 class="text-2xl font-bold mt-1">Sidebar Navigation (เปลี่ยนจาก mockup ที่คุณส่งมา)</h2>
+  <div class="wireframe mt-4 grid md:grid-cols-2 gap-0">
+    <div class="nav-mock p-3 space-y-1">
+      <div class="text-xs font-semibold text-slate-700 px-2 mb-1">ปัจจุบัน</div>
+      <div class="text-xs text-slate-400 px-2">หลัก</div>
+      <div class="item">ภาพรวมจัดซื้อ</div>
+      <div class="item">ใบขอซื้อ (PR)</div>
+      <div class="item">ขอใบเสนอราคา (RFQ)</div>
+      <div class="item">เทียบราคา</div>
+      <div class="item active">ใบสั่งซื้อ (PO)</div>
+      <div class="item">รับสินค้า (GR)</div>
+      <div class="item">QC คุณภาพ</div>
+      <div class="text-xs text-slate-400 px-2 mt-2">Master Data</div>
+      <div class="item">Suppliers</div>
+      <div class="item">รายงาน</div>
+      <div class="text-xs text-slate-400 px-2 mt-2">Settings</div>
+      <div class="item">Flow อนุมัติ</div>
+      <div class="item">User จัดซื้อ</div>
+    </div>
+    <div class="nav-mock p-3 space-y-1 border-l-4 border-violet-200">
+      <div class="text-xs font-semibold text-violet-700 px-2 mb-1">เสนอใหม่</div>
+      <div class="text-xs text-slate-400 px-2">หลัก</div>
+      <div class="item">ภาพรวมจัดซื้อ</div>
+      <div class="item">ใบขอซื้อ (PR)</div>
+      <div class="item">ขอใบเสนอราคา (RFQ)</div>
+      <div class="item">เทียบราคา</div>
+      <div class="item">ใบสั่งซื้อ (PO)</div>
+      <div class="item active">📥 PO Tracking <span class="ml-auto text-[10px] bg-violet-100 text-violet-700 px-1.5 rounded">ใหม่</span></div>
+      <div class="item">รับสินค้า (GR)</div>
+      <div class="item">QC คุณภาพ</div>
+      <div class="text-xs text-slate-400 px-2 mt-2">📦 คลัง (มุมจัดซื้อ)</div>
+      <div class="item">Stock Balance <span class="ml-auto text-[10px] bg-violet-100 text-violet-700 px-1.5 rounded">ใหม่</span></div>
+      <div class="item">ใกล้หมดอายุ <span class="ml-auto text-[10px] bg-rose-100 text-rose-700 px-1.5 rounded">7</span></div>
+      <div class="text-xs text-slate-400 px-2 mt-2">Master Data</div>
+      <div class="item">Suppliers</div>
+      <div class="item">รายงาน — รวม Variance <span class="ml-auto text-[10px] bg-violet-100 text-violet-700 px-1.5 rounded">ใหม่</span></div>
+      <div class="text-xs text-slate-400 px-2 mt-2">Settings</div>
+      <div class="item">Flow อนุมัติ</div>
+      <div class="item">User จัดซื้อ</div>
+      <div class="item">🔔 Notification preferences <span class="ml-auto text-[10px] bg-violet-100 text-violet-700 px-1.5 rounded">ใหม่</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── 13. CASES ─────────────────────────────────────────── -->
+<section id="cases">
+  <div class="text-xs brand-text font-semibold uppercase tracking-widest">13</div>
+  <h2 class="text-2xl font-bold mt-1">Cases Reference — ที่คุณถามมา</h2>
+  <div class="mt-4 grid md:grid-cols-2 gap-3 text-sm">
+    <div class="case-card">
+      <div class="text-xs text-slate-500">Case 1</div>
+      <div class="font-semibold">PO รอรับเข้า</div>
+      <div class="text-slate-600 mt-1">เห็นที่ <i>PO Tracking → คอลัมน์ Approved</i> · จำนวน &amp; มูลค่ารวมโผล่บน Dashboard KPI</div>
+    </div>
+    <div class="case-card">
+      <div class="text-xs text-slate-500">Case 2</div>
+      <div class="font-semibold">PO รับเข้าแล้ว</div>
+      <div class="text-slate-600 mt-1">คอลัมน์ <span class="badge-soft b-received">FULL</span> + ปุ่ม PDF / Close</div>
+    </div>
+    <div class="case-card">
+      <div class="text-xs text-slate-500">Case 3</div>
+      <div class="font-semibold">PO รับเข้ายังไม่หมด (รับครึ่ง)</div>
+      <div class="text-slate-600 mt-1">คอลัมน์ <span class="badge-soft b-partial">PARTIAL</span> + progress bar + ตาราง line-level <i>สั่ง / รับ / ค้าง</i> ใน PO Detail</div>
+    </div>
+    <div class="case-card">
+      <div class="text-xs text-slate-500">Case 4</div>
+      <div class="font-semibold">PO เกินกำหนด</div>
+      <div class="text-slate-600 mt-1">Cron ทุกเที่ยงคืน · เปลี่ยนสีบน Kanban + แจ้งเตือน buyer + อีเมลซัพ</div>
+    </div>
+    <div class="case-card">
+      <div class="text-xs text-slate-500">Case 5</div>
+      <div class="font-semibold">ของใกล้หมด (Low Stock)</div>
+      <div class="text-slate-600 mt-1">Stock Report tab "⚠ ใกล้หมด" + เลือกหลายรายการ → "+ สร้าง PR" รวบ batch</div>
+    </div>
+    <div class="case-card">
+      <div class="text-xs text-slate-500">Case 6</div>
+      <div class="font-semibold">ของเยอะเกิน (Overstock)</div>
+      <div class="text-slate-600 mt-1">Tab "📈 Overstock" — ระบบ <b>บล็อก</b>การสร้าง PR/PO ของ SKU นั้นจนกว่าจะลด · มี action "คืนซัพ"</div>
+    </div>
+    <div class="case-card">
+      <div class="text-xs text-slate-500">Case 7</div>
+      <div class="font-semibold">ของใกล้หมดอายุ</div>
+      <div class="text-slate-600 mt-1">Tab "⏳ ใกล้หมดอายุ" + lot-level + มูลค่ารวม · suggest action: promo / FIFO / RETURN_SUPPLIER</div>
+    </div>
+    <div class="case-card">
+      <div class="text-xs text-slate-500">Case 8</div>
+      <div class="font-semibold">ของหมดอายุแล้ว</div>
+      <div class="text-slate-600 mt-1">Tab "⛔ หมดอายุแล้ว" — บันทึก <span class="mono">WASTE</span> เข้า StockMovement + เคลม supplier</div>
+    </div>
+    <div class="case-card">
+      <div class="text-xs text-slate-500">Case 9</div>
+      <div class="font-semibold">เห็น GR ที่คลังบันทึก realtime</div>
+      <div class="text-slate-600 mt-1">Event <span class="mono">gr.completed</span> → Socket.IO push เข้า room procurement → card อัปเดต progress bar</div>
+    </div>
+    <div class="case-card">
+      <div class="text-xs text-slate-500">Case 10</div>
+      <div class="font-semibold">PO ↔ Invoice ไม่ตรง</div>
+      <div class="text-slate-600 mt-1">Variance Report → 3-way match (PO ↔ GR ↔ Invoice) + ปุ่ม "โต้แย้ง invoice"</div>
+    </div>
+  </div>
+
+  <div class="mt-8 case-card brand-soft border-violet-200">
+    <h3 class="font-bold">ลำดับการ build ที่แนะนำ</h3>
+    <ol class="mt-2 text-sm space-y-1.5 list-decimal list-inside text-violet-900/90">
+      <li><b>Sprint 1</b> — Schema additions (<span class="mono">receivedQty rollup, expectedDeliveryDate</span>) + endpoint <span class="mono">/tracking</span> + หน้า PO Tracking (table view ก่อน)</li>
+      <li><b>Sprint 2</b> — Tab "การรับเข้า" ใน PO Detail + recalc service + event <span class="mono">gr.completed → po.received</span></li>
+      <li><b>Sprint 3</b> — Stock Report (4 tabs) + endpoint <span class="mono">/balance</span> + <span class="mono">/expiring</span></li>
+      <li><b>Sprint 4</b> — Variance Report + Force Close + 3-way match + LINE/email digest</li>
+      <li><b>Sprint 5</b> — Realtime (Socket.IO) + Kanban view + Notification preferences</li>
+    </ol>
+  </div>
+</section>
+
+<footer class="pt-10 pb-6 text-center text-xs text-slate-400">
+  StaySync · Procurement ↔ Warehouse Link · Design v1 · 2026-04-25
+</footer>
+
+    </main>
+  </div>
+</section>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    themeVariables: {
+      primaryColor: '#ede9fe',
+      primaryBorderColor: '#7c3aed',
+      primaryTextColor: '#4c1d95',
+      lineColor: '#94a3b8',
+      fontFamily: 'IBM Plex Sans Thai, sans-serif',
+    },
+    flowchart: { curve: 'basis', padding: 16 },
+  });
+</script>
+
+</body>
+</html>
