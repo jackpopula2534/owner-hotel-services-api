@@ -1,4 +1,10 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+  Logger,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
 import {
@@ -11,6 +17,143 @@ import {
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { QueryPurchaseOrderDto, PurchaseOrderStatus } from './dto/query-purchase-order.dto';
+import {
+  QueryPurchaseOrderTrackingDto,
+  PurchaseOrderTrackingStatus,
+} from './dto/query-purchase-order-tracking.dto';
+
+/**
+ * Shape of a single row in the procurement Receiving Pipeline view.
+ * Computed from PurchaseOrder + items + latest GoodsReceive — no schema additions
+ * required (receivedQty already lives on PurchaseOrderItem).
+ */
+export interface PurchaseOrderTrackingRow {
+  id: string;
+  poNumber: string;
+  status: string;
+  supplier: { id: string; name: string };
+  warehouse: { id: string; name: string };
+  expectedDate: Date | null;
+  approvedAt: Date | null;
+  createdAt: Date;
+  totalAmount: number;
+  currency: string;
+  isOverdue: boolean;
+  daysOverdue: number;
+  progress: {
+    orderedQty: number;
+    receivedQty: number;
+    pendingQty: number;
+    percent: number;
+    lineCount: number;
+    receivedLineCount: number;
+    pendingLineCount: number;
+  };
+  latestGr:
+    | {
+        id: string;
+        grNumber: string;
+        status: string;
+        receiveDate: Date;
+      }
+    | null;
+}
+
+export interface PurchaseOrderTrackingSummary {
+  approvedAwaiting: number;
+  partial: number;
+  full: number;
+  closed: number;
+  overdue: number;
+  totalValue: number;
+  pendingValue: number;
+}
+
+/**
+ * Sprint 2 — line-level reconciliation between PO and its linked GRs.
+ * Surfaces ordered/received/pending per line plus the GR breakdown,
+ * which the procurement-side PO detail "การรับเข้า" tab consumes.
+ */
+export interface PurchaseOrderReceivingLine {
+  poItemId: string;
+  itemId: string;
+  sku: string | null;
+  name: string | null;
+  unit: string | null;
+  ordered: number;
+  received: number;
+  pending: number;
+  percent: number;
+  status: 'PENDING' | 'PARTIAL' | 'FULL' | 'OVER';
+  // Most-recent GR row that touched this line, if any
+  lastGr: {
+    grId: string;
+    grNumber: string;
+    receivedQty: number;
+    rejectedQty: number;
+    receiveDate: Date;
+    lotId: string | null;
+    expiryDate: Date | null;
+  } | null;
+}
+
+export interface PurchaseOrderReceivingGrSummary {
+  id: string;
+  grNumber: string;
+  status: string;
+  receiveDate: Date;
+  invoiceNumber: string | null;
+  totalAmount: number;
+  itemCount: number;
+}
+
+/**
+ * Sprint 4 — variance row for the procurement Variance Report.
+ *
+ * Each row reflects a 3-way snapshot of a single PO:
+ *   ordered  — sum of PurchaseOrderItem.quantity
+ *   received — sum of PurchaseOrderItem.receivedQty (rolled up by GR)
+ *   invoiced — sum of GoodsReceiveItem.receivedQty on GRs that have an invoice
+ *               (proxy until we have a full invoicing module)
+ *
+ *   deltaQty     = received - ordered     (negative when short, positive when over)
+ *   deltaAmount  = pro-rated value of deltaQty
+ *   reason       = derived from PO state (overdue, force-closed, accepted-over)
+ */
+export interface PurchaseOrderVarianceRow {
+  poId: string;
+  poNumber: string;
+  supplier: { id: string; name: string };
+  status: string;
+  orderedQty: number;
+  receivedQty: number;
+  invoicedQty: number;
+  deltaQty: number;
+  deltaAmount: number;
+  invoicedAmount: number;
+  expectedDate: Date | null;
+  forceClosedAt: Date | null;
+  forceClosedReason: string | null;
+  reason: 'SHORT_DELIVERY' | 'OVER_DELIVERY' | 'INVOICE_MISMATCH' | 'OVERDUE' | 'FORCE_CLOSED' | 'NONE';
+  suggestedAction: string;
+}
+
+export interface PurchaseOrderReceivingDetail {
+  purchaseOrderId: string;
+  poNumber: string;
+  status: string;
+  totals: {
+    orderedQty: number;
+    receivedQty: number;
+    pendingQty: number;
+    percent: number;
+    orderedValue: number;
+    receivedValue: number;
+    pendingValue: number;
+  };
+  lines: PurchaseOrderReceivingLine[];
+  grs: PurchaseOrderReceivingGrSummary[];
+}
 
 type PurchaseOrderItemInput = {
   itemId: string;
@@ -182,6 +325,522 @@ export class PurchaseOrdersService {
         itemCount: po._count.items,
       })),
       meta: { page, limit, total },
+    };
+  }
+
+  /**
+   * Receiving pipeline view — list POs that are post-approval together with
+   * received-vs-ordered roll-ups, days overdue, and the latest GR linked to
+   * each PO. Used by the procurement-side "PO Tracking" page (Sprint 1).
+   *
+   * Reuses existing `PurchaseOrderItem.receivedQty` and `PurchaseOrder.expectedDate`;
+   * no schema additions required.
+   */
+  async findTracking(
+    tenantId: string,
+    query: QueryPurchaseOrderTrackingDto,
+  ): Promise<{
+    data: PurchaseOrderTrackingRow[];
+    meta: {
+      page: number;
+      limit: number;
+      total: number;
+      summary: PurchaseOrderTrackingSummary;
+    };
+  }> {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+    const skip = (page - 1) * limit;
+
+    // Default scope: only post-approval POs are meaningful for "tracking".
+    const trackingStatuses: PurchaseOrderStatus[] = [
+      PurchaseOrderStatus.APPROVED,
+      PurchaseOrderStatus.PARTIALLY_RECEIVED,
+      PurchaseOrderStatus.FULLY_RECEIVED,
+      PurchaseOrderStatus.CLOSED,
+    ];
+
+    const statusFilter: PurchaseOrderStatus[] = query.status
+      ? [query.status as unknown as PurchaseOrderStatus]
+      : trackingStatuses;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const where: Prisma.PurchaseOrderWhereInput = {
+      tenantId,
+      status: { in: statusFilter },
+      ...(query.supplierId && { supplierId: query.supplierId }),
+      ...(query.warehouseId && { warehouseId: query.warehouseId }),
+      ...(query.search && { poNumber: { contains: query.search } }),
+      ...(query.overdue && {
+        expectedDate: { lt: today },
+        status: { in: [PurchaseOrderStatus.APPROVED, PurchaseOrderStatus.PARTIALLY_RECEIVED] },
+      }),
+    };
+
+    const [rows, total] = await Promise.all([
+      this.prisma.purchaseOrder.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: [{ expectedDate: 'asc' }, { createdAt: 'desc' }],
+        select: {
+          id: true,
+          poNumber: true,
+          status: true,
+          expectedDate: true,
+          approvedAt: true,
+          createdAt: true,
+          totalAmount: true,
+          currency: true,
+          supplierId: true,
+          warehouseId: true,
+          supplier: { select: { name: true } },
+          items: {
+            select: { quantity: true, receivedQty: true },
+          },
+          goodsReceives: {
+            select: { id: true, grNumber: true, status: true, receiveDate: true },
+            orderBy: { receiveDate: 'desc' },
+            take: 1,
+          },
+        },
+      }),
+      this.prisma.purchaseOrder.count({ where }),
+    ]);
+
+    // Resolve warehouse names in one round-trip — selecting via Prisma include
+    // would couple us to the Warehouse model and be wasteful for the column we need.
+    const warehouseIds = Array.from(new Set(rows.map((r) => r.warehouseId)));
+    const warehouses = warehouseIds.length
+      ? await this.prisma.warehouse.findMany({
+          where: { id: { in: warehouseIds } },
+          select: { id: true, name: true },
+        })
+      : [];
+    const warehouseMap = new Map(warehouses.map((w) => [w.id, w.name]));
+
+    const data: PurchaseOrderTrackingRow[] = rows.map((po) => {
+      const orderedQty = po.items.reduce((sum, it) => sum + (it.quantity ?? 0), 0);
+      const receivedQty = po.items.reduce((sum, it) => sum + (it.receivedQty ?? 0), 0);
+      const pendingQty = Math.max(0, orderedQty - receivedQty);
+      const percent = orderedQty > 0 ? Math.round((receivedQty / orderedQty) * 100) : 0;
+      const receivedLineCount = po.items.filter(
+        (it) => (it.receivedQty ?? 0) >= (it.quantity ?? 0),
+      ).length;
+      const pendingLineCount = po.items.length - receivedLineCount;
+
+      const isPostFull =
+        po.status === PurchaseOrderStatus.FULLY_RECEIVED ||
+        po.status === PurchaseOrderStatus.CLOSED;
+      const isOverdue = !isPostFull && !!po.expectedDate && po.expectedDate < today;
+      const daysOverdue = isOverdue
+        ? Math.floor((today.getTime() - po.expectedDate!.getTime()) / 86_400_000)
+        : 0;
+
+      const gr = po.goodsReceives[0] ?? null;
+
+      return {
+        id: po.id,
+        poNumber: po.poNumber,
+        status: po.status,
+        supplier: { id: po.supplierId, name: po.supplier?.name ?? 'Unknown' },
+        warehouse: {
+          id: po.warehouseId,
+          name: warehouseMap.get(po.warehouseId) ?? 'Unknown',
+        },
+        expectedDate: po.expectedDate,
+        approvedAt: po.approvedAt,
+        createdAt: po.createdAt,
+        totalAmount: Number(po.totalAmount),
+        currency: po.currency,
+        isOverdue,
+        daysOverdue,
+        progress: {
+          orderedQty,
+          receivedQty,
+          pendingQty,
+          percent,
+          lineCount: po.items.length,
+          receivedLineCount,
+          pendingLineCount,
+        },
+        latestGr: gr
+          ? {
+              id: gr.id,
+              grNumber: gr.grNumber,
+              status: gr.status,
+              receiveDate: gr.receiveDate,
+            }
+          : null,
+      };
+    });
+
+    // Summary aggregated server-side over the full filtered set (not just current page)
+    const summary = await this.computeTrackingSummary(tenantId, query, today);
+
+    return {
+      data,
+      meta: { page, limit, total, summary },
+    };
+  }
+
+  /**
+   * Aggregate counts & values across the full filtered set so KPI cards on the
+   * tracking page reflect totals, not just the current page.
+   */
+  private async computeTrackingSummary(
+    tenantId: string,
+    query: QueryPurchaseOrderTrackingDto,
+    today: Date,
+  ): Promise<PurchaseOrderTrackingSummary> {
+    const baseWhere: Prisma.PurchaseOrderWhereInput = {
+      tenantId,
+      ...(query.supplierId && { supplierId: query.supplierId }),
+      ...(query.warehouseId && { warehouseId: query.warehouseId }),
+      ...(query.search && { poNumber: { contains: query.search } }),
+    };
+
+    const [approvedRows, partialRows, fullCount, closedCount, overdueCount] = await Promise.all([
+      this.prisma.purchaseOrder.findMany({
+        where: { ...baseWhere, status: PurchaseOrderStatus.APPROVED },
+        select: { totalAmount: true, items: { select: { quantity: true, receivedQty: true } } },
+      }),
+      this.prisma.purchaseOrder.findMany({
+        where: { ...baseWhere, status: PurchaseOrderStatus.PARTIALLY_RECEIVED },
+        select: { totalAmount: true, items: { select: { quantity: true, receivedQty: true } } },
+      }),
+      this.prisma.purchaseOrder.count({
+        where: { ...baseWhere, status: PurchaseOrderStatus.FULLY_RECEIVED },
+      }),
+      this.prisma.purchaseOrder.count({
+        where: { ...baseWhere, status: PurchaseOrderStatus.CLOSED },
+      }),
+      this.prisma.purchaseOrder.count({
+        where: {
+          ...baseWhere,
+          expectedDate: { lt: today },
+          status: {
+            in: [PurchaseOrderStatus.APPROVED, PurchaseOrderStatus.PARTIALLY_RECEIVED],
+          },
+        },
+      }),
+    ]);
+
+    const sumValue = (rows: typeof approvedRows): number =>
+      rows.reduce((s, r) => s + Number(r.totalAmount), 0);
+
+    // Pending value = portion of partial+approved orders not yet received,
+    // calculated proportionally so a 60% received order contributes 40% of value.
+    const pendingValueOf = (rows: typeof approvedRows): number =>
+      rows.reduce((sum, po) => {
+        const ordered = po.items.reduce((s, it) => s + (it.quantity ?? 0), 0);
+        const received = po.items.reduce((s, it) => s + (it.receivedQty ?? 0), 0);
+        const remainingPct = ordered > 0 ? Math.max(0, ordered - received) / ordered : 0;
+        return sum + Number(po.totalAmount) * remainingPct;
+      }, 0);
+
+    return {
+      approvedAwaiting: approvedRows.length,
+      partial: partialRows.length,
+      full: fullCount,
+      closed: closedCount,
+      overdue: overdueCount,
+      totalValue: sumValue(approvedRows) + sumValue(partialRows),
+      pendingValue: pendingValueOf(approvedRows) + pendingValueOf(partialRows),
+    };
+  }
+
+  /**
+   * Sprint 4 — Variance report for procurement-side reconciliation.
+   *
+   * Returns one row per PO in the [from, to] window where there's a meaningful
+   * delta (qty differs from ordered, or PO is overdue/force-closed).
+   * Rows with `reason: 'NONE'` are excluded from the response.
+   */
+  async findVariance(
+    tenantId: string,
+    query: { from?: string; to?: string; supplierId?: string },
+  ): Promise<{ data: PurchaseOrderVarianceRow[]; meta: { total: number; netDeltaAmount: number } }> {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const where: Prisma.PurchaseOrderWhereInput = {
+      tenantId,
+      // Variance only makes sense for POs that actually entered the receiving
+      // pipeline — DRAFT/PENDING/CANCELLED don't have GRs.
+      status: {
+        in: [
+          PurchaseOrderStatus.APPROVED,
+          PurchaseOrderStatus.PARTIALLY_RECEIVED,
+          PurchaseOrderStatus.FULLY_RECEIVED,
+          PurchaseOrderStatus.CLOSED,
+        ],
+      },
+      ...(query.supplierId && { supplierId: query.supplierId }),
+      ...(query.from && { createdAt: { gte: new Date(query.from) } }),
+      ...(query.to && { createdAt: { lte: new Date(query.to) } }),
+    };
+
+    const pos = await this.prisma.purchaseOrder.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        poNumber: true,
+        status: true,
+        totalAmount: true,
+        expectedDate: true,
+        supplierId: true,
+        supplier: { select: { name: true } },
+        items: { select: { quantity: true, receivedQty: true, totalPrice: true } },
+        goodsReceives: {
+          select: {
+            invoiceNumber: true,
+            items: { select: { receivedQty: true, totalCost: true } },
+          },
+        },
+      },
+    });
+
+    const poRaw = pos as unknown as Array<
+      (typeof pos)[number] & { forceClosedAt: Date | null; forceClosedReason: string | null }
+    >;
+
+    const rows: PurchaseOrderVarianceRow[] = [];
+    let netDeltaAmount = 0;
+
+    for (const po of poRaw) {
+      const orderedQty = po.items.reduce((s, i) => s + (i.quantity ?? 0), 0);
+      const receivedQty = po.items.reduce((s, i) => s + (i.receivedQty ?? 0), 0);
+
+      // Invoiced qty/amount: only count GRs that have an invoiceNumber.
+      // Until we have a real invoicing table, this is a useful proxy because
+      // accounting only enters an invoice number once they've matched it.
+      let invoicedQty = 0;
+      let invoicedAmount = 0;
+      for (const gr of po.goodsReceives) {
+        if (!gr.invoiceNumber) continue;
+        for (const it of gr.items) {
+          invoicedQty += it.receivedQty ?? 0;
+          invoicedAmount += Number(it.totalCost ?? 0);
+        }
+      }
+
+      const deltaQty = receivedQty - orderedQty;
+
+      // Pro-rate delta value off the PO total — keeps the figure sensitive
+      // to discounts and tax that are baked into totalAmount.
+      const deltaAmount =
+        orderedQty > 0 ? (Number(po.totalAmount) / orderedQty) * deltaQty : 0;
+
+      let reason: PurchaseOrderVarianceRow['reason'] = 'NONE';
+      let suggestedAction = '';
+
+      if (po.forceClosedAt) {
+        reason = 'FORCE_CLOSED';
+        suggestedAction = 'เคลม supplier / ปรับงบ';
+      } else if (deltaQty > 0) {
+        reason = 'OVER_DELIVERY';
+        suggestedAction = 'รับเกิน → คืน หรือเพิ่ม PO line';
+      } else if (deltaQty < 0 && po.status === PurchaseOrderStatus.PARTIALLY_RECEIVED) {
+        // Overdue partial → mark separately so UI can highlight
+        if (po.expectedDate && po.expectedDate < today) {
+          reason = 'OVERDUE';
+          suggestedAction = 'ติดตามซัพ / Force close';
+        } else {
+          reason = 'SHORT_DELIVERY';
+          suggestedAction = 'ติดตามซัพ';
+        }
+      } else if (
+        invoicedQty !== 0 &&
+        invoicedQty !== receivedQty
+      ) {
+        reason = 'INVOICE_MISMATCH';
+        suggestedAction = 'โต้แย้ง invoice';
+      }
+
+      // Skip rows with no actionable variance — pure FULLY_RECEIVED+matched POs
+      // would otherwise drown out the report.
+      if (reason === 'NONE') continue;
+
+      netDeltaAmount += deltaAmount;
+
+      rows.push({
+        poId: po.id,
+        poNumber: po.poNumber,
+        supplier: { id: po.supplierId, name: po.supplier?.name ?? 'Unknown' },
+        status: po.status,
+        orderedQty,
+        receivedQty,
+        invoicedQty,
+        deltaQty,
+        deltaAmount,
+        invoicedAmount,
+        expectedDate: po.expectedDate,
+        forceClosedAt: po.forceClosedAt,
+        forceClosedReason: po.forceClosedReason,
+        reason,
+        suggestedAction,
+      });
+    }
+
+    return { data: rows, meta: { total: rows.length, netDeltaAmount } };
+  }
+
+  /**
+   * Sprint 2 — receiving-tab payload for a single PO.
+   * Returns line-level ordered/received/pending plus a flat list of GRs.
+   * The "lastGr" per line is computed from GoodsReceiveItem rows joined back
+   * to their parent GoodsReceive — Prisma doesn't support a nested
+   * `orderBy` on grand-children so we resolve it in-memory.
+   */
+  async findReceiving(
+    id: string,
+    tenantId: string,
+  ): Promise<PurchaseOrderReceivingDetail> {
+    const po = await this.prisma.purchaseOrder.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        tenantId: true,
+        poNumber: true,
+        status: true,
+        items: {
+          select: {
+            id: true,
+            itemId: true,
+            quantity: true,
+            receivedQty: true,
+            unitPrice: true,
+            totalPrice: true,
+            item: { select: { name: true, sku: true, unit: true } },
+          },
+        },
+        goodsReceives: {
+          select: {
+            id: true,
+            grNumber: true,
+            status: true,
+            receiveDate: true,
+            invoiceNumber: true,
+            totalAmount: true,
+            items: {
+              select: {
+                id: true,
+                itemId: true,
+                receivedQty: true,
+                rejectedQty: true,
+                lotId: true,
+                expiryDate: true,
+              },
+            },
+          },
+          orderBy: { receiveDate: 'desc' },
+        },
+      },
+    });
+
+    if (!po || po.tenantId !== tenantId) {
+      throw new NotFoundException('Purchase order not found');
+    }
+
+    // Build a per-PO-item lookup of the most recent GR row that touched it.
+    // We walk GRs from newest → oldest and take the first hit per itemId.
+    const lastGrByItem = new Map<
+      string,
+      {
+        grId: string;
+        grNumber: string;
+        receivedQty: number;
+        rejectedQty: number;
+        receiveDate: Date;
+        lotId: string | null;
+        expiryDate: Date | null;
+      }
+    >();
+    for (const gr of po.goodsReceives) {
+      for (const grItem of gr.items) {
+        if (!lastGrByItem.has(grItem.itemId)) {
+          lastGrByItem.set(grItem.itemId, {
+            grId: gr.id,
+            grNumber: gr.grNumber,
+            receivedQty: grItem.receivedQty,
+            rejectedQty: grItem.rejectedQty ?? 0,
+            receiveDate: gr.receiveDate,
+            lotId: grItem.lotId ?? null,
+            expiryDate: grItem.expiryDate ?? null,
+          });
+        }
+      }
+    }
+
+    const lines: PurchaseOrderReceivingLine[] = po.items.map((it) => {
+      const ordered = it.quantity ?? 0;
+      const received = it.receivedQty ?? 0;
+      const pending = Math.max(0, ordered - received);
+      const percent = ordered > 0 ? Math.round((received / ordered) * 100) : 0;
+
+      let status: PurchaseOrderReceivingLine['status'];
+      if (received === 0) status = 'PENDING';
+      else if (received > ordered) status = 'OVER';
+      else if (received < ordered) status = 'PARTIAL';
+      else status = 'FULL';
+
+      return {
+        poItemId: it.id,
+        itemId: it.itemId,
+        sku: it.item?.sku ?? null,
+        name: it.item?.name ?? null,
+        unit: it.item?.unit ?? null,
+        ordered,
+        received,
+        pending,
+        percent,
+        status,
+        lastGr: lastGrByItem.get(it.itemId) ?? null,
+      };
+    });
+
+    const orderedQty = lines.reduce((s, l) => s + l.ordered, 0);
+    const receivedQty = lines.reduce((s, l) => s + l.received, 0);
+    const pendingQty = Math.max(0, orderedQty - receivedQty);
+    const percent = orderedQty > 0 ? Math.round((receivedQty / orderedQty) * 100) : 0;
+
+    // Value rollup uses each line's recorded totalPrice as the "ordered" value
+    // and prorates by received qty for received/pending — keeps the math
+    // proportional even when line totals include discounts/tax.
+    const orderedValue = po.items.reduce((s, it) => s + Number(it.totalPrice ?? 0), 0);
+    const receivedValue = po.items.reduce((s, it) => {
+      const ratio = (it.quantity ?? 0) > 0 ? (it.receivedQty ?? 0) / (it.quantity ?? 1) : 0;
+      return s + Number(it.totalPrice ?? 0) * ratio;
+    }, 0);
+    const pendingValue = Math.max(0, orderedValue - receivedValue);
+
+    return {
+      purchaseOrderId: po.id,
+      poNumber: po.poNumber,
+      status: po.status,
+      totals: {
+        orderedQty,
+        receivedQty,
+        pendingQty,
+        percent,
+        orderedValue,
+        receivedValue,
+        pendingValue,
+      },
+      lines,
+      grs: po.goodsReceives.map((gr) => ({
+        id: gr.id,
+        grNumber: gr.grNumber,
+        status: gr.status,
+        receiveDate: gr.receiveDate,
+        invoiceNumber: gr.invoiceNumber,
+        totalAmount: Number(gr.totalAmount ?? 0),
+        itemCount: gr.items.length,
+      })),
     };
   }
 
@@ -360,6 +1019,30 @@ export class PurchaseOrdersService {
     }
     if (!warehouse || warehouse.tenantId !== tenantId) {
       throw new NotFoundException('Warehouse not found');
+    }
+
+    // Supervisor approval gate: if a price comparison exists for this PR it
+    // must be APPROVED before the PO can be created. Direct POs (without a
+    // PR or with a PR that has no comparison) bypass this check.
+    if (dto.purchaseRequisitionId) {
+      const comparison = await this.prisma.priceComparison.findUnique({
+        where: {
+          tenantId_purchaseRequisitionId: {
+            tenantId,
+            purchaseRequisitionId: dto.purchaseRequisitionId,
+          },
+        },
+      });
+
+      if (comparison) {
+        const status = (comparison as unknown as { status?: string }).status;
+        if (status !== 'APPROVED') {
+          throw new ConflictException({
+            code: 'COMPARISON_NOT_APPROVED',
+            message: 'ยังไม่ผ่านการอนุมัติคู่เทียบ — ต้องให้หัวหน้าจัดซื้ออนุมัติก่อน',
+          });
+        }
+      }
     }
 
     // Verify all items exist
@@ -647,6 +1330,63 @@ export class PurchaseOrdersService {
     });
 
     this.logger.log(`Purchase order cancelled: ${id} (${updated.poNumber})`);
+    return this.findOne(updated.id, tenantId);
+  }
+
+  /**
+   * Sprint 4 — force-close a PO that won't be received in full.
+   *
+   * Use case: supplier can't deliver remaining qty (out of stock, contract
+   * cancelled, late beyond tolerance). Admin closes the PO with a reason and
+   * the difference between ordered and received becomes the recorded variance,
+   * surfaced in the variance report so finance can chase a refund / credit.
+   *
+   * Allowed from APPROVED or PARTIALLY_RECEIVED only — DRAFT/PENDING_APPROVAL
+   * use plain `cancel`, FULLY_RECEIVED uses plain `close`.
+   */
+  async forceClose(
+    id: string,
+    userId: string,
+    reason: string,
+    tenantId: string,
+  ): Promise<Record<string, unknown>> {
+    if (!reason || reason.trim().length < 5) {
+      throw new BadRequestException('A reason of at least 5 characters is required to force-close');
+    }
+
+    const po = await this.prisma.purchaseOrder.findUnique({
+      where: { id },
+      include: { items: true },
+    });
+
+    if (!po || po.tenantId !== tenantId) {
+      throw new NotFoundException('Purchase order not found');
+    }
+
+    const allowed: PurchaseOrderStatus[] = [
+      PurchaseOrderStatus.APPROVED,
+      PurchaseOrderStatus.PARTIALLY_RECEIVED,
+    ];
+    if (!allowed.includes(po.status as PurchaseOrderStatus)) {
+      throw new BadRequestException(
+        'Force-close is only allowed for APPROVED or PARTIALLY_RECEIVED purchase orders',
+      );
+    }
+
+    const updated = await this.prisma.purchaseOrder.update({
+      where: { id },
+      data: {
+        status: PurchaseOrderStatus.CLOSED,
+        forceClosedAt: new Date(),
+        forceClosedBy: userId,
+        forceClosedReason: reason.trim(),
+        updatedAt: new Date(),
+      } as unknown as Prisma.PurchaseOrderUncheckedUpdateInput,
+    });
+
+    this.logger.log(
+      `Purchase order force-closed: ${id} (${updated.poNumber}) by ${userId} — "${reason.slice(0, 60)}"`,
+    );
     return this.findOne(updated.id, tenantId);
   }
 
