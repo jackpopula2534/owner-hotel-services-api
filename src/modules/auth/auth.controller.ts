@@ -193,6 +193,50 @@ export class AuthController {
     return { success: true, message: 'Logged out from Procurement system' };
   }
 
+  // ─── Warehouse / Inventory Operations Sub-System ───────────────────────────
+
+  @Post('warehouse/login')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Login to Warehouse Terminal',
+    description:
+      'Creates a session tagged systemContext="warehouse". ' +
+      'Validates that the user has "warehouse" in their allowedSystems. ' +
+      'Tokens issued here are scoped to the warehouse sub-system only. ' +
+      'Logging out from this terminal will NOT affect the main dashboard or procurement sessions.',
+  })
+  @ApiResponse({ status: 200, description: 'Warehouse login successful' })
+  @ApiResponse({ status: 401, description: 'Unauthorized or account not allowed to access Warehouse system' })
+  async warehouseLogin(@Body() loginDto: LoginDto, @Req() req: Request) {
+    return this.authService.login(
+      loginDto,
+      {
+        ipAddress: req.ip ?? req.socket?.remoteAddress,
+        userAgent: req.headers['user-agent'],
+      },
+      'warehouse',
+    );
+  }
+
+  @Post('warehouse/logout')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 50, ttl: 60 } })
+  @ApiBearerAuth('JWT-auth')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Logout from Warehouse Terminal only',
+    description:
+      'Revokes only warehouse session tokens. ' +
+      'The main hotel management dashboard and procurement sessions stay active.',
+  })
+  @ApiResponse({ status: 200, description: 'Warehouse session ended' })
+  async warehouseLogout(@CurrentUser() user: any, @Body() body?: { refreshToken?: string }) {
+    await this.authService.logout(user.userId, body?.refreshToken, 'warehouse');
+    return { success: true, message: 'Logged out from Warehouse system' };
+  }
+
   @Post('forgot-password')
   @Public()
   @HttpCode(HttpStatus.OK)

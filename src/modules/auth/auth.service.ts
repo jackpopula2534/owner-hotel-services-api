@@ -207,7 +207,7 @@ export class AuthService {
   async login(
     loginDto: LoginDto,
     deviceInfo?: { ipAddress?: string; userAgent?: string },
-    systemContext: 'main' | 'pos' | 'procurement' = 'main',
+    systemContext: 'main' | 'pos' | 'procurement' | 'warehouse' = 'main',
   ) {
     const { email, password } = loginDto;
 
@@ -242,7 +242,9 @@ export class AuthService {
               ? 'This account is not authorized to access the POS system. Please use a POS staff account.'
               : systemContext === 'procurement'
                 ? 'บัญชีนี้ไม่มีสิทธิ์เข้าใช้ระบบจัดซื้อ กรุณาติดต่อผู้ดูแลระบบเพื่อขอสิทธิ์เข้าใช้งาน'
-                : 'This account is not authorized to access the management dashboard.',
+                : systemContext === 'warehouse'
+                  ? 'บัญชีนี้ไม่มีสิทธิ์เข้าใช้ระบบคลังสินค้า กรุณาติดต่อผู้ดูแลระบบเพื่อขอสิทธิ์เข้าใช้งาน'
+                  : 'This account is not authorized to access the management dashboard.',
           );
         }
       } catch (e) {
@@ -323,6 +325,32 @@ export class AuthService {
           }
         : {};
 
+    // ── Warehouse-specific fields ───────────────────────────────────────────
+    // Include warehouse metadata when logging in via the warehouse terminal
+    const warehouseFields =
+      systemContext === 'warehouse'
+        ? {
+            employeeId: (user as any).employeeId ?? null,
+            warehouseIds: (() => {
+              try {
+                const raw = (user as any).warehouseIds;
+                return raw ? JSON.parse(raw) : [];
+              } catch {
+                return [];
+              }
+            })(),
+            permissions: (() => {
+              try {
+                const raw = (user as any).warehousePermissions;
+                return raw ? JSON.parse(raw) : [];
+              } catch {
+                return [];
+              }
+            })(),
+            propertyName: defaultProperty?.name ?? null,
+          }
+        : {};
+
     return {
       ...tokens,
       user: {
@@ -335,6 +363,7 @@ export class AuthService {
         defaultPropertyId: defaultProperty?.id ?? null,
         isPlatformAdmin: false,
         ...procurementFields,
+        ...warehouseFields,
       },
       property: defaultProperty ?? null,
     };
@@ -399,7 +428,7 @@ export class AuthService {
     }
 
     // Carry forward the systemContext from the original token
-    const systemContext = ((tokenRecord as any).systemContext as 'main' | 'pos' | 'procurement') ?? 'main';
+    const systemContext = ((tokenRecord as any).systemContext as 'main' | 'pos' | 'procurement' | 'warehouse') ?? 'main';
 
     // Generate new tokens
     const tokens = await this.generateTokens(
@@ -439,7 +468,7 @@ export class AuthService {
     };
   }
 
-  async logout(userIdOrAdminId: string, refreshToken?: string, systemContext?: 'main' | 'pos' | 'procurement') {
+  async logout(userIdOrAdminId: string, refreshToken?: string, systemContext?: 'main' | 'pos' | 'procurement' | 'warehouse') {
     if (refreshToken) {
       // Revoke the specific refresh token
       // If systemContext provided, also filter by it (prevents cross-system token revocation)
@@ -727,7 +756,7 @@ export class AuthService {
     tenantId?: string,
     userType: 'admin' | 'user' = 'user',
     deviceInfo?: { ipAddress?: string; userAgent?: string },
-    systemContext: 'main' | 'pos' | 'procurement' = 'main',
+    systemContext: 'main' | 'pos' | 'procurement' | 'warehouse' = 'main',
   ) {
     const payload = {
       sub: id,
