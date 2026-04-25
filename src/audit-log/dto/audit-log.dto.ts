@@ -98,6 +98,11 @@ export enum AuditAction {
   USER_CREATE = 'user_create',
   USER_UPDATE = 'user_update',
   USER_DELETE = 'user_delete',
+
+  // Procurement — Price Comparison approval workflow
+  PRICE_COMPARISON_SUBMITTED = 'price_comparison_submitted',
+  PRICE_COMPARISON_APPROVED = 'price_comparison_approved',
+  PRICE_COMPARISON_REJECTED = 'price_comparison_rejected',
 }
 
 export enum AuditResource {
@@ -120,6 +125,7 @@ export enum AuditResource {
   ORDER = 'order',
   MENU = 'menu',
   STAFF = 'staff',
+  PRICE_COMPARISON = 'price_comparison',
 }
 
 /** Category tags for grouping audit logs by system area */
@@ -137,6 +143,7 @@ export enum AuditCategory {
   PROPERTIES = 'properties',
   SETTINGS = 'settings',
   USERS = 'users',
+  PROCUREMENT = 'procurement',
   GENERAL = 'general',
 }
 
