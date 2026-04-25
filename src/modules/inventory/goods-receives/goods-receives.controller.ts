@@ -143,6 +143,45 @@ export class GoodsReceivesController {
     return { success: true, data };
   }
 
+  /**
+   * QC ผ่าน — accept the GR. Writes stock, creates lots, updates PO.
+   * Allowed only for status DRAFT or INSPECTING.
+   */
+  @Post(':id/accept')
+  @ApiOperation({ summary: 'Accept GR after QC — writes stock, creates lots, updates PO' })
+  @ApiResponse({ status: 200, description: 'Goods receive accepted and stock written' })
+  @ApiResponse({ status: 409, description: 'Invalid status — must be DRAFT or INSPECTING' })
+  async accept(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+  ): Promise<{ success: boolean; data: GoodsReceiveDetail }> {
+    const data = await this.goodsReceivesService.accept(id, user.userId, user.tenantId);
+    return { success: true, data };
+  }
+
+  /**
+   * QC ปฏิเสธ — reject the GR. NO stock writes, NO PO updates.
+   * Reason ≥5 chars required.
+   */
+  @Post(':id/reject')
+  @ApiOperation({ summary: 'Reject GR — no stock written, reason required' })
+  @ApiResponse({ status: 200, description: 'Goods receive rejected' })
+  @ApiResponse({ status: 400, description: 'Reason missing or too short' })
+  @ApiResponse({ status: 409, description: 'Invalid status — must be DRAFT or INSPECTING' })
+  async reject(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() body: { reason: string },
+  ): Promise<{ success: boolean; data: GoodsReceiveDetail }> {
+    const data = await this.goodsReceivesService.reject(
+      id,
+      user.userId,
+      body.reason,
+      user.tenantId,
+    );
+    return { success: true, data };
+  }
+
   @Post(':id/inspect')
   @ApiOperation({
     summary: 'Mark goods receive as inspected or rejected',

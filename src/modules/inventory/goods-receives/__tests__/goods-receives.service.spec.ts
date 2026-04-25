@@ -108,6 +108,13 @@ describe('GoodsReceivesService', () => {
       },
       inventoryItem: {
         findUnique: jest.fn().mockImplementation(({ where }: any) => itemRows[where.id] ?? null),
+        // 2026-04-25 — DRAFT-first refactor batches the lookup. Both findUnique
+        // (still used inside _applyAcceptance loop) and findMany (used at the
+        // top of create() to compute requiresQC) are exercised by tests.
+        findMany: jest.fn().mockImplementation(({ where }: any) => {
+          const ids: string[] = where?.id?.in ?? [];
+          return ids.map((id) => itemRows[id]).filter(Boolean);
+        }),
       },
       goodsReceive: {
         create: jest.fn().mockImplementation(({ data }: any) => {
@@ -177,12 +184,22 @@ describe('GoodsReceivesService', () => {
     return { mockPrisma, poRow, warehouseRow, state, itemRows };
   };
 
+  // Sprint 2: GR service now emits `gr.completed` / `po.received` after the
+  // transaction. Tests don't care about delivery, only that the constructor
+  // can be satisfied — a no-op emit() mock is enough.
+  const mockEventEmitter = { emit: jest.fn() };
+
   beforeEach(async () => {
     buildMock();
+    mockEventEmitter.emit.mockClear();
+    // Resolve EventEmitter2 lazily to avoid a top-level require that would
+    // break if the package were ever swapped.
+    const { EventEmitter2 } = await import('@nestjs/event-emitter');
     const moduleRef: TestingModule = await Test.createTestingModule({
       providers: [
         GoodsReceivesService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: EventEmitter2, useValue: mockEventEmitter },
       ],
     }).compile();
     service = moduleRef.get(GoodsReceivesService);
@@ -277,6 +294,219 @@ describe('GoodsReceivesService', () => {
     expect(mockPrisma.inventoryLot.create).toHaveBeenCalledTimes(1);
   });
 
+  // ─── DRAFT-first flow (proper international GRN) ──────────────────────────
+  describe('DRAFT-first flow — items requiring QC', () => {
+    it('creates GR as DRAFT and skips stock writes when an item requires QC', async () => {
+      // Add a QC-required item to the catalog
+      mockPrisma.__state = mockPrisma.__state ?? {};
+      const itemRequiringQC = 'item-needs-qc';
+      mockPrisma.inventoryItem.findMany.mockImplementationOnce(({ where }: any) => {
+        const ids: string[] = where?.id?.in ?? [];
+        return ids.map((id: string) => ({
+          id,
+          isPerishable: false,
+          requiresLotTracking: false,
+          requiresQC: id === itemRequiringQC,
+        }));
+      });
+
+      await service.create(
+        baseDto({
+          items: [
+            { itemId: itemRequiringQC, receivedQty: 5, unitCost: 100 },
+          ],
+        }),
+        userId,
+        tenantId,
+      );
+
+      // GR was inserted as DRAFT
+      expect(mockPrisma.goodsReceive.create.mock.calls[0][0].data.status).toBe('DRAFT');
+      // No stock movement, no lot, no PO updates — all deferred to accept()
+      expect(mockPrisma.stockMovement.create).not.toHaveBeenCalled();
+      expect(mockPrisma.inventoryLot.create).not.toHaveBeenCalled();
+      expect(mockPrisma.warehouseStock.create).not.toHaveBeenCalled();
+      expect(mockPrisma.warehouseStock.update).not.toHaveBeenCalled();
+    });
+
+    it('fast-paths to ACCEPTED when no item requires QC (legacy behavior preserved)', async () => {
+      await service.create(
+        baseDto({
+          items: [{ itemId: itemNonPerishable, receivedQty: 5, unitCost: 100 }],
+        }),
+        userId,
+        tenantId,
+      );
+
+      // Header was created as DRAFT but flipped to ACCEPTED inside _applyAcceptance
+      expect(mockPrisma.goodsReceive.create.mock.calls[0][0].data.status).toBe('DRAFT');
+      const calls = mockPrisma.goodsReceive.update.mock.calls.map((c: any[]) => c[0]);
+      const acceptCall = calls.find((c: any) => c.data?.status === 'ACCEPTED');
+      expect(acceptCall).toBeDefined();
+      expect(acceptCall.data.inspectedAt).toBeInstanceOf(Date);
+      expect(acceptCall.data.inspectedBy).toBe(userId);
+      // Stock writes happened
+      expect(mockPrisma.stockMovement.create).toHaveBeenCalled();
+    });
+  });
+
+  // ─── Regression: Flow honesty — qcPending semantic ────────────────────────
+  // 2026-04-25 — production users complained that the timeline UI marked
+  // QC as done immediately on a freshly-created GR. The backend currently
+  // creates GR with status='ACCEPTED' synchronously (see flow-debt note in
+  // create()), so the only honest signal for "QC happened" is `inspectedAt`.
+  // findOne must surface a derived `qcPending` flag and a `requiresQC` flag
+  // computed from the items so the UI can show the pending-QC banner.
+  describe('regression — qcPending honesty in findOne mapToDetail', () => {
+    // Direct unit test of mapToDetail via a synthetic raw row, since wiring
+    // up findOne with full Prisma mocks isn't worth it for this assertion.
+    it('marks qcPending=true when an item requires QC and inspectedAt is null', () => {
+      // Access the private mapper through `(service as any)`. We're calling
+      // a single pure function, so test isolation is preserved.
+      const detail = (service as any).mapToDetail(
+        {
+          id: 'gr-1',
+          tenantId,
+          grNumber: 'GR-X',
+          purchaseOrderId: null,
+          warehouseId,
+          status: 'ACCEPTED',
+          subtotal: 0,
+          totalAmount: 0,
+          notes: null,
+          receivedBy: userId,
+          inspectedBy: null,
+          inspectedAt: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          items: [
+            {
+              id: 'gri-1',
+              itemId: 'item-x',
+              receivedQty: 5,
+              rejectedQty: 0,
+              unitCost: 10,
+              item: { id: 'item-x', name: 'X', sku: 'SKU-X', unit: 'PIECE', requiresQC: true },
+            },
+          ],
+        },
+        { lotMap: new Map(), userMap: new Map() },
+      );
+
+      expect(detail.requiresQC).toBe(true);
+      expect(detail.qcPending).toBe(true); // status=ACCEPTED but no inspectedAt
+    });
+
+    it('marks qcPending=false when no item requires QC even if inspectedAt is null', () => {
+      const detail = (service as any).mapToDetail(
+        {
+          id: 'gr-2',
+          tenantId,
+          grNumber: 'GR-Y',
+          purchaseOrderId: null,
+          warehouseId,
+          status: 'ACCEPTED',
+          subtotal: 0,
+          totalAmount: 0,
+          notes: null,
+          receivedBy: userId,
+          inspectedBy: null,
+          inspectedAt: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          items: [
+            {
+              id: 'gri-1',
+              itemId: 'item-y',
+              receivedQty: 5,
+              rejectedQty: 0,
+              unitCost: 10,
+              item: { id: 'item-y', name: 'Y', sku: 'SKU-Y', unit: 'PIECE', requiresQC: false },
+            },
+          ],
+        },
+        { lotMap: new Map(), userMap: new Map() },
+      );
+
+      expect(detail.requiresQC).toBe(false);
+      expect(detail.qcPending).toBe(false);
+    });
+
+    it('marks qcPending=false once inspectedAt is set, regardless of requiresQC', () => {
+      const detail = (service as any).mapToDetail(
+        {
+          id: 'gr-3',
+          tenantId,
+          grNumber: 'GR-Z',
+          purchaseOrderId: null,
+          warehouseId,
+          status: 'ACCEPTED',
+          subtotal: 0,
+          totalAmount: 0,
+          notes: null,
+          receivedBy: userId,
+          inspectedBy: 'inspector-1',
+          inspectedAt: new Date(),
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          items: [
+            {
+              id: 'gri-1',
+              itemId: 'item-z',
+              receivedQty: 5,
+              rejectedQty: 0,
+              unitCost: 10,
+              item: { id: 'item-z', name: 'Z', sku: 'SKU-Z', unit: 'PIECE', requiresQC: true },
+            },
+          ],
+        },
+        { lotMap: new Map(), userMap: new Map() },
+      );
+
+      expect(detail.requiresQC).toBe(true);
+      expect(detail.qcPending).toBe(false); // QC explicitly happened
+    });
+  });
+
+  // ─── Regression: Prisma StockMovement input shape ─────────────────────────
+  // 2026-04-25 — production GR submit failed with
+  //   "Unknown argument `lotId`. Did you mean `lot`?"
+  // because we mixed `warehouse: { connect }` (relation form) with scalar
+  // `lotId: ...` in the same `data` payload, which forces Prisma to use
+  // StockMovementCreateInput (relation-only). The fix is to use
+  // `lot: { connect: { id } }` and only when a lot exists.
+  describe('regression — stockMovement.create payload shape', () => {
+    it('uses `lot: { connect }` and never sends scalar lotId (lot-tracked item)', async () => {
+      await service.create(
+        baseDto({
+          items: [{ itemId: itemPerishable, receivedQty: 3, unitCost: 80 }],
+        }),
+        userId,
+        tenantId,
+      );
+
+      const movement = mockPrisma.__state.stockMovements[0];
+      // Must NOT have raw scalar lotId — Prisma rejects it in CreateInput mode
+      expect(movement).not.toHaveProperty('lotId');
+      // Must use relation form
+      expect(movement.lot).toEqual({ connect: { id: expect.stringMatching(/^lot-/) } });
+    });
+
+    it('omits the lot key entirely when item has no lot tracking', async () => {
+      await service.create(
+        baseDto({
+          items: [{ itemId: itemNonPerishable, receivedQty: 5, unitCost: 100 }],
+        }),
+        userId,
+        tenantId,
+      );
+
+      const movement = mockPrisma.__state.stockMovements[0];
+      expect(movement).not.toHaveProperty('lotId');
+      expect(movement).not.toHaveProperty('lot');
+    });
+  });
+
   // ─── Regression: sequence schema fields ───────────────────────────────────
   it('uses schema-correct DocumentSequence fields (lastNumber + prefix) — both GR and LOT', async () => {
     await service.create(
@@ -313,11 +543,17 @@ describe('GoodsReceivesService', () => {
       tenantId,
     );
 
-    expect(mockPrisma.goodsReceive.update).toHaveBeenCalled();
-    const headerUpdate = mockPrisma.__state.grHeaderUpdate.data;
+    // After DRAFT-first refactor `goodsReceive.update` is called multiple times:
+    //   1. Subtotal/totalAmount persistence
+    //   2. (Inside _applyAcceptance) status → ACCEPTED + inspectedAt
+    // Find the call that actually carried subtotal — last call may be the
+    // status flip, not the totals.
+    const calls = mockPrisma.goodsReceive.update.mock.calls.map((c: any[]) => c[0]);
+    const totalsCall = calls.find((c: any) => c.data?.subtotal !== undefined);
+    expect(totalsCall).toBeDefined();
     // Accepted = 5 - 1 = 4 units * 100 = 400
-    expect(Number(headerUpdate.subtotal)).toBe(400);
-    expect(Number(headerUpdate.totalAmount)).toBe(400);
+    expect(Number(totalsCall.data.subtotal)).toBe(400);
+    expect(Number(totalsCall.data.totalAmount)).toBe(400);
   });
 
   it('skips stock movement and lot creation when 100% of the line is rejected', async () => {
@@ -339,8 +575,10 @@ describe('GoodsReceivesService', () => {
 
     expect(mockPrisma.stockMovement.create).not.toHaveBeenCalled();
     expect(mockPrisma.inventoryLot.create).not.toHaveBeenCalled();
-    // Header totals stay at zero → no update call (condition: computedTotal > 0)
-    expect(mockPrisma.goodsReceive.update).not.toHaveBeenCalled();
+    // The GR header IS updated (status flipped to ACCEPTED by _applyAcceptance)
+    // but NO subtotal write happens because computedTotal stayed at 0.
+    const calls = mockPrisma.goodsReceive.update.mock.calls.map((c: any[]) => c[0]);
+    expect(calls.find((c: any) => c.data?.subtotal !== undefined)).toBeUndefined();
   });
 
   // ─── Warehouse stock weighted average ─────────────────────────────────────
@@ -425,7 +663,11 @@ describe('GoodsReceivesService', () => {
   });
 
   it('throws NotFoundException when an item on the line was deleted from catalog', async () => {
+    // 2026-04-25 — DRAFT-first refactor moved the missing-item check to a
+    // single `findMany` at the top of create() (so we can also read
+    // `requiresQC` upfront). Mock both to be safe.
     mockPrisma.inventoryItem.findUnique.mockResolvedValue(null);
+    mockPrisma.inventoryItem.findMany.mockResolvedValueOnce([]); // empty = nothing matched
     await expect(service.create(baseDto(), userId, tenantId)).rejects.toBeInstanceOf(
       NotFoundException,
     );
