@@ -324,7 +324,12 @@ export class ProcurementStockService {
     const next30 = new Date(today);
     next30.setDate(today.getDate() + 30);
 
-    const [nearExpiry, expired, totalStockValue] = await Promise.all([
+    // Distinct item count for the "รวมสินค้า" KPI. We count InventoryItem rows
+    // directly (NOT the sum of breakdown buckets) because breakdown counts are
+    // keyed by `(itemId, warehouseId)` — an item that lives in two warehouses
+    // would be double-counted there. The dashboard headline number must match
+    // what the รายการสินค้า list page shows, which queries InventoryItem.
+    const [nearExpiry, expired, totalStockValue, totalItems] = await Promise.all([
       this.prisma.inventoryLot.count({
         where: {
           tenantId,
@@ -356,9 +361,28 @@ export class ProcurementStockService {
         },
         _sum: { totalValue: true },
       }),
+      // Distinct active item count. When a warehouseId filter is provided we
+      // narrow to items that have stock in that specific warehouse so the KPI
+      // is consistent with the rest of the per-warehouse summary numbers.
+      warehouseId
+        ? this.prisma.inventoryItem
+            .findMany({
+              where: {
+                tenantId,
+                isActive: true,
+                deletedAt: null,
+                warehouseStocks: { some: { warehouseId } },
+              },
+              select: { id: true },
+            })
+            .then((rows) => rows.length)
+        : this.prisma.inventoryItem.count({
+            where: { tenantId, isActive: true, deletedAt: null },
+          }),
     ]);
 
     return {
+      totalItems,
       lowCount: balance.meta.breakdown.LOW,
       outOfStockCount: balance.meta.breakdown.OUT_OF_STOCK,
       overstockCount: balance.meta.breakdown.OVERSTOCK,
