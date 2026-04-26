@@ -59,6 +59,28 @@ export class PurchaseOrdersController {
   }
 
   /**
+   * Sprint 5 — Procurement dashboard spend summary. Surfaces this-month vs
+   * last-month committed spend, 12-month sparkline trend, and category
+   * breakdown for the current month. Registered before `:id` so the literal
+   * "spend-summary" segment is matched first (same reason as `/tracking`).
+   */
+  @Get('spend-summary')
+  @ApiOperation({
+    summary: 'Spend summary — this/last month + 12-month trend + category breakdown',
+  })
+  @ApiResponse({ status: 200, description: 'Spend summary retrieved' })
+  async findSpendSummary(
+    @Query('propertyId') propertyId: string | undefined,
+    @Req() req: { user: { tenantId: string } },
+  ): Promise<{ success: boolean; data: unknown }> {
+    const data = await this.purchaseOrdersService.findSpendSummary(
+      req.user.tenantId,
+      propertyId,
+    );
+    return { success: true, data };
+  }
+
+  /**
    * Sprint 4 — Variance Report. Returns POs with non-zero delta between
    * ordered/received/invoiced. Registered before `:id` for the same reason
    * as `/tracking`.

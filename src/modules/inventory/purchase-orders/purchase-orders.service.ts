@@ -690,6 +690,200 @@ export class PurchaseOrdersService {
   }
 
   /**
+   * Sprint 5 — Procurement dashboard spend summary.
+   *
+   * Powers the SpendCard on /purchasing (DashboardV2 + V1 ManagerView).
+   * Surfaces:
+   *   - thisMonth / lastMonth committed spend
+   *   - deltaPct (null when lastMonth = 0 to avoid /0)
+   *   - 12-month sparkline trend, oldest → newest
+   *   - top-N category breakdown with "อื่น ๆ" lump for the tail
+   *
+   * "Committed spend" = totalAmount of POs that have been approved or
+   * received (APPROVED / PARTIALLY_RECEIVED / FULLY_RECEIVED / CLOSED).
+   * DRAFT / PENDING_APPROVAL / CANCELLED are excluded so the figure
+   * reflects money actually allocated, not requested-but-unsigned.
+   *
+   * Trend is bucketed by `approvedAt` when present (so an old draft
+   * approved late lands in the right month) and falls back to `createdAt`
+   * for legacy rows that pre-date the approvedAt column.
+   */
+  async findSpendSummary(
+    tenantId: string,
+    propertyId?: string,
+  ): Promise<{
+    thisMonth: number;
+    lastMonth: number;
+    deltaPct: number | null;
+    trend: number[];
+    categories: Array<{
+      categoryId: string | null;
+      categoryName: string;
+      total: number;
+      pct: number;
+    }>;
+  }> {
+    const committedStatuses: PurchaseOrderStatus[] = [
+      PurchaseOrderStatus.APPROVED,
+      PurchaseOrderStatus.PARTIALLY_RECEIVED,
+      PurchaseOrderStatus.FULLY_RECEIVED,
+      PurchaseOrderStatus.CLOSED,
+    ];
+
+    const now = new Date();
+    const startOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 1); // exclusive
+    // 12-month window starts at the first day of (now - 11 months).
+    const trendStart = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+
+    const baseWhere: Prisma.PurchaseOrderWhereInput = {
+      tenantId,
+      status: { in: committedStatuses },
+      ...(propertyId && { propertyId }),
+    };
+
+    // One sweep covering the longest window we need (12 months back) — we then
+    // partition in-memory rather than running 14+ separate queries. Selecting
+    // `items.totalPrice` and the joined item.categoryId/category.name lets us
+    // compute category breakdown without a 2nd round-trip.
+    const pos = await this.prisma.purchaseOrder.findMany({
+      where: {
+        ...baseWhere,
+        OR: [
+          { approvedAt: { gte: trendStart } },
+          // Fallback for rows that never got approvedAt populated — use createdAt.
+          { AND: [{ approvedAt: null }, { createdAt: { gte: trendStart } }] },
+        ],
+      },
+      select: {
+        approvedAt: true,
+        createdAt: true,
+        totalAmount: true,
+        items: {
+          select: {
+            totalPrice: true,
+            item: {
+              select: {
+                categoryId: true,
+                category: { select: { name: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Helper — pick the bucket date (approvedAt preferred, createdAt fallback)
+    const bucketDate = (po: (typeof pos)[number]): Date =>
+      po.approvedAt ?? po.createdAt;
+
+    // ── Month totals ─────────────────────────────────────────────────────────
+    let thisMonth = 0;
+    let lastMonth = 0;
+
+    // ── Trend (12 months) — index 0 = oldest, index 11 = current month ──────
+    const trend = new Array<number>(12).fill(0);
+    const monthIndex = (d: Date): number => {
+      // Months between trendStart and d, clamped to [0, 11].
+      const diff =
+        (d.getFullYear() - trendStart.getFullYear()) * 12 +
+        (d.getMonth() - trendStart.getMonth());
+      if (diff < 0) return -1;
+      if (diff > 11) return -1;
+      return diff;
+    };
+
+    // ── Categories (only this-month spend, mirrors the card UX) ─────────────
+    const categoryTotals = new Map<
+      string, // key = categoryId ?? '__uncategorized'
+      { categoryId: string | null; categoryName: string; total: number }
+    >();
+
+    for (const po of pos) {
+      const bd = bucketDate(po);
+      const total = Number(po.totalAmount);
+
+      // Trend
+      const idx = monthIndex(bd);
+      if (idx >= 0) trend[idx] += total;
+
+      // This / last month aggregates
+      if (bd >= startOfThisMonth) {
+        thisMonth += total;
+        // Category breakdown only counts current month so the "100%" pie
+        // matches the headline figure shown next to it.
+        for (const it of po.items) {
+          const catId = it.item?.categoryId ?? null;
+          const catName = it.item?.category?.name ?? 'ไม่ระบุหมวด';
+          const key = catId ?? '__uncategorized';
+          const existing = categoryTotals.get(key);
+          const linePrice = Number(it.totalPrice ?? 0);
+          if (existing) {
+            existing.total += linePrice;
+          } else {
+            categoryTotals.set(key, {
+              categoryId: catId,
+              categoryName: catName,
+              total: linePrice,
+            });
+          }
+        }
+      } else if (bd >= startOfLastMonth && bd < endOfLastMonth) {
+        lastMonth += total;
+      }
+    }
+
+    const deltaPct =
+      lastMonth > 0
+        ? Math.round(((thisMonth - lastMonth) / lastMonth) * 100)
+        : null;
+
+    // ── Build category list ──────────────────────────────────────────────────
+    // Take top 3 by amount + lump the tail into "อื่น ๆ" so the card
+    // stays readable when a tenant has many categories. Total here is taken
+    // from the line-level sum (closer to true cost of goods) rather than the
+    // PO totalAmount which includes shipping/tax — keeps the % proportional
+    // to procurement value, not invoice-level overhead.
+    const sorted = Array.from(categoryTotals.values()).sort(
+      (a, b) => b.total - a.total,
+    );
+    const topN = 3;
+    const top = sorted.slice(0, topN);
+    const tail = sorted.slice(topN);
+    const tailTotal = tail.reduce((s, c) => s + c.total, 0);
+    const grand = sorted.reduce((s, c) => s + c.total, 0);
+
+    const categories: Array<{
+      categoryId: string | null;
+      categoryName: string;
+      total: number;
+      pct: number;
+    }> = top.map((c) => ({
+      categoryId: c.categoryId,
+      categoryName: c.categoryName,
+      total: Math.round(c.total),
+      pct: grand > 0 ? Math.round((c.total / grand) * 100) : 0,
+    }));
+    if (tailTotal > 0) {
+      categories.push({
+        categoryId: null,
+        categoryName: 'อื่น ๆ',
+        total: Math.round(tailTotal),
+        pct: grand > 0 ? Math.round((tailTotal / grand) * 100) : 0,
+      });
+    }
+
+    return {
+      thisMonth: Math.round(thisMonth),
+      lastMonth: Math.round(lastMonth),
+      deltaPct,
+      trend: trend.map((n) => Math.round(n)),
+      categories,
+    };
+  }
+
+  /**
    * Sprint 2 — receiving-tab payload for a single PO.
    * Returns line-level ordered/received/pending plus a flat list of GRs.
    * The "lastGr" per line is computed from GoodsReceiveItem rows joined back
