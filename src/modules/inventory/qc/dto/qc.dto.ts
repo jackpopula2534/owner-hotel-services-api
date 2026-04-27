@@ -12,6 +12,7 @@ import {
   ValidateNested,
   IsUUID,
   IsNumber,
+  IsDateString,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -168,6 +169,16 @@ export class QueryQCRecordDto {
   @IsOptional()
   @IsString()
   goodsReceiveId?: string;
+
+  @ApiPropertyOptional({ description: 'Filter from date (ISO date string e.g. 2026-01-01)' })
+  @IsOptional()
+  @IsDateString()
+  from?: string;
+
+  @ApiPropertyOptional({ description: 'Filter to date (ISO date string e.g. 2026-04-30)' })
+  @IsOptional()
+  @IsDateString()
+  to?: string;
 
   @ApiPropertyOptional({ default: 1 })
   @IsOptional()

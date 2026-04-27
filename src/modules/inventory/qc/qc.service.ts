@@ -101,16 +101,33 @@ export class QCService {
   // ═══════════════════════════════════════════════════════════════════════════
 
   async listRecords(tenantId: string, query: QueryQCRecordDto) {
-    const { page = 1, limit = 20, status, supplierId, goodsReceiveId } = query;
+    const { page = 1, limit = 20, status, supplierId, goodsReceiveId, from, to } = query;
     const skip = (page - 1) * limit;
 
     const where: any = { tenantId };
     if (status) where.status = status;
     if (goodsReceiveId) where.goodsReceiveId = goodsReceiveId;
 
+    // Date range filter on createdAt
+    if (from || to) {
+      where.createdAt = {};
+      if (from) where.createdAt.gte = new Date(from);
+      if (to) {
+        // Include the full end date (set to end-of-day)
+        const toDate = new Date(to);
+        toDate.setHours(23, 59, 59, 999);
+        where.createdAt.lte = toDate;
+      }
+    }
+
     // Supplier filter via GR linkage
+    // QCRecord has no direct Prisma relation to GoodsReceive — must resolve GR IDs first
     if (supplierId) {
-      where.goodsReceive = { purchaseOrder: { supplierId } };
+      const linkedGRs = await this.prisma.goodsReceive.findMany({
+        where: { tenantId, purchaseOrder: { supplierId } },
+        select: { id: true },
+      });
+      where.goodsReceiveId = { in: linkedGRs.map((gr) => gr.id) };
     }
 
     const [data, total] = await Promise.all([
