@@ -332,6 +332,44 @@ export class AuthController {
     );
   }
 
+  // ─── Purchasing Sub-System Deep-link Launch ──────────────────────────────────
+
+  @Post('purchasing-launch')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 30, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Generate a short-lived deep-link token to open Purchasing terminal pre-authenticated',
+    description: 'Returns a 5-minute JWT. User is logged in as procurement_manager (highest level).',
+  })
+  @ApiResponse({ status: 200, description: 'Purchasing launch token generated' })
+  async purchasingLaunch(@CurrentUser() caller: any, @Req() req: Request) {
+    return this.authService.generatePurchasingLaunchToken(
+      { userId: caller.userId, email: caller.email, role: caller.role, tenantId: caller.tenantId },
+      req.ip ?? req.socket?.remoteAddress,
+    );
+  }
+
+  // ─── Warehouse Sub-System Deep-link Launch ───────────────────────────────────
+
+  @Post('warehouse-launch')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 30, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Generate a short-lived deep-link token to open Warehouse terminal pre-authenticated',
+    description: 'Returns a 5-minute JWT. User is logged in as warehouse_manager (highest level).',
+  })
+  @ApiResponse({ status: 200, description: 'Warehouse launch token generated' })
+  async warehouseLaunch(@CurrentUser() caller: any, @Req() req: Request) {
+    return this.authService.generateWarehouseLaunchToken(
+      { userId: caller.userId, email: caller.email, role: caller.role, tenantId: caller.tenantId },
+      req.ip ?? req.socket?.remoteAddress,
+    );
+  }
+
   // ────────────────────────────────────────────────────────────────────────────
 
   /** Only tenant_admin, manager, or platform_admin can manage POS users */
