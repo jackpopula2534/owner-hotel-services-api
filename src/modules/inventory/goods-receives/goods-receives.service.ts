@@ -32,6 +32,25 @@ export interface GoodsReceiveDetail {
   grNumber: string;
   purchaseOrderId?: string;
   poNumber?: string;
+  /**
+   * Status of the parent PO (APPROVED / PARTIALLY_RECEIVED / FULLY_RECEIVED / CLOSED).
+   * Surfaced so list UIs can warn when a GR is "ACCEPTED" but the underlying
+   * PO is still partially fulfilled — otherwise users misread an ACCEPTED GR
+   * as the entire PO being done.
+   */
+  purchaseOrderStatus?: string;
+  /**
+   * Aggregate fulfilment of the parent PO across ALL its GRs (not just this one).
+   * Lets a GR list row show "รับ 42/84 · ค้าง 42" so reviewers see at a glance
+   * whether the PO still has goods outstanding, rather than concluding from the
+   * GR's "รับเข้าแล้ว" badge that the whole order is done.
+   */
+  purchaseOrderProgress?: {
+    orderedQty: number;
+    receivedQty: number;
+    pendingQty: number;
+    percent: number;
+  };
   // Extended PO snapshot (only set when GR is linked to a PO)
   poSnapshot?: {
     id: string;
@@ -184,7 +203,17 @@ export class GoodsReceivesService {
         where,
         include: {
           warehouse: { select: { id: true, name: true } },
-          purchaseOrder: { select: { id: true, poNumber: true } },
+          // Status + per-line qty roll-ups let mapToDetail compute the parent
+          // PO's overall fulfilment so the GR list can show "รับ 42/84 · ค้าง 42"
+          // without an extra round-trip per row.
+          purchaseOrder: {
+            select: {
+              id: true,
+              poNumber: true,
+              status: true,
+              items: { select: { quantity: true, receivedQty: true } },
+            },
+          },
           items: true,
         },
         orderBy: { [sort]: order },
@@ -224,6 +253,9 @@ export class GoodsReceivesService {
           select: {
             id: true,
             poNumber: true,
+            // Forwarded as `purchaseOrderStatus` so the detail page can warn
+            // when the GR is closed but the PO itself is still partial.
+            status: true,
             orderDate: true,
             expectedDate: true,
             currency: true,
@@ -241,7 +273,9 @@ export class GoodsReceivesService {
               },
             },
             items: {
-              select: { itemId: true, quantity: true, unitPrice: true },
+              // receivedQty included so mapToDetail can roll up
+              // purchaseOrderProgress without an extra query
+              select: { itemId: true, quantity: true, receivedQty: true, unitPrice: true },
             },
           },
         },
@@ -496,6 +530,18 @@ export class GoodsReceivesService {
           })),
           receivedBy: userId,
         };
+
+        // 8b. Auto-create PENDING QC records for every received item that
+        // requires QC. Without this step the QC inbox stays empty and users
+        // must remember to create records manually — easy to miss.
+        await this._createPendingQCRecords(
+          tx,
+          tenantId,
+          goodsReceive.id,
+          dto.items,
+          invItemMap,
+          userId,
+        );
       }
 
       // 9. Return full details
@@ -559,7 +605,14 @@ export class GoodsReceivesService {
       },
       include: {
         warehouse: { select: { id: true, name: true } },
-        purchaseOrder: { select: { id: true, poNumber: true } },
+        purchaseOrder: {
+          select: {
+            id: true,
+            poNumber: true,
+            status: true,
+            items: { select: { quantity: true, receivedQty: true } },
+          },
+        },
         items: {
           include: {
             item: { select: { id: true, name: true, sku: true } },
@@ -569,6 +622,114 @@ export class GoodsReceivesService {
     });
 
     return this.mapToDetail(updated);
+  }
+
+  /**
+   * Internal — auto-create PENDING `QCRecord` rows for items in this GR that
+   * require QC. Resolves a template via the cascade:
+   *
+   *   1. inventoryItem.defaultQCTemplateId         (most specific)
+   *   2. QCTemplate where appliesTo='ITEM' AND itemId=…
+   *   3. QCTemplate where appliesTo='CATEGORY' AND categoryId=…
+   *
+   * Items that need QC but have no resolvable template are skipped silently —
+   * the GR still becomes DRAFT so the user can add a record later, but we log
+   * a warning so the operator can fix the master data.
+   *
+   * One QCRecord per (goodsReceive, item) pair. Linked to the GR via
+   * `goodsReceiveId`. `lotId` stays null at this point because lots are only
+   * created on acceptance; QC happens BEFORE acceptance by design.
+   *
+   * Idempotency: only called inside the create() transaction, so no risk of
+   * double-creation. If the tx rolls back the QC records roll back too.
+   */
+  private async _createPendingQCRecords(
+    tx: any,
+    tenantId: string,
+    goodsReceiveId: string,
+    sourceItems: Array<{ itemId: string }>,
+    invItemMap: Map<string, any>,
+    userId: string,
+  ): Promise<void> {
+    // Deduplicate by itemId — if the GR has the same item on two lines we still
+    // want a single QC record (a QC inspection is per-item, not per-line).
+    const qcCandidateIds = Array.from(
+      new Set(
+        sourceItems
+          .map((it) => it.itemId)
+          .filter((id) => invItemMap.get(id)?.requiresQC === true),
+      ),
+    );
+    if (qcCandidateIds.length === 0) return;
+
+    // Pre-load all candidate templates in two round-trips:
+    //   1. ITEM-scoped templates for any of these items
+    //   2. CATEGORY-scoped templates for any of these items' categories
+    const categoryIds = Array.from(
+      new Set(
+        qcCandidateIds
+          .map((id) => invItemMap.get(id)?.categoryId)
+          .filter((c): c is string => !!c),
+      ),
+    );
+
+    const [itemTemplates, categoryTemplates] = await Promise.all([
+      tx.qCTemplate.findMany({
+        where: {
+          tenantId,
+          isActive: true,
+          appliesTo: 'ITEM',
+          itemId: { in: qcCandidateIds },
+        },
+        select: { id: true, itemId: true },
+      }),
+      categoryIds.length
+        ? tx.qCTemplate.findMany({
+            where: {
+              tenantId,
+              isActive: true,
+              appliesTo: 'CATEGORY',
+              categoryId: { in: categoryIds },
+            },
+            select: { id: true, categoryId: true },
+          })
+        : Promise.resolve([] as Array<{ id: string; categoryId: string }>),
+    ]);
+
+    const itemTemplateMap = new Map<string, string>(
+      itemTemplates.map((t: any) => [t.itemId, t.id]),
+    );
+    const categoryTemplateMap = new Map<string, string>(
+      categoryTemplates.map((t: any) => [t.categoryId, t.id]),
+    );
+
+    for (const itemId of qcCandidateIds) {
+      const inv = invItemMap.get(itemId);
+      const templateId =
+        inv?.defaultQCTemplateId ??
+        itemTemplateMap.get(itemId) ??
+        (inv?.categoryId ? categoryTemplateMap.get(inv.categoryId) : undefined);
+
+      if (!templateId) {
+        this.logger.warn(
+          `Skipped auto-creating QC record for item ${itemId} on GR ${goodsReceiveId}: ` +
+            `no QC template found (defaultQCTemplateId, ITEM-scope, CATEGORY-scope all empty).`,
+        );
+        continue;
+      }
+
+      await tx.qCRecord.create({
+        data: {
+          tenantId,
+          templateId,
+          goodsReceiveId,
+          // lotId left null — lots aren't created until acceptance, and the
+          // record can be linked to a lot later by the QC submit flow if needed.
+          inspectedBy: userId,
+          // QCRecord.status default is PENDING (see prisma schema).
+        },
+      });
+    }
   }
 
   /**
@@ -1032,12 +1193,36 @@ export class GoodsReceivesService {
     const varianceQty =
       totalOrderedQty != null ? totalReceivedQty - totalOrderedQty : undefined;
 
+    // Aggregate parent-PO fulfilment from its line items (when included).
+    // We compute this here (not in the controller) so every consumer of
+    // mapToDetail benefits — list view, detail view, inspect response.
+    const poItemsForProgress: Array<{ quantity?: number | null; receivedQty?: number | null }> =
+      receive.purchaseOrder?.items ?? [];
+    const purchaseOrderProgress = poItemsForProgress.length
+      ? (() => {
+          const orderedQty = poItemsForProgress.reduce(
+            (s, it) => s + (it.quantity ?? 0),
+            0,
+          );
+          const receivedQty = poItemsForProgress.reduce(
+            (s, it) => s + (it.receivedQty ?? 0),
+            0,
+          );
+          const pendingQty = Math.max(0, orderedQty - receivedQty);
+          const percent =
+            orderedQty > 0 ? Math.round((receivedQty / orderedQty) * 100) : 0;
+          return { orderedQty, receivedQty, pendingQty, percent };
+        })()
+      : undefined;
+
     return {
       id: receive.id,
       tenantId: receive.tenantId,
       grNumber: receive.grNumber,
       purchaseOrderId: receive.purchaseOrderId,
       poNumber: receive.purchaseOrder?.poNumber,
+      purchaseOrderStatus: receive.purchaseOrder?.status,
+      purchaseOrderProgress,
       poSnapshot: receive.purchaseOrder
         ? {
             id: receive.purchaseOrder.id,

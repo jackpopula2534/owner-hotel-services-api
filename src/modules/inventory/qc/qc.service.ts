@@ -130,20 +130,114 @@ export class QCService {
       where.goodsReceiveId = { in: linkedGRs.map((gr) => gr.id) };
     }
 
-    const [data, total] = await Promise.all([
+    const [rawData, total] = await Promise.all([
       this.prisma.qCRecord.findMany({
         where,
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
         include: {
-          template: { select: { id: true, name: true } },
+          template: {
+            select: { id: true, name: true, _count: { select: { checklistItems: true } } },
+          },
           lot: { select: { id: true, lotNumber: true } },
-          _count: { select: { results: true } },
+          results: { select: { passed: true } },
         },
       }),
       this.prisma.qCRecord.count({ where }),
     ]);
+
+    // Resolve linked GR + supplier + inspector data in batch round-trips so the
+    // list can show "GR-202604-0001 · Acme Supplier · ตรวจโดย คุณก้อง · 8 นาที"
+    // without extra fetches per row.
+    const grIds = Array.from(
+      new Set(
+        rawData
+          .map((r: any) => r.goodsReceiveId)
+          .filter((id: string | null): id is string => !!id),
+      ),
+    );
+    const inspectorIds = Array.from(
+      new Set(rawData.map((r: any) => r.inspectedBy).filter(Boolean)),
+    );
+
+    const [grs, inspectors] = await Promise.all([
+      grIds.length
+        ? this.prisma.goodsReceive.findMany({
+            where: { id: { in: grIds } },
+            select: {
+              id: true,
+              grNumber: true,
+              purchaseOrder: {
+                select: {
+                  id: true,
+                  poNumber: true,
+                  supplier: { select: { id: true, name: true } },
+                },
+              },
+            },
+          })
+        : Promise.resolve([] as any[]),
+      inspectorIds.length
+        ? this.prisma.user.findMany({
+            where: { id: { in: inspectorIds as string[] } },
+            select: { id: true, firstName: true, lastName: true, email: true },
+          })
+        : Promise.resolve([] as any[]),
+    ]);
+
+    const grMap = new Map(grs.map((g: any) => [g.id, g]));
+    const inspectorMap = new Map(
+      inspectors.map((u: any) => [
+        u.id,
+        [u.firstName, u.lastName].filter(Boolean).join(' ') || u.email,
+      ]),
+    );
+
+    const data = rawData.map((rec: any) => {
+      const checklistTotal = rec.template?._count?.checklistItems ?? 0;
+      const completed = rec.results.length;
+      const passed = rec.results.filter((r: any) => r.passed === true).length;
+      const failed = rec.results.filter((r: any) => r.passed === false).length;
+
+      const gr = rec.goodsReceiveId ? grMap.get(rec.goodsReceiveId) : null;
+
+      // Submitted records carry inspectedAt; PENDING records have inspectedAt
+      // = createdAt by Prisma default. Don't compute durationMs for PENDING.
+      const durationMs =
+        rec.status !== 'PENDING' && rec.inspectedAt && rec.createdAt
+          ? new Date(rec.inspectedAt).getTime() - new Date(rec.createdAt).getTime()
+          : null;
+
+      return {
+        id: rec.id,
+        status: rec.status,
+        notes: rec.notes,
+        createdAt: rec.createdAt,
+        inspectedAt: rec.inspectedAt,
+        inspectedBy: rec.inspectedBy,
+        inspectedByName: inspectorMap.get(rec.inspectedBy) ?? null,
+        durationMs,
+        template: rec.template
+          ? { id: rec.template.id, name: rec.template.name }
+          : null,
+        lot: rec.lot,
+        goodsReceiveId: rec.goodsReceiveId,
+        goodsReceiveNumber: gr?.grNumber ?? null,
+        purchaseOrderId: gr?.purchaseOrder?.id ?? null,
+        purchaseOrderNumber: gr?.purchaseOrder?.poNumber ?? null,
+        supplier: gr?.purchaseOrder?.supplier ?? null,
+        progress: {
+          checklistTotal,
+          completed,
+          passed,
+          failed,
+          passRate: completed > 0 ? Math.round((passed / completed) * 100) : 0,
+          completionRate:
+            checklistTotal > 0 ? Math.round((completed / checklistTotal) * 100) : 0,
+        },
+      };
+    });
 
     return { data, meta: { page, limit, total, totalPages: Math.ceil(total / limit) } };
   }

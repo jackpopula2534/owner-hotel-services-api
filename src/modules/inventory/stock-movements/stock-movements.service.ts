@@ -23,23 +23,38 @@ interface StockMovementDetail {
   id: string;
   tenantId: string;
   warehouseId: string;
+  /** @deprecated kept for backward compat; prefer `warehouse.name` */
   warehouseName?: string;
+  warehouse?: { id: string; name: string };
   itemId: string;
+  /** @deprecated kept for backward compat; prefer `item.name` */
   itemName?: string;
+  /** @deprecated kept for backward compat; prefer `item.sku` */
   itemSku?: string;
+  item?: { id: string; name: string; sku: string };
   type: string;
   quantity: number;
   unitCost: number;
+  /** Total movement cost (qty * unitCost). Mirrors DB `totalCost` field. */
+  totalCost: number;
+  /** @deprecated alias of `totalCost` for backward compat */
   totalValue: number;
   referenceType?: string;
   referenceId?: string;
   transferWarehouseId?: string;
   notes?: string;
   batchNumber?: string;
-  expiryDate?: string;
+  expiryDate?: string | Date | null;
+  lotId?: string | null;
+  lot?: { id: string; lotNumber: string; expiryDate?: Date | null; status: string } | null;
+  /** Raw user id of the actor (kept for backward compat). */
   createdBy: string;
+  /** Display name resolved from User table. */
+  createdByName?: string;
+  /** Populated user record for the actor (firstName/lastName/email). */
+  createdByUser?: { id: string; firstName: string | null; lastName: string | null; email: string } | null;
   createdAt: Date;
-  updatedAt: Date;
+  updatedAt?: Date;
 }
 
 @Injectable()
@@ -94,6 +109,7 @@ export class StockMovementsService {
         include: {
           warehouse: { select: { id: true, name: true } },
           item: { select: { id: true, name: true, sku: true } },
+          lot: { select: { id: true, lotNumber: true, expiryDate: true, status: true } },
         },
         orderBy: { [sort]: order },
         skip,
@@ -102,7 +118,21 @@ export class StockMovementsService {
       this.prisma.stockMovement.count({ where }),
     ]);
 
-    const data = movements.map((m) => this.mapToDetail(m));
+    // Resolve actor names in a single batch query.
+    // StockMovement.createdBy is a plain UUID string (no FK relation in schema),
+    // so we fetch the matching users separately and stitch them in.
+    const userIds = Array.from(
+      new Set(movements.map((m) => m.createdBy).filter((id): id is string => Boolean(id))),
+    );
+    const users = userIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: userIds } },
+          select: { id: true, firstName: true, lastName: true, email: true },
+        })
+      : [];
+    const userMap = new Map(users.map((u) => [u.id, u]));
+
+    const data = movements.map((m) => this.mapToDetail(m, userMap.get(m.createdBy) ?? null));
 
     return {
       data,
@@ -124,6 +154,7 @@ export class StockMovementsService {
       include: {
         warehouse: { select: { id: true, name: true } },
         item: { select: { id: true, name: true, sku: true } },
+        lot: { select: { id: true, lotNumber: true, expiryDate: true, status: true } },
       },
     });
 
@@ -135,7 +166,14 @@ export class StockMovementsService {
       throw new NotFoundException(`Stock movement with ID ${id} not found`);
     }
 
-    return this.mapToDetail(movement);
+    const user = movement.createdBy
+      ? await this.prisma.user.findUnique({
+          where: { id: movement.createdBy },
+          select: { id: true, firstName: true, lastName: true, email: true },
+        })
+      : null;
+
+    return this.mapToDetail(movement, user);
   }
 
   /**
@@ -393,13 +431,21 @@ export class StockMovementsService {
       include: {
         warehouse: { select: { id: true, name: true } },
         item: { select: { id: true, name: true, sku: true } },
+        lot: { select: { id: true, lotNumber: true, expiryDate: true, status: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
 
+    const transferUser = toMovement?.createdBy
+      ? await this.prisma.user.findUnique({
+          where: { id: toMovement.createdBy },
+          select: { id: true, firstName: true, lastName: true, email: true },
+        })
+      : null;
+
     return {
       from: fromMovement,
-      to: toMovement ? this.mapToDetail(toMovement) : fromMovement,
+      to: toMovement ? this.mapToDetail(toMovement, transferUser) : fromMovement,
     };
   }
 
@@ -556,31 +602,91 @@ export class StockMovementsService {
   }
 
   /**
-   * Private: Map database record to detail response
+   * Private: Map database record to detail response.
+   *
+   * Resolves the following display issues that show up in the UI:
+   *  - Prisma Decimal fields (`unitCost`, `totalCost`) are coerced to plain
+   *    numbers so the frontend's `formatCurrency` does not produce `NaN`.
+   *  - The DB column is `totalCost`; we expose it under both `totalCost`
+   *    (preferred) and `totalValue` (legacy alias) for backward compatibility.
+   *  - Nested `item` / `warehouse` objects are forwarded so the frontend can
+   *    read `movement.item.name`, `movement.warehouse.name`, etc.
+   *  - The actor record (looked up separately because `createdBy` has no FK
+   *    relation in the Prisma schema) is attached as `createdByUser` and a
+   *    pre-formatted `createdByName` for direct rendering.
    */
-  private mapToDetail(movement: any): StockMovementDetail {
+  private mapToDetail(
+    movement: any,
+    user: { id: string; firstName: string | null; lastName: string | null; email: string } | null = null,
+  ): StockMovementDetail {
+    const unitCost = this.toNumber(movement.unitCost);
+    const totalCost = this.toNumber(movement.totalCost);
+
+    const createdByName = user
+      ? [user.firstName, user.lastName].filter(Boolean).join(' ').trim() || user.email
+      : undefined;
+
     return {
       id: movement.id,
       tenantId: movement.tenantId,
       warehouseId: movement.warehouseId,
       warehouseName: movement.warehouse?.name,
+      warehouse: movement.warehouse
+        ? { id: movement.warehouse.id, name: movement.warehouse.name }
+        : undefined,
       itemId: movement.itemId,
       itemName: movement.item?.name,
       itemSku: movement.item?.sku,
+      item: movement.item
+        ? { id: movement.item.id, name: movement.item.name, sku: movement.item.sku }
+        : undefined,
       type: movement.type,
       quantity: movement.quantity,
-      unitCost: movement.unitCost,
-      totalValue: movement.totalValue,
-      referenceType: movement.referenceType,
-      referenceId: movement.referenceId,
-      transferWarehouseId: movement.transferWarehouseId,
-      notes: movement.notes,
-      batchNumber: movement.batchNumber,
-      expiryDate: movement.expiryDate,
+      unitCost,
+      totalCost,
+      totalValue: totalCost,
+      referenceType: movement.referenceType ?? undefined,
+      referenceId: movement.referenceId ?? undefined,
+      transferWarehouseId: movement.transferWarehouseId ?? undefined,
+      notes: movement.notes ?? undefined,
+      batchNumber: movement.batchNumber ?? undefined,
+      expiryDate: movement.expiryDate ?? null,
+      lotId: movement.lotId ?? null,
+      lot: movement.lot
+        ? {
+            id: movement.lot.id,
+            lotNumber: movement.lot.lotNumber,
+            expiryDate: movement.lot.expiryDate ?? null,
+            status: movement.lot.status,
+          }
+        : null,
       createdBy: movement.createdBy,
+      createdByName,
+      createdByUser: user,
       createdAt: movement.createdAt,
       updatedAt: movement.updatedAt,
     };
+  }
+
+  /**
+   * Coerce a Prisma `Decimal` (or anything number-ish) into a plain JS number.
+   * Returns 0 for null/undefined/non-finite inputs so the frontend never
+   * receives `NaN` for the value column.
+   */
+  private toNumber(value: unknown): number {
+    if (value === null || value === undefined) return 0;
+    if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+    if (typeof value === 'string') {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+    // Prisma Decimal exposes a `.toNumber()` helper.
+    if (typeof (value as { toNumber?: () => number }).toNumber === 'function') {
+      const parsed = (value as { toNumber: () => number }).toNumber();
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
   }
 
   /**

@@ -49,6 +49,7 @@ describe('GoodsReceivesService', () => {
       sequenceCalls: [] as any[],
       inventoryLotInserts: [] as any[],
       warehouseStockUpserts: [] as any[],
+      qcRecordsInserted: [] as any[],
     };
 
     const warehouseRow = { id: warehouseId, tenantId, name: 'คลังกลาง' };
@@ -170,6 +171,19 @@ describe('GoodsReceivesService', () => {
         update: jest.fn().mockImplementation(({ where, data }: any) => {
           state.warehouseStockUpserts.push({ op: 'update', where, data });
           return data;
+        }),
+      },
+      // QC tables only see traffic when an item with requiresQC=true is
+      // received. Default mocks return empty so non-QC tests stay quiet;
+      // tests that exercise the QC branch override them per-case.
+      qCTemplate: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      qCRecord: {
+        create: jest.fn().mockImplementation(({ data }: any) => {
+          const row = { id: `qcr-${state.qcRecordsInserted.length + 1}`, ...data };
+          state.qcRecordsInserted.push(row);
+          return row;
         }),
       },
       documentSequence: {
@@ -327,6 +341,72 @@ describe('GoodsReceivesService', () => {
       expect(mockPrisma.inventoryLot.create).not.toHaveBeenCalled();
       expect(mockPrisma.warehouseStock.create).not.toHaveBeenCalled();
       expect(mockPrisma.warehouseStock.update).not.toHaveBeenCalled();
+    });
+
+    it('auto-creates a PENDING QC record when a matching template exists', async () => {
+      // Catalog: item requires QC AND has a defaultQCTemplateId
+      const itemRequiringQC = 'item-needs-qc-with-tpl';
+      mockPrisma.inventoryItem.findMany.mockImplementationOnce(({ where }: any) => {
+        const ids: string[] = where?.id?.in ?? [];
+        return ids.map((id: string) => ({
+          id,
+          isPerishable: false,
+          requiresLotTracking: false,
+          requiresQC: id === itemRequiringQC,
+          // Direct template wins the resolution cascade
+          defaultQCTemplateId:
+            id === itemRequiringQC ? 'tpl-default-1' : null,
+          categoryId: null,
+        }));
+      });
+
+      await service.create(
+        baseDto({
+          items: [
+            { itemId: itemRequiringQC, receivedQty: 5, unitCost: 100 },
+          ],
+        }),
+        userId,
+        tenantId,
+      );
+
+      // Exactly one QC record was created and linked to the GR
+      expect(mockPrisma.qCRecord.create).toHaveBeenCalledTimes(1);
+      const qcCall = mockPrisma.qCRecord.create.mock.calls[0][0];
+      expect(qcCall.data.templateId).toBe('tpl-default-1');
+      expect(qcCall.data.tenantId).toBe(tenantId);
+      expect(qcCall.data.goodsReceiveId).toBeTruthy();
+    });
+
+    it('skips auto-create QC silently when no template can be resolved', async () => {
+      // Item requires QC but has no defaultQCTemplateId, no ITEM-scope, no CATEGORY-scope
+      const itemRequiringQC = 'item-needs-qc-no-tpl';
+      mockPrisma.inventoryItem.findMany.mockImplementationOnce(({ where }: any) => {
+        const ids: string[] = where?.id?.in ?? [];
+        return ids.map((id: string) => ({
+          id,
+          isPerishable: false,
+          requiresLotTracking: false,
+          requiresQC: id === itemRequiringQC,
+          defaultQCTemplateId: null,
+          categoryId: null,
+        }));
+      });
+      // qCTemplate.findMany default mock returns [] — no template will match.
+
+      await service.create(
+        baseDto({
+          items: [
+            { itemId: itemRequiringQC, receivedQty: 3, unitCost: 100 },
+          ],
+        }),
+        userId,
+        tenantId,
+      );
+
+      // GR is still DRAFT, but no QC record was created
+      expect(mockPrisma.goodsReceive.create.mock.calls[0][0].data.status).toBe('DRAFT');
+      expect(mockPrisma.qCRecord.create).not.toHaveBeenCalled();
     });
 
     it('fast-paths to ACCEPTED when no item requires QC (legacy behavior preserved)', async () => {
