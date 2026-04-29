@@ -117,11 +117,7 @@ export class QCController {
   @ApiResponse({ status: 200, description: 'Record updated with status' })
   @Post('records/:id/submit')
   @HttpCode(HttpStatus.OK)
-  submitRecord(
-    @Request() req: any,
-    @Param('id') id: string,
-    @Body() dto: SubmitQCRecordDto,
-  ) {
+  submitRecord(@Request() req: any, @Param('id') id: string, @Body() dto: SubmitQCRecordDto) {
     return this.qcService.submitRecord(req.user.tenantId, id, dto);
   }
 

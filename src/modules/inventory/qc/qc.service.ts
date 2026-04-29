@@ -45,26 +45,139 @@ export class QCService {
       throw new BadRequestException('ต้องระบุ itemId เมื่อ appliesTo = ITEM');
     }
 
-    return this.prisma.qCTemplate.create({
-      data: {
-        tenantId,
-        name: dto.name,
-        appliesTo: dto.appliesTo,
-        categoryId: dto.categoryId,
-        itemId: dto.itemId,
-        checklistItems: dto.checklistItems?.length
-          ? { create: dto.checklistItems }
-          : undefined,
-      },
-      include: { checklistItems: { orderBy: { orderIndex: 'asc' } } },
-    });
+    // Pre-flight existence + tenant-scope check so the user gets a friendly
+    // 404 instead of a Prisma P2003 foreign-key explosion at write time.
+    if (dto.appliesTo === 'CATEGORY' && dto.categoryId) {
+      const cat = await this.prisma.itemCategory.findFirst({
+        where: { id: dto.categoryId, tenantId },
+        select: { id: true },
+      });
+      if (!cat) {
+        throw new NotFoundException(`ไม่พบหมวดหมู่สินค้าในระบบ (categoryId=${dto.categoryId})`);
+      }
+    }
+    if (dto.appliesTo === 'ITEM' && dto.itemId) {
+      const item = await this.prisma.inventoryItem.findFirst({
+        where: { id: dto.itemId, tenantId },
+        select: { id: true },
+      });
+      if (!item) {
+        throw new NotFoundException(`ไม่พบสินค้าในระบบ (itemId=${dto.itemId})`);
+      }
+    }
+
+    // Normalize checklist items so each row gets a sequential orderIndex even
+    // if the client forgot to send one (DTO defaults to 0 → all rows would
+    // collide on the index).
+    const checklistData = (dto.checklistItems ?? []).map((ci, idx) => ({
+      label: ci.label,
+      type: ci.type,
+      required: ci.required ?? true,
+      orderIndex: typeof ci.orderIndex === 'number' ? ci.orderIndex : idx,
+      passCondition: ci.passCondition ? (ci.passCondition as unknown as object) : undefined,
+    }));
+
+    try {
+      return await this.prisma.qCTemplate.create({
+        data: {
+          tenantId,
+          name: dto.name,
+          appliesTo: dto.appliesTo,
+          categoryId: dto.appliesTo === 'CATEGORY' ? dto.categoryId : null,
+          itemId: dto.appliesTo === 'ITEM' ? dto.itemId : null,
+          checklistItems: checklistData.length ? { create: checklistData } : undefined,
+        },
+        include: { checklistItems: { orderBy: { orderIndex: 'asc' } } },
+      });
+    } catch (e: unknown) {
+      this.logger.error('createTemplate failed', e instanceof Error ? e.stack : String(e));
+      // Surface a meaningful error to the API consumer instead of a 500.
+      throw new BadRequestException(
+        e instanceof Error ? e.message : 'ไม่สามารถสร้าง QC Template ได้',
+      );
+    }
   }
 
   async updateTemplate(tenantId: string, id: string, dto: UpdateQCTemplateDto) {
-    await this.findTemplateOrThrow(tenantId, id);
+    const existing = await this.findTemplateOrThrow(tenantId, id);
+
+    // Resolve effective appliesTo — may come from dto or fall back to current value.
+    const effectiveAppliesTo = dto.appliesTo ?? existing.appliesTo;
+
+    // Validate scope fields when changing appliesTo or the associated ID.
+    if (effectiveAppliesTo === 'CATEGORY') {
+      const effectiveCategoryId = dto.categoryId ?? (existing.appliesTo === 'CATEGORY' ? existing.categoryId : undefined);
+      if (!effectiveCategoryId) {
+        throw new BadRequestException('ต้องระบุ categoryId เมื่อ appliesTo = CATEGORY');
+      }
+      if (dto.categoryId) {
+        const cat = await this.prisma.itemCategory.findFirst({
+          where: { id: dto.categoryId, tenantId },
+          select: { id: true },
+        });
+        if (!cat) throw new NotFoundException(`ไม่พบหมวดหมู่สินค้า (categoryId=${dto.categoryId})`);
+      }
+    }
+
+    if (effectiveAppliesTo === 'ITEM') {
+      const effectiveItemId = dto.itemId ?? (existing.appliesTo === 'ITEM' ? existing.itemId : undefined);
+      if (!effectiveItemId) {
+        throw new BadRequestException('ต้องระบุ itemId เมื่อ appliesTo = ITEM');
+      }
+      if (dto.itemId) {
+        const item = await this.prisma.inventoryItem.findFirst({
+          where: { id: dto.itemId, tenantId },
+          select: { id: true },
+        });
+        if (!item) throw new NotFoundException(`ไม่พบสินค้า (itemId=${dto.itemId})`);
+      }
+    }
+
+    // Build scalar update payload — only include fields actually sent by client.
+    const scalarUpdate: Record<string, unknown> = {};
+    if (dto.name !== undefined)     scalarUpdate.name     = dto.name;
+    if (dto.isActive !== undefined) scalarUpdate.isActive = dto.isActive;
+    if (dto.appliesTo !== undefined) {
+      scalarUpdate.appliesTo  = dto.appliesTo;
+      // Nullify the opposite scope ID when switching scope type.
+      scalarUpdate.categoryId = dto.appliesTo === 'CATEGORY' ? (dto.categoryId ?? existing.categoryId) : null;
+      scalarUpdate.itemId     = dto.appliesTo === 'ITEM'     ? (dto.itemId     ?? existing.itemId)     : null;
+    } else {
+      // Scope type unchanged — allow updating individual IDs in place.
+      if (dto.categoryId !== undefined) scalarUpdate.categoryId = dto.categoryId;
+      if (dto.itemId     !== undefined) scalarUpdate.itemId     = dto.itemId;
+    }
+
+    // If checklistItems were sent, replace the entire set inside a transaction.
+    if (dto.checklistItems !== undefined) {
+      const checklistData = dto.checklistItems.map((ci, idx) => ({
+        label:         ci.label,
+        type:          ci.type,
+        required:      ci.required ?? true,
+        orderIndex:    typeof ci.orderIndex === 'number' ? ci.orderIndex : idx,
+        passCondition: ci.passCondition ? (ci.passCondition as unknown as object) : undefined,
+      }));
+
+      return this.prisma.$transaction(async (tx) => {
+        // Delete all existing checklist items then recreate — simpler than
+        // diffing by label/type and avoids stale orderIndex collisions.
+        await tx.qCChecklistItem.deleteMany({ where: { templateId: id } });
+
+        return tx.qCTemplate.update({
+          where: { id },
+          data: {
+            ...scalarUpdate,
+            checklistItems: checklistData.length ? { create: checklistData } : undefined,
+          },
+          include: { checklistItems: { orderBy: { orderIndex: 'asc' } } },
+        });
+      });
+    }
+
+    // No checklist update — simple scalar patch.
     return this.prisma.qCTemplate.update({
       where: { id },
-      data: { ...dto },
+      data: scalarUpdate,
       include: { checklistItems: { orderBy: { orderIndex: 'asc' } } },
     });
   }
@@ -81,7 +194,17 @@ export class QCService {
   async addChecklistItem(tenantId: string, templateId: string, dto: CreateChecklistItemDto) {
     await this.findTemplateOrThrow(tenantId, templateId);
     return this.prisma.qCChecklistItem.create({
-      data: { templateId, ...dto },
+      data: {
+        templateId,
+        label: dto.label,
+        type: dto.type,
+        required: dto.required ?? true,
+        orderIndex: dto.orderIndex ?? 0,
+        // PassConditionDto is a class instance — Prisma's JSON column accepts
+        // a plain object, so cast through `unknown` to satisfy the typed
+        // generated input.
+        passCondition: dto.passCondition ? (dto.passCondition as unknown as object) : undefined,
+      },
     });
   }
 
@@ -152,9 +275,7 @@ export class QCService {
     // without extra fetches per row.
     const grIds = Array.from(
       new Set(
-        rawData
-          .map((r: any) => r.goodsReceiveId)
-          .filter((id: string | null): id is string => !!id),
+        rawData.map((r: any) => r.goodsReceiveId).filter((id: string | null): id is string => !!id),
       ),
     );
     const inspectorIds = Array.from(
@@ -218,9 +339,7 @@ export class QCService {
         inspectedBy: rec.inspectedBy,
         inspectedByName: inspectorMap.get(rec.inspectedBy) ?? null,
         durationMs,
-        template: rec.template
-          ? { id: rec.template.id, name: rec.template.name }
-          : null,
+        template: rec.template ? { id: rec.template.id, name: rec.template.name } : null,
         lot: rec.lot,
         goodsReceiveId: rec.goodsReceiveId,
         goodsReceiveNumber: gr?.grNumber ?? null,
@@ -233,8 +352,7 @@ export class QCService {
           passed,
           failed,
           passRate: completed > 0 ? Math.round((passed / completed) * 100) : 0,
-          completionRate:
-            checklistTotal > 0 ? Math.round((completed / checklistTotal) * 100) : 0,
+          completionRate: checklistTotal > 0 ? Math.round((completed / checklistTotal) * 100) : 0,
         },
       };
     });
@@ -369,9 +487,7 @@ export class QCService {
       where: { recordId, checklistItemId },
     });
 
-    const photoUrls = existing
-      ? [...((existing.photoUrls as string[]) ?? []), url]
-      : [url];
+    const photoUrls = existing ? [...((existing.photoUrls as string[]) ?? []), url] : [url];
 
     return this.prisma.qCResult.upsert({
       where: { id: existing?.id ?? '' },
