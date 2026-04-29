@@ -11,6 +11,10 @@ export class SubscriptionFeaturesService {
       subscription_id: createSubscriptionFeatureDto.subscriptionId,
       feature_id: createSubscriptionFeatureDto.featureId,
       price: createSubscriptionFeatureDto.price,
+      // Always explicitly set is_active=1 so AddonGuard's `where: { is_active: 1 }`
+      // filter reliably finds this row. Never rely on DB default alone — some older
+      // migration paths or manual inserts may leave the column as NULL.
+      is_active: 1,
     };
 
     // Clean up undefined properties

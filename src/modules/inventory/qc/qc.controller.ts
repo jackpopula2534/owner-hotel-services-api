@@ -95,8 +95,12 @@ export class QCController {
 
   @ApiOperation({ summary: 'List QC records with filters' })
   @Get('records')
-  listRecords(@Request() req: any, @Query() query: QueryQCRecordDto) {
-    return this.qcService.listRecords(req.user.tenantId, query);
+  async listRecords(@Request() req: any, @Query() query: QueryQCRecordDto) {
+    // Wrap response in { success, data } so apiClient's auto-unwrap returns
+    // { data: [...], meta: {...} } to the frontend store (consistent with other
+    // inventory controllers that return { success: true, data: result }).
+    const result = await this.qcService.listRecords(req.user.tenantId, query);
+    return { success: true, data: result };
   }
 
   @ApiOperation({ summary: 'Create a new QC record' })

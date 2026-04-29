@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Injectable,
   Logger,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { AddonCode, AddonService } from '@/modules/addons/addon.service';
@@ -68,18 +69,32 @@ export class AddonGuard implements CanActivate {
     const tenantId = request.user?.tenantId;
 
     if (!tenantId) {
-      this.logger.warn(`AddonGuard: tenantId missing in JWT payload — denying access`);
-      throw new ForbiddenException({
-        code: `${requiredAddon}_REQUIRED`,
-        message: `This feature requires an active add-on subscription.`,
-        addon: requiredAddon,
-        upgradeUrl: '/billing/addons',
+      // tenantId missing → the JWT is stale or was issued before onboarding completed.
+      // Return 401 so the frontend's token-refresh interceptor kicks in and
+      // prompts a re-login — NOT 403, which would show a misleading "no permission" toast.
+      this.logger.warn(`AddonGuard: tenantId missing in JWT for user — returning 401 to trigger re-login`);
+      throw new UnauthorizedException({
+        code: 'TENANT_MISSING',
+        message: 'Session expired or account setup incomplete. Please log in again.',
       });
     }
 
-    // 4) Platform admins bypass add-on checks
+    // 4) Platform admins and dedicated procurement roles bypass add-on checks.
+    // Procurement users (procurement_manager, buyer, approver, receiver) authenticate
+    // via /auth/purchasing/login specifically to use the inventory/procurement system,
+    // so gating them behind a per-tenant addon check is incorrect — their access
+    // is governed by role-based guards on each endpoint instead.
     const role = request.user?.role ?? '';
-    if (role === 'platform_admin' || role === 'super_admin' || role === 'admin') {
+    const BYPASS_ROLES = [
+      'platform_admin',
+      'super_admin',
+      'admin',
+      'procurement_manager',
+      'buyer',
+      'approver',
+      'receiver',
+    ];
+    if (BYPASS_ROLES.includes(role)) {
       return true;
     }
 

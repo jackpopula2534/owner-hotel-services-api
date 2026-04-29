@@ -43,7 +43,9 @@ export class CacheService implements OnModuleInit {
     try {
       const cacheKey = this.generateKey(key, namespace);
       const value = await this.cacheManager.get<T>(cacheKey);
-      return value || null;
+      // NOTE: must NOT use `value || null` — that coerces falsy values like
+      // `false` and `0` to null, causing cache misses for boolean addon checks.
+      return value !== undefined && value !== null ? value : null;
     } catch (error) {
       this.logger.error(`Cache get error: ${error.message}`);
       return null;
@@ -83,15 +85,34 @@ export class CacheService implements OnModuleInit {
    * Get or set - fetch from cache or execute function and cache result
    */
   async getOrSet<T>(key: string, fetchFn: () => Promise<T>, config?: CacheConfig): Promise<T> {
-    // Try to get from cache
-    const cached = await this.get<T>(key, config?.namespace);
-    if (cached !== null) {
-      return cached;
+    // Use a sentinel-wrapped get to distinguish "not cached" (null) from a
+    // legitimately cached falsy value (false, 0, empty string, etc.).
+    const cacheKey = this.generateKey(key, config?.namespace);
+
+    if (this.isConnected) {
+      try {
+        const raw = await this.cacheManager.get<{ v: T }>(cacheKey);
+        if (raw !== undefined && raw !== null) {
+          return raw.v; // cache hit — unwrap sentinel
+        }
+      } catch (err) {
+        this.logger.error(`Cache get error in getOrSet: ${(err as Error).message}`);
+      }
     }
 
-    // Fetch and cache
+    // Cache miss — fetch from source
     const value = await fetchFn();
-    await this.set(key, value, config);
+
+    // Store wrapped in sentinel so falsy values (false, 0, '') survive the cache round-trip
+    if (this.isConnected) {
+      try {
+        const ttl = (config?.ttl ?? 300) * 1000;
+        await this.cacheManager.set(cacheKey, { v: value }, ttl);
+      } catch (err) {
+        this.logger.error(`Cache set error in getOrSet: ${(err as Error).message}`);
+      }
+    }
+
     return value;
   }
 
