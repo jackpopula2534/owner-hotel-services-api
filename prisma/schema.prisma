@@ -2575,6 +2575,7 @@ model GoodsReceive {
   purchaseOrder PurchaseOrder?     @relation(fields: [purchaseOrderId], references: [id])
   warehouse     Warehouse          @relation(fields: [warehouseId], references: [id])
   items         GoodsReceiveItem[]
+  qcRecords     QCRecord[]
 
   @@unique([tenantId, grNumber])
   @@index([tenantId])
@@ -3651,6 +3652,7 @@ model QCRecord {
 
   template        QCTemplate      @relation(fields: [templateId], references: [id])
   lot             InventoryLot?   @relation(fields: [lotId], references: [id])
+  goodsReceive    GoodsReceive?   @relation(fields: [goodsReceiveId], references: [id])
   results         QCResult[]
 
   @@index([tenantId])

@@ -215,6 +215,7 @@ export class GoodsReceivesService {
             },
           },
           items: true,
+          qcRecords: { select: { id: true } },
         },
         orderBy: { [sort]: order },
         skip,
@@ -281,12 +282,12 @@ export class GoodsReceivesService {
         },
         items: {
           include: {
-            // requiresQC drives the "pending QC" banner — must be fetched here.
             item: {
               select: { id: true, name: true, sku: true, unit: true, requiresQC: true },
             },
           },
         },
+        qcRecords: { select: { id: true } },
       },
     });
 
@@ -422,8 +423,12 @@ export class GoodsReceivesService {
         }
       }
 
-      // 3. Pre-flight: load all inventory items so we know their requiresQC
-      // upfront and can decide whether to create as DRAFT or fast-path to ACCEPTED.
+      // 3. Pre-flight: load all inventory items.
+      // NOTE: We no longer rely on the `requiresQC` flag on InventoryItem to
+      // decide whether QC is needed. Instead, the existence of a matching
+      // QC Template (by defaultQCTemplateId, ITEM-scope, or CATEGORY-scope)
+      // is the single source of truth. This means setting up a QCTemplate is
+      // sufficient — no need to also flip a flag on every item master.
       const itemIds = dto.items.map((i) => i.itemId);
       const invItems = await tx.inventoryItem.findMany({
         where: { id: { in: itemIds }, tenantId },
@@ -432,7 +437,6 @@ export class GoodsReceivesService {
         throw new NotFoundException('One or more inventory items not found');
       }
       const invItemMap = new Map(invItems.map((i: any) => [i.id, i]));
-      const requiresQC = invItems.some((i: any) => i.requiresQC === true);
 
       // 4. Generate GR number
       const grNumber = await this.generateGRNumber(tenantId, tx);
@@ -489,10 +493,23 @@ export class GoodsReceivesService {
         goodsReceive.totalAmount = computedTotal as any;
       }
 
-      // 8. Fast-path: if NO item requires QC, run acceptance immediately
-      //    so behavior matches the legacy auto-accept flow for items where
-      //    QC is not required by the master record.
-      if (!requiresQC) {
+      // 8. Attempt to auto-create PENDING QC records for all received items by
+      //    matching against active QC Templates (3-tier cascade: defaultQCTemplateId
+      //    → ITEM-scoped template → CATEGORY-scoped template).
+      //    The template is the SINGLE source of truth — the `requiresQC` flag on
+      //    InventoryItem is no longer used to gate this path, so operators only
+      //    need to set up a template and not also flip a flag on every item.
+      const qcRecordsCreated = await this._createPendingQCRecords(
+        tx,
+        tenantId,
+        goodsReceive.id,
+        dto.items,
+        invItemMap,
+        userId,
+      );
+
+      if (qcRecordsCreated === 0) {
+        // Fast-path: no matching QC template for any item → accept immediately.
         const result = await this._applyAcceptance(
           tx,
           goodsReceive,
@@ -511,9 +528,9 @@ export class GoodsReceivesService {
         grEventPayload = result.grEventPayload;
         // grItems were updated in-place inside _applyAcceptance to carry lotId.
       } else {
-        // QC-pending path: build a basic gr.completed event so consumers know a
-        // GR was registered (status will be DRAFT in the payload). PO progress
-        // is NOT emitted yet — it'll fire when the user explicitly accepts.
+        // QC-pending path: at least one item has a matching template.
+        // Build a basic gr.registered event so consumers know a GR was recorded
+        // (status=DRAFT). PO progress fires only after explicit accept/reject.
         grEventPayload = {
           grId: goodsReceive.id,
           grNumber: goodsReceive.grNumber,
@@ -530,18 +547,6 @@ export class GoodsReceivesService {
           })),
           receivedBy: userId,
         };
-
-        // 8b. Auto-create PENDING QC records for every received item that
-        // requires QC. Without this step the QC inbox stays empty and users
-        // must remember to create records manually — easy to miss.
-        await this._createPendingQCRecords(
-          tx,
-          tenantId,
-          goodsReceive.id,
-          dto.items,
-          invItemMap,
-          userId,
-        );
       }
 
       // 9. Return full details
@@ -550,6 +555,9 @@ export class GoodsReceivesService {
         warehouse: { id: warehouse.id, name: warehouse.name },
         purchaseOrder: po ? { id: po.id, poNumber: po.poNumber } : null,
         items: grItems,
+        // Synthetic array — mapToDetail only needs length > 0 to set requiresQC/qcPending.
+        // Real IDs are available via findOne; this avoids an extra round-trip.
+        qcRecords: Array.from({ length: qcRecordsCreated }, () => ({ id: '' })),
       });
     });
 
@@ -618,6 +626,7 @@ export class GoodsReceivesService {
             item: { select: { id: true, name: true, sku: true } },
           },
         },
+        qcRecords: { select: { id: true } },
       },
     });
 
@@ -643,6 +652,10 @@ export class GoodsReceivesService {
    * Idempotency: only called inside the create() transaction, so no risk of
    * double-creation. If the tx rolls back the QC records roll back too.
    */
+  /**
+   * Returns the number of QC records actually created.
+   * 0 means no matching template was found → caller should fast-path to accept.
+   */
   private async _createPendingQCRecords(
     tx: any,
     tenantId: string,
@@ -650,17 +663,15 @@ export class GoodsReceivesService {
     sourceItems: Array<{ itemId: string }>,
     invItemMap: Map<string, any>,
     userId: string,
-  ): Promise<void> {
+  ): Promise<number> {
     // Deduplicate by itemId — if the GR has the same item on two lines we still
     // want a single QC record (a QC inspection is per-item, not per-line).
+    // NOTE: We no longer filter by requiresQC here — template existence is the
+    // sole trigger. Every item is a candidate; the template lookup decides.
     const qcCandidateIds = Array.from(
-      new Set(
-        sourceItems
-          .map((it) => it.itemId)
-          .filter((id) => invItemMap.get(id)?.requiresQC === true),
-      ),
+      new Set(sourceItems.map((it) => it.itemId)),
     );
-    if (qcCandidateIds.length === 0) return;
+    if (qcCandidateIds.length === 0) return 0;
 
     // Pre-load all candidate templates in two round-trips:
     //   1. ITEM-scoped templates for any of these items
@@ -703,6 +714,8 @@ export class GoodsReceivesService {
       categoryTemplates.map((t: any) => [t.categoryId, t.id]),
     );
 
+    let createdCount = 0;
+
     for (const itemId of qcCandidateIds) {
       const inv = invItemMap.get(itemId);
       const templateId =
@@ -711,10 +724,8 @@ export class GoodsReceivesService {
         (inv?.categoryId ? categoryTemplateMap.get(inv.categoryId) : undefined);
 
       if (!templateId) {
-        this.logger.warn(
-          `Skipped auto-creating QC record for item ${itemId} on GR ${goodsReceiveId}: ` +
-            `no QC template found (defaultQCTemplateId, ITEM-scope, CATEGORY-scope all empty).`,
-        );
+        // No template → item doesn't need QC. This is normal for items that
+        // have no QC template configured. No warning needed (not a problem).
         continue;
       }
 
@@ -729,7 +740,10 @@ export class GoodsReceivesService {
           // QCRecord.status default is PENDING (see prisma schema).
         },
       });
+      createdCount++;
     }
+
+    return createdCount;
   }
 
   /**
@@ -1060,6 +1074,7 @@ export class GoodsReceivesService {
               item: { select: { id: true, name: true, sku: true, unit: true, requiresQC: true } },
             },
           },
+          qcRecords: { select: { id: true } },
         },
       });
       return fresh;
@@ -1253,11 +1268,14 @@ export class GoodsReceivesService {
       invoiceNumber: receive.invoiceNumber,
       invoiceDate: receive.invoiceDate?.toISOString(),
       status: receive.status,
-      // Aggregate requiresQC across the GR lines so the UI can show the
-      // pending-QC banner without doing its own join.
-      requiresQC: items.some((it: any) => it.item?.requiresQC === true),
+      // requiresQC / qcPending are now derived from actual QC records on this GR,
+      // not from the item-master flag. This correctly reflects template-driven QC
+      // (an item with no requiresQC flag but a matching template will show the banner).
+      requiresQC: Array.isArray(receive.qcRecords) && receive.qcRecords.length > 0,
       qcPending:
-        items.some((it: any) => it.item?.requiresQC === true) && !receive.inspectedAt,
+        Array.isArray(receive.qcRecords) &&
+        receive.qcRecords.length > 0 &&
+        !receive.inspectedAt,
       itemCount: items.length,
       totalReceivedQty,
       totalRejectedQty,
