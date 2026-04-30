@@ -384,10 +384,16 @@ export class QCService {
         template: { include: { checklistItems: { orderBy: { orderIndex: 'asc' } } } },
         results: { include: { checklistItem: true } },
         lot: { select: { id: true, lotNumber: true, status: true } },
+        goodsReceive: { select: { id: true, status: true } },
       },
     });
     if (!record) throw new NotFoundException(`ไม่พบ QC Record ID: ${id}`);
-    return record;
+    // Surface the GR status as a flat field so the frontend can decide
+    // whether to show Accept/Reject buttons or an "already accepted" badge.
+    return {
+      ...record,
+      goodsReceiveStatus: record.goodsReceive?.status ?? null,
+    };
   }
 
   async submitRecord(tenantId: string, id: string, dto: SubmitQCRecordDto) {

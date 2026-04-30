@@ -1,6 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, VersioningType, Logger } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
+import { json, urlencoded } from 'express';
 import { join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import { AppModule } from './app.module';
@@ -21,6 +22,12 @@ async function bootstrap() {
 
   // Serve static files from uploads directory
   app.useStaticAssets(uploadsPath, { prefix: '/uploads' });
+
+  // Increase body parser limit to 10 MB to support QC submissions that include
+  // base64-encoded photos (up to 5 images) and inspector signature data URLs.
+  // Default Express limit is 100 kb — far too small for image payloads.
+  app.use(json({ limit: '10mb' }));
+  app.use(urlencoded({ limit: '10mb', extended: true }));
 
   // Global validation pipe
   app.useGlobalPipes(

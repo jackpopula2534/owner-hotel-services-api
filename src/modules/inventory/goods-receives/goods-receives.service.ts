@@ -1001,6 +1001,22 @@ export class GoodsReceivesService {
       if (!gr || gr.tenantId !== tenantId) {
         throw new NotFoundException('Goods receive not found');
       }
+      // Idempotent: if GR is already ACCEPTED (e.g. fast-pathed at creation
+      // before a QC template existed, then QC was run manually later),
+      // treat this as a no-op success instead of throwing a conflict.
+      if (gr.status === 'ACCEPTED') {
+        // Idempotent no-op — return current state without re-running acceptance.
+        const fresh = await tx.goodsReceive.findUnique({
+          where: { id },
+          include: {
+            items: true,
+            warehouse: true,
+            purchaseOrder: { include: { items: true } },
+            qcRecords: { select: { id: true } },
+          },
+        });
+        return fresh;
+      }
       if (gr.status !== 'DRAFT' && gr.status !== 'INSPECTING') {
         throw new ConflictException(
           'Only DRAFT or INSPECTING goods receives can be accepted',
@@ -1109,6 +1125,14 @@ export class GoodsReceivesService {
     const gr = await this.prisma.goodsReceive.findUnique({ where: { id } });
     if (!gr || gr.tenantId !== tenantId) {
       throw new NotFoundException('Goods receive not found');
+    }
+    if (gr.status === 'ACCEPTED') {
+      throw new ConflictException(
+        'ไม่สามารถปฏิเสธ GR ที่รับเข้าสต็อกแล้ว — สต็อกถูกเพิ่มไปแล้ว กรุณาทำรายการปรับลดสต็อกแทน',
+      );
+    }
+    if (gr.status === 'REJECTED') {
+      throw new ConflictException('GR นี้ถูกปฏิเสธไปแล้ว');
     }
     if (gr.status !== 'DRAFT' && gr.status !== 'INSPECTING') {
       throw new ConflictException(

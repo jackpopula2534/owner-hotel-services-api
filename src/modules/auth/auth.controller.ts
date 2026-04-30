@@ -237,6 +237,58 @@ export class AuthController {
     return { success: true, message: 'Logged out from Warehouse system' };
   }
 
+  // ─── Hotel Management Terminal Sub-System ───────────────────────────────────
+
+  @Post('hotel-terminal/login')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Login to Hotel Management Terminal',
+    description:
+      'Creates a session tagged systemContext="hotel-terminal". ' +
+      'Validates that the user has "hotel-terminal" in their allowedSystems. ' +
+      'Tokens issued here are scoped to the hotel terminal sub-system only. ' +
+      'Logging out from this terminal will NOT affect the main dashboard, ' +
+      'POS, procurement, or warehouse sessions.',
+  })
+  @ApiResponse({ status: 200, description: 'Hotel terminal login successful' })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized or account not allowed to access Hotel Terminal',
+  })
+  async hotelTerminalLogin(@Body() loginDto: LoginDto, @Req() req: Request) {
+    return this.authService.login(
+      loginDto,
+      {
+        ipAddress: req.ip ?? req.socket?.remoteAddress,
+        userAgent: req.headers['user-agent'],
+      },
+      'hotel-terminal',
+    );
+  }
+
+  @Post('hotel-terminal/logout')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 50, ttl: 60 } })
+  @ApiBearerAuth('JWT-auth')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Logout from Hotel Management Terminal only',
+    description:
+      'Revokes only hotel terminal session tokens. ' +
+      'The main hotel management dashboard, POS, procurement, and warehouse ' +
+      'sessions stay active.',
+  })
+  @ApiResponse({ status: 200, description: 'Hotel terminal session ended' })
+  async hotelTerminalLogout(
+    @CurrentUser() user: any,
+    @Body() body?: { refreshToken?: string },
+  ) {
+    await this.authService.logout(user.userId, body?.refreshToken, 'hotel-terminal');
+    return { success: true, message: 'Logged out from Hotel Management Terminal' };
+  }
+
   @Post('forgot-password')
   @Public()
   @HttpCode(HttpStatus.OK)
@@ -365,6 +417,28 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'Warehouse launch token generated' })
   async warehouseLaunch(@CurrentUser() caller: any, @Req() req: Request) {
     return this.authService.generateWarehouseLaunchToken(
+      { userId: caller.userId, email: caller.email, role: caller.role, tenantId: caller.tenantId },
+      req.ip ?? req.socket?.remoteAddress,
+    );
+  }
+
+  // ─── Hotel Management Terminal Deep-link Launch ─────────────────────────────
+
+  @Post('hotel-terminal-launch')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 30, ttl: 60 } })
+  @ApiOperation({
+    summary:
+      'Generate a short-lived deep-link token to open Hotel Management Terminal pre-authenticated',
+    description:
+      'Returns a 5-minute JWT. The user is logged in as hotel_manager (highest level) ' +
+      'with the full permission set so they can navigate every menu item.',
+  })
+  @ApiResponse({ status: 200, description: 'Hotel Terminal launch token generated' })
+  async hotelTerminalLaunch(@CurrentUser() caller: any, @Req() req: Request) {
+    return this.authService.generateHotelTerminalLaunchToken(
       { userId: caller.userId, email: caller.email, role: caller.role, tenantId: caller.tenantId },
       req.ip ?? req.socket?.remoteAddress,
     );

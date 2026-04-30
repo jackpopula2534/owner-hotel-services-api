@@ -18,6 +18,26 @@ import { PosLaunchDto } from './dto/pos-launch.dto';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 
+// Default permissions granted to a hotel_manager when launching the Hotel
+// Management Terminal via SSO. Front-desk / housekeeper / maintenance staff
+// receive a narrower set stored on the user record (hotelTerminalPermissions).
+const HOTEL_MANAGER_PERMISSIONS = [
+  'property.view',
+  'property.manage',
+  'rooms.view',
+  'rooms.manage',
+  'frontdesk.view',
+  'frontdesk.manage',
+  'bookings.view',
+  'bookings.manage',
+  'guests.view',
+  'guests.manage',
+  'housekeeping.view',
+  'housekeeping.manage',
+  'maintenance.view',
+  'maintenance.manage',
+];
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -207,7 +227,7 @@ export class AuthService {
   async login(
     loginDto: LoginDto,
     deviceInfo?: { ipAddress?: string; userAgent?: string },
-    systemContext: 'main' | 'pos' | 'procurement' | 'warehouse' = 'main',
+    systemContext: 'main' | 'pos' | 'procurement' | 'warehouse' | 'hotel-terminal' = 'main',
   ) {
     const { email, password } = loginDto;
 
@@ -244,7 +264,9 @@ export class AuthService {
                 ? 'บัญชีนี้ไม่มีสิทธิ์เข้าใช้ระบบจัดซื้อ กรุณาติดต่อผู้ดูแลระบบเพื่อขอสิทธิ์เข้าใช้งาน'
                 : systemContext === 'warehouse'
                   ? 'บัญชีนี้ไม่มีสิทธิ์เข้าใช้ระบบคลังสินค้า กรุณาติดต่อผู้ดูแลระบบเพื่อขอสิทธิ์เข้าใช้งาน'
-                  : 'This account is not authorized to access the management dashboard.',
+                  : systemContext === 'hotel-terminal'
+                    ? 'บัญชีนี้ไม่มีสิทธิ์เข้าใช้ระบบจัดการโรงแรม กรุณาติดต่อผู้ดูแลระบบเพื่อขอสิทธิ์เข้าใช้งาน'
+                    : 'This account is not authorized to access the management dashboard.',
           );
         }
       } catch (e) {
@@ -351,6 +373,26 @@ export class AuthService {
           }
         : {};
 
+    // ── Hotel Terminal–specific fields ──────────────────────────────────────
+    // Include hotel terminal metadata (permissions, property linkage) when
+    // logging in via /auth/hotel-terminal/login.
+    const hotelTerminalFields =
+      systemContext === 'hotel-terminal'
+        ? {
+            employeeId: (user as any).employeeId ?? null,
+            permissions: (() => {
+              try {
+                const raw = (user as any).hotelTerminalPermissions;
+                return raw ? JSON.parse(raw) : HOTEL_MANAGER_PERMISSIONS;
+              } catch {
+                return HOTEL_MANAGER_PERMISSIONS;
+              }
+            })(),
+            propertyId: defaultProperty?.id ?? null,
+            propertyName: defaultProperty?.name ?? null,
+          }
+        : {};
+
     return {
       ...tokens,
       user: {
@@ -364,6 +406,7 @@ export class AuthService {
         isPlatformAdmin: false,
         ...procurementFields,
         ...warehouseFields,
+        ...hotelTerminalFields,
       },
       property: defaultProperty ?? null,
     };
@@ -428,7 +471,7 @@ export class AuthService {
     }
 
     // Carry forward the systemContext from the original token
-    const systemContext = ((tokenRecord as any).systemContext as 'main' | 'pos' | 'procurement' | 'warehouse') ?? 'main';
+    const systemContext = ((tokenRecord as any).systemContext as 'main' | 'pos' | 'procurement' | 'warehouse' | 'hotel-terminal') ?? 'main';
 
     // Generate new tokens
     const tokens = await this.generateTokens(
@@ -468,7 +511,7 @@ export class AuthService {
     };
   }
 
-  async logout(userIdOrAdminId: string, refreshToken?: string, systemContext?: 'main' | 'pos' | 'procurement' | 'warehouse') {
+  async logout(userIdOrAdminId: string, refreshToken?: string, systemContext?: 'main' | 'pos' | 'procurement' | 'warehouse' | 'hotel-terminal') {
     if (refreshToken) {
       // Revoke the specific refresh token
       // If systemContext provided, also filter by it (prevents cross-system token revocation)
@@ -783,6 +826,46 @@ export class AuthService {
     return { success: true, data: { token, launchUrl, expiresIn: 300 } };
   }
 
+  /**
+   * Generate a short-lived launch token so a manager can open the Hotel
+   * Management Terminal pre-authenticated: /hotel-terminal?token=<jwt>
+   *
+   * The user is logged in as `hotel_manager` (highest level) and receives the
+   * full permission set so they can navigate every menu item.
+   */
+  async generateHotelTerminalLaunchToken(
+    caller: { userId: string; email: string; role: string; tenantId: string },
+    originIp?: string,
+  ) {
+    // Resolve default property so the terminal header can show "Property: ..."
+    let property: { id: string; name: string } | null = null;
+    if (caller.tenantId) {
+      property = await this.prisma.property.findFirst({
+        where: { tenantId: caller.tenantId },
+        orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+        select: { id: true, name: true },
+      });
+    }
+
+    const payload = {
+      sub: caller.userId,
+      email: caller.email,
+      role: 'hotel_manager',
+      tenantId: caller.tenantId,
+      hotelTerminalLaunch: true,
+      firstName: null,
+      lastName: null,
+      propertyId: property?.id ?? null,
+      propertyName: property?.name ?? null,
+      permissions: HOTEL_MANAGER_PERMISSIONS,
+      originIp: originIp ?? null,
+    };
+    const token = this.jwtService.sign(payload, { expiresIn: '5m' });
+    const launchUrl = `/hotel-terminal?token=${token}`;
+    this.logger.log(`Hotel Terminal launch token generated by user ${caller.userId}`);
+    return { success: true, data: { token, launchUrl, expiresIn: 300 } };
+  }
+
   // ── Device fingerprint interface ─────────────────────────────────────────
   private parseDeviceType(userAgent: string): string {
     const ua = userAgent.toLowerCase();
@@ -816,7 +899,7 @@ export class AuthService {
     tenantId?: string,
     userType: 'admin' | 'user' = 'user',
     deviceInfo?: { ipAddress?: string; userAgent?: string },
-    systemContext: 'main' | 'pos' | 'procurement' | 'warehouse' = 'main',
+    systemContext: 'main' | 'pos' | 'procurement' | 'warehouse' | 'hotel-terminal' = 'main',
   ) {
     const payload = {
       sub: id,
