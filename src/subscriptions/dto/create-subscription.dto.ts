@@ -62,4 +62,21 @@ export class CreateSubscriptionDto {
   @IsBoolean()
   @IsOptional()
   autoRenew?: boolean;
+
+  @ApiPropertyOptional({
+    example: '2026-04-01T00:00:00Z',
+    description: 'Date the next billing cycle should be charged. Defaults to endDate when omitted.',
+  })
+  @IsDateString()
+  @IsOptional()
+  nextBillingDate?: Date;
+
+  @ApiPropertyOptional({
+    example: '2026-03-01T00:00:00Z',
+    description:
+      'Anchor day-of-month/year used to compute future billing periods. Defaults to startDate when omitted.',
+  })
+  @IsDateString()
+  @IsOptional()
+  billingAnchorDate?: Date;
 }

@@ -24,7 +24,22 @@ model User {
   lastLoginIp   String?
   metadata      String?        @db.Text
   phone         String?
-  status        String         @default("active")
+  // ── Account Lifecycle ─────────────────────────────────────────────────────
+  // status valid values: "active" | "inactive" | "suspended" | "expired"
+  // - active     : ใช้งานได้ปกติ
+  // - inactive   : ปิดใช้งานชั่วคราว (สามารถเปิดกลับได้, ไม่มีเหตุผล/วันสิ้นสุดเฉพาะ)
+  // - suspended  : ถูกระงับโดย admin (มีเหตุผลใน suspendedReason)
+  // - expired    : หมดอายุการใช้งาน (expiresAt < now)
+  status         String         @default("active") @db.VarChar(20)
+  // วันที่บัญชีจะหมดอายุ — null = ใช้งานได้ไม่จำกัด
+  expiresAt      DateTime?
+  // เวลาที่ถูกระงับ + ใครระงับ + เหตุผล (เก็บเพื่อ audit/UI แสดงผล)
+  suspendedAt    DateTime?
+  suspendedBy    String?        @db.VarChar(36)
+  suspendedReason String?       @db.Text
+  // เวลาที่ถูกปิดใช้งาน (deactivate) — แยกจาก suspend เพื่อบ่งสาเหตุ
+  deactivatedAt  DateTime?
+  // ─────────────────────────────────────────────────────────────────────────
   tenantId       String? // activeTenantId for current session context
   timezone       String?
   // ── System Access Control ─────────────────────────────────────────────────
@@ -1161,6 +1176,26 @@ model features {
   subscription_features subscription_features[]
 }
 
+model add_ons {
+  id            String                @id @default(uuid()) @db.VarChar(36)
+  code          String                @unique(map: "IDX_add_ons_code") @db.VarChar(80)
+  name          String                @db.VarChar(150)
+  description   String?               @db.Text
+  price         Decimal               @default(0.00) @db.Decimal(10, 2)
+  billing_cycle add_ons_billing_cycle @default(monthly)
+  category      String?               @db.VarChar(80)
+  icon          String?               @db.VarChar(80)
+  display_order Int                   @default(0)
+  min_quantity  Int                   @default(1)
+  max_quantity  Int                   @default(1)
+  is_active     Int                   @default(1) @db.TinyInt
+  created_at    DateTime              @default(now()) @db.DateTime(6)
+  updated_at    DateTime              @default(now()) @updatedAt @db.DateTime(6)
+
+  @@index([is_active], map: "IDX_add_ons_is_active")
+  @@index([category], map: "IDX_add_ons_category")
+}
+
 model invoice_adjustments {
   id                   String                   @id @default(uuid()) @db.VarChar(36)
   invoice_id           String
@@ -1643,6 +1678,12 @@ enum features_type {
   toggle
   limit
   module
+}
+
+enum add_ons_billing_cycle {
+  monthly
+  yearly
+  one_time
 }
 
 enum payment_refunds_status {

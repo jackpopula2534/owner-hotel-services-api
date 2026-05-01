@@ -560,6 +560,57 @@ export class AuditLogService {
     });
   }
 
+  async logUserStatusChange(
+    userId: string,
+    oldStatus: string,
+    newStatus: string,
+    changedBy: string,
+    extra?: { reason?: string; tenantId?: string; ipAddress?: string },
+  ): Promise<void> {
+    const actionMap: Record<string, AuditAction> = {
+      suspended: AuditAction.USER_SUSPEND,
+      active: AuditAction.USER_ACTIVATE,
+      inactive: AuditAction.USER_DEACTIVATE,
+      expired: AuditAction.USER_AUTO_EXPIRED,
+    };
+    await this.log({
+      action: actionMap[newStatus] ?? AuditAction.USER_STATUS_CHANGE,
+      resource: AuditResource.USER,
+      category: AuditCategory.USERS,
+      resourceId: userId,
+      userId: changedBy,
+      tenantId: extra?.tenantId,
+      ipAddress: extra?.ipAddress,
+      oldValues: { status: oldStatus },
+      newValues: { status: newStatus, reason: extra?.reason },
+      description: `เปลี่ยนสถานะผู้ใช้ ${userId} จาก ${oldStatus} เป็น ${newStatus}${extra?.reason ? ` (${extra.reason})` : ''}`,
+    });
+  }
+
+  async logUserExpirationSet(
+    userId: string,
+    oldExpiresAt: Date | null | undefined,
+    newExpiresAt: Date | null,
+    changedBy: string,
+    tenantId?: string,
+    ipAddress?: string,
+  ): Promise<void> {
+    await this.log({
+      action: AuditAction.USER_EXPIRATION_SET,
+      resource: AuditResource.USER,
+      category: AuditCategory.USERS,
+      resourceId: userId,
+      userId: changedBy,
+      tenantId,
+      ipAddress,
+      oldValues: { expiresAt: oldExpiresAt ?? null },
+      newValues: { expiresAt: newExpiresAt },
+      description: newExpiresAt
+        ? `กำหนดวันหมดอายุผู้ใช้ ${userId} เป็น ${newExpiresAt.toISOString()}`
+        : `ยกเลิกวันหมดอายุของผู้ใช้ ${userId}`,
+    });
+  }
+
   async logRoleChange(
     targetUserId: string,
     oldRole: string,

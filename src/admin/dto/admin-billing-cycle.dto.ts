@@ -60,6 +60,25 @@ export class RenewSubscriptionDto {
   periodMonths?: number;
 
   @ApiPropertyOptional({
+    description:
+      'Custom renewal period in days. Used for sub-month renewals (e.g. 7 = 1 week). Ignored when customEndDate is provided.',
+    example: 7,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  periodDays?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Explicit end date for the new period. When provided, periodMonths/periodDays are ignored.',
+    example: '2026-12-31',
+  })
+  @IsOptional()
+  @IsDateString()
+  customEndDate?: string;
+
+  @ApiPropertyOptional({
     description: 'Custom renewal price (default: plan price)',
   })
   @IsOptional()

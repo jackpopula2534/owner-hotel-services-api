@@ -14,7 +14,6 @@ import {
   UpdateBillingCycleDto,
   RenewSubscriptionDto,
   CancelRenewalDto,
-  BillingCycleDto,
   BillingCycleResponseDto,
   RenewSubscriptionResponseDto,
   CancelRenewalResponseDto,
@@ -56,6 +55,9 @@ export class AdminBillingCycleService {
     const planPrice = Number(subscription.plan?.priceMonthly || 0);
     const totalMonthlyAmount = planPrice + addonAmount;
 
+    const nextBilling = this.computeNextBillingDate(subscription);
+    const anchorDate = subscription.billingAnchorDate || subscription.startDate || null;
+
     return {
       subscriptionCode: subscription.subscriptionCode || subscription.id,
       hotelName: subscription.tenant?.name || 'N/A',
@@ -65,14 +67,8 @@ export class AdminBillingCycleService {
       status: subscription.status,
       currentPeriodStart: this.formatDate(subscription.startDate),
       currentPeriodEnd: this.formatDate(subscription.endDate),
-      nextBillingDate:
-        this.formatDate(subscription.nextBillingDate) ||
-        this.formatDate(subscription.endDate) ||
-        'N/A',
-      billingAnchorDate:
-        this.formatDate(subscription.billingAnchorDate) ||
-        this.formatDate(subscription.startDate) ||
-        'N/A',
+      nextBillingDate: this.formatDate(nextBilling),
+      billingAnchorDate: this.formatDate(anchorDate),
       autoRenew: subscription.autoRenew,
       renewedCount: subscription.renewedCount || 0,
       lastRenewedAt: this.formatDateTime(subscription.lastRenewedAt),
@@ -81,6 +77,43 @@ export class AdminBillingCycleService {
       cancelledAt: this.formatDateTime(subscription.cancelledAt),
       cancellationReason: subscription.cancellationReason || undefined,
     };
+  }
+
+  /**
+   * Compute the next billing date for a subscription.
+   *
+   * Priority:
+   *  1) Use stored `nextBillingDate` if present
+   *  2) Fall back to `endDate` (the active period boundary == next charge moment)
+   *  3) If `endDate` already passed, roll forward by billing cycle until in the future
+   *  4) Returns null only when subscription has no endDate at all
+   */
+  private computeNextBillingDate(subscription: Subscription): Date | null {
+    if (subscription.nextBillingDate) {
+      return new Date(subscription.nextBillingDate);
+    }
+
+    if (!subscription.endDate) {
+      return null;
+    }
+
+    const cycle = subscription.billingCycle || BillingCycle.MONTHLY;
+    const candidate = new Date(subscription.endDate);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Roll forward until the candidate date is in the future
+    let safetyCounter = 0;
+    while (candidate.getTime() < today.getTime() && safetyCounter < 240) {
+      if (cycle === BillingCycle.YEARLY) {
+        candidate.setFullYear(candidate.getFullYear() + 1);
+      } else {
+        candidate.setMonth(candidate.getMonth() + 1);
+      }
+      safetyCounter += 1;
+    }
+
+    return candidate;
   }
 
   /**
@@ -183,14 +216,36 @@ export class AdminBillingCycleService {
       throw new BadRequestException('Cannot renew cancelled subscription. Reactivate first.');
     }
 
-    // Calculate renewal period
-    const periodMonths =
-      dto.periodMonths || (subscription.billingCycle === BillingCycle.YEARLY ? 12 : 1);
-
-    // Calculate new dates
+    // Calculate new dates. Three input modes, in priority order:
+    //   1) explicit customEndDate (admin picked a date)
+    //   2) periodDays (sub-month renewals such as 1 week)
+    //   3) periodMonths (default — falls back to billing cycle)
     const newStartDate = new Date(subscription.endDate);
-    const newEndDate = new Date(newStartDate);
-    newEndDate.setMonth(newEndDate.getMonth() + periodMonths);
+    let newEndDate: Date;
+    let periodMonths: number;
+    let periodDays: number | undefined;
+
+    if (dto.customEndDate) {
+      newEndDate = new Date(dto.customEndDate);
+      if (Number.isNaN(newEndDate.getTime()) || newEndDate <= newStartDate) {
+        throw new BadRequestException(
+          'customEndDate must be a valid date after the current period end',
+        );
+      }
+      // Approximate months from the chosen end date for amount/invoice math.
+      const ms = newEndDate.getTime() - newStartDate.getTime();
+      periodMonths = Math.max(1, Math.round(ms / (1000 * 60 * 60 * 24 * 30)));
+    } else if (dto.periodDays && dto.periodDays > 0) {
+      periodDays = dto.periodDays;
+      newEndDate = new Date(newStartDate);
+      newEndDate.setDate(newEndDate.getDate() + periodDays);
+      periodMonths = Math.max(1, Math.round(periodDays / 30));
+    } else {
+      periodMonths =
+        dto.periodMonths || (subscription.billingCycle === BillingCycle.YEARLY ? 12 : 1);
+      newEndDate = new Date(newStartDate);
+      newEndDate.setMonth(newEndDate.getMonth() + periodMonths);
+    }
 
     // Calculate renewal amount
     const planPrice = Number(subscription.plan?.priceMonthly || 0);
@@ -199,8 +254,12 @@ export class AdminBillingCycleService {
     });
     const addonAmount = addons.reduce((sum, a) => sum + Number(a.price || 0), 0);
     const monthlyTotal = planPrice + addonAmount;
-    const renewalAmount =
-      dto.customPrice !== undefined ? dto.customPrice : monthlyTotal * periodMonths;
+
+    // For sub-month (week) renewals, prorate by days; otherwise multiply by months.
+    const computedAmount = periodDays
+      ? Math.round((monthlyTotal / 30) * periodDays)
+      : monthlyTotal * periodMonths;
+    const renewalAmount = dto.customPrice !== undefined ? dto.customPrice : computedAmount;
 
     // Create invoice if requested
     let invoiceNo: string | undefined;
@@ -376,10 +435,7 @@ export class AdminBillingCycleService {
       hotelName: subscription.tenant?.name || 'N/A',
       currentPlan: subscription.plan?.name || 'No Plan',
       billingCycle: subscription.billingCycle || 'monthly',
-      nextBillingDate:
-        this.formatDate(subscription.nextBillingDate) ||
-        this.formatDate(subscription.endDate) ||
-        'N/A',
+      nextBillingDate: this.formatDate(this.computeNextBillingDate(subscription)),
       history: historyItems,
       total: historyItems.length,
     };

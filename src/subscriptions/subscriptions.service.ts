@@ -9,6 +9,23 @@ export class SubscriptionsService {
   constructor(private readonly prisma: PrismaService) {}
 
   create(createSubscriptionDto: CreateSubscriptionDto) {
+    const startDate = createSubscriptionDto.startDate
+      ? new Date(createSubscriptionDto.startDate)
+      : undefined;
+    const endDate = createSubscriptionDto.endDate
+      ? new Date(createSubscriptionDto.endDate)
+      : undefined;
+
+    // Default next billing date and anchor date when caller omits them.
+    // Without this, every subscription created via the public endpoint ends up
+    // with NULL next_billing_date and the admin Billing tab shows "N/A".
+    const nextBillingDate = createSubscriptionDto.nextBillingDate
+      ? new Date(createSubscriptionDto.nextBillingDate)
+      : endDate;
+    const billingAnchorDate = createSubscriptionDto.billingAnchorDate
+      ? new Date(createSubscriptionDto.billingAnchorDate)
+      : startDate;
+
     const data: any = {
       subscription_code: createSubscriptionDto.subscriptionCode,
       tenant_id: createSubscriptionDto.tenantId,
@@ -17,6 +34,8 @@ export class SubscriptionsService {
       status: createSubscriptionDto.status,
       start_date: createSubscriptionDto.startDate,
       end_date: createSubscriptionDto.endDate,
+      next_billing_date: nextBillingDate,
+      billing_anchor_date: billingAnchorDate,
       auto_renew:
         createSubscriptionDto.autoRenew !== undefined
           ? createSubscriptionDto.autoRenew

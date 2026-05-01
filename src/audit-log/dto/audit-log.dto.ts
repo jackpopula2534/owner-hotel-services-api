@@ -98,6 +98,12 @@ export enum AuditAction {
   USER_CREATE = 'user_create',
   USER_UPDATE = 'user_update',
   USER_DELETE = 'user_delete',
+  USER_STATUS_CHANGE = 'user_status_change',
+  USER_SUSPEND = 'user_suspend',
+  USER_ACTIVATE = 'user_activate',
+  USER_DEACTIVATE = 'user_deactivate',
+  USER_EXPIRATION_SET = 'user_expiration_set',
+  USER_AUTO_EXPIRED = 'user_auto_expired',
 
   // Procurement — Price Comparison approval workflow
   PRICE_COMPARISON_SUBMITTED = 'price_comparison_submitted',

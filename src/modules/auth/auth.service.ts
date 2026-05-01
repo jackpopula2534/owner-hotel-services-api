@@ -239,9 +239,36 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    if (user.status !== 'active') {
-      throw new UnauthorizedException('User account is suspended or inactive');
+    // ── Lifecycle gate ────────────────────────────────────────────────────────
+    // ถ้า expiresAt ผ่านไปแล้ว → ตั้ง status = expired ทันที (lazy-expire)
+    // as any: Prisma type อาจยังไม่ sync หลัง schema migration
+    const userExpiresAt = (user as any).expiresAt as Date | null | undefined;
+    if (userExpiresAt && userExpiresAt.getTime() <= Date.now() && user.status !== 'expired') {
+      try {
+        await this.prisma.user.update({
+          where: { id: user.id },
+          data: { status: 'expired' },
+        });
+        user.status = 'expired';
+      } catch (err) {
+        this.logger.warn(
+          `Failed to lazy-expire user ${user.id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
+
+    if (user.status !== 'active') {
+      const message =
+        user.status === 'suspended'
+          ? 'บัญชีของคุณถูกระงับการใช้งาน กรุณาติดต่อผู้ดูแลระบบ'
+          : user.status === 'expired'
+            ? 'บัญชีของคุณหมดอายุการใช้งาน กรุณาติดต่อผู้ดูแลระบบเพื่อต่ออายุ'
+            : user.status === 'inactive'
+              ? 'บัญชีของคุณถูกปิดการใช้งาน กรุณาติดต่อผู้ดูแลระบบ'
+              : 'User account is not active';
+      throw new UnauthorizedException(message);
+    }
+    // ────────────────────────────────────────────────────────────────────────
 
     // บล็อก admin-level roles จากการ login ผ่าน /auth/login
     if (this.ADMIN_ONLY_ROLES.includes(user.role)) {
