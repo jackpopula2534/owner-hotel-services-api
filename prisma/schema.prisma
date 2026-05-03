@@ -1170,10 +1170,16 @@ model features {
   name                  String
   description           String?                 @db.Text
   type                  features_type
+  category              String?                 @db.VarChar(80)
+  icon                  String?                 @db.VarChar(80)
+  display_order         Int                     @default(0)
   price_monthly         Decimal                 @default(0.00) @db.Decimal(10, 2)
   is_active             Int                     @default(1) @db.TinyInt
   plan_features         plan_features[]
   subscription_features subscription_features[]
+
+  @@index([category], map: "IDX_features_category")
+  @@index([is_active], map: "IDX_features_is_active")
 }
 
 model add_ons {
@@ -1658,6 +1664,7 @@ enum billing_history_eventType {
   cancelled
   reactivated
   expired
+  trial_reminder_sent
 }
 
 enum tenant_credits_status {
@@ -1670,8 +1677,437 @@ enum tenant_credits_status {
 enum tenants_status {
   trial
   active
+  past_due
   suspended
   expired
+  cancelled
+  archived
+}
+
+model dunning_attempts {
+  id            String                   @id @default(uuid()) @db.VarChar(36)
+  invoice_id    String                   @db.VarChar(36)
+  tenant_id     String                   @db.VarChar(36)
+  level         dunning_attempts_level
+  channel       dunning_attempts_channel
+  status        dunning_attempts_status  @default(queued)
+  recipient     String                   @db.VarChar(255)
+  subject       String?                  @db.VarChar(255)
+  error_message String?                  @db.Text
+  metadata      Json?
+  sent_at       DateTime?                @db.DateTime(6)
+  created_by    String?                  @db.VarChar(36)
+  created_at    DateTime                 @default(now()) @db.DateTime(6)
+
+  @@index([invoice_id], map: "IDX_dunning_invoice")
+  @@index([tenant_id], map: "IDX_dunning_tenant")
+  @@index([level, status], map: "IDX_dunning_level_status")
+}
+
+enum dunning_attempts_level {
+  reminder
+  first_warning
+  second_warning
+  final_notice
+}
+
+enum dunning_attempts_channel {
+  email
+  line
+  sms
+  manual
+}
+
+enum dunning_attempts_status {
+  queued
+  sent
+  failed
+  acknowledged
+}
+
+model subscription_coupons {
+  id                          String                                 @id @default(uuid()) @db.VarChar(36)
+  code                        String                                 @unique(map: "IDX_sub_coupons_code") @db.VarChar(64)
+  name                        String                                 @db.VarChar(150)
+  description                 String?                                @db.Text
+  discount_type               subscription_coupons_discount_type
+  discount_value              Decimal                                @db.Decimal(10, 2)
+  applies_to                  subscription_coupons_applies_to        @default(any_plan)
+  applicable_plan_ids         Json?
+  max_redemptions             Int?
+  redemptions_count           Int                                    @default(0)
+  max_redemptions_per_tenant  Int                                    @default(1)
+  valid_from                  DateTime                               @db.DateTime(6)
+  valid_until                 DateTime?                              @db.DateTime(6)
+  is_active                   Int                                    @default(1) @db.TinyInt
+  metadata                    Json?
+  created_at                  DateTime                               @default(now()) @db.DateTime(6)
+  updated_at                  DateTime                               @default(now()) @db.DateTime(6)
+  redemptions                 subscription_coupon_redemptions[]
+}
+
+model subscription_coupon_redemptions {
+  id              String                @id @default(uuid()) @db.VarChar(36)
+  coupon_id       String                @db.VarChar(36)
+  tenant_id       String                @db.VarChar(36)
+  invoice_id      String?               @db.VarChar(36)
+  subscription_id String?               @db.VarChar(36)
+  discount_amount Decimal               @db.Decimal(10, 2)
+  original_amount Decimal               @db.Decimal(10, 2)
+  redeemed_at     DateTime              @default(now()) @db.DateTime(6)
+  coupon          subscription_coupons  @relation(fields: [coupon_id], references: [id], onDelete: Cascade)
+
+  @@index([coupon_id], map: "IDX_sub_coupon_redemptions_coupon")
+  @@index([tenant_id], map: "IDX_sub_coupon_redemptions_tenant")
+  @@index([invoice_id], map: "IDX_sub_coupon_redemptions_invoice")
+}
+
+enum subscription_coupons_discount_type {
+  percent
+  fixed
+}
+
+enum subscription_coupons_applies_to {
+  any_plan
+  specific_plans
+  first_invoice_only
+}
+
+model payment_webhook_events {
+  id                  String                         @id @default(uuid()) @db.VarChar(36)
+  provider            String                         @db.VarChar(50)
+  event_type          String                         @db.VarChar(80)
+  idempotency_key     String                         @db.VarChar(120)
+  signature           String?                        @db.Text
+  signature_verified  Int                            @default(0) @db.TinyInt
+  payload             Json
+  status              payment_webhook_events_status  @default(received)
+  error_message       String?                        @db.Text
+  payment_id          String?                        @db.VarChar(36)
+  received_at         DateTime                       @default(now()) @db.DateTime(6)
+  processed_at        DateTime?                      @db.DateTime(6)
+
+  @@unique([provider, idempotency_key], map: "IDX_webhook_idempotency")
+  @@index([status], map: "IDX_webhook_status")
+  @@index([received_at], map: "IDX_webhook_received_at")
+}
+
+model payment_reconciliation_runs {
+  id                    String                                  @id @default(uuid()) @db.VarChar(36)
+  provider              String                                  @db.VarChar(50)
+  period_start          DateTime                                @db.DateTime(6)
+  period_end            DateTime                                @db.DateTime(6)
+  db_total_count        Int                                     @default(0)
+  db_total_amount       Decimal                                 @default(0) @db.Decimal(12, 2)
+  gateway_total_count   Int                                     @default(0)
+  gateway_total_amount  Decimal                                 @default(0) @db.Decimal(12, 2)
+  mismatch_count        Int                                     @default(0)
+  mismatches            Json?
+  status                payment_reconciliation_runs_status      @default(clean)
+  notes                 String?                                 @db.Text
+  created_at            DateTime                                @default(now()) @db.DateTime(6)
+
+  @@index([provider, period_start], map: "IDX_reconciliation_provider_period")
+}
+
+enum payment_webhook_events_status {
+  received
+  processed
+  failed
+  duplicate
+}
+
+enum payment_reconciliation_runs_status {
+  clean
+  mismatch
+  failed
+}
+
+model usage_metric_definitions {
+  id                  String                                @id @default(uuid()) @db.VarChar(36)
+  code                String                                @unique(map: "IDX_usage_metric_code") @db.VarChar(80)
+  name                String                                @db.VarChar(150)
+  description         String?                               @db.Text
+  unit                String                                @default("count") @db.VarChar(40)
+  aggregation         usage_metric_definitions_aggregation  @default(sum_per_period)
+  overage_unit_price  Decimal                               @default(0) @db.Decimal(10, 4)
+  is_active           Int                                   @default(1) @db.TinyInt
+  created_at          DateTime                              @default(now()) @db.DateTime(6)
+  updated_at          DateTime                              @default(now()) @db.DateTime(6)
+}
+
+model usage_counters {
+  id             String    @id @default(uuid()) @db.VarChar(36)
+  tenant_id      String    @db.VarChar(36)
+  metric_code    String    @db.VarChar(80)
+  period         String    @db.VarChar(7)
+  value          BigInt    @default(0)
+  peak_value     BigInt    @default(0)
+  last_event_at  DateTime? @db.DateTime(6)
+  created_at     DateTime  @default(now()) @db.DateTime(6)
+  updated_at     DateTime  @default(now()) @db.DateTime(6)
+
+  @@unique([tenant_id, metric_code, period], map: "IDX_usage_counter_unique")
+  @@index([period], map: "IDX_usage_counter_period")
+}
+
+model usage_overage_charges {
+  id              String                       @id @default(uuid()) @db.VarChar(36)
+  tenant_id       String                       @db.VarChar(36)
+  metric_code     String                       @db.VarChar(80)
+  period          String                       @db.VarChar(7)
+  usage_amount    BigInt
+  included_amount BigInt
+  overage_amount  BigInt
+  unit_price      Decimal                      @db.Decimal(10, 4)
+  total_charge    Decimal                      @db.Decimal(10, 2)
+  invoice_id      String?                      @db.VarChar(36)
+  status          usage_overage_charges_status @default(pending)
+  created_at      DateTime                     @default(now()) @db.DateTime(6)
+
+  @@unique([tenant_id, metric_code, period], map: "IDX_overage_unique")
+  @@index([status], map: "IDX_overage_status")
+}
+
+enum usage_metric_definitions_aggregation {
+  sum_per_period
+  peak_in_period
+}
+
+enum usage_overage_charges_status {
+  pending
+  invoiced
+  waived
+}
+
+model impersonation_sessions {
+  id               String                         @id @default(uuid()) @db.VarChar(36)
+  admin_id         String                         @db.VarChar(36)
+  target_tenant_id String                         @db.VarChar(36)
+  target_user_id   String?                        @db.VarChar(36)
+  reason           String?                        @db.VarChar(255)
+  scope            impersonation_sessions_scope   @default(read_only)
+  status           impersonation_sessions_status  @default(active)
+  started_at       DateTime                       @default(now()) @db.DateTime(6)
+  expires_at       DateTime                       @db.DateTime(6)
+  ended_at         DateTime?                      @db.DateTime(6)
+  ip_address       String?                        @db.VarChar(64)
+  user_agent       String?                        @db.VarChar(255)
+
+  @@index([admin_id], map: "IDX_impersonation_admin")
+  @@index([target_tenant_id], map: "IDX_impersonation_tenant")
+  @@index([status], map: "IDX_impersonation_status")
+}
+
+enum impersonation_sessions_scope {
+  read_only
+  full
+}
+
+enum impersonation_sessions_status {
+  active
+  ended
+  expired
+}
+
+model data_export_requests {
+  id                   String                       @id @default(uuid()) @db.VarChar(36)
+  tenant_id            String                       @db.VarChar(36)
+  requested_by_user_id String?                      @db.VarChar(36)
+  kind                 data_export_requests_kind    @default(export)
+  status               data_export_requests_status  @default(queued)
+  download_url         String?                      @db.VarChar(2048)
+  download_expires_at  DateTime?                    @db.DateTime(6)
+  byte_size            BigInt?
+  error_message        String?                      @db.Text
+  requested_at         DateTime                     @default(now()) @db.DateTime(6)
+  completed_at         DateTime?                    @db.DateTime(6)
+
+  @@index([tenant_id], map: "IDX_data_export_tenant")
+  @@index([status], map: "IDX_data_export_status")
+}
+
+enum data_export_requests_kind {
+  export
+  erasure
+}
+
+enum data_export_requests_status {
+  queued
+  processing
+  completed
+  failed
+  expired
+}
+
+model service_components {
+  id            String                    @id @default(uuid()) @db.VarChar(36)
+  code          String                    @unique(map: "IDX_service_components_code") @db.VarChar(64)
+  name          String                    @db.VarChar(150)
+  description   String?                   @db.Text
+  status        service_components_status @default(operational)
+  display_order Int                       @default(0)
+  is_visible    Int                       @default(1) @db.TinyInt
+  created_at    DateTime                  @default(now()) @db.DateTime(6)
+  updated_at    DateTime                  @default(now()) @db.DateTime(6)
+}
+
+model incidents {
+  id                  String              @id @default(uuid()) @db.VarChar(36)
+  title               String              @db.VarChar(255)
+  severity            incidents_severity  @default(minor)
+  status              incidents_status    @default(investigating)
+  affected_components Json?
+  started_at          DateTime            @default(now()) @db.DateTime(6)
+  resolved_at         DateTime?           @db.DateTime(6)
+  created_by          String?             @db.VarChar(36)
+  created_at          DateTime            @default(now()) @db.DateTime(6)
+  updated_at          DateTime            @default(now()) @db.DateTime(6)
+  updates             incident_updates[]
+
+  @@index([status], map: "IDX_incidents_status")
+  @@index([started_at], map: "IDX_incidents_started_at")
+}
+
+model incident_updates {
+  id          String                  @id @default(uuid()) @db.VarChar(36)
+  incident_id String                  @db.VarChar(36)
+  status      incident_updates_status
+  message     String                  @db.Text
+  created_by  String?                 @db.VarChar(36)
+  created_at  DateTime                @default(now()) @db.DateTime(6)
+  incident    incidents               @relation(fields: [incident_id], references: [id], onDelete: Cascade)
+
+  @@index([incident_id], map: "IDX_incident_updates_incident")
+}
+
+model uptime_checks {
+  id            String                @id @default(uuid()) @db.VarChar(36)
+  component_id  String                @db.VarChar(36)
+  checked_at    DateTime              @default(now()) @db.DateTime(6)
+  status        uptime_checks_status
+  latency_ms    Int?
+  error_message String?               @db.Text
+
+  @@index([component_id, checked_at], map: "IDX_uptime_component_time")
+}
+
+enum service_components_status {
+  operational
+  degraded
+  partial_outage
+  major_outage
+  maintenance
+}
+
+enum incidents_severity {
+  minor
+  major
+  critical
+}
+
+enum incidents_status {
+  investigating
+  identified
+  monitoring
+  resolved
+}
+
+enum incident_updates_status {
+  investigating
+  identified
+  monitoring
+  resolved
+}
+
+enum uptime_checks_status {
+  up
+  down
+}
+
+model announcements {
+  id              String                     @id @default(uuid()) @db.VarChar(36)
+  title           String                     @db.VarChar(255)
+  body            String                     @db.Text
+  severity        announcements_severity     @default(info)
+  audience        announcements_audience     @default(all)
+  audience_filter Json?
+  cta_label       String?                    @db.VarChar(120)
+  cta_url         String?                    @db.VarChar(500)
+  published_at    DateTime?                  @db.DateTime(6)
+  expires_at      DateTime?                  @db.DateTime(6)
+  created_by      String?                    @db.VarChar(36)
+  created_at      DateTime                   @default(now()) @db.DateTime(6)
+  updated_at      DateTime                   @default(now()) @db.DateTime(6)
+  reads           announcement_reads[]
+
+  @@index([published_at], map: "IDX_announcements_published")
+  @@index([expires_at], map: "IDX_announcements_expires")
+}
+
+model announcement_reads {
+  id              String        @id @default(uuid()) @db.VarChar(36)
+  announcement_id String        @db.VarChar(36)
+  tenant_id       String        @db.VarChar(36)
+  user_id         String?       @db.VarChar(36)
+  read_at         DateTime      @default(now()) @db.DateTime(6)
+  announcement    announcements @relation(fields: [announcement_id], references: [id], onDelete: Cascade)
+
+  @@unique([announcement_id, tenant_id], map: "IDX_announcement_reads_unique")
+}
+
+enum announcements_severity {
+  info
+  warning
+  critical
+  maintenance
+}
+
+enum announcements_audience {
+  all
+  tenants_by_status
+  specific_tenants
+}
+
+model tenant_brandings {
+  id                        String                          @id @default(uuid()) @db.VarChar(36)
+  tenant_id                 String                          @unique(map: "IDX_tenant_brandings_tenant") @db.VarChar(36)
+  logo_url                  String?                         @db.VarChar(500)
+  primary_color             String?                         @db.VarChar(20)
+  accent_color              String?                         @db.VarChar(20)
+  email_sender_name         String?                         @db.VarChar(120)
+  email_sender_address      String?                         @db.VarChar(255)
+  custom_domain             String?                         @unique(map: "IDX_tenant_brandings_domain") @db.VarChar(255)
+  domain_status             tenant_brandings_domain_status  @default(not_configured)
+  domain_verification_token String?                         @db.VarChar(120)
+  last_verified_at          DateTime?                       @db.DateTime(6)
+  created_at                DateTime                        @default(now()) @db.DateTime(6)
+  updated_at                DateTime                        @default(now()) @db.DateTime(6)
+}
+
+enum tenant_brandings_domain_status {
+  not_configured
+  pending
+  verified
+  failed
+}
+
+model api_keys {
+  id           String    @id @default(uuid()) @db.VarChar(36)
+  tenant_id    String    @db.VarChar(36)
+  name         String    @db.VarChar(150)
+  key_prefix   String    @db.VarChar(16)
+  key_hash     String    @unique(map: "IDX_api_keys_hash") @db.VarChar(128)
+  scopes       Json
+  is_active    Int       @default(1) @db.TinyInt
+  last_used_at DateTime? @db.DateTime(6)
+  expires_at   DateTime? @db.DateTime(6)
+  created_by   String?   @db.VarChar(36)
+  created_at   DateTime  @default(now()) @db.DateTime(6)
+  revoked_at   DateTime? @db.DateTime(6)
+
+  @@index([tenant_id], map: "IDX_api_keys_tenant")
+  @@index([key_prefix], map: "IDX_api_keys_prefix")
 }
 
 enum features_type {
