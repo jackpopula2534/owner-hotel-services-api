@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="th"><head><meta charset="UTF-8"><title>บัญชีถูกระงับ — {{invoiceNo}}</title></head>
+<body style="margin:0;padding:0;font-family:'Sarabun',Arial,sans-serif;background:#f4f4f4;">
+<table width="100%" style="background:#f4f4f4;padding:24px 0;"><tr><td align="center">
+<table width="600" style="background:#ffffff;border-radius:12px;overflow:hidden;">
+<tr><td style="background:#1f2937;padding:28px;text-align:center;">
+  <h1 style="color:#fff;margin:0;font-size:22px;">บัญชีถูกระงับการใช้งาน</h1>
+  <p style="color:#fca5a5;margin:6px 0 0 0;">{{hotelName}}</p>
+</td></tr>
+<tr><td style="padding:32px;">
+  <p style="color:#333;">เรียน {{customerName}},</p>
+  <p style="color:#555;line-height:1.7;">
+    เนื่องจากใบแจ้งหนี้ <b>{{invoiceNo}}</b>
+    จำนวน <b>฿{{amount}}</b> เกินกำหนด <b>{{daysOverdue}} วัน</b>
+    บัญชีของคุณจึงถูกระงับการใช้งานตามนโยบายของ StaySync
+  </p>
+  <div style="background:#1f2937;color:#fff;padding:20px;border-radius:8px;margin:20px 0;line-height:1.7;">
+    <b style="color:#fbbf24;">สิ่งที่ยังเกิดขึ้น:</b>
+    <ul style="margin:10px 0 0 0;padding-left:20px;">
+      <li>ข้อมูลของคุณถูกเก็บไว้ 30 วัน</li>
+      <li>คุณยังเข้าระบบเพื่อชำระเงินได้</li>
+      <li>หลังชำระ บัญชีจะกลับมาใช้งานได้ภายใน 24 ชม.</li>
+    </ul>
+  </div>
+  <table width="100%" style="margin:24px 0;"><tr><td align="center">
+    <a href="{{payInvoiceUrl}}" style="display:inline-block;background:#10b981;color:#fff;padding:14px 36px;border-radius:8px;text-decoration:none;font-weight:600;">ชำระเงินและกู้บัญชี</a>
+  </td></tr></table>
+  <p style="color:#777;font-size:14px;">หากต้องการยกเลิกบัญชี กรุณาตอบกลับอีเมลฉบับนี้</p>
+</td></tr>
+<tr><td style="background:#f9fafb;padding:16px;text-align:center;color:#9ca3af;font-size:12px;">StaySync — Hotel Management</td></tr>
+</table></td></tr></table></body></html>
