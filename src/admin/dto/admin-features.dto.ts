@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsNumber, IsOptional, IsBoolean, IsEnum, Min } from 'class-validator';
+import { IsString, IsNumber, IsOptional, IsBoolean, IsEnum, IsInt, Min } from 'class-validator';
 
 // ============ Enums ============
 // Must match Feature entity enum
@@ -9,6 +9,20 @@ export enum FeatureType {
   LIMIT = 'limit',
   MODULE = 'module',
 }
+
+// Valid categories for the admin UI grouping. Kept as a plain string list (not
+// an enum) so individual hotels can extend the taxonomy without a migration.
+export const FEATURE_CATEGORIES = [
+  'CORE',
+  'PMS',
+  'RESTAURANT',
+  'HR',
+  'HOUSEKEEPING',
+  'MAINTENANCE',
+  'REPORTING',
+  'INTEGRATION',
+  'ADVANCED',
+] as const;
 
 // ============ Request DTOs ============
 
@@ -39,6 +53,31 @@ export class CreateFeatureDto {
   })
   @IsEnum(FeatureType)
   type: FeatureType;
+
+  @ApiPropertyOptional({
+    description: 'Logical category bucket for admin UI grouping',
+    example: 'INTEGRATION',
+  })
+  @IsOptional()
+  @IsString()
+  category?: string;
+
+  @ApiPropertyOptional({
+    description: 'Lucide-react icon name to render in the admin UI',
+    example: 'Plug',
+  })
+  @IsOptional()
+  @IsString()
+  icon?: string;
+
+  @ApiPropertyOptional({
+    description: 'Sort order within a category (lower comes first)',
+    example: 10,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  displayOrder?: number;
 
   @ApiProperty({ description: 'Monthly price', example: 990 })
   @IsNumber()
@@ -88,6 +127,22 @@ export class UpdateFeatureDto {
   @IsEnum(FeatureType)
   type?: FeatureType;
 
+  @ApiPropertyOptional({ description: 'Category bucket' })
+  @IsOptional()
+  @IsString()
+  category?: string;
+
+  @ApiPropertyOptional({ description: 'Lucide-react icon name' })
+  @IsOptional()
+  @IsString()
+  icon?: string;
+
+  @ApiPropertyOptional({ description: 'Sort order within a category' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  displayOrder?: number;
+
   @ApiPropertyOptional({ description: 'Monthly price' })
   @IsOptional()
   @IsNumber()
@@ -134,6 +189,15 @@ export class AdminFeatureItemDto {
   @ApiProperty({ enum: ['toggle', 'limit', 'module'] })
   type: string;
 
+  @ApiPropertyOptional({ example: 'INTEGRATION' })
+  category?: string | null;
+
+  @ApiPropertyOptional({ example: 'Plug' })
+  icon?: string | null;
+
+  @ApiPropertyOptional({ example: 10 })
+  displayOrder?: number;
+
   @ApiProperty({ example: 990 })
   priceMonthly: number;
 
@@ -170,6 +234,15 @@ export class FeatureResponseDto {
 
   @ApiProperty({ enum: ['toggle', 'limit', 'module'] })
   type: string;
+
+  @ApiPropertyOptional({ example: 'INTEGRATION' })
+  category?: string | null;
+
+  @ApiPropertyOptional({ example: 'Plug' })
+  icon?: string | null;
+
+  @ApiPropertyOptional({ example: 10 })
+  displayOrder?: number;
 
   @ApiProperty({ example: 990 })
   priceMonthly: number;

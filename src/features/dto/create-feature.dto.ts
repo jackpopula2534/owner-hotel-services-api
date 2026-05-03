@@ -1,4 +1,4 @@
-import { IsString, IsNumber, IsEnum, IsBoolean, IsOptional } from 'class-validator';
+import { IsString, IsNumber, IsEnum, IsBoolean, IsOptional, IsInt, Min } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { FeatureType } from '../entities/feature.entity';
 
@@ -31,6 +31,32 @@ export class CreateFeatureDto {
   })
   @IsEnum(FeatureType)
   type: FeatureType;
+
+  @ApiPropertyOptional({
+    example: 'INTEGRATION',
+    description:
+      'Logical category bucket: CORE, PMS, RESTAURANT, HR, HOUSEKEEPING, MAINTENANCE, REPORTING, INTEGRATION, ADVANCED',
+  })
+  @IsString()
+  @IsOptional()
+  category?: string;
+
+  @ApiPropertyOptional({
+    example: 'Plug',
+    description: 'Lucide-react icon name to render in the admin UI',
+  })
+  @IsString()
+  @IsOptional()
+  icon?: string;
+
+  @ApiPropertyOptional({
+    example: 10,
+    description: 'Sort order within a category (lower comes first)',
+  })
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  displayOrder?: number;
 
   @ApiPropertyOptional({
     example: 990,

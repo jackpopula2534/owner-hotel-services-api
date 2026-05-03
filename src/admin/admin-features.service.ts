@@ -21,11 +21,12 @@ export class AdminFeaturesService {
 
   /**
    * GET /api/v1/admin/features
-   * Get all features
+   * Get all features ordered by category and display order so the UI can
+   * group them without an extra client-side sort.
    */
   async findAll(): Promise<AdminFeaturesListDto> {
     const features = await this.featuresRepository.find({
-      order: { type: 'ASC', name: 'ASC' },
+      order: { category: 'ASC', displayOrder: 'ASC', name: 'ASC' },
     });
 
     const data: AdminFeatureItemDto[] = features.map((feature) => ({
@@ -34,10 +35,13 @@ export class AdminFeaturesService {
       name: feature.name,
       description: feature.description || '',
       type: feature.type,
+      category: feature.category ?? null,
+      icon: feature.icon ?? null,
+      displayOrder: feature.displayOrder ?? 0,
       priceMonthly: Number(feature.priceMonthly || 0),
-      priceYearly: undefined, // Not supported in current schema
+      priceYearly: undefined,
       isActive: feature.isActive !== false,
-      createdAt: 'N/A', // Not supported in current schema
+      createdAt: 'N/A',
     }));
 
     return {
@@ -48,7 +52,6 @@ export class AdminFeaturesService {
 
   /**
    * GET /api/v1/admin/features/:id
-   * Get feature by ID
    */
   async findOne(id: string): Promise<FeatureResponseDto> {
     const feature = await this.featuresRepository.findOne({
@@ -65,28 +68,32 @@ export class AdminFeaturesService {
       name: feature.name,
       description: feature.description || '',
       type: feature.type,
+      category: feature.category ?? null,
+      icon: feature.icon ?? null,
+      displayOrder: feature.displayOrder ?? 0,
       priceMonthly: Number(feature.priceMonthly || 0),
-      priceYearly: undefined, // Not supported in current schema
+      priceYearly: undefined,
       isActive: feature.isActive !== false,
-      metadata: undefined, // Not supported in current schema
-      createdAt: 'N/A', // Not supported in current schema
-      updatedAt: 'N/A', // Not supported in current schema
+      metadata: undefined,
+      createdAt: 'N/A',
+      updatedAt: 'N/A',
     };
   }
 
   /**
    * POST /api/v1/admin/features
-   * Create a new feature
    */
   async create(dto: CreateFeatureDto): Promise<FeatureResponseDto> {
     const feature = this.featuresRepository.create({
       code: dto.code,
       name: dto.name,
       description: dto.description,
-      type: dto.type as any, // Cast to match entity enum
+      type: dto.type as any,
+      category: dto.category ?? null,
+      icon: dto.icon ?? null,
+      displayOrder: dto.displayOrder ?? 0,
       priceMonthly: dto.priceMonthly,
       isActive: dto.isActive !== false,
-      // Note: priceYearly and metadata not supported in current schema
     });
 
     await this.featuresRepository.save(feature);
@@ -98,7 +105,6 @@ export class AdminFeaturesService {
 
   /**
    * PATCH /api/v1/admin/features/:id
-   * Update a feature
    */
   async update(id: string, dto: UpdateFeatureDto): Promise<FeatureResponseDto> {
     const feature = await this.featuresRepository.findOne({
@@ -111,10 +117,12 @@ export class AdminFeaturesService {
 
     if (dto.name !== undefined) feature.name = dto.name;
     if (dto.description !== undefined) feature.description = dto.description;
-    if (dto.type !== undefined) feature.type = dto.type as any; // Cast to match entity enum
+    if (dto.type !== undefined) feature.type = dto.type as any;
+    if (dto.category !== undefined) feature.category = dto.category ?? null;
+    if (dto.icon !== undefined) feature.icon = dto.icon ?? null;
+    if (dto.displayOrder !== undefined) feature.displayOrder = dto.displayOrder;
     if (dto.priceMonthly !== undefined) feature.priceMonthly = dto.priceMonthly;
     if (dto.isActive !== undefined) feature.isActive = dto.isActive;
-    // Note: priceYearly and metadata not supported in current schema
 
     await this.featuresRepository.save(feature);
 
@@ -124,8 +132,7 @@ export class AdminFeaturesService {
   }
 
   /**
-   * DELETE /api/v1/admin/features/:id
-   * Delete a feature (soft delete)
+   * DELETE /api/v1/admin/features/:id  — soft delete via isActive=false
    */
   async remove(id: string): Promise<{ message: string }> {
     const feature = await this.featuresRepository.findOne({
@@ -136,7 +143,6 @@ export class AdminFeaturesService {
       throw new NotFoundException(`Feature with ID "${id}" not found`);
     }
 
-    // Soft delete by setting isActive to false
     feature.isActive = false;
     await this.featuresRepository.save(feature);
 

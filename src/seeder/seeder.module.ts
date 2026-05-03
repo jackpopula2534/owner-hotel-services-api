@@ -10,6 +10,7 @@ import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { InvoicesModule } from '../invoices/invoices.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { SubscriptionFeaturesModule } from '../subscription-features/subscription-features.module';
+import { AddonModule } from '../modules/addons/addon.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { SubscriptionFeaturesModule } from '../subscription-features/subscriptio
     InvoicesModule,
     PaymentsModule,
     SubscriptionFeaturesModule,
+    AddonModule,
   ],
   controllers: [SeederController],
   providers: [SeederService],

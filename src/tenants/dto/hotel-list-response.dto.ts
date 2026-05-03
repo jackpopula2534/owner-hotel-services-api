@@ -8,10 +8,17 @@ import { Type } from 'class-transformer';
 
 // ===== Status Badge =====
 export type HotelListStatusBadge = {
-  status: 'trial' | 'active' | 'suspended' | 'expired';
+  status:
+    | 'trial'
+    | 'active'
+    | 'past_due'
+    | 'suspended'
+    | 'expired'
+    | 'cancelled'
+    | 'archived';
   label: string;
   labelTh: string;
-  color: 'blue' | 'green' | 'red' | 'gray';
+  color: 'blue' | 'green' | 'yellow' | 'red' | 'gray';
   bgColor: string;
   textColor: string;
 };

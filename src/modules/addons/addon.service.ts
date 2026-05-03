@@ -272,6 +272,36 @@ export class AddonService {
     return this.toEntity(updated);
   }
 
+  /**
+   * Upsert an add-on by its unique code. Used by the master seeder so that
+   * re-running the seeder keeps the catalog in sync with the latest
+   * definitions (renaming, retagging, repricing) without throwing on the
+   * existing-code conflict that `create()` enforces.
+   */
+  async upsertByCode(dto: CreateAddonDto): Promise<AddonEntity> {
+    const data = {
+      name: dto.name,
+      description: dto.description ?? null,
+      price: new Prisma.Decimal(dto.price),
+      billing_cycle: dto.billingCycle ?? AddonBillingCycle.MONTHLY,
+      category: dto.category ?? null,
+      icon: dto.icon ?? null,
+      display_order: dto.displayOrder ?? 0,
+      min_quantity: dto.minQuantity ?? 1,
+      max_quantity: dto.maxQuantity ?? 1,
+      is_active: dto.isActive === false ? 0 : 1,
+    };
+
+    const record = await this.addOnsClient().upsert({
+      where: { code: dto.code },
+      update: data,
+      create: { code: dto.code, ...data },
+    });
+
+    await this.invalidateCatalogCache();
+    return this.toEntity(record);
+  }
+
   async toggleActive(id: string): Promise<AddonEntity> {
     const existing = await this.addOnsClient().findUnique({ where: { id } });
     if (!existing) {

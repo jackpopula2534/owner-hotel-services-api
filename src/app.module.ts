@@ -23,6 +23,18 @@ import { FeaturesModule } from './features/features.module';
 import { PlanFeaturesModule } from './plan-features/plan-features.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { SubscriptionFeaturesModule } from './subscription-features/subscription-features.module';
+import { DunningModule } from './dunning/dunning.module';
+import { CouponsModule } from './coupons/coupons.module';
+import { WebhooksModule } from './webhooks/webhooks.module';
+import { UsageMeteringModule } from './usage-metering/usage-metering.module';
+import { AdminAnalyticsModule } from './admin-analytics/admin-analytics.module';
+import { ImpersonationModule } from './impersonation/impersonation.module';
+import { DataExportModule } from './data-export/data-export.module';
+import { StatusPageModule } from './status-page/status-page.module';
+import { AnnouncementsModule } from './announcements/announcements.module';
+import { ApiKeysModule } from './api-keys/api-keys.module';
+import { BrandingModule } from './branding/branding.module';
+import { QueueMonitorModule } from './queue-monitor/queue-monitor.module';
 import { InvoicesModule } from './invoices/invoices.module';
 import { InvoiceItemsModule } from './invoice-items/invoice-items.module';
 import { PaymentsModule } from './payments/payments.module';
@@ -96,6 +108,18 @@ import { DocumentSettingsModule } from './modules/document-settings/document-set
     PlanFeaturesModule,
     SubscriptionsModule,
     SubscriptionFeaturesModule,
+    DunningModule,
+    CouponsModule,
+    WebhooksModule,
+    UsageMeteringModule,
+    AdminAnalyticsModule,
+    ImpersonationModule,
+    DataExportModule,
+    StatusPageModule,
+    AnnouncementsModule,
+    ApiKeysModule,
+    BrandingModule,
+    QueueMonitorModule,
     InvoicesModule,
     InvoiceItemsModule,
     PaymentsModule,

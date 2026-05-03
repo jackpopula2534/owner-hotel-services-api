@@ -7,6 +7,8 @@ import { TenantsService } from './tenants.service';
 import { HotelDetailService } from './hotel-detail.service';
 import { HotelManagementService } from './hotel-management.service';
 import { TenantDefaultDataService } from './tenant-default-data.service';
+import { TenantLifecycleService } from './tenant-lifecycle.service';
+import { TenantActiveGuard } from './guards/tenant-active.guard';
 import { TenantsController } from './tenants.controller';
 import { Tenant } from './entities/tenant.entity';
 import { TenantCredit } from './entities/tenant-credit.entity';
@@ -36,13 +38,22 @@ import { PlansModule } from '../plans/plans.module';
     }),
   ],
   controllers: [TenantsController],
-  providers: [TenantsService, HotelDetailService, HotelManagementService, TenantDefaultDataService],
+  providers: [
+    TenantsService,
+    HotelDetailService,
+    HotelManagementService,
+    TenantDefaultDataService,
+    TenantLifecycleService,
+    TenantActiveGuard,
+  ],
   exports: [
     TypeOrmModule, // exports Repository<Tenant>, Repository<TenantCredit>
     TenantsService,
     HotelDetailService,
     HotelManagementService,
     TenantDefaultDataService,
+    TenantLifecycleService,
+    TenantActiveGuard,
   ],
 })
 export class TenantsModule {}

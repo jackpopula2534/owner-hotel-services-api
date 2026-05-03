@@ -115,6 +115,30 @@ export class HotelDetailService {
         bgColor: 'bg-gray-100',
         textColor: 'text-gray-800',
       },
+      [TenantStatus.PAST_DUE]: {
+        status: 'past_due',
+        label: 'Past Due',
+        labelTh: 'ค้างชำระ',
+        color: 'yellow',
+        bgColor: 'bg-amber-100',
+        textColor: 'text-amber-800',
+      },
+      [TenantStatus.CANCELLED]: {
+        status: 'cancelled',
+        label: 'Cancelled',
+        labelTh: 'ยกเลิก',
+        color: 'gray',
+        bgColor: 'bg-gray-100',
+        textColor: 'text-gray-700',
+      },
+      [TenantStatus.ARCHIVED]: {
+        status: 'archived',
+        label: 'Archived',
+        labelTh: 'เก็บถาวร',
+        color: 'gray',
+        bgColor: 'bg-gray-200',
+        textColor: 'text-gray-600',
+      },
     };
 
     return statusMap[status];

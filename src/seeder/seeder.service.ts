@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PlansService } from '../plans/plans.service';
 import { FeaturesService } from '../features/features.service';
 import { PlanFeaturesService } from '../plan-features/plan-features.service';
+import { AddonService } from '../modules/addons/addon.service';
+import { AddonBillingCycle } from '../modules/addons/dto/create-addon.dto';
 import { AdminsService } from '../admins/admins.service';
 import { TenantsService } from '../tenants/tenants.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
@@ -32,6 +34,7 @@ export class SeederService {
     private invoicesService: InvoicesService,
     private paymentsService: PaymentsService,
     private subscriptionFeaturesService: SubscriptionFeaturesService,
+    private addonService: AddonService,
     private prisma: PrismaService,
   ) {}
 
@@ -44,6 +47,7 @@ export class SeederService {
     try {
       await this.seedPlans();
       await this.seedFeatures();
+      await this.seedAddOns();
       await this.seedPlanFeatures();
       await this.seedAdmins();
       await this.seedUsers();
@@ -208,50 +212,30 @@ export class SeederService {
   }
 
   /**
-   * 2️⃣ Seed Features (Add-ons)
+   * 2️⃣ Seed Features (Master catalog)
+   *
+   * Each feature now carries a `category` and `icon` so the admin UI can group
+   * the catalog instead of showing a flat list of N/A cells. Categories follow
+   * the StaySync taxonomy: CORE / PMS / RESTAURANT / HR / HOUSEKEEPING /
+   * MAINTENANCE / REPORTING / INTEGRATION / ADVANCED.
+   *
+   * The seeder upserts by code so re-running keeps the catalog in sync with
+   * the latest definitions (renaming a feature, retagging a category, etc.).
    */
   private async seedFeatures(): Promise<void> {
-    this.logger.log('⚙️ Seeding Features...');
+    this.logger.log('⚙️ Seeding Features (master catalog)...');
 
     const features = [
+      // ─── CORE ─────────────────────────────────────────────
       {
-        code: 'ota_booking',
-        name: 'OTA Booking Integration',
-        description: 'เชื่อมต่อกับ Booking.com, Agoda, และ OTA อื่นๆ',
-        type: FeatureType.MODULE,
-        priceMonthly: 990,
-        isActive: true,
-      },
-      {
-        code: 'extra_analytics',
-        name: 'Extra Analytics',
-        description: 'รายงานและ Analytics ขั้นสูง',
-        type: FeatureType.MODULE,
-        priceMonthly: 990,
-        isActive: true,
-      },
-      {
-        code: 'custom_branding',
-        name: 'Custom Branding',
-        description: 'กำหนด branding และ logo ของโรงแรม',
-        type: FeatureType.MODULE,
-        priceMonthly: 1490,
-        isActive: true,
-      },
-      {
-        code: 'automation',
-        name: 'Automation System',
-        description: 'ระบบอัตโนมัติสำหรับจัดการ booking และ workflow',
-        type: FeatureType.MODULE,
-        priceMonthly: 990,
-        isActive: true,
-      },
-      {
-        code: 'tax_invoice',
-        name: 'Tax Invoice',
-        description: 'ระบบออกใบกำกับภาษีอัตโนมัติ',
+        code: 'basic_report',
+        name: 'Basic Report',
+        description: 'รายงานพื้นฐานสำหรับการดำเนินงานประจำวัน',
         type: FeatureType.TOGGLE,
-        priceMonthly: 500,
+        category: 'CORE',
+        icon: 'FileText',
+        displayOrder: 10,
+        priceMonthly: 0,
         isActive: true,
       },
       {
@@ -259,7 +243,122 @@ export class SeederService {
         name: 'Extra User',
         description: 'เพิ่มจำนวน user ที่ใช้งานได้',
         type: FeatureType.LIMIT,
+        category: 'CORE',
+        icon: 'Users',
+        displayOrder: 20,
         priceMonthly: 200,
+        isActive: true,
+      },
+
+      // ─── PMS ──────────────────────────────────────────────
+      {
+        code: 'tax_invoice',
+        name: 'Tax Invoice',
+        description: 'ระบบออกใบกำกับภาษีอัตโนมัติ พร้อม e-Tax',
+        type: FeatureType.TOGGLE,
+        category: 'PMS',
+        icon: 'Receipt',
+        displayOrder: 10,
+        priceMonthly: 500,
+        isActive: true,
+      },
+
+      // ─── RESTAURANT ───────────────────────────────────────
+      {
+        code: 'RESTAURANT_MODULE',
+        name: 'Restaurant & F&B Module',
+        description: 'ระบบจัดการร้านอาหาร F&B: เมนู หมวดหมู่ จองโต๊ะ และเชื่อม Folio แขก',
+        type: FeatureType.MODULE,
+        category: 'RESTAURANT',
+        icon: 'UtensilsCrossed',
+        displayOrder: 10,
+        priceMonthly: 990,
+        isActive: true,
+      },
+      {
+        code: 'POS_MODULE',
+        name: 'POS System',
+        description: 'ระบบ POS ครบวงจร: รับออเดอร์ ส่งครัว (KDS) ชำระเงิน และจัดการ User POS',
+        type: FeatureType.MODULE,
+        category: 'RESTAURANT',
+        icon: 'ShoppingCart',
+        displayOrder: 20,
+        priceMonthly: 790,
+        isActive: true,
+      },
+
+      // ─── HR ───────────────────────────────────────────────
+      {
+        code: 'HR_MODULE',
+        name: 'HR Module',
+        description:
+          'ระบบ HR ครบวงจร: จัดการพนักงาน เงินเดือน การลา และเชื่อมข้อมูลกับทีมแม่บ้าน/ช่าง',
+        type: FeatureType.MODULE,
+        category: 'HR',
+        icon: 'Briefcase',
+        displayOrder: 10,
+        priceMonthly: 1200,
+        isActive: true,
+      },
+
+      // ─── HOUSEKEEPING ─────────────────────────────────────
+      {
+        code: 'housekeeping',
+        name: 'Housekeeping Management',
+        description: 'ระบบจัดการงานทำความสะอาดและสถานะห้องพัก real-time',
+        type: FeatureType.TOGGLE,
+        category: 'HOUSEKEEPING',
+        icon: 'Sparkles',
+        displayOrder: 10,
+        priceMonthly: 500,
+        isActive: true,
+      },
+
+      // ─── REPORTING ────────────────────────────────────────
+      {
+        code: 'advanced_report',
+        name: 'Advanced Report',
+        description: 'รายงานขั้นสูงและ analytics สำหรับผู้บริหาร',
+        type: FeatureType.MODULE,
+        category: 'REPORTING',
+        icon: 'BarChart3',
+        displayOrder: 10,
+        priceMonthly: 500,
+        isActive: true,
+      },
+      {
+        code: 'extra_analytics',
+        name: 'Extra Analytics',
+        description: 'Dashboard และ Analytics เชิงลึก พร้อม custom metrics',
+        type: FeatureType.MODULE,
+        category: 'REPORTING',
+        icon: 'TrendingUp',
+        displayOrder: 20,
+        priceMonthly: 990,
+        isActive: true,
+      },
+
+      // ─── INTEGRATION ──────────────────────────────────────
+      {
+        code: 'ota_booking',
+        name: 'OTA Booking Integration',
+        description: 'เชื่อมต่อกับ Booking.com, Agoda, และ OTA อื่นๆ',
+        type: FeatureType.MODULE,
+        category: 'INTEGRATION',
+        icon: 'Globe',
+        displayOrder: 10,
+        priceMonthly: 990,
+        isActive: true,
+      },
+      {
+        code: 'CHANNEL_MANAGER',
+        name: 'Channel Manager',
+        description: 'เชื่อมต่อกับ OTA อัตโนมัติ sync ราคาและห้องพักแบบ real-time',
+        type: FeatureType.MODULE,
+        category: 'INTEGRATION',
+        icon: 'Network',
+        displayOrder: 20,
+        priceMonthly: 1490,
         isActive: true,
       },
       {
@@ -267,112 +366,286 @@ export class SeederService {
         name: 'API Access',
         description: 'เข้าถึง API สำหรับ integration กับระบบอื่น',
         type: FeatureType.MODULE,
+        category: 'INTEGRATION',
+        icon: 'Plug',
+        displayOrder: 30,
         priceMonthly: 1500,
         isActive: true,
       },
+
+      // ─── ADVANCED ─────────────────────────────────────────
       {
-        code: 'advanced_report',
-        name: 'Advanced Report',
-        description: 'รายงานขั้นสูงและ analytics',
+        code: 'automation',
+        name: 'Automation System',
+        description: 'ระบบอัตโนมัติสำหรับจัดการ booking และ workflow',
         type: FeatureType.MODULE,
-        priceMonthly: 500,
-        isActive: true,
-      },
-      {
-        code: 'housekeeping',
-        name: 'Housekeeping Management',
-        description: 'ระบบจัดการงานทำความสะอาด',
-        type: FeatureType.TOGGLE,
-        priceMonthly: 500,
-        isActive: true,
-      },
-      {
-        code: 'basic_report',
-        name: 'Basic Report',
-        description: 'รายงานพื้นฐาน',
-        type: FeatureType.TOGGLE,
-        priceMonthly: 0,
-        isActive: true,
-      },
-      {
-        // HR Add-on: paid module add-on — sold separately
-        code: 'HR_MODULE',
-        name: 'HR Module',
-        description:
-          'ระบบ HR ครบวงจร: จัดการพนักงาน เงินเดือน การลา และเชื่อมข้อมูลกับทีมแม่บ้าน/ช่าง',
-        type: FeatureType.MODULE,
-        priceMonthly: 1200,
-        isActive: true,
-      },
-      {
-        // Restaurant Add-on: F&B management with table reservations and menu management
-        code: 'RESTAURANT_MODULE',
-        name: 'Restaurant & F&B Module',
-        description: 'ระบบจัดการร้านอาหาร F&B: เมนู หมวดหมู่ จองโต๊ะ และเชื่อม Folio แขก',
-        type: FeatureType.MODULE,
+        category: 'ADVANCED',
+        icon: 'Zap',
+        displayOrder: 10,
         priceMonthly: 990,
         isActive: true,
       },
       {
-        // POS Add-on: full POS system with kitchen display and cashier
-        code: 'POS_MODULE',
-        name: 'POS System',
-        description: 'ระบบ POS ครบวงจร: รับออเดอร์ ส่งครัว (KDS) ชำระเงิน และจัดการ User POS',
+        code: 'custom_branding',
+        name: 'Custom Branding',
+        description: 'กำหนด branding และ logo ของโรงแรมในทุก touchpoint',
         type: FeatureType.MODULE,
-        priceMonthly: 790,
-        isActive: true,
-      },
-      {
-        // Channel Manager Add-on
-        code: 'CHANNEL_MANAGER',
-        name: 'Channel Manager',
-        description: 'เชื่อมต่อกับ OTA อัตโนมัติ sync ราคาและห้องพักแบบ real-time',
-        type: FeatureType.MODULE,
+        category: 'ADVANCED',
+        icon: 'Palette',
+        displayOrder: 20,
         priceMonthly: 1490,
         isActive: true,
       },
       {
-        // Loyalty Module Add-on
         code: 'LOYALTY_MODULE',
         name: 'Loyalty & Rewards',
         description: 'โปรแกรมสะสมแต้มแขกประจำ ส่วนลด และ reward tiers',
         type: FeatureType.MODULE,
+        category: 'ADVANCED',
+        icon: 'Gift',
+        displayOrder: 30,
         priceMonthly: 590,
         isActive: true,
       },
       {
-        // Inventory Management Add-on
         code: 'INVENTORY_MODULE',
         name: 'Inventory Management',
         description:
           'ระบบคลังสินค้าครบวงจร: คุมสต็อก เบิก-รับสินค้า สั่งซื้อ นับสต็อก และแจ้งเตือนสต็อกต่ำ',
         type: FeatureType.MODULE,
+        category: 'ADVANCED',
+        icon: 'Package',
+        displayOrder: 40,
         priceMonthly: 990,
         isActive: true,
       },
       {
-        // Cost Accounting Add-on (requires Inventory)
         code: 'COST_ACCOUNTING_MODULE',
         name: 'Cost Accounting',
         description:
           'ระบบบัญชีต้นทุน USALI: ติดตามต้นทุนรายแผนก P&L ปิดงวดรายเดือน วิเคราะห์ food cost และ dashboard KPI โรงแรม',
         type: FeatureType.MODULE,
+        category: 'ADVANCED',
+        icon: 'Calculator',
+        displayOrder: 50,
         priceMonthly: 1490,
         isActive: true,
       },
     ];
 
     for (const featureData of features) {
-      const existing = await this.featuresService.findByCode(featureData.code);
-      if (!existing) {
-        await this.featuresService.create(featureData);
-        this.logger.log(
-          `  ✓ Created feature: ${featureData.code} (฿${featureData.priceMonthly}/mo)`,
-        );
-      } else {
-        this.logger.log(`  ⊙ Feature already exists: ${featureData.code}`);
-      }
+      await this.featuresService.upsertByCode(featureData);
+      this.logger.log(
+        `  ✓ Upserted feature: ${featureData.code} [${featureData.category}] (฿${featureData.priceMonthly}/mo)`,
+      );
     }
+
+    this.logger.log(`  ✅ Seeded ${features.length} features across 9 categories`);
+  }
+
+  /**
+   * 2️⃣B Seed Add-ons (Master catalog for the SaaS billing/upsell flows)
+   *
+   * Add-ons are billable items attached to a tenant's subscription. They live
+   * in their own `add_ons` table (separate from `features`) so the billing
+   * system can price/quote them independently.
+   *
+   * Catalog sources:
+   *   • 8 paid module add-ons (HR/POS/RESTAURANT/HOUSEKEEPING/CHANNEL_MANAGER/
+   *     LOYALTY/INVENTORY/COST_ACCOUNTING) — these mirror the feature codes
+   *     used by the AddonGate UI.
+   *   • 5 platform add-ons (OTA Booking, Automation, API Access, Extra
+   *     Analytics, Custom Branding) — these match what tenants see in the
+   *     subscription detail modal (see Mountain View Resort example).
+   */
+  private async seedAddOns(): Promise<void> {
+    this.logger.log('🔌 Seeding Add-ons (master catalog)...');
+
+    const addons = [
+      // ─── PAID MODULE ADD-ONS (uppercase codes match AddonGate) ───
+      {
+        code: 'HR_MODULE',
+        name: 'HR Module',
+        description: 'ระบบ HR ครบวงจร: จัดการพนักงาน เงินเดือน การลา และเชื่อมข้อมูลทีมแม่บ้าน/ช่าง',
+        price: 1200,
+        billingCycle: AddonBillingCycle.MONTHLY,
+        category: 'HR',
+        icon: 'Briefcase',
+        displayOrder: 10,
+        minQuantity: 1,
+        maxQuantity: 1,
+        isActive: true,
+      },
+      {
+        code: 'RESTAURANT_MODULE',
+        name: 'Restaurant & F&B Module',
+        description: 'ระบบจัดการร้านอาหาร F&B: เมนู หมวดหมู่ จองโต๊ะ และเชื่อม Folio แขก',
+        price: 990,
+        billingCycle: AddonBillingCycle.MONTHLY,
+        category: 'RESTAURANT',
+        icon: 'UtensilsCrossed',
+        displayOrder: 20,
+        minQuantity: 1,
+        maxQuantity: 1,
+        isActive: true,
+      },
+      {
+        code: 'POS_MODULE',
+        name: 'POS System',
+        description: 'ระบบ POS ครบวงจร: รับออเดอร์ ส่งครัว (KDS) ชำระเงิน และจัดการ User POS',
+        price: 790,
+        billingCycle: AddonBillingCycle.MONTHLY,
+        category: 'RESTAURANT',
+        icon: 'ShoppingCart',
+        displayOrder: 30,
+        minQuantity: 1,
+        maxQuantity: 1,
+        isActive: true,
+      },
+      {
+        code: 'HOUSEKEEPING_MODULE',
+        name: 'Housekeeping Module',
+        description: 'ระบบจัดการแม่บ้าน: มอบหมายงาน, ตรวจห้อง, รายงานสภาพห้องแบบ real-time',
+        price: 590,
+        billingCycle: AddonBillingCycle.MONTHLY,
+        category: 'HOUSEKEEPING',
+        icon: 'Sparkles',
+        displayOrder: 40,
+        minQuantity: 1,
+        maxQuantity: 1,
+        isActive: true,
+      },
+      {
+        code: 'CHANNEL_MANAGER',
+        name: 'Channel Manager',
+        description: 'เชื่อมต่อกับ OTA อัตโนมัติ sync ราคาและห้องพักแบบ real-time',
+        price: 1490,
+        billingCycle: AddonBillingCycle.MONTHLY,
+        category: 'INTEGRATION',
+        icon: 'Network',
+        displayOrder: 50,
+        minQuantity: 1,
+        maxQuantity: 1,
+        isActive: true,
+      },
+      {
+        code: 'LOYALTY_MODULE',
+        name: 'Loyalty & Rewards',
+        description: 'โปรแกรมสะสมแต้มแขกประจำ ส่วนลด และ reward tiers',
+        price: 590,
+        billingCycle: AddonBillingCycle.MONTHLY,
+        category: 'ADVANCED',
+        icon: 'Gift',
+        displayOrder: 60,
+        minQuantity: 1,
+        maxQuantity: 1,
+        isActive: true,
+      },
+      {
+        code: 'INVENTORY_MODULE',
+        name: 'Inventory Management',
+        description:
+          'ระบบคลังสินค้าครบวงจร: คุมสต็อก เบิก-รับสินค้า สั่งซื้อ นับสต็อก และแจ้งเตือนสต็อกต่ำ',
+        price: 990,
+        billingCycle: AddonBillingCycle.MONTHLY,
+        category: 'ADVANCED',
+        icon: 'Package',
+        displayOrder: 70,
+        minQuantity: 1,
+        maxQuantity: 1,
+        isActive: true,
+      },
+      {
+        code: 'COST_ACCOUNTING_MODULE',
+        name: 'Cost Accounting (USALI)',
+        description:
+          'ระบบบัญชีต้นทุน USALI: ติดตามต้นทุนรายแผนก P&L ปิดงวดรายเดือน วิเคราะห์ food cost และ dashboard KPI',
+        price: 1490,
+        billingCycle: AddonBillingCycle.MONTHLY,
+        category: 'ADVANCED',
+        icon: 'Calculator',
+        displayOrder: 80,
+        minQuantity: 1,
+        maxQuantity: 1,
+        isActive: true,
+      },
+
+      // ─── PLATFORM ADD-ONS (lowercase codes — match subscription detail UI) ───
+      {
+        code: 'ota_booking',
+        name: 'OTA Booking Integration',
+        description: 'เชื่อมต่อกับ Booking.com, Agoda, และ OTA อื่นๆ',
+        price: 990,
+        billingCycle: AddonBillingCycle.MONTHLY,
+        category: 'INTEGRATION',
+        icon: 'Globe',
+        displayOrder: 90,
+        minQuantity: 1,
+        maxQuantity: 1,
+        isActive: true,
+      },
+      {
+        code: 'automation',
+        name: 'Automation System',
+        description: 'ระบบอัตโนมัติสำหรับจัดการ booking และ workflow',
+        price: 990,
+        billingCycle: AddonBillingCycle.MONTHLY,
+        category: 'ADVANCED',
+        icon: 'Zap',
+        displayOrder: 100,
+        minQuantity: 1,
+        maxQuantity: 1,
+        isActive: true,
+      },
+      {
+        code: 'api_access',
+        name: 'API Access',
+        description: 'เข้าถึง API สำหรับ integration กับระบบอื่น',
+        price: 1990,
+        billingCycle: AddonBillingCycle.MONTHLY,
+        category: 'INTEGRATION',
+        icon: 'Plug',
+        displayOrder: 110,
+        minQuantity: 1,
+        maxQuantity: 1,
+        isActive: true,
+      },
+      {
+        code: 'extra_analytics',
+        name: 'Extra Analytics',
+        description: 'รายงานและ Analytics ขั้นสูง พร้อม custom dashboards',
+        price: 990,
+        billingCycle: AddonBillingCycle.MONTHLY,
+        category: 'REPORTING',
+        icon: 'TrendingUp',
+        displayOrder: 120,
+        minQuantity: 1,
+        maxQuantity: 1,
+        isActive: true,
+      },
+      {
+        code: 'custom_branding',
+        name: 'Custom Branding',
+        description: 'กำหนด branding และ logo ของโรงแรมในทุก touchpoint',
+        price: 1490,
+        billingCycle: AddonBillingCycle.MONTHLY,
+        category: 'ADVANCED',
+        icon: 'Palette',
+        displayOrder: 130,
+        minQuantity: 1,
+        maxQuantity: 1,
+        isActive: true,
+      },
+    ];
+
+    for (const addonData of addons) {
+      await this.addonService.upsertByCode(addonData);
+      this.logger.log(
+        `  ✓ Upserted add-on: ${addonData.code} [${addonData.category}] (฿${addonData.price}/${addonData.billingCycle})`,
+      );
+    }
+
+    this.logger.log(`  ✅ Seeded ${addons.length} add-ons across 6 categories`);
   }
 
   /**
