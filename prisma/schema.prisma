@@ -512,7 +512,9 @@ model MenuCategory {
   restaurantId String
   name         String
   description  String?
-  image        String?
+  image        String?  @db.LongText
+  icon         String?
+  color        String?
   displayOrder Int      @default(0)
   isActive     Boolean  @default(true)
   createdAt    DateTime @default(now())

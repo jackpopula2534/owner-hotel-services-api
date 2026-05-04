@@ -4,9 +4,11 @@ import { AuditLogService } from '../../../audit-log/audit-log.service';
 import { CreateMenuCategoryDto } from './dto/create-menu-category.dto';
 import { UpdateMenuCategoryDto } from './dto/update-menu-category.dto';
 import { ReorderCategoriesDto } from './dto/reorder-categories.dto';
+import { AutoMockupCategoriesDto } from './dto/auto-mockup-categories.dto';
 import { CreateMenuItemDto } from './dto/create-menu-item.dto';
 import { UpdateMenuItemDto } from './dto/update-menu-item.dto';
 import { CreateRecipeDto } from './dto/create-recipe.dto';
+import { sampleMenuCategoryMockups } from './menu-category-mockups';
 
 @Injectable()
 export class MenuService {
@@ -134,6 +136,74 @@ export class MenuService {
     );
 
     return this.findAllCategories(restaurantId, tenantId);
+  }
+
+  /**
+   * Seeds 5–10 random F&B categories for the given restaurant.
+   *
+   * The endpoint is idempotent in the sense that it never duplicates existing
+   * names: if the restaurant already has a category named "Desserts" we skip
+   * the matching mockup entry. This keeps the button safe to click multiple
+   * times while still topping up the list with new entries.
+   */
+  async autoMockupCategories(
+    restaurantId: string,
+    dto: AutoMockupCategoriesDto,
+    tenantId: string,
+    userId?: string,
+  ) {
+    await this.validateRestaurant(restaurantId, tenantId);
+
+    const existing = await this.prisma.menuCategory.findMany({
+      where: { restaurantId, tenantId },
+      select: { name: true, displayOrder: true },
+    });
+
+    const existingNames = new Set(existing.map((c) => c.name.trim().toLowerCase()));
+    const startOrder =
+      existing.reduce((max, c) => (c.displayOrder > max ? c.displayOrder : max), -1) + 1;
+
+    const samples = sampleMenuCategoryMockups(dto?.count).filter(
+      (mockup) => !existingNames.has(mockup.name.trim().toLowerCase()),
+    );
+
+    if (samples.length === 0) {
+      return {
+        created: [] as Awaited<ReturnType<typeof this.findAllCategories>>,
+        skipped: dto?.count ?? 0,
+        total: existing.length,
+      };
+    }
+
+    const created = await this.prisma.$transaction(
+      samples.map((mockup, idx) =>
+        this.prisma.menuCategory.create({
+          data: {
+            ...mockup,
+            displayOrder: startOrder + idx,
+            isActive: true,
+            restaurantId,
+            tenantId,
+          },
+        }),
+      ),
+    );
+
+    this.auditLogService.log({
+      action: 'menu_create' as any,
+      resource: 'menu' as any,
+      category: 'restaurant' as any,
+      resourceId: restaurantId,
+      userId,
+      tenantId,
+      description: `Auto-mockup สร้างหมวดหมู่เมนู ${created.length} รายการ`,
+    });
+
+    return {
+      created,
+      skipped: 0,
+      total: existing.length + created.length,
+    };
   }
 
   // ─── Menu Items ───────────────────────────────────────────────────────────
