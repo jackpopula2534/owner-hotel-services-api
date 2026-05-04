@@ -111,8 +111,18 @@ export class AllExceptionsFilter implements ExceptionFilter {
     } else if (exception instanceof Prisma.PrismaClientValidationError) {
       status = HttpStatus.BAD_REQUEST;
       code = 'VALIDATION_ERROR';
-      message = 'ข้อมูลไม่ถูกต้องตามโครงสร้างฐานข้อมูล (Database validation error)';
-      this.logger.error(`Prisma validation: ${exception.message}`, undefined, requestId);
+      // The Prisma client throws this when the input shape doesn't match the
+      // generated schema. The most common cause in dev is a stale client that
+      // hasn't been regenerated after a schema change — surface that hint so
+      // the team doesn't have to dig into server logs.
+      const prismaMsg = exception.message || '';
+      const looksLikeUnknownArg = /Unknown (arg|argument) `(?<field>[^`]+)`/.exec(prismaMsg);
+      if (looksLikeUnknownArg?.groups?.field) {
+        message = `ข้อมูลไม่ถูกต้อง: ฟิลด์ "${looksLikeUnknownArg.groups.field}" ไม่อยู่ใน Prisma client — กรุณา run \`npm run prisma:migrate\` เพื่อ regenerate client หลัง pull schema ใหม่`;
+      } else {
+        message = 'ข้อมูลไม่ถูกต้องตามโครงสร้างฐานข้อมูล (Database validation error)';
+      }
+      this.logger.error(`Prisma validation: ${prismaMsg}`, undefined, requestId);
 
       // ─── TypeORM query failed ─────────────────────────────────────────────
     } else if (exception instanceof QueryFailedError) {

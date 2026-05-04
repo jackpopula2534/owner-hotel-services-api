@@ -74,7 +74,7 @@ describe('MenuService — categories (icon/color + auto-mockup)', () => {
         ...data,
       }));
 
-      const result = await service.createCategory(
+      const result: any = await service.createCategory(
         RESTAURANT_ID,
         {
           name: 'Desserts',
@@ -105,9 +105,9 @@ describe('MenuService — categories (icon/color + auto-mockup)', () => {
     it('rejects when the restaurant does not belong to the tenant', async () => {
       prisma.restaurant.findFirst.mockResolvedValue(null);
 
-      await expect(
-        service.createCategory(RESTAURANT_ID, { name: 'X' }, TENANT_ID),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.createCategory(RESTAURANT_ID, { name: 'X' }, TENANT_ID)).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
@@ -154,11 +154,7 @@ describe('MenuService — categories (icon/color + auto-mockup)', () => {
         MENU_CATEGORY_MOCKUPS.map((m, idx) => ({ name: m.name, displayOrder: idx })),
       );
 
-      const result = await service.autoMockupCategories(
-        RESTAURANT_ID,
-        {},
-        TENANT_ID,
-      );
+      const result = await service.autoMockupCategories(RESTAURANT_ID, {}, TENANT_ID);
 
       expect(result.created).toEqual([]);
       expect(prisma.menuCategory.create).not.toHaveBeenCalled();
@@ -168,9 +164,9 @@ describe('MenuService — categories (icon/color + auto-mockup)', () => {
     it('throws NotFoundException for unknown restaurant', async () => {
       prisma.restaurant.findFirst.mockResolvedValue(null);
 
-      await expect(
-        service.autoMockupCategories(RESTAURANT_ID, {}, TENANT_ID),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.autoMockupCategories(RESTAURANT_ID, {}, TENANT_ID)).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('respects an explicit count within the [5,10] window', async () => {
@@ -181,11 +177,7 @@ describe('MenuService — categories (icon/color + auto-mockup)', () => {
         ...data,
       }));
 
-      const result = await service.autoMockupCategories(
-        RESTAURANT_ID,
-        { count: 6 },
-        TENANT_ID,
-      );
+      const result = await service.autoMockupCategories(RESTAURANT_ID, { count: 6 }, TENANT_ID);
 
       expect(result.created).toHaveLength(6);
       expect(result.total).toBe(6);

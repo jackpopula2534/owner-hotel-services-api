@@ -12,7 +12,8 @@ export class AutoMockupCategoriesDto {
     minimum: 5,
     maximum: 10,
     example: 8,
-    description: 'How many mockup categories to insert. Defaults to a random number between 5 and 10.',
+    description:
+      'How many mockup categories to insert. Defaults to a random number between 5 and 10.',
   })
   @Type(() => Number)
   @IsInt()
