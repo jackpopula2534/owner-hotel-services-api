@@ -20,7 +20,10 @@ export class UpdateDocumentSettingsDto {
   @MaxLength(255)
   companyName?: string;
 
-  @ApiPropertyOptional({ description: 'ชื่อบริษัท (English)', example: 'Mountain View Resort Co., Ltd.' })
+  @ApiPropertyOptional({
+    description: 'ชื่อบริษัท (English)',
+    example: 'Mountain View Resort Co., Ltd.',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(255)
@@ -137,7 +140,10 @@ export class UpdateDocumentSettingsDto {
   @IsIn(['plain', 'framed'])
   logoFrameStyle?: string;
 
-  @ApiPropertyOptional({ description: 'การจัดตำแหน่งแนวตั้ง Logo', enum: ['top', 'center', 'bottom'] })
+  @ApiPropertyOptional({
+    description: 'การจัดตำแหน่งแนวตั้ง Logo',
+    enum: ['top', 'center', 'bottom'],
+  })
   @IsOptional()
   @IsString()
   @IsIn(['top', 'center', 'bottom'])

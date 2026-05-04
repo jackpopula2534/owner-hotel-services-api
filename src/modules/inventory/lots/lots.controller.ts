@@ -76,11 +76,7 @@ export class LotsController {
   @ApiResponse({ status: 400, description: 'Lot is not in ACTIVE status' })
   @Post(':id/quarantine')
   @HttpCode(HttpStatus.OK)
-  quarantine(
-    @Request() req: any,
-    @Param('id') id: string,
-    @Body() dto: QuarantineLotDto,
-  ) {
+  quarantine(@Request() req: any, @Param('id') id: string, @Body() dto: QuarantineLotDto) {
     return this.lotsService.quarantine(req.user.tenantId, id, dto);
   }
 
@@ -88,11 +84,7 @@ export class LotsController {
   @ApiParam({ name: 'id', description: 'Lot UUID' })
   @Post(':id/release')
   @HttpCode(HttpStatus.OK)
-  release(
-    @Request() req: any,
-    @Param('id') id: string,
-    @Body() dto: ReleaseLotDto,
-  ) {
+  release(@Request() req: any, @Param('id') id: string, @Body() dto: ReleaseLotDto) {
     return this.lotsService.release(req.user.tenantId, id, dto);
   }
 
@@ -101,11 +93,7 @@ export class LotsController {
   @ApiResponse({ status: 200, description: 'Lot disposed, WASTE movement created' })
   @Post(':id/dispose')
   @HttpCode(HttpStatus.OK)
-  dispose(
-    @Request() req: any,
-    @Param('id') id: string,
-    @Body() dto: DisposeLotDto,
-  ) {
+  dispose(@Request() req: any, @Param('id') id: string, @Body() dto: DisposeLotDto) {
     return this.lotsService.dispose(req.user.tenantId, id, dto, req.user.id);
   }
 }

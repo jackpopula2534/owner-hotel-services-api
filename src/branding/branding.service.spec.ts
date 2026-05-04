@@ -11,9 +11,7 @@ describe('BrandingService', () => {
   let mockUpdate: jest.Mock;
 
   beforeEach(async () => {
-    mockUpsert = jest
-      .fn()
-      .mockImplementation(async ({ create }) => ({ id: 'b1', ...create }));
+    mockUpsert = jest.fn().mockImplementation(async ({ create }) => ({ id: 'b1', ...create }));
     mockFindUnique = jest.fn();
     mockFindFirst = jest.fn();
     mockUpdate = jest.fn().mockResolvedValue({});
@@ -42,9 +40,9 @@ describe('BrandingService', () => {
 
   describe('upsert', () => {
     it('rejects non-hex primary color', async () => {
-      await expect(
-        service.upsert({ tenantId: 't1', primaryColor: 'red' }),
-      ).rejects.toThrow(BadRequestException);
+      await expect(service.upsert({ tenantId: 't1', primaryColor: 'red' })).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('rejects malformed email sender', async () => {
@@ -71,16 +69,16 @@ describe('BrandingService', () => {
 
   describe('requestCustomDomain', () => {
     it('rejects invalid domain shape', async () => {
-      await expect(
-        service.requestCustomDomain('t1', 'not a domain'),
-      ).rejects.toThrow(BadRequestException);
+      await expect(service.requestCustomDomain('t1', 'not a domain')).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('rejects domain already used by another tenant', async () => {
       mockFindFirst.mockResolvedValue({ id: 'other' });
-      await expect(
-        service.requestCustomDomain('t1', 'app.hotel.com'),
-      ).rejects.toThrow(BadRequestException);
+      await expect(service.requestCustomDomain('t1', 'app.hotel.com')).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('returns DNS instructions when domain is free', async () => {
@@ -111,9 +109,7 @@ describe('BrandingService', () => {
 
     it('throws NotFound for unknown tenant', async () => {
       mockFindUnique.mockResolvedValue(null);
-      await expect(service.setDomainStatus('missing', 'failed')).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(service.setDomainStatus('missing', 'failed')).rejects.toThrow(NotFoundException);
     });
   });
 

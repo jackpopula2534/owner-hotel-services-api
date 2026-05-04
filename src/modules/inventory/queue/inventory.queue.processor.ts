@@ -31,8 +31,7 @@ export class InventoryQueueProcessor {
     const now = Date.now();
     // AggregateError / ECONNREFUSED = Redis unavailable — suppress repeat floods.
     const isConnectionError =
-      error.name === 'AggregateError' ||
-      (error as NodeJS.ErrnoException).code === 'ECONNREFUSED';
+      error.name === 'AggregateError' || (error as NodeJS.ErrnoException).code === 'ECONNREFUSED';
 
     if (isConnectionError) {
       if (now - this.lastQueueErrorLog < 30_000) return; // suppress within 30 s window
@@ -87,11 +86,14 @@ export class InventoryQueueProcessor {
 
       // Group by tenant for notification dispatch
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const byTenant = (lots as any[]).reduce((acc: Record<string, any[]>, lot: any) => {
-        acc[lot.tenantId] = acc[lot.tenantId] ?? [];
-        acc[lot.tenantId].push(lot);
-        return acc;
-      }, {} as Record<string, any[]>);
+      const byTenant = (lots as any[]).reduce(
+        (acc: Record<string, any[]>, lot: any) => {
+          acc[lot.tenantId] = acc[lot.tenantId] ?? [];
+          acc[lot.tenantId].push(lot);
+          return acc;
+        },
+        {} as Record<string, any[]>,
+      );
 
       for (const [tid, tenantLots] of Object.entries(byTenant) as [string, any[]][]) {
         try {
@@ -204,11 +206,14 @@ export class InventoryQueueProcessor {
 
     // Group by tenant and create notifications
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const byTenant = (stale as any[]).reduce((acc: Record<string, any[]>, r: any) => {
-      acc[r.tenantId] = acc[r.tenantId] ?? [];
-      acc[r.tenantId].push(r);
-      return acc;
-    }, {} as Record<string, any[]>);
+    const byTenant = (stale as any[]).reduce(
+      (acc: Record<string, any[]>, r: any) => {
+        acc[r.tenantId] = acc[r.tenantId] ?? [];
+        acc[r.tenantId].push(r);
+        return acc;
+      },
+      {} as Record<string, any[]>,
+    );
 
     for (const [tid, records] of Object.entries(byTenant) as [string, any[]][]) {
       try {

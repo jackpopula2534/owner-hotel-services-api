@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { PurchaseRequisitionsService } from '../purchase-requisitions.service';
 import { PrismaService } from '@/prisma/prisma.service';
+import { withPrismaFallback } from '@/common/test';
 
 describe('PurchaseRequisitionsService', () => {
   let service: PurchaseRequisitionsService;
@@ -11,7 +12,7 @@ describe('PurchaseRequisitionsService', () => {
   const mockPropertyId = 'property-001';
   const mockPRId = 'pr-001';
 
-  const mockPrismaService = {
+  const mockPrismaService = withPrismaFallback({
     purchaseRequisition: {
       findMany: jest.fn(),
       findUnique: jest.fn(),
@@ -48,8 +49,7 @@ describe('PurchaseRequisitionsService', () => {
     documentSequence: {
       upsert: jest.fn(),
     },
-    $transaction: jest.fn((fn) => fn(mockPrismaService)),
-  };
+  });
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -62,9 +62,7 @@ describe('PurchaseRequisitionsService', () => {
       ],
     }).compile();
 
-    service = module.get<PurchaseRequisitionsService>(
-      PurchaseRequisitionsService,
-    );
+    service = module.get<PurchaseRequisitionsService>(PurchaseRequisitionsService);
 
     jest.clearAllMocks();
   });
@@ -94,9 +92,7 @@ describe('PurchaseRequisitionsService', () => {
         },
       ];
 
-      mockPrismaService.purchaseRequisition.findMany.mockResolvedValue(
-        mockPRList,
-      );
+      mockPrismaService.purchaseRequisition.findMany.mockResolvedValue(mockPRList);
       mockPrismaService.purchaseRequisition.count.mockResolvedValue(1);
 
       const result = await service.findAll(mockTenantId, {
@@ -120,9 +116,7 @@ describe('PurchaseRequisitionsService', () => {
         status: 'DRAFT' as any,
       });
 
-      expect(
-        mockPrismaService.purchaseRequisition.findMany,
-      ).toHaveBeenCalledWith(
+      expect(mockPrismaService.purchaseRequisition.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             tenantId: mockTenantId,
@@ -142,9 +136,7 @@ describe('PurchaseRequisitionsService', () => {
         search: 'PR-202604',
       });
 
-      expect(
-        mockPrismaService.purchaseRequisition.findMany,
-      ).toHaveBeenCalledWith(
+      expect(mockPrismaService.purchaseRequisition.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             prNumber: { contains: 'PR-202604' },
@@ -192,9 +184,7 @@ describe('PurchaseRequisitionsService', () => {
         supplierQuotes: [],
       };
 
-      mockPrismaService.purchaseRequisition.findUnique.mockResolvedValue(
-        mockPR,
-      );
+      mockPrismaService.purchaseRequisition.findUnique.mockResolvedValue(mockPR);
 
       const result = await service.findOne(mockPRId, mockTenantId);
 
@@ -206,9 +196,9 @@ describe('PurchaseRequisitionsService', () => {
     it('should throw NotFoundException if PR not found', async () => {
       mockPrismaService.purchaseRequisition.findUnique.mockResolvedValue(null);
 
-      await expect(
-        service.findOne('nonexistent-id', mockTenantId),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.findOne('nonexistent-id', mockTenantId)).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('should throw NotFoundException if PR belongs to different tenant', async () => {
@@ -217,9 +207,7 @@ describe('PurchaseRequisitionsService', () => {
         tenantId: 'other-tenant',
       });
 
-      await expect(
-        service.findOne(mockPRId, mockTenantId),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.findOne(mockPRId, mockTenantId)).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -258,9 +246,7 @@ describe('PurchaseRequisitionsService', () => {
         { id: 'inv-item-2' },
       ]);
 
-      mockPrismaService.supplier.findMany.mockResolvedValue([
-        { id: 'supplier-1' },
-      ]);
+      mockPrismaService.supplier.findMany.mockResolvedValue([{ id: 'supplier-1' }]);
 
       mockPrismaService.documentSequence.upsert.mockResolvedValue({
         lastNumber: 1,
@@ -271,9 +257,7 @@ describe('PurchaseRequisitionsService', () => {
         prNumber: 'PR-202604-0001',
         tenantId: mockTenantId,
       };
-      mockPrismaService.purchaseRequisition.create.mockResolvedValue(
-        createdPR,
-      );
+      mockPrismaService.purchaseRequisition.create.mockResolvedValue(createdPR);
       mockPrismaService.purchaseRequisitionItem.createMany.mockResolvedValue({
         count: 2,
       });
@@ -332,9 +316,9 @@ describe('PurchaseRequisitionsService', () => {
     it('should throw NotFoundException if property not found', async () => {
       mockPrismaService.property.findUnique.mockResolvedValue(null);
 
-      await expect(
-        service.create(createDto, mockUserId, mockTenantId),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.create(createDto, mockUserId, mockTenantId)).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('should throw NotFoundException if inventory items not found', async () => {
@@ -344,13 +328,11 @@ describe('PurchaseRequisitionsService', () => {
       });
 
       // Return only 1 item when 2 are expected
-      mockPrismaService.inventoryItem.findMany.mockResolvedValue([
-        { id: 'inv-item-1' },
-      ]);
+      mockPrismaService.inventoryItem.findMany.mockResolvedValue([{ id: 'inv-item-1' }]);
 
-      await expect(
-        service.create(createDto, mockUserId, mockTenantId),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.create(createDto, mockUserId, mockTenantId)).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('should throw NotFoundException if preferred supplier not found', async () => {
@@ -367,9 +349,9 @@ describe('PurchaseRequisitionsService', () => {
       // Return empty suppliers
       mockPrismaService.supplier.findMany.mockResolvedValue([]);
 
-      await expect(
-        service.create(createDto, mockUserId, mockTenantId),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.create(createDto, mockUserId, mockTenantId)).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
@@ -432,11 +414,7 @@ describe('PurchaseRequisitionsService', () => {
       });
 
       await expect(
-        service.update(
-          mockPRId,
-          { purpose: 'Should fail' },
-          mockTenantId,
-        ),
+        service.update(mockPRId, { purpose: 'Should fail' }, mockTenantId),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -482,9 +460,7 @@ describe('PurchaseRequisitionsService', () => {
           supplierQuotes: [],
         });
 
-      mockPrismaService.inventoryItem.findMany.mockResolvedValue([
-        { id: 'inv-item-3' },
-      ]);
+      mockPrismaService.inventoryItem.findMany.mockResolvedValue([{ id: 'inv-item-3' }]);
       mockPrismaService.purchaseRequisition.update.mockResolvedValue({
         id: mockPRId,
       });
@@ -503,14 +479,10 @@ describe('PurchaseRequisitionsService', () => {
         mockTenantId,
       );
 
-      expect(
-        mockPrismaService.purchaseRequisitionItem.deleteMany,
-      ).toHaveBeenCalledWith({
+      expect(mockPrismaService.purchaseRequisitionItem.deleteMany).toHaveBeenCalledWith({
         where: { purchaseRequisitionId: mockPRId },
       });
-      expect(
-        mockPrismaService.purchaseRequisitionItem.createMany,
-      ).toHaveBeenCalled();
+      expect(mockPrismaService.purchaseRequisitionItem.createMany).toHaveBeenCalled();
     });
   });
 
@@ -563,9 +535,7 @@ describe('PurchaseRequisitionsService', () => {
         status: 'APPROVED',
       });
 
-      await expect(
-        service.submit(mockPRId, mockTenantId),
-      ).rejects.toThrow(BadRequestException);
+      await expect(service.submit(mockPRId, mockTenantId)).rejects.toThrow(BadRequestException);
     });
   });
 
@@ -607,11 +577,7 @@ describe('PurchaseRequisitionsService', () => {
         prNumber: 'PR-202604-0001',
       });
 
-      const result = await service.approve(
-        mockPRId,
-        mockUserId,
-        mockTenantId,
-      );
+      const result = await service.approve(mockPRId, mockUserId, mockTenantId);
       expect((result as any).status).toBe('APPROVED');
       expect((result as any).approvedBy).toBe(mockUserId);
     });
@@ -623,9 +589,9 @@ describe('PurchaseRequisitionsService', () => {
         status: 'DRAFT',
       });
 
-      await expect(
-        service.approve(mockPRId, mockUserId, mockTenantId),
-      ).rejects.toThrow(BadRequestException);
+      await expect(service.approve(mockPRId, mockUserId, mockTenantId)).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 
@@ -667,12 +633,7 @@ describe('PurchaseRequisitionsService', () => {
         prNumber: 'PR-202604-0001',
       });
 
-      const result = await service.cancel(
-        mockPRId,
-        'Budget cut',
-        mockUserId,
-        mockTenantId,
-      );
+      const result = await service.cancel(mockPRId, 'Budget cut', mockUserId, mockTenantId);
       expect((result as any).status).toBe('CANCELLED');
       expect((result as any).cancelReason).toBe('Budget cut');
     });
@@ -684,9 +645,9 @@ describe('PurchaseRequisitionsService', () => {
         status: 'PO_CREATED',
       });
 
-      await expect(
-        service.cancel(mockPRId, 'Too late', mockUserId, mockTenantId),
-      ).rejects.toThrow(BadRequestException);
+      await expect(service.cancel(mockPRId, 'Too late', mockUserId, mockTenantId)).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 
@@ -728,9 +689,7 @@ describe('PurchaseRequisitionsService', () => {
         prNumber: 'PR-202604-0002',
         tenantId: mockTenantId,
       };
-      mockPrismaService.purchaseRequisition.create.mockResolvedValue(
-        createdPR,
-      );
+      mockPrismaService.purchaseRequisition.create.mockResolvedValue(createdPR);
       mockPrismaService.purchaseRequisitionItem.createMany.mockResolvedValue({
         count: 2,
       });
@@ -791,9 +750,7 @@ describe('PurchaseRequisitionsService', () => {
         { id: 'inv-item-2' },
       ]);
 
-      mockPrismaService.supplier.findMany.mockResolvedValue([
-        { id: 'supplier-1' },
-      ]);
+      mockPrismaService.supplier.findMany.mockResolvedValue([{ id: 'supplier-1' }]);
 
       mockPrismaService.documentSequence.upsert.mockResolvedValue({
         lastNumber: 3,
@@ -804,9 +761,7 @@ describe('PurchaseRequisitionsService', () => {
         prNumber: 'PR-202604-0003',
         tenantId: mockTenantId,
       };
-      mockPrismaService.purchaseRequisition.create.mockResolvedValue(
-        createdPR,
-      );
+      mockPrismaService.purchaseRequisition.create.mockResolvedValue(createdPR);
       mockPrismaService.purchaseRequisitionItem.createMany.mockResolvedValue({
         count: 2,
       });
@@ -853,9 +808,7 @@ describe('PurchaseRequisitionsService', () => {
         id: mockPropertyId,
         tenantId: mockTenantId,
       });
-      mockPrismaService.inventoryItem.findMany.mockResolvedValue([
-        { id: 'inv-item-1' },
-      ]);
+      mockPrismaService.inventoryItem.findMany.mockResolvedValue([{ id: 'inv-item-1' }]);
       mockPrismaService.documentSequence.upsert.mockResolvedValue({
         lastNumber: 4,
       });
@@ -865,9 +818,7 @@ describe('PurchaseRequisitionsService', () => {
         prNumber: 'PR-202604-0004',
         tenantId: mockTenantId,
       };
-      mockPrismaService.purchaseRequisition.create.mockResolvedValue(
-        createdPR,
-      );
+      mockPrismaService.purchaseRequisition.create.mockResolvedValue(createdPR);
       mockPrismaService.purchaseRequisitionItem.createMany.mockResolvedValue({
         count: 1,
       });
@@ -893,11 +844,7 @@ describe('PurchaseRequisitionsService', () => {
         supplierQuotes: [],
       });
 
-      const result = await service.create(
-        minimalDto as any,
-        mockUserId,
-        mockTenantId,
-      );
+      const result = await service.create(minimalDto as any, mockUserId, mockTenantId);
       expect(result).toHaveProperty('status', 'DRAFT');
     });
   });
@@ -980,11 +927,7 @@ describe('PurchaseRequisitionsService', () => {
         prNumber: 'PR-202604-0001',
       });
 
-      const approved = await service.approve(
-        mockPRId,
-        mockUserId,
-        mockTenantId,
-      );
+      const approved = await service.approve(mockPRId, mockUserId, mockTenantId);
       expect((approved as any).status).toBe('APPROVED');
       expect((approved as any).approvedBy).toBe(mockUserId);
 

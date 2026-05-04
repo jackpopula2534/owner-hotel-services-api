@@ -303,9 +303,7 @@ export class GoodsReceivesService {
     // query keyed by the unique set of lotIds beats N findUnique round-trips.
     const lotIds = Array.from(
       new Set(
-        receive.items
-          .map((it: any) => it.lotId)
-          .filter((id: string | null): id is string => !!id),
+        receive.items.map((it: any) => it.lotId).filter((id: string | null): id is string => !!id),
       ),
     );
     const lots = lotIds.length
@@ -326,10 +324,7 @@ export class GoodsReceivesService {
     const lotMap = new Map(lots.map((l) => [l.id, l]));
 
     // Resolve receiver + inspector display names so the UI doesn't render bare UUIDs.
-    const userMap = await this.resolveUserNames([
-      receive.receivedBy,
-      receive.inspectedBy,
-    ]);
+    const userMap = await this.resolveUserNames([receive.receivedBy, receive.inspectedBy]);
 
     return this.mapToDetail(receive, { lotMap, userMap });
   }
@@ -349,10 +344,7 @@ export class GoodsReceivesService {
     });
 
     return new Map(
-      users.map((u) => [
-        u.id,
-        [u.firstName, u.lastName].filter(Boolean).join(' ') || u.email,
-      ]),
+      users.map((u) => [u.id, [u.firstName, u.lastName].filter(Boolean).join(' ') || u.email]),
     );
   }
 
@@ -668,9 +660,7 @@ export class GoodsReceivesService {
     // want a single QC record (a QC inspection is per-item, not per-line).
     // NOTE: We no longer filter by requiresQC here — template existence is the
     // sole trigger. Every item is a candidate; the template lookup decides.
-    const qcCandidateIds = Array.from(
-      new Set(sourceItems.map((it) => it.itemId)),
-    );
+    const qcCandidateIds = Array.from(new Set(sourceItems.map((it) => it.itemId)));
     if (qcCandidateIds.length === 0) return 0;
 
     // Pre-load all candidate templates in two round-trips:
@@ -678,9 +668,7 @@ export class GoodsReceivesService {
     //   2. CATEGORY-scoped templates for any of these items' categories
     const categoryIds = Array.from(
       new Set(
-        qcCandidateIds
-          .map((id) => invItemMap.get(id)?.categoryId)
-          .filter((c): c is string => !!c),
+        qcCandidateIds.map((id) => invItemMap.get(id)?.categoryId).filter((c): c is string => !!c),
       ),
     );
 
@@ -860,8 +848,7 @@ export class GoodsReceivesService {
       if (existingStock) {
         const newTotalQty = existingStock.quantity + acceptedQty;
         const newAvgCost =
-          (existingStock.quantity * Number(existingStock.avgCost) +
-            acceptedQty * item.unitCost) /
+          (existingStock.quantity * Number(existingStock.avgCost) + acceptedQty * item.unitCost) /
           newTotalQty;
         await tx.warehouseStock.update({
           where: {
@@ -922,14 +909,8 @@ export class GoodsReceivesService {
           where: { id: po.id },
           data: { status: newPoStatus },
         });
-        const orderedQty = poItems.reduce(
-          (s: number, p: any) => s + (p.quantity ?? 0),
-          0,
-        );
-        const receivedQty = poItems.reduce(
-          (s: number, p: any) => s + (p.receivedQty ?? 0),
-          0,
-        );
+        const orderedQty = poItems.reduce((s: number, p: any) => s + (p.quantity ?? 0), 0);
+        const receivedQty = poItems.reduce((s: number, p: any) => s + (p.receivedQty ?? 0), 0);
         poStatusTransition = {
           purchaseOrderId: po.id,
           poNumber: po.poNumber,
@@ -981,11 +962,7 @@ export class GoodsReceivesService {
    * Accept a DRAFT or INSPECTING GR — writes stock, creates lots, updates PO.
    * This is the "QC passed" action.
    */
-  async accept(
-    id: string,
-    userId: string,
-    tenantId: string,
-  ): Promise<GoodsReceiveDetail> {
+  async accept(id: string, userId: string, tenantId: string): Promise<GoodsReceiveDetail> {
     let poStatusTransition: PurchaseOrderReceivedEvent | null = null;
     let grEventPayload: GoodsReceiveCompletedEvent | null = null;
 
@@ -1018,9 +995,7 @@ export class GoodsReceivesService {
         return fresh;
       }
       if (gr.status !== 'DRAFT' && gr.status !== 'INSPECTING') {
-        throw new ConflictException(
-          'Only DRAFT or INSPECTING goods receives can be accepted',
-        );
+        throw new ConflictException('Only DRAFT or INSPECTING goods receives can be accepted');
       }
 
       // Re-fetch inventoryItem master so _applyAcceptance has the same shape
@@ -1098,7 +1073,8 @@ export class GoodsReceivesService {
 
     try {
       if (grEventPayload) this.eventEmitter.emit(INVENTORY_EVENTS.GR_COMPLETED, grEventPayload);
-      if (poStatusTransition) this.eventEmitter.emit(INVENTORY_EVENTS.PO_RECEIVED, poStatusTransition);
+      if (poStatusTransition)
+        this.eventEmitter.emit(INVENTORY_EVENTS.PO_RECEIVED, poStatusTransition);
     } catch (err) {
       this.logger.error(`Failed to emit accept event: ${(err as Error).message}`);
     }
@@ -1135,9 +1111,7 @@ export class GoodsReceivesService {
       throw new ConflictException('GR นี้ถูกปฏิเสธไปแล้ว');
     }
     if (gr.status !== 'DRAFT' && gr.status !== 'INSPECTING') {
-      throw new ConflictException(
-        'Only DRAFT or INSPECTING goods receives can be rejected',
-      );
+      throw new ConflictException('Only DRAFT or INSPECTING goods receives can be rejected');
     }
 
     await this.prisma.goodsReceive.update({
@@ -1152,9 +1126,7 @@ export class GoodsReceivesService {
       },
     });
 
-    this.logger.log(
-      `Goods receive rejected: ${id} by ${userId} — "${reason.slice(0, 60)}"`,
-    );
+    this.logger.log(`Goods receive rejected: ${id} by ${userId} — "${reason.slice(0, 60)}"`);
 
     return this.findOne(id, tenantId);
   }
@@ -1173,10 +1145,7 @@ export class GoodsReceivesService {
     },
   ): GoodsReceiveDetail {
     const items = receive.items || [];
-    const totalReceivedQty = items.reduce(
-      (sum: number, item: any) => sum + item.receivedQty,
-      0,
-    );
+    const totalReceivedQty = items.reduce((sum: number, item: any) => sum + item.receivedQty, 0);
     const totalRejectedQty = items.reduce(
       (sum: number, item: any) => sum + (item.rejectedQty || 0),
       0,
@@ -1229,8 +1198,7 @@ export class GoodsReceivesService {
       };
     });
 
-    const varianceQty =
-      totalOrderedQty != null ? totalReceivedQty - totalOrderedQty : undefined;
+    const varianceQty = totalOrderedQty != null ? totalReceivedQty - totalOrderedQty : undefined;
 
     // Aggregate parent-PO fulfilment from its line items (when included).
     // We compute this here (not in the controller) so every consumer of
@@ -1239,17 +1207,10 @@ export class GoodsReceivesService {
       receive.purchaseOrder?.items ?? [];
     const purchaseOrderProgress = poItemsForProgress.length
       ? (() => {
-          const orderedQty = poItemsForProgress.reduce(
-            (s, it) => s + (it.quantity ?? 0),
-            0,
-          );
-          const receivedQty = poItemsForProgress.reduce(
-            (s, it) => s + (it.receivedQty ?? 0),
-            0,
-          );
+          const orderedQty = poItemsForProgress.reduce((s, it) => s + (it.quantity ?? 0), 0);
+          const receivedQty = poItemsForProgress.reduce((s, it) => s + (it.receivedQty ?? 0), 0);
           const pendingQty = Math.max(0, orderedQty - receivedQty);
-          const percent =
-            orderedQty > 0 ? Math.round((receivedQty / orderedQty) * 100) : 0;
+          const percent = orderedQty > 0 ? Math.round((receivedQty / orderedQty) * 100) : 0;
           return { orderedQty, receivedQty, pendingQty, percent };
         })()
       : undefined;
@@ -1267,8 +1228,7 @@ export class GoodsReceivesService {
             id: receive.purchaseOrder.id,
             poNumber: receive.purchaseOrder.poNumber,
             orderDate: receive.purchaseOrder.orderDate?.toISOString(),
-            expectedDate:
-              receive.purchaseOrder.expectedDate?.toISOString() ?? null,
+            expectedDate: receive.purchaseOrder.expectedDate?.toISOString() ?? null,
             currency: receive.purchaseOrder.currency ?? 'THB',
             paymentTerms: receive.purchaseOrder.paymentTerms ?? null,
           }
@@ -1297,9 +1257,7 @@ export class GoodsReceivesService {
       // (an item with no requiresQC flag but a matching template will show the banner).
       requiresQC: Array.isArray(receive.qcRecords) && receive.qcRecords.length > 0,
       qcPending:
-        Array.isArray(receive.qcRecords) &&
-        receive.qcRecords.length > 0 &&
-        !receive.inspectedAt,
+        Array.isArray(receive.qcRecords) && receive.qcRecords.length > 0 && !receive.inspectedAt,
       itemCount: items.length,
       totalReceivedQty,
       totalRejectedQty,
@@ -1310,18 +1268,14 @@ export class GoodsReceivesService {
       // missing or extra goods.
       varianceAmount: items.reduce((sum: number, it: any, idx: number) => {
         const m = mappedItems[idx];
-        return m.varianceQty != null
-          ? sum + m.varianceQty * m.unitCost
-          : sum;
+        return m.varianceQty != null ? sum + m.varianceQty * m.unitCost : sum;
       }, 0),
       subtotal: Number(receive.subtotal ?? 0),
       totalAmount: Number(receive.totalAmount ?? 0),
       notes: receive.notes,
       createdBy: receive.receivedBy,
       createdByName: userMap.get(receive.receivedBy) ?? null,
-      inspectedByName: receive.inspectedBy
-        ? userMap.get(receive.inspectedBy) ?? null
-        : null,
+      inspectedByName: receive.inspectedBy ? (userMap.get(receive.inspectedBy) ?? null) : null,
       createdAt: receive.createdAt,
       updatedAt: receive.updatedAt,
       inspectedBy: receive.inspectedBy,

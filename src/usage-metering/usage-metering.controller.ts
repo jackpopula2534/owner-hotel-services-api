@@ -14,12 +14,9 @@ export class UsageMeteringController {
   @Get('snapshots')
   @ApiOperation({
     summary:
-      'List the active tenant\'s usage counters for the given period (defaults to current month).',
+      "List the active tenant's usage counters for the given period (defaults to current month).",
   })
-  async list(
-    @CurrentUser() user: any,
-    @Query('period') period?: string,
-  ) {
+  async list(@CurrentUser() user: any, @Query('period') period?: string) {
     return this.usage.listSnapshots(user.tenant_id, period);
   }
 }

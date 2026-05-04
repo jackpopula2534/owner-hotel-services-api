@@ -11,12 +11,7 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiBearerAuth,
-} from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AddonGuard } from '@/common/guards/addon.guard';
 import { RequireAddon } from '@/common/decorators/require-addon.decorator';
@@ -31,9 +26,7 @@ import { QueryPurchaseRequisitionDto } from './dto/query-purchase-requisition.dt
 @RequireAddon('INVENTORY_MODULE')
 @Controller({ path: 'inventory/purchase-requisitions', version: '1' })
 export class PurchaseRequisitionsController {
-  constructor(
-    private readonly purchaseRequisitionsService: PurchaseRequisitionsService,
-  ) {}
+  constructor(private readonly purchaseRequisitionsService: PurchaseRequisitionsService) {}
 
   @Get()
   @ApiOperation({ summary: 'List purchase requisitions with pagination' })
@@ -42,10 +35,7 @@ export class PurchaseRequisitionsController {
     @Query() query: QueryPurchaseRequisitionDto,
     @Req() req: { user: { tenantId: string } },
   ): Promise<{ success: boolean; data: unknown; meta: unknown }> {
-    const result = await this.purchaseRequisitionsService.findAll(
-      req.user.tenantId,
-      query,
-    );
+    const result = await this.purchaseRequisitionsService.findAll(req.user.tenantId, query);
     return {
       success: true,
       data: result.data,
@@ -61,10 +51,7 @@ export class PurchaseRequisitionsController {
     @Param('id') id: string,
     @Req() req: { user: { tenantId: string } },
   ): Promise<{ success: boolean; data: unknown }> {
-    const data = await this.purchaseRequisitionsService.findOne(
-      id,
-      req.user.tenantId,
-    );
+    const data = await this.purchaseRequisitionsService.findOne(id, req.user.tenantId);
     return { success: true, data };
   }
 
@@ -77,11 +64,7 @@ export class PurchaseRequisitionsController {
     @Body() dto: CreatePurchaseRequisitionDto,
     @Req() req: { user: { id: string; tenantId: string } },
   ): Promise<{ success: boolean; data: unknown }> {
-    const data = await this.purchaseRequisitionsService.create(
-      dto,
-      req.user.id,
-      req.user.tenantId,
-    );
+    const data = await this.purchaseRequisitionsService.create(dto, req.user.id, req.user.tenantId);
     return { success: true, data };
   }
 
@@ -99,11 +82,7 @@ export class PurchaseRequisitionsController {
     @Body() dto: UpdatePurchaseRequisitionDto,
     @Req() req: { user: { tenantId: string } },
   ): Promise<{ success: boolean; data: unknown }> {
-    const data = await this.purchaseRequisitionsService.update(
-      id,
-      dto,
-      req.user.tenantId,
-    );
+    const data = await this.purchaseRequisitionsService.update(id, dto, req.user.tenantId);
     return { success: true, data };
   }
 
@@ -116,35 +95,26 @@ export class PurchaseRequisitionsController {
     @Param('id') id: string,
     @Req() req: { user: { tenantId: string } },
   ): Promise<{ success: boolean; data: unknown }> {
-    const data = await this.purchaseRequisitionsService.submit(
-      id,
-      req.user.tenantId,
-    );
+    const data = await this.purchaseRequisitionsService.submit(id, req.user.tenantId);
     return { success: true, data };
   }
 
   @Post(':id/approve')
   @ApiOperation({
-    summary:
-      'Approve purchase requisition (PENDING_APPROVAL → APPROVED)',
+    summary: 'Approve purchase requisition (PENDING_APPROVAL → APPROVED)',
   })
   @ApiResponse({ status: 200, description: 'Purchase requisition approved' })
   async approve(
     @Param('id') id: string,
     @Req() req: { user: { id: string; tenantId: string } },
   ): Promise<{ success: boolean; data: unknown }> {
-    const data = await this.purchaseRequisitionsService.approve(
-      id,
-      req.user.id,
-      req.user.tenantId,
-    );
+    const data = await this.purchaseRequisitionsService.approve(id, req.user.id, req.user.tenantId);
     return { success: true, data };
   }
 
   @Post(':id/request-quotes')
   @ApiOperation({
-    summary:
-      'Request quotes from suppliers (APPROVED → PENDING_QUOTES)',
+    summary: 'Request quotes from suppliers (APPROVED → PENDING_QUOTES)',
   })
   @ApiResponse({ status: 200, description: 'Quotes requested' })
   async requestQuotes(

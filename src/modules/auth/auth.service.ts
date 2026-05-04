@@ -359,9 +359,7 @@ export class AuthService {
         ? {
             employeeId: (user as any).employeeId ?? null,
             approvalLimit:
-              (user as any).approvalLimit != null
-                ? Number((user as any).approvalLimit)
-                : null,
+              (user as any).approvalLimit != null ? Number((user as any).approvalLimit) : null,
             permissions: (() => {
               try {
                 const raw = (user as any).procurementPermissions;
@@ -498,7 +496,13 @@ export class AuthService {
     }
 
     // Carry forward the systemContext from the original token
-    const systemContext = ((tokenRecord as any).systemContext as 'main' | 'pos' | 'procurement' | 'warehouse' | 'hotel-terminal') ?? 'main';
+    const systemContext =
+      ((tokenRecord as any).systemContext as
+        | 'main'
+        | 'pos'
+        | 'procurement'
+        | 'warehouse'
+        | 'hotel-terminal') ?? 'main';
 
     // Generate new tokens
     const tokens = await this.generateTokens(
@@ -538,7 +542,11 @@ export class AuthService {
     };
   }
 
-  async logout(userIdOrAdminId: string, refreshToken?: string, systemContext?: 'main' | 'pos' | 'procurement' | 'warehouse' | 'hotel-terminal') {
+  async logout(
+    userIdOrAdminId: string,
+    refreshToken?: string,
+    systemContext?: 'main' | 'pos' | 'procurement' | 'warehouse' | 'hotel-terminal',
+  ) {
     if (refreshToken) {
       // Revoke the specific refresh token
       // If systemContext provided, also filter by it (prevents cross-system token revocation)
@@ -810,10 +818,24 @@ export class AuthService {
       firstName: null,
       lastName: null,
       permissions: [
-        'pr.create','pr.view','pr.approve','rfq.create','rfq.view',
-        'quote.compare','po.create','po.view','po.approve','supplier.view',
-        'supplier.manage','grn.create','grn.view','qc.inspect','qc.view',
-        'report.view','user.manage','approval-flow.manage',
+        'pr.create',
+        'pr.view',
+        'pr.approve',
+        'rfq.create',
+        'rfq.view',
+        'quote.compare',
+        'po.create',
+        'po.view',
+        'po.approve',
+        'supplier.view',
+        'supplier.manage',
+        'grn.create',
+        'grn.view',
+        'qc.inspect',
+        'qc.view',
+        'report.view',
+        'user.manage',
+        'approval-flow.manage',
       ],
       originIp: originIp ?? null,
     };
@@ -840,10 +862,25 @@ export class AuthService {
       firstName: null,
       lastName: null,
       permissions: [
-        'item.view','item.manage','warehouse.view','warehouse.manage',
-        'gr.create','gr.view','gr.receive','movement.create','movement.view',
-        'qc.inspect','qc.view','lot.manage','lot.view','stock.view',
-        'stock.adjust','stock.count','report.view','forecast.view','user.manage',
+        'item.view',
+        'item.manage',
+        'warehouse.view',
+        'warehouse.manage',
+        'gr.create',
+        'gr.view',
+        'gr.receive',
+        'movement.create',
+        'movement.view',
+        'qc.inspect',
+        'qc.view',
+        'lot.manage',
+        'lot.view',
+        'stock.view',
+        'stock.adjust',
+        'stock.count',
+        'report.view',
+        'forecast.view',
+        'user.manage',
       ],
       originIp: originIp ?? null,
     };

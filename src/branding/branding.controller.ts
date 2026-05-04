@@ -19,19 +19,13 @@ export class BrandingController {
 
   @Patch()
   @ApiOperation({ summary: 'Update branding (logo / colors / sender)' })
-  async upsert(
-    @CurrentUser() user: any,
-    @Body() body: Omit<UpsertBrandingInput, 'tenantId'>,
-  ) {
+  async upsert(@CurrentUser() user: any, @Body() body: Omit<UpsertBrandingInput, 'tenantId'>) {
     return this.service.upsert({ ...body, tenantId: user.tenant_id });
   }
 
   @Post('domain')
   @ApiOperation({ summary: 'Request a custom domain (returns DNS instructions)' })
-  async requestDomain(
-    @CurrentUser() user: any,
-    @Body() body: { domain: string },
-  ) {
+  async requestDomain(@CurrentUser() user: any, @Body() body: { domain: string }) {
     return this.service.requestCustomDomain(user.tenant_id, body.domain);
   }
 }

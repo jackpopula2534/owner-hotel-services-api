@@ -68,7 +68,9 @@ export class CategoriesController {
       },
     },
   })
-  async findAll(@CurrentUser() user: JwtPayload): Promise<{ success: boolean; data: CategoryWithChildren[] }> {
+  async findAll(
+    @CurrentUser() user: JwtPayload,
+  ): Promise<{ success: boolean; data: CategoryWithChildren[] }> {
     const data = await this.categoriesService.findAll(user.tenantId);
     return { success: true, data };
   }

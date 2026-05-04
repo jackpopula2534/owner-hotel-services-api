@@ -96,10 +96,7 @@ export class ItemsService {
       if (query.search) {
         // mode: 'insensitive' is not supported by Prisma v5 + MySQL
         // MySQL utf8mb4_unicode_ci is already case-insensitive by default
-        where.OR = [
-          { name: { contains: query.search } },
-          { sku: { contains: query.search } },
-        ];
+        where.OR = [{ name: { contains: query.search } }, { sku: { contains: query.search } }];
       }
 
       if (query.categoryId) {

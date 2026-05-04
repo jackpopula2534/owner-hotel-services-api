@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { EmailEventsService } from '../email/email-events.service';
 import { InvoicesService } from '../invoices/invoices.service';
@@ -8,6 +9,7 @@ import { HousekeepingService } from '../modules/housekeeping/housekeeping.servic
 import { NotificationsService } from '../notifications/notifications.service';
 import { PaymentsService } from '../payments/payments.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { mockEventEmitter } from '../common/test/mock-providers';
 
 describe('Booking -> Checkout -> Housekeeping integration flow', () => {
   let bookingsService: BookingsService;
@@ -77,6 +79,7 @@ describe('Booking -> Checkout -> Housekeeping integration flow', () => {
         { provide: LoyaltyService, useValue: loyaltyServiceMock },
         { provide: NotificationsService, useValue: notificationsServiceMock },
         { provide: PaymentsService, useValue: paymentsServiceMock },
+        { provide: EventEmitter2, useValue: mockEventEmitter() },
       ],
     }).compile();
 

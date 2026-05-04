@@ -86,9 +86,7 @@ export class AnnouncementsService {
       take: 50,
     });
 
-    const visible = all.filter((a: any) =>
-      this.matchesAudience(a, tenantId, tenantStatus),
-    );
+    const visible = all.filter((a: any) => this.matchesAudience(a, tenantId, tenantStatus));
 
     const reads: any[] = await (this.prisma as any).announcement_reads.findMany({
       where: { tenant_id: tenantId, announcement_id: { in: visible.map((a: any) => a.id) } },

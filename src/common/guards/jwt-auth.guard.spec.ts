@@ -29,9 +29,9 @@ describe('JwtAuthGuard', () => {
   });
 
   it('returns true immediately when @Public() metadata is set', () => {
-    jest.spyOn(reflector, 'getAllAndOverride').mockImplementation((key) =>
-      key === IS_PUBLIC_KEY ? true : undefined,
-    );
+    jest
+      .spyOn(reflector, 'getAllAndOverride')
+      .mockImplementation((key) => (key === IS_PUBLIC_KEY ? true : undefined));
     const guard = new JwtAuthGuard(reflector);
     expect(guard.canActivate(makeContext())).toBe(true);
   });

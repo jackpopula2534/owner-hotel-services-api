@@ -46,6 +46,8 @@ describe('AuthService', () => {
 
   const mockJwtService = {
     sign: jest.fn(),
+    verify: jest.fn(),
+    decode: jest.fn(),
   };
 
   const mockConfigService = {

@@ -1,6 +1,8 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { AuditLogService } from '../../audit-log/audit-log.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { mockAuditLogService } from '../../common/test/mock-providers';
 import { StaffDepartment, StaffRole, StaffStatus } from './dto/create-staff.dto';
 import { StaffService } from './staff.service';
 
@@ -30,6 +32,7 @@ describe('StaffService', () => {
           provide: PrismaService,
           useValue: prismaMock,
         },
+        { provide: AuditLogService, useValue: mockAuditLogService() },
       ],
     }).compile();
 

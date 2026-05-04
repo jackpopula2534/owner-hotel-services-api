@@ -168,9 +168,9 @@ describe('AddonService - Catalog CRUD', () => {
 
     it('throws NotFound if record missing', async () => {
       prismaMock.add_ons.findUnique.mockResolvedValue(null);
-      await expect(
-        service.update('missing', { name: 'x' }),
-      ).rejects.toBeInstanceOf(NotFoundException);
+      await expect(service.update('missing', { name: 'x' })).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
     });
 
     it('throws Conflict when changing to existing code', async () => {
@@ -178,9 +178,9 @@ describe('AddonService - Catalog CRUD', () => {
         .mockResolvedValueOnce(buildRecord())
         .mockResolvedValueOnce(buildRecord({ id: 'addon-2', code: 'OTHER' }));
 
-      await expect(
-        service.update('addon-1', { code: 'OTHER' }),
-      ).rejects.toBeInstanceOf(ConflictException);
+      await expect(service.update('addon-1', { code: 'OTHER' })).rejects.toBeInstanceOf(
+        ConflictException,
+      );
     });
   });
 

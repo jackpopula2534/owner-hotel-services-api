@@ -103,7 +103,11 @@ export class CreateSupplierDto {
     // รับทั้ง array และ JSON string
     if (Array.isArray(value)) return value;
     if (typeof value === 'string') {
-      try { return JSON.parse(value); } catch { return []; }
+      try {
+        return JSON.parse(value);
+      } catch {
+        return [];
+      }
     }
     return [];
   })

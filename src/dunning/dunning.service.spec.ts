@@ -94,16 +94,12 @@ describe('DunningService', () => {
       status: 'paid',
       tenants: { email: 'a@b.com' },
     });
-    await expect(service.sendManual('inv-1', 'reminder')).rejects.toThrow(
-      BadRequestException,
-    );
+    await expect(service.sendManual('inv-1', 'reminder')).rejects.toThrow(BadRequestException);
   });
 
   it('sendManual rejects unknown invoice', async () => {
     prismaInvoiceFindUnique.mockResolvedValue(null);
-    await expect(service.sendManual('missing', 'reminder')).rejects.toThrow(
-      NotFoundException,
-    );
+    await expect(service.sendManual('missing', 'reminder')).rejects.toThrow(NotFoundException);
   });
 
   it('sendManual escalates tenant to past_due after first_warning', async () => {

@@ -5,14 +5,7 @@
 
 // ===== Status Badge Types =====
 export type HotelStatusBadge = {
-  status:
-    | 'trial'
-    | 'active'
-    | 'past_due'
-    | 'suspended'
-    | 'expired'
-    | 'cancelled'
-    | 'archived';
+  status: 'trial' | 'active' | 'past_due' | 'suspended' | 'expired' | 'cancelled' | 'archived';
   label: string;
   labelTh: string;
   color: 'blue' | 'green' | 'yellow' | 'red' | 'gray' | 'orange';

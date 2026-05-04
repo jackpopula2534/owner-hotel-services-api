@@ -1,12 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsArray,
-  ArrayUnique,
-  IsIn,
-  IsOptional,
-  IsString,
-  MinLength,
-} from 'class-validator';
+import { IsArray, ArrayUnique, IsIn, IsOptional, IsString, MinLength } from 'class-validator';
 import { HOTEL_TERMINAL_ROLES, HotelTerminalRole } from './create-hotel-terminal-user.dto';
 
 export class UpdateHotelTerminalUserDto {

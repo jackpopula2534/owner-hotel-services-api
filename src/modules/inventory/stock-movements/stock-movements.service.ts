@@ -52,7 +52,12 @@ interface StockMovementDetail {
   /** Display name resolved from User table. */
   createdByName?: string;
   /** Populated user record for the actor (firstName/lastName/email). */
-  createdByUser?: { id: string; firstName: string | null; lastName: string | null; email: string } | null;
+  createdByUser?: {
+    id: string;
+    firstName: string | null;
+    lastName: string | null;
+    email: string;
+  } | null;
   createdAt: Date;
   updatedAt?: Date;
 }
@@ -617,7 +622,12 @@ export class StockMovementsService {
    */
   private mapToDetail(
     movement: any,
-    user: { id: string; firstName: string | null; lastName: string | null; email: string } | null = null,
+    user: {
+      id: string;
+      firstName: string | null;
+      lastName: string | null;
+      email: string;
+    } | null = null,
   ): StockMovementDetail {
     const unitCost = this.toNumber(movement.unitCost);
     const totalCost = this.toNumber(movement.totalCost);
@@ -740,7 +750,13 @@ export class StockMovementsService {
     userId: string,
     tenantId: string,
   ) {
-    const OUTBOUND_TYPES = ['GOODS_ISSUE', 'TRANSFER_OUT', 'WASTE', 'ADJUSTMENT_OUT', 'RETURN_SUPPLIER'];
+    const OUTBOUND_TYPES = [
+      'GOODS_ISSUE',
+      'TRANSFER_OUT',
+      'WASTE',
+      'ADJUSTMENT_OUT',
+      'RETURN_SUPPLIER',
+    ];
 
     if (!OUTBOUND_TYPES.includes(dto.type)) {
       // Not outbound — use normal create

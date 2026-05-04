@@ -92,10 +92,7 @@ export class DocumentSettingsController {
       }),
       fileFilter: (_req, file, cb) => {
         if (!file.mimetype.match(/^image\/(jpeg|jpg|png|webp)$/)) {
-          return cb(
-            new BadRequestException('อนุญาตเฉพาะไฟล์ภาพ (JPG, PNG, WebP) เท่านั้น'),
-            false,
-          );
+          return cb(new BadRequestException('อนุญาตเฉพาะไฟล์ภาพ (JPG, PNG, WebP) เท่านั้น'), false);
         }
         cb(null, true);
       },

@@ -10,7 +10,11 @@ import {
   HttpCode,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
-import { GoodsReceivesService, GoodsReceiveDetail, PaginatedResponse } from './goods-receives.service';
+import {
+  GoodsReceivesService,
+  GoodsReceiveDetail,
+  PaginatedResponse,
+} from './goods-receives.service';
 import { CreateGoodsReceiveDto } from './dto/create-goods-receive.dto';
 import { QueryGoodsReceiveDto } from './dto/query-goods-receive.dto';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
@@ -78,7 +82,10 @@ export class GoodsReceivesController {
       },
     },
   })
-  async findAll(@CurrentUser() user: JwtPayload, @Query() query: QueryGoodsReceiveDto): Promise<{ success: boolean } & PaginatedResponse<GoodsReceiveDetail>> {
+  async findAll(
+    @CurrentUser() user: JwtPayload,
+    @Query() query: QueryGoodsReceiveDto,
+  ): Promise<{ success: boolean } & PaginatedResponse<GoodsReceiveDetail>> {
     const result = await this.goodsReceivesService.findAll(user.tenantId, query);
     return { success: true, ...result };
   }
@@ -118,7 +125,10 @@ export class GoodsReceivesController {
     },
   })
   @ApiResponse({ status: 404, description: 'Goods receive not found' })
-  async findOne(@CurrentUser() user: JwtPayload, @Param('id') id: string): Promise<{ success: boolean; data: GoodsReceiveDetail }> {
+  async findOne(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+  ): Promise<{ success: boolean; data: GoodsReceiveDetail }> {
     const data = await this.goodsReceivesService.findOne(id, user.tenantId);
     return { success: true, data };
   }
@@ -138,7 +148,10 @@ export class GoodsReceivesController {
     status: 409,
     description: 'Conflict: PO status invalid or stock conflict',
   })
-  async create(@CurrentUser() user: JwtPayload, @Body() createDto: CreateGoodsReceiveDto): Promise<{ success: boolean; data: GoodsReceiveDetail }> {
+  async create(
+    @CurrentUser() user: JwtPayload,
+    @Body() createDto: CreateGoodsReceiveDto,
+  ): Promise<{ success: boolean; data: GoodsReceiveDetail }> {
     const data = await this.goodsReceivesService.create(createDto, user.userId, user.tenantId);
     return { success: true, data };
   }

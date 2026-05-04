@@ -1,4 +1,13 @@
-import { IsOptional, IsString, IsInt, IsBoolean, MinLength, MaxLength, Min, Max } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  IsInt,
+  IsBoolean,
+  MinLength,
+  MaxLength,
+  Min,
+  Max,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type, Transform } from 'class-transformer';
 
@@ -44,7 +53,8 @@ export class SearchItemDto {
   categoryId?: string;
 
   @ApiPropertyOptional({
-    description: 'Restrict results to active items. Default true (dropdowns rarely need archived items).',
+    description:
+      'Restrict results to active items. Default true (dropdowns rarely need archived items).',
     example: true,
     default: true,
   })

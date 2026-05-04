@@ -43,10 +43,7 @@ export class AnnouncementsController {
   @Get('mine/unread-count')
   @ApiOperation({ summary: 'Unread count for badge in nav' })
   async unread(@CurrentUser() user: any) {
-    const count = await this.service.unreadCount(
-      user.tenant_id,
-      user.tenant_status || null,
-    );
+    const count = await this.service.unreadCount(user.tenant_id, user.tenant_status || null);
     return { count };
   }
 

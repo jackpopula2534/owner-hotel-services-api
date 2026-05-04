@@ -39,10 +39,7 @@ export class StatusPageController {
   @Patch('admin/components/:code/status')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: '[Admin] Change component status' })
-  async setComponentStatus(
-    @Param('code') code: string,
-    @Body('status') status: ComponentStatus,
-  ) {
+  async setComponentStatus(@Param('code') code: string, @Body('status') status: ComponentStatus) {
     await this.service.updateComponentStatus(code, status);
     return { success: true };
   }

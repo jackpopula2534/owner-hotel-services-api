@@ -9,11 +9,7 @@ export type ComponentStatus =
   | 'maintenance';
 
 export type IncidentSeverity = 'minor' | 'major' | 'critical';
-export type IncidentStatus =
-  | 'investigating'
-  | 'identified'
-  | 'monitoring'
-  | 'resolved';
+export type IncidentStatus = 'investigating' | 'identified' | 'monitoring' | 'resolved';
 
 export interface PublicStatusResponse {
   overallStatus: ComponentStatus;

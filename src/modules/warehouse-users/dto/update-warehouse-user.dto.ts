@@ -1,12 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsIn,
-  IsOptional,
-  IsString,
-  MinLength,
-  ArrayUnique,
-  IsArray,
-} from 'class-validator';
+import { IsIn, IsOptional, IsString, MinLength, ArrayUnique, IsArray } from 'class-validator';
 import { WAREHOUSE_ROLES, type WarehouseRole } from './create-warehouse-user.dto';
 
 export class UpdateWarehouseUserDto {

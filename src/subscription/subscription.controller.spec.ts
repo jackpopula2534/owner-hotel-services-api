@@ -1,6 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { SubscriptionController } from './subscription.controller';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
+import { SelfServicePlanService } from './self-service-plan.service';
+import { mockSelfServicePlanService } from '../common/test/mock-providers';
 
 describe('SubscriptionController', () => {
   let controller: SubscriptionController;
@@ -17,6 +19,10 @@ describe('SubscriptionController', () => {
         {
           provide: SubscriptionsService,
           useValue: mockSubscriptionsService,
+        },
+        {
+          provide: SelfServicePlanService,
+          useValue: mockSelfServicePlanService(),
         },
       ],
     }).compile();

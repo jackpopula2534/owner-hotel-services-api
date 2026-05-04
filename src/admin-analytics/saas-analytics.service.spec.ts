@@ -115,10 +115,7 @@ describe('SaasAnalyticsService', () => {
     const endSubs = startSubs.filter((s) => s.id !== 's3');
     mockSubsFindMany.mockResolvedValueOnce(startSubs).mockResolvedValueOnce(endSubs);
 
-    const r = await service.getChurnSummary(
-      new Date('2026-04-01'),
-      new Date('2026-05-01'),
-    );
+    const r = await service.getChurnSummary(new Date('2026-04-01'), new Date('2026-05-01'));
 
     expect(r.startActive).toBe(4);
     expect(r.endActive).toBe(3);

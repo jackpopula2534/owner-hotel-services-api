@@ -106,9 +106,7 @@ export class WebhooksService {
   // ─────────── private ───────────
 
   private verifySignature(input: WebhookIngestInput): boolean {
-    const secret = this.config.get<string>(
-      `WEBHOOK_SECRET_${input.provider.toUpperCase()}`,
-    );
+    const secret = this.config.get<string>(`WEBHOOK_SECRET_${input.provider.toUpperCase()}`);
     if (!secret) {
       this.logger.warn(
         `No webhook secret configured for provider "${input.provider}" — skipping verification`,

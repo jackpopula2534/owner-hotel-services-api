@@ -12,7 +12,13 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
-import { ItemsService, ItemWithStock, ItemSearchResult, StockSummary, PaginatedResponse } from './items.service';
+import {
+  ItemsService,
+  ItemWithStock,
+  ItemSearchResult,
+  StockSummary,
+  PaginatedResponse,
+} from './items.service';
 import { CreateItemDto } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
 import { QueryItemDto } from './dto/query-item.dto';
@@ -88,7 +94,10 @@ export class ItemsController {
       },
     },
   })
-  async findAll(@CurrentUser() user: JwtPayload, @Query() query: QueryItemDto): Promise<{ success: boolean } & PaginatedResponse<ItemWithStock>> {
+  async findAll(
+    @CurrentUser() user: JwtPayload,
+    @Query() query: QueryItemDto,
+  ): Promise<{ success: boolean } & PaginatedResponse<ItemWithStock>> {
     const result = await this.itemsService.findAll(user.tenantId, query);
     return { success: true, ...result };
   }
@@ -151,7 +160,10 @@ export class ItemsController {
       },
     },
   })
-  async getStockSummary(@CurrentUser() user: JwtPayload, @Query('propertyId') propertyId?: string): Promise<{ success: boolean; data: StockSummary }> {
+  async getStockSummary(
+    @CurrentUser() user: JwtPayload,
+    @Query('propertyId') propertyId?: string,
+  ): Promise<{ success: boolean; data: StockSummary }> {
     const data = await this.itemsService.getStockSummary(user.tenantId, propertyId);
     return { success: true, data };
   }

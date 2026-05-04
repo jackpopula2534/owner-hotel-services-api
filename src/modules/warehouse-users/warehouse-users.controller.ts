@@ -63,10 +63,7 @@ export class WarehouseUsersController {
   @ApiOperation({ summary: 'Create a warehouse user account' })
   @ApiResponse({ status: 201, description: 'Warehouse user created' })
   @ApiResponse({ status: 409, description: 'Email already in use' })
-  async create(
-    @Body() dto: CreateWarehouseUserDto,
-    @CurrentUser() caller: AuthenticatedCaller,
-  ) {
+  async create(@Body() dto: CreateWarehouseUserDto, @CurrentUser() caller: AuthenticatedCaller) {
     this.assertManager(caller);
     return this.service.create(dto, this.assertTenant(caller));
   }
@@ -90,10 +87,7 @@ export class WarehouseUsersController {
 
   @Get(':userId')
   @ApiOperation({ summary: 'Get a warehouse user by ID' })
-  async findOne(
-    @Param('userId') userId: string,
-    @CurrentUser() caller: AuthenticatedCaller,
-  ) {
+  async findOne(@Param('userId') userId: string, @CurrentUser() caller: AuthenticatedCaller) {
     this.assertManager(caller);
     return this.service.findOne(userId, this.assertTenant(caller));
   }
@@ -113,10 +107,7 @@ export class WarehouseUsersController {
   @Delete(':userId')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Disable (soft-delete) a warehouse user' })
-  async remove(
-    @Param('userId') userId: string,
-    @CurrentUser() caller: AuthenticatedCaller,
-  ) {
+  async remove(@Param('userId') userId: string, @CurrentUser() caller: AuthenticatedCaller) {
     this.assertManager(caller);
     return this.service.remove(userId, this.assertTenant(caller));
   }

@@ -14,10 +14,7 @@ export class DataExportController {
   // ── Tenant endpoints ──
   @Post()
   @ApiOperation({ summary: 'Request a data export for the active tenant' })
-  async request(
-    @CurrentUser() user: any,
-    @Body() body: { kind?: ExportKind },
-  ) {
+  async request(@CurrentUser() user: any, @Body() body: { kind?: ExportKind }) {
     return this.service.request({
       tenantId: user.tenant_id,
       userId: user.id || user.user_id,
@@ -33,10 +30,7 @@ export class DataExportController {
 
   @Get(':id/download')
   @ApiOperation({ summary: 'Resolve the signed download URL for a completed export' })
-  async download(
-    @CurrentUser() user: any,
-    @Param('id') id: string,
-  ) {
+  async download(@CurrentUser() user: any, @Param('id') id: string) {
     const url = await this.service.getDownloadUrl(id, user.tenant_id);
     return { url };
   }
@@ -45,12 +39,7 @@ export class DataExportController {
   @Get('admin')
   @ApiOperation({ summary: '[Admin] List export requests across tenants' })
   async listAll(
-    @Query('status') status?:
-      | 'queued'
-      | 'processing'
-      | 'completed'
-      | 'failed'
-      | 'expired',
+    @Query('status') status?: 'queued' | 'processing' | 'completed' | 'failed' | 'expired',
     @Query('kind') kind?: ExportKind,
     @Query('limit') limit?: string,
   ) {

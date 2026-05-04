@@ -36,9 +36,7 @@ import {
   cors: { origin: '*' },
   namespace: 'procurement',
 })
-export class ProcurementEventsGateway
-  implements OnGatewayConnection, OnGatewayDisconnect
-{
+export class ProcurementEventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(ProcurementEventsGateway.name);
 
   @WebSocketServer()
@@ -57,7 +55,10 @@ export class ProcurementEventsGateway
    * the socket out of all rooms — it will never receive broadcasts.
    */
   @SubscribeMessage('procurement.subscribe')
-  handleSubscribe(client: Socket, payload: { tenantId?: string }): {
+  handleSubscribe(
+    client: Socket,
+    payload: { tenantId?: string },
+  ): {
     status: 'subscribed' | 'rejected';
     room?: string;
   } {

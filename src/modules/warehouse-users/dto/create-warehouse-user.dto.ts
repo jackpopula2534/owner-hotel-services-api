@@ -58,19 +58,8 @@ export const DEFAULT_WAREHOUSE_PERMISSIONS: Record<WarehouseRole, string[]> = {
     'alert.view',
     'forecast.view',
   ],
-  qc_officer: [
-    'item.view',
-    'gr.view',
-    'qc.inspect',
-    'lot.view',
-  ],
-  receiver: [
-    'item.view',
-    'gr.view',
-    'gr.create',
-    'qc.inspect',
-    'lot.view',
-  ],
+  qc_officer: ['item.view', 'gr.view', 'qc.inspect', 'lot.view'],
+  receiver: ['item.view', 'gr.view', 'gr.create', 'qc.inspect', 'lot.view'],
 };
 
 export class CreateWarehouseUserDto {

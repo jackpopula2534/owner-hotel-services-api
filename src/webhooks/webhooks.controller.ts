@@ -1,14 +1,4 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Headers,
-  Param,
-  Post,
-  Query,
-  Req,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -40,8 +30,7 @@ export class WebhooksController {
     @Body() body: any,
     @Req() req: Request,
   ) {
-    const idempotencyKey =
-      idemHeader || body?.idempotencyKey || body?.event_id || body?.id;
+    const idempotencyKey = idemHeader || body?.idempotencyKey || body?.event_id || body?.id;
     if (!idempotencyKey) {
       return { status: 'failed', error: 'missing idempotency key' };
     }
@@ -54,8 +43,7 @@ export class WebhooksController {
       // raw body string used for HMAC; if express.raw was not configured
       // we fall back to JSON.stringify which is not byte-equivalent and
       // will cause signature failures for strict providers.
-      rawBody:
-        (req as any).rawBody?.toString?.() || JSON.stringify(body || {}),
+      rawBody: (req as any).rawBody?.toString?.() || JSON.stringify(body || {}),
       payload: body || {},
     });
   }

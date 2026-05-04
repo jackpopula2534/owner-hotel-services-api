@@ -1,9 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsIn, IsOptional, IsString, MinLength } from 'class-validator';
-import {
-  HOTEL_TERMINAL_ROLES,
-  HotelTerminalRole,
-} from './create-hotel-terminal-user.dto';
+import { HOTEL_TERMINAL_ROLES, HotelTerminalRole } from './create-hotel-terminal-user.dto';
 
 /**
  * Auto-create a Hotel Terminal user from an existing HR Employee.
@@ -29,8 +26,7 @@ export class ImportFromEmployeeDto {
   password!: string;
 
   @ApiPropertyOptional({
-    description:
-      'Override propertyId. Defaults to the employee\'s assigned propertyId.',
+    description: "Override propertyId. Defaults to the employee's assigned propertyId.",
   })
   @IsOptional()
   @IsString()

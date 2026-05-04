@@ -54,11 +54,7 @@ describe('UsageMeteringService', () => {
     expect(sql).toContain('ON DUPLICATE KEY UPDATE');
     expect(sql).toContain('value = value + VALUES(value)');
     // bind args: tenantId, metric, period, amount, amount, now
-    expect(mockExecuteRaw.mock.calls[0].slice(1, 4)).toEqual([
-      't1',
-      'bookings',
-      '2026-05',
-    ]);
+    expect(mockExecuteRaw.mock.calls[0].slice(1, 4)).toEqual(['t1', 'bookings', '2026-05']);
   });
 
   it('record() defaults amount to 1 when omitted', async () => {
@@ -69,9 +65,9 @@ describe('UsageMeteringService', () => {
   });
 
   it('record() rejects negative amount', async () => {
-    await expect(
-      service.record({ tenantId: 't1', metricCode: 'x', amount: -1 }),
-    ).rejects.toThrow(BadRequestException);
+    await expect(service.record({ tenantId: 't1', metricCode: 'x', amount: -1 })).rejects.toThrow(
+      BadRequestException,
+    );
     expect(mockExecuteRaw).not.toHaveBeenCalled();
   });
 

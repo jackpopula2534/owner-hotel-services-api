@@ -104,8 +104,7 @@ export class ProcurementUsersService {
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
     const permissions = dto.permissions ?? DEFAULT_ROLE_PERMISSIONS[dto.role];
-    const approvalLimit =
-      dto.approvalLimit ?? DEFAULT_ROLE_LIMITS[dto.role] ?? null;
+    const approvalLimit = dto.approvalLimit ?? DEFAULT_ROLE_LIMITS[dto.role] ?? null;
 
     const user = await this.prisma.user.create({
       data: {
@@ -118,8 +117,7 @@ export class ProcurementUsersService {
         employeeId: dto.employeeId ?? null,
         status: 'active',
         allowedSystems: this.allowedSystemsFor(dto.role),
-        approvalLimit:
-          approvalLimit === null ? null : (approvalLimit as unknown as Prisma.Decimal),
+        approvalLimit: approvalLimit === null ? null : (approvalLimit as unknown as Prisma.Decimal),
         procurementPermissions: JSON.stringify(permissions),
       } as unknown as Prisma.UserCreateInput,
     });
@@ -131,9 +129,7 @@ export class ProcurementUsersService {
     return { success: true, data: this.format(user as unknown as UserLike) };
   }
 
-  async findAll(
-    tenantId: string,
-  ): Promise<{ success: true; data: ProcurementUserResponse[] }> {
+  async findAll(tenantId: string): Promise<{ success: true; data: ProcurementUserResponse[] }> {
     const users = await this.prisma.user.findMany({
       where: {
         tenantId,
@@ -179,9 +175,7 @@ export class ProcurementUsersService {
     if (dto.password) data.password = await bcrypt.hash(dto.password, 10);
     if (dto.approvalLimit !== undefined) {
       data.approvalLimit =
-        dto.approvalLimit === null
-          ? null
-          : (dto.approvalLimit as unknown as Prisma.Decimal);
+        dto.approvalLimit === null ? null : (dto.approvalLimit as unknown as Prisma.Decimal);
     }
     if (dto.permissions !== undefined) {
       data.procurementPermissions = JSON.stringify(dto.permissions);

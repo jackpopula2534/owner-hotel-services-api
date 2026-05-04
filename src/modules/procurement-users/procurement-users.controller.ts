@@ -45,7 +45,9 @@ export class ProcurementUsersController {
 
   private assertManager(caller: AuthenticatedCaller): void {
     if (!ADMIN_ROLES.has(caller.role)) {
-      throw new ForbiddenException('Only tenant admins and procurement managers can manage procurement users');
+      throw new ForbiddenException(
+        'Only tenant admins and procurement managers can manage procurement users',
+      );
     }
   }
 
@@ -61,10 +63,7 @@ export class ProcurementUsersController {
   @ApiOperation({ summary: 'Create a procurement user account' })
   @ApiResponse({ status: 201, description: 'Procurement user created' })
   @ApiResponse({ status: 409, description: 'Email already in use' })
-  async create(
-    @Body() dto: CreateProcurementUserDto,
-    @CurrentUser() caller: AuthenticatedCaller,
-  ) {
+  async create(@Body() dto: CreateProcurementUserDto, @CurrentUser() caller: AuthenticatedCaller) {
     this.assertManager(caller);
     return this.service.create(dto, this.assertTenant(caller));
   }
@@ -88,10 +87,7 @@ export class ProcurementUsersController {
 
   @Get(':userId')
   @ApiOperation({ summary: 'Get a procurement user by ID' })
-  async findOne(
-    @Param('userId') userId: string,
-    @CurrentUser() caller: AuthenticatedCaller,
-  ) {
+  async findOne(@Param('userId') userId: string, @CurrentUser() caller: AuthenticatedCaller) {
     this.assertManager(caller);
     return this.service.findOne(userId, this.assertTenant(caller));
   }
@@ -111,10 +107,7 @@ export class ProcurementUsersController {
   @Delete(':userId')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Disable (soft-delete) a procurement user' })
-  async remove(
-    @Param('userId') userId: string,
-    @CurrentUser() caller: AuthenticatedCaller,
-  ) {
+  async remove(@Param('userId') userId: string, @CurrentUser() caller: AuthenticatedCaller) {
     this.assertManager(caller);
     return this.service.remove(userId, this.assertTenant(caller));
   }

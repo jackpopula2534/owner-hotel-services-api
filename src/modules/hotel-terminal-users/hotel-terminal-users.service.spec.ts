@@ -42,15 +42,10 @@ describe('HotelTerminalUsersService.listImportableEmployees', () => {
     prisma = createMockPrisma();
 
     const moduleRef: TestingModule = await Test.createTestingModule({
-      providers: [
-        HotelTerminalUsersService,
-        { provide: PrismaService, useValue: prisma },
-      ],
+      providers: [HotelTerminalUsersService, { provide: PrismaService, useValue: prisma }],
     }).compile();
 
-    service = moduleRef.get<HotelTerminalUsersService>(
-      HotelTerminalUsersService,
-    );
+    service = moduleRef.get<HotelTerminalUsersService>(HotelTerminalUsersService);
   });
 
   it('returns importable employees from the primary tenant when seeded', async () => {
@@ -165,16 +160,10 @@ describe('HotelTerminalUsersService.listImportableEmployees', () => {
 
   it('falls back to a UserTenant-linked tenant when the primary tenant is empty', async () => {
     // Primary count → 0; fallback count → 54.
-    prisma.employee.count
-      .mockResolvedValueOnce(0)
-      .mockResolvedValueOnce(54);
+    prisma.employee.count.mockResolvedValueOnce(0).mockResolvedValueOnce(54);
     // UserTenant memberships → caller is also linked to "tenant-other".
-    prisma.userTenant.findMany.mockResolvedValueOnce([
-      { tenantId: 'tenant-other' },
-    ]);
-    prisma.$queryRawUnsafe.mockResolvedValueOnce([
-      { tenantId: 'tenant-other', cnt: 54 },
-    ]);
+    prisma.userTenant.findMany.mockResolvedValueOnce([{ tenantId: 'tenant-other' }]);
+    prisma.$queryRawUnsafe.mockResolvedValueOnce([{ tenantId: 'tenant-other', cnt: 54 }]);
     // findMany on the resolved tenant returns one row from the page.
     prisma.employee.findMany.mockResolvedValueOnce([
       {
@@ -288,9 +277,7 @@ describe('HotelTerminalUsersService.listImportableEmployees', () => {
       .mockResolvedValueOnce(0) // primary
       .mockResolvedValueOnce(54); // diagnostic global probe
     prisma.userTenant.findMany.mockResolvedValueOnce([]);
-    prisma.$queryRawUnsafe.mockResolvedValueOnce([
-      { tenantId: 'tenant-other', cnt: 54 },
-    ]);
+    prisma.$queryRawUnsafe.mockResolvedValueOnce([{ tenantId: 'tenant-other', cnt: 54 }]);
 
     const res = await service.listImportableEmployees({
       userId: 'user-1',
@@ -357,11 +344,7 @@ describe('HotelTerminalUsersService.listImportableEmployees', () => {
       });
 
       expect(res.success).toBe(true);
-      expect(res.data).toEqual([
-        'ฝ่ายบริหาร',
-        'ฝ่ายต้อนรับ',
-        'ฝ่ายแม่บ้าน',
-      ]);
+      expect(res.data).toEqual(['ฝ่ายบริหาร', 'ฝ่ายต้อนรับ', 'ฝ่ายแม่บ้าน']);
     });
   });
 });

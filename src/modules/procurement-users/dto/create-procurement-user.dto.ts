@@ -20,12 +20,7 @@ import { Type } from 'class-transformer';
  * - approver:            approves documents within assigned limit
  * - receiver:            checks incoming goods, signs GRN / QC
  */
-export const PROCUREMENT_ROLES = [
-  'procurement_manager',
-  'buyer',
-  'approver',
-  'receiver',
-] as const;
+export const PROCUREMENT_ROLES = ['procurement_manager', 'buyer', 'approver', 'receiver'] as const;
 
 export type ProcurementRole = (typeof PROCUREMENT_ROLES)[number];
 

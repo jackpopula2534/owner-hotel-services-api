@@ -93,10 +93,7 @@ export class PaymentReconciliationService {
       }
     }
 
-    const status =
-      mismatches.length === 0
-        ? 'clean'
-        : 'mismatch';
+    const status = mismatches.length === 0 ? 'clean' : 'mismatch';
 
     const run = await (this.prisma as any).payment_reconciliation_runs.create({
       data: {

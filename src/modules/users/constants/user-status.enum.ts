@@ -26,10 +26,7 @@ export const ACTIVE_USER_STATUSES: ReadonlyArray<UserStatus> = [UserStatus.ACTIV
  * Helper: เช็คว่า user สามารถ login / ใช้งาน API ได้หรือไม่
  * คำนึงทั้ง status และ expiresAt
  */
-export function isUserUsable(user: {
-  status?: string | null;
-  expiresAt?: Date | null;
-}): boolean {
+export function isUserUsable(user: { status?: string | null; expiresAt?: Date | null }): boolean {
   if (!user) return false;
   if (user.status !== UserStatus.ACTIVE) return false;
   if (user.expiresAt && user.expiresAt.getTime() <= Date.now()) return false;

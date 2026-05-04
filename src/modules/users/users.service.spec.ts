@@ -104,12 +104,9 @@ describe('UsersService — lifecycle management', () => {
 
     it('refuses self-status-change', async () => {
       await expect(
-        service.updateStatus(
-          'user-1',
-          { status: UserStatus.SUSPENDED },
-          'tenant-1',
-          { callerId: 'user-1' },
-        ),
+        service.updateStatus('user-1', { status: UserStatus.SUSPENDED }, 'tenant-1', {
+          callerId: 'user-1',
+        }),
       ).rejects.toBeInstanceOf(ForbiddenException);
       expect(prismaMock.user.update).not.toHaveBeenCalled();
     });
@@ -158,12 +155,9 @@ describe('UsersService — lifecycle management', () => {
     it('throws NotFound for unknown user', async () => {
       prismaMock.user.findFirst.mockResolvedValue(null);
       await expect(
-        service.updateStatus(
-          'ghost',
-          { status: UserStatus.SUSPENDED },
-          'tenant-1',
-          { callerId: 'admin-1' },
-        ),
+        service.updateStatus('ghost', { status: UserStatus.SUSPENDED }, 'tenant-1', {
+          callerId: 'admin-1',
+        }),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
@@ -174,12 +168,9 @@ describe('UsersService — lifecycle management', () => {
       const future = new Date(Date.now() + 86_400_000).toISOString();
       prismaMock.user.update.mockResolvedValue({ ...baseUser, expiresAt: new Date(future) });
 
-      const result = await service.setExpiration(
-        'user-1',
-        { expiresAt: future },
-        'tenant-1',
-        { callerId: 'admin-1' },
-      );
+      const result = await service.setExpiration('user-1', { expiresAt: future }, 'tenant-1', {
+        callerId: 'admin-1',
+      });
 
       expect(result.expiresAt).toEqual(new Date(future));
       expect(prismaMock.user.update).toHaveBeenCalledWith(
@@ -201,12 +192,9 @@ describe('UsersService — lifecycle management', () => {
       });
       prismaMock.refreshToken.updateMany.mockResolvedValue({ count: 1 });
 
-      await service.setExpiration(
-        'user-1',
-        { expiresAt: past },
-        'tenant-1',
-        { callerId: 'admin-1' },
-      );
+      await service.setExpiration('user-1', { expiresAt: past }, 'tenant-1', {
+        callerId: 'admin-1',
+      });
 
       expect(prismaMock.user.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -232,12 +220,9 @@ describe('UsersService — lifecycle management', () => {
         expiresAt: new Date(future),
       });
 
-      await service.setExpiration(
-        'user-1',
-        { expiresAt: future },
-        'tenant-1',
-        { callerId: 'admin-1' },
-      );
+      await service.setExpiration('user-1', { expiresAt: future }, 'tenant-1', {
+        callerId: 'admin-1',
+      });
 
       expect(prismaMock.user.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -256,12 +241,9 @@ describe('UsersService — lifecycle management', () => {
       });
       prismaMock.user.update.mockResolvedValue({ ...baseUser, expiresAt: null });
 
-      await service.setExpiration(
-        'user-1',
-        { expiresAt: null },
-        'tenant-1',
-        { callerId: 'admin-1' },
-      );
+      await service.setExpiration('user-1', { expiresAt: null }, 'tenant-1', {
+        callerId: 'admin-1',
+      });
 
       expect(prismaMock.user.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -279,9 +261,7 @@ describe('UsersService — lifecycle management', () => {
       const result = await service.findAll({ page: 1, limit: 10 }, undefined);
 
       expect(result.total).toBe(1);
-      expect(prismaMock.user.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: {} }),
-      );
+      expect(prismaMock.user.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: {} }));
     });
 
     it('tenant admin is constrained to own tenant', async () => {

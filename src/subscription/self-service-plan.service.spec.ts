@@ -169,9 +169,9 @@ describe('SelfServicePlanService', () => {
         max_users: 100,
         max_properties: 100,
       });
-      await expect(
-        service.preview({ tenantId: 'tenant-1', newPlanId: 'plan-x' }),
-      ).rejects.toThrow(ForbiddenException);
+      await expect(service.preview({ tenantId: 'tenant-1', newPlanId: 'plan-x' })).rejects.toThrow(
+        ForbiddenException,
+      );
     });
   });
 

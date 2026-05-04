@@ -1,10 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { JwtService } from '@nestjs/jwt';
-import {
-  BadRequestException,
-  ForbiddenException,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ImpersonationService } from './impersonation.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -80,9 +76,9 @@ describe('ImpersonationService', () => {
 
     it('rejects without a reason', async () => {
       mockTenantFindUnique.mockResolvedValue({ id: 't1' });
-      await expect(
-        service.start({ adminId: 'a', tenantId: 't1', reason: '' }),
-      ).rejects.toThrow(BadRequestException);
+      await expect(service.start({ adminId: 'a', tenantId: 't1', reason: '' })).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('throws NotFound when tenant missing', async () => {
@@ -129,9 +125,7 @@ describe('ImpersonationService', () => {
         admin_id: 'admin-1',
         status: 'active',
       });
-      await expect(service.end('sess-1', 'admin-2')).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(service.end('sess-1', 'admin-2')).rejects.toThrow(ForbiddenException);
     });
 
     it('is idempotent for already-ended session', async () => {
@@ -168,9 +162,7 @@ describe('ImpersonationService', () => {
         target_tenant_id: 't1',
         expires_at: past,
       });
-      await expect(service.assertActive('sess-1')).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(service.assertActive('sess-1')).rejects.toThrow(ForbiddenException);
       expect(mockSessionUpdate).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ status: 'expired' }),
@@ -180,9 +172,7 @@ describe('ImpersonationService', () => {
 
     it('rejects unknown session', async () => {
       mockSessionFindUnique.mockResolvedValue(null);
-      await expect(service.assertActive('sess-x')).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(service.assertActive('sess-x')).rejects.toThrow(ForbiddenException);
     });
 
     it('rejects ended session', async () => {
@@ -191,9 +181,7 @@ describe('ImpersonationService', () => {
         status: 'ended',
         expires_at: new Date(Date.now() + 10_000),
       });
-      await expect(service.assertActive('sess-1')).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(service.assertActive('sess-1')).rejects.toThrow(ForbiddenException);
     });
   });
 });

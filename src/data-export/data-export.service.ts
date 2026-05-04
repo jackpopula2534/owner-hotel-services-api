@@ -40,9 +40,7 @@ export class DataExportService {
       },
     });
     if (recent) {
-      throw new BadRequestException(
-        'มีคำขอกำลังดำเนินการอยู่ กรุณารอจนเสร็จก่อนสร้างคำขอใหม่',
-      );
+      throw new BadRequestException('มีคำขอกำลังดำเนินการอยู่ กรุณารอจนเสร็จก่อนสร้างคำขอใหม่');
     }
 
     const request = await (this.prisma as any).data_export_requests.create({
@@ -54,9 +52,7 @@ export class DataExportService {
       },
     });
 
-    this.logger.log(
-      `Data ${kind} requested: tenant=${input.tenantId} request=${request.id}`,
-    );
+    this.logger.log(`Data ${kind} requested: tenant=${input.tenantId} request=${request.id}`);
 
     return { id: request.id, status: request.status };
   }
@@ -95,12 +91,7 @@ export class DataExportService {
    * `downloadUrl` is a signed S3 URL; we record `download_expires_at` so
    * the cleanup cron can stop offering it after 7 days.
    */
-  async complete(
-    requestId: string,
-    downloadUrl: string,
-    byteSize: number,
-    expiresAt: Date,
-  ) {
+  async complete(requestId: string, downloadUrl: string, byteSize: number, expiresAt: Date) {
     const r = await (this.prisma as any).data_export_requests.findUnique({
       where: { id: requestId },
     });
@@ -134,12 +125,15 @@ export class DataExportService {
     });
     if (!r) throw new NotFoundException('Request not found');
     if (r.tenant_id !== tenantId) {
-      throw new ForbiddenException('Cannot access another tenant\'s export');
+      throw new ForbiddenException("Cannot access another tenant's export");
     }
     if (r.status !== 'completed') {
       throw new BadRequestException('Export is not yet ready');
     }
-    if (!r.download_url || (r.download_expires_at && new Date(r.download_expires_at) < new Date())) {
+    if (
+      !r.download_url ||
+      (r.download_expires_at && new Date(r.download_expires_at) < new Date())
+    ) {
       throw new BadRequestException('Download link has expired');
     }
     return r.download_url;

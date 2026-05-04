@@ -24,10 +24,7 @@ export class AdminAnalyticsController {
 
   @Get('churn')
   @ApiOperation({ summary: 'Logo + revenue churn for a period' })
-  async churn(
-    @Query('from') from?: string,
-    @Query('to') to?: string,
-  ) {
+  async churn(@Query('from') from?: string, @Query('to') to?: string) {
     const periodEnd = to ? new Date(to) : new Date();
     const periodStart = from ? new Date(from) : new Date(periodEnd);
     if (!from) periodStart.setMonth(periodStart.getMonth() - 1);

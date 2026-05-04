@@ -1,9 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import {
-  BadRequestException,
-  ConflictException,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { GoodsReceivesService } from '../goods-receives.service';
 import { PrismaService } from '@/prisma/prisma.service';
 import type { CreateGoodsReceiveDto } from '../dto/create-goods-receive.dto';
@@ -221,9 +217,7 @@ describe('GoodsReceivesService', () => {
 
   const baseDto = (overrides?: Partial<CreateGoodsReceiveDto>): CreateGoodsReceiveDto => ({
     warehouseId,
-    items: [
-      { itemId: itemNonPerishable, receivedQty: 5, unitCost: 100 },
-    ],
+    items: [{ itemId: itemNonPerishable, receivedQty: 5, unitCost: 100 }],
     ...overrides,
   });
 
@@ -326,9 +320,7 @@ describe('GoodsReceivesService', () => {
 
       await service.create(
         baseDto({
-          items: [
-            { itemId: itemRequiringQC, receivedQty: 5, unitCost: 100 },
-          ],
+          items: [{ itemId: itemRequiringQC, receivedQty: 5, unitCost: 100 }],
         }),
         userId,
         tenantId,
@@ -354,17 +346,14 @@ describe('GoodsReceivesService', () => {
           requiresLotTracking: false,
           requiresQC: id === itemRequiringQC,
           // Direct template wins the resolution cascade
-          defaultQCTemplateId:
-            id === itemRequiringQC ? 'tpl-default-1' : null,
+          defaultQCTemplateId: id === itemRequiringQC ? 'tpl-default-1' : null,
           categoryId: null,
         }));
       });
 
       await service.create(
         baseDto({
-          items: [
-            { itemId: itemRequiringQC, receivedQty: 5, unitCost: 100 },
-          ],
+          items: [{ itemId: itemRequiringQC, receivedQty: 5, unitCost: 100 }],
         }),
         userId,
         tenantId,
@@ -396,9 +385,7 @@ describe('GoodsReceivesService', () => {
 
       await service.create(
         baseDto({
-          items: [
-            { itemId: itemRequiringQC, receivedQty: 3, unitCost: 100 },
-          ],
+          items: [{ itemId: itemRequiringQC, receivedQty: 3, unitCost: 100 }],
         }),
         userId,
         tenantId,
@@ -615,9 +602,7 @@ describe('GoodsReceivesService', () => {
   it('persists subtotal + totalAmount computed from accepted qty * unit cost (excluding rejected)', async () => {
     await service.create(
       baseDto({
-        items: [
-          { itemId: itemNonPerishable, receivedQty: 5, rejectedQty: 1, unitCost: 100 },
-        ],
+        items: [{ itemId: itemNonPerishable, receivedQty: 5, rejectedQty: 1, unitCost: 100 }],
       }),
       userId,
       tenantId,
@@ -787,9 +772,9 @@ describe('GoodsReceivesService', () => {
         tenantId,
         status: 'DRAFT',
       });
-      await expect(
-        service.inspect('g1', userId, tenantId, 'INSPECTING'),
-      ).rejects.toBeInstanceOf(ConflictException);
+      await expect(service.inspect('g1', userId, tenantId, 'INSPECTING')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
     });
 
     it('rejects when the GR belongs to another tenant', async () => {
@@ -798,9 +783,9 @@ describe('GoodsReceivesService', () => {
         tenantId: 'other',
         status: 'ACCEPTED',
       });
-      await expect(
-        service.inspect('g1', userId, tenantId, 'INSPECTING'),
-      ).rejects.toBeInstanceOf(NotFoundException);
+      await expect(service.inspect('g1', userId, tenantId, 'INSPECTING')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
     });
   });
 });

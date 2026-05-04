@@ -9,10 +9,7 @@ import {
   ArrayMinSize,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import {
-  HOTEL_TERMINAL_ROLES,
-  HotelTerminalRole,
-} from './create-hotel-terminal-user.dto';
+import { HOTEL_TERMINAL_ROLES, HotelTerminalRole } from './create-hotel-terminal-user.dto';
 
 export class BulkImportItemDto {
   @ApiProperty({ description: 'HR Employee.id' })

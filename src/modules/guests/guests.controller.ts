@@ -12,6 +12,8 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { GuestsService } from './guests.service';
+import { CreateGuestDto } from './dto/create-guest.dto';
+import { UpdateGuestDto } from './dto/update-guest.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -42,7 +44,7 @@ export class GuestsController {
   @ApiOperation({ summary: 'Create a new guest' })
   @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
   async create(
-    @Body() createGuestDto: any,
+    @Body() createGuestDto: CreateGuestDto,
     @CurrentUser() user: { id?: string; tenantId?: string },
   ) {
     return this.guestsService.create(createGuestDto, user?.tenantId, user?.id);
@@ -53,10 +55,9 @@ export class GuestsController {
   @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
   async updatePut(
     @Param('id') id: string,
-    @Body() updateGuestDto: any,
+    @Body() updateGuestDto: UpdateGuestDto,
     @CurrentUser() user: { id?: string; tenantId?: string },
   ) {
-    console.log(`Update (PUT) called for ID: ${id}, tenantId: ${user?.tenantId}`);
     return this.guestsService.update(id, updateGuestDto, user?.tenantId, user?.id);
   }
 
@@ -65,17 +66,10 @@ export class GuestsController {
   @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
   async updatePatch(
     @Param('id') id: string,
-    @Body() updateGuestDto: any,
+    @Body() updateGuestDto: UpdateGuestDto,
     @CurrentUser() user: { id?: string; tenantId?: string },
   ) {
-    console.log(`Update (PATCH) called for ID: ${id}, tenantId: ${user?.tenantId}`);
     return this.guestsService.update(id, updateGuestDto, user?.tenantId, user?.id);
-  }
-
-  @Patch('*')
-  async debugPatch(@Param() params: any, @Body() body: any) {
-    console.log('DEBUG: Wildcard PATCH caught', params, body);
-    return { success: true, debug: 'Wildcard caught' };
   }
 
   @Delete(':id')

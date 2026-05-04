@@ -81,8 +81,8 @@ export class HotelTerminalUsersController {
   @ApiOperation({
     summary: 'Auto-create a hotel terminal user from an HR Employee record',
     description:
-      'Looks up the Employee.id within the caller\'s tenant, then creates a ' +
-      'User with the employee\'s name and email. Requires the HR add-on to ' +
+      "Looks up the Employee.id within the caller's tenant, then creates a " +
+      "User with the employee's name and email. Requires the HR add-on to " +
       'have employees in the database.',
   })
   @ApiResponse({ status: 201, description: 'User imported successfully' })
@@ -133,8 +133,7 @@ export class HotelTerminalUsersController {
   @Get('importable-employees')
   @Throttle({ default: { limit: 30, ttl: 60 } })
   @ApiOperation({
-    summary:
-      'List HR Employees that can be imported into the hotel terminal as users',
+    summary: 'List HR Employees that can be imported into the hotel terminal as users',
   })
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
   @ApiQuery({ name: 'limit', required: false, type: Number, example: 20 })
@@ -164,9 +163,7 @@ export class HotelTerminalUsersController {
       userId: caller.userId,
       tenantId: this.assertTenant(caller),
       page: page ? Math.max(1, parseInt(page, 10) || 1) : 1,
-      limit: limit
-        ? Math.min(200, Math.max(1, parseInt(limit, 10) || 20))
-        : 20,
+      limit: limit ? Math.min(200, Math.max(1, parseInt(limit, 10) || 20)) : 20,
       search: search?.trim() || undefined,
       department: department?.trim() || undefined,
     });
@@ -175,8 +172,7 @@ export class HotelTerminalUsersController {
   @Get('importable-employees/departments')
   @Throttle({ default: { limit: 30, ttl: 60 } })
   @ApiOperation({
-    summary:
-      'Distinct department names available in HR (for the import filter)',
+    summary: 'Distinct department names available in HR (for the import filter)',
   })
   async listImportableDepartments(@CurrentUser() caller: AuthenticatedCaller) {
     this.assertManager(caller);
@@ -188,10 +184,7 @@ export class HotelTerminalUsersController {
 
   @Get(':userId')
   @ApiOperation({ summary: 'Get a hotel terminal user by ID' })
-  async findOne(
-    @Param('userId') userId: string,
-    @CurrentUser() caller: AuthenticatedCaller,
-  ) {
+  async findOne(@Param('userId') userId: string, @CurrentUser() caller: AuthenticatedCaller) {
     this.assertManager(caller);
     return this.service.findOne(userId, this.assertTenant(caller));
   }
@@ -213,10 +206,7 @@ export class HotelTerminalUsersController {
   @Delete(':userId')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Disable (soft-delete) a hotel terminal user' })
-  async remove(
-    @Param('userId') userId: string,
-    @CurrentUser() caller: AuthenticatedCaller,
-  ) {
+  async remove(@Param('userId') userId: string, @CurrentUser() caller: AuthenticatedCaller) {
     this.assertManager(caller);
     return this.service.remove(userId, this.assertTenant(caller));
   }

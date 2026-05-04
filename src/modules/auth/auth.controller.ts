@@ -164,7 +164,10 @@ export class AuthController {
       'Logging out from this terminal will NOT affect the main dashboard session.',
   })
   @ApiResponse({ status: 200, description: 'Procurement login successful' })
-  @ApiResponse({ status: 401, description: 'Unauthorized or account not allowed to access Procurement system' })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized or account not allowed to access Procurement system',
+  })
   async purchasingLogin(@Body() loginDto: LoginDto, @Req() req: Request) {
     return this.authService.login(
       loginDto,
@@ -208,7 +211,10 @@ export class AuthController {
       'Logging out from this terminal will NOT affect the main dashboard or procurement sessions.',
   })
   @ApiResponse({ status: 200, description: 'Warehouse login successful' })
-  @ApiResponse({ status: 401, description: 'Unauthorized or account not allowed to access Warehouse system' })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized or account not allowed to access Warehouse system',
+  })
   async warehouseLogin(@Body() loginDto: LoginDto, @Req() req: Request) {
     return this.authService.login(
       loginDto,
@@ -281,10 +287,7 @@ export class AuthController {
       'sessions stay active.',
   })
   @ApiResponse({ status: 200, description: 'Hotel terminal session ended' })
-  async hotelTerminalLogout(
-    @CurrentUser() user: any,
-    @Body() body?: { refreshToken?: string },
-  ) {
+  async hotelTerminalLogout(@CurrentUser() user: any, @Body() body?: { refreshToken?: string }) {
     await this.authService.logout(user.userId, body?.refreshToken, 'hotel-terminal');
     return { success: true, message: 'Logged out from Hotel Management Terminal' };
   }
@@ -393,7 +396,8 @@ export class AuthController {
   @Throttle({ default: { limit: 30, ttl: 60 } })
   @ApiOperation({
     summary: 'Generate a short-lived deep-link token to open Purchasing terminal pre-authenticated',
-    description: 'Returns a 5-minute JWT. User is logged in as procurement_manager (highest level).',
+    description:
+      'Returns a 5-minute JWT. User is logged in as procurement_manager (highest level).',
   })
   @ApiResponse({ status: 200, description: 'Purchasing launch token generated' })
   async purchasingLaunch(@CurrentUser() caller: any, @Req() req: Request) {

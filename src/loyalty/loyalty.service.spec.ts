@@ -9,10 +9,17 @@ describe('LoyaltyService', () => {
   const mockPrismaService = {
     loyaltyPoint: {
       findUnique: jest.fn(),
+      findFirst: jest.fn(),
+      findMany: jest.fn(),
       create: jest.fn(),
+      update: jest.fn(),
+      upsert: jest.fn(),
+      count: jest.fn(),
     },
     referral: {
       create: jest.fn(),
+      findFirst: jest.fn(),
+      findMany: jest.fn(),
     },
   };
 

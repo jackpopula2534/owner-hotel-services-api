@@ -48,8 +48,7 @@ export class SelfServicePlanService {
   constructor(private readonly prisma: PrismaService) {}
 
   async preview(input: PreviewChangePlanInput): Promise<ChangePlanPreview> {
-    const { subscription, currentPlan, newPlan, effectiveDate } =
-      await this.loadContext(input);
+    const { subscription, currentPlan, newPlan, effectiveDate } = await this.loadContext(input);
 
     const intent = this.classifyIntent(currentPlan.price_monthly, newPlan.price_monthly);
     const blockedReasons = await this.checkLimits(input.tenantId, newPlan);
@@ -85,9 +84,7 @@ export class SelfServicePlanService {
   async confirm(input: ConfirmChangePlanInput) {
     const preview = await this.preview(input);
     if (preview.blockedReasons.length > 0) {
-      throw new BadRequestException(
-        `Cannot change plan: ${preview.blockedReasons.join('; ')}`,
-      );
+      throw new BadRequestException(`Cannot change plan: ${preview.blockedReasons.join('; ')}`);
     }
     if (preview.intent === 'same') {
       throw new BadRequestException('You are already on this plan');
@@ -192,10 +189,7 @@ export class SelfServicePlanService {
     return { subscription, currentPlan, newPlan, effectiveDate };
   }
 
-  private classifyIntent(
-    currentPrice: unknown,
-    newPrice: unknown,
-  ): ChangePlanIntent {
+  private classifyIntent(currentPrice: unknown, newPrice: unknown): ChangePlanIntent {
     const a = Number(currentPrice);
     const b = Number(newPrice);
     if (b > a) return 'upgrade';

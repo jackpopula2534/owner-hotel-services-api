@@ -135,9 +135,9 @@ describe('StatusPageService', () => {
 
     it('throws NotFound for unknown component', async () => {
       mockComponentsFindUnique.mockResolvedValue(null);
-      await expect(
-        service.updateComponentStatus('nope', 'degraded'),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.updateComponentStatus('nope', 'degraded')).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 

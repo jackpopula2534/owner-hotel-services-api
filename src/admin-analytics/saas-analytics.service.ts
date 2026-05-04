@@ -57,10 +57,7 @@ export class SaasAnalyticsService {
     for (const sub of subs) {
       const plan = sub.plans_subscriptions_plan_idToplans;
       if (!plan) continue;
-      const monthly = this.normalizeMonthly(
-        Number(plan.price_monthly || 0),
-        sub.billing_cycle,
-      );
+      const monthly = this.normalizeMonthly(Number(plan.price_monthly || 0), sub.billing_cycle);
       mrr += monthly;
       const cur = byPlan.get(plan.id) || { name: plan.name, count: 0, mrr: 0 };
       cur.count += 1;
@@ -140,8 +137,7 @@ export class SaasAnalyticsService {
 
     const logoChurnPercent =
       startActive.length > 0 ? (churned.length / startActive.length) * 100 : 0;
-    const revenueChurnPercent =
-      startRevenue > 0 ? (churnedRevenue / startRevenue) * 100 : 0;
+    const revenueChurnPercent = startRevenue > 0 ? (churnedRevenue / startRevenue) * 100 : 0;
 
     return {
       periodStart: periodStart.toISOString().split('T')[0],
@@ -163,16 +159,13 @@ export class SaasAnalyticsService {
     const mrr = await this.getMrrSummary(now);
     const churn = await this.getChurnSummary(monthAgo, now);
 
-    const monthlyChurnRate =
-      churn.startActive > 0 ? churn.churnedCount / churn.startActive : 0;
+    const monthlyChurnRate = churn.startActive > 0 ? churn.churnedCount / churn.startActive : 0;
 
-    const averageMrr =
-      mrr.activeSubscriptions > 0 ? mrr.mrr / mrr.activeSubscriptions : 0;
+    const averageMrr = mrr.activeSubscriptions > 0 ? mrr.mrr / mrr.activeSubscriptions : 0;
 
     // Estimated LTV = ARPU / churn-rate. Cap at ~1000 months to avoid
     // showing infinity when churn is 0%.
-    const ltv =
-      monthlyChurnRate > 0 ? averageMrr / monthlyChurnRate : averageMrr * 1000;
+    const ltv = monthlyChurnRate > 0 ? averageMrr / monthlyChurnRate : averageMrr * 1000;
 
     return {
       asOfDate: now.toISOString().split('T')[0],

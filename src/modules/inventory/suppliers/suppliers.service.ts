@@ -59,10 +59,7 @@ export class SuppliersService {
       deletedAt: null,
       // mode: 'insensitive' is not supported by Prisma v5 + MySQL
       ...(search && {
-        OR: [
-          { name: { contains: search } },
-          { code: { contains: search } },
-        ],
+        OR: [{ name: { contains: search } }, { code: { contains: search } }],
       }),
     };
 

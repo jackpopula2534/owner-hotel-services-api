@@ -90,10 +90,7 @@ export class DunningService {
         }
       }
     } catch (err) {
-      this.logger.error(
-        'Dunning cron failed',
-        err instanceof Error ? err.stack : String(err),
-      );
+      this.logger.error('Dunning cron failed', err instanceof Error ? err.stack : String(err));
     }
 
     if (sent > 0) {
@@ -181,9 +178,7 @@ export class DunningService {
       throw new BadRequestException(`Tenant ${invoice.tenant_id} has no email`);
     }
 
-    const daysOverdue = Math.floor(
-      (Date.now() - new Date(invoice.due_date).getTime()) / 86400_000,
-    );
+    const daysOverdue = Math.floor((Date.now() - new Date(invoice.due_date).getTime()) / 86400_000);
 
     const attempt = await (this.prisma as any).dunning_attempts.create({
       data: {

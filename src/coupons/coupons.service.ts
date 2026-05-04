@@ -1,9 +1,4 @@
-import {
-  BadRequestException,
-  Injectable,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 export type DiscountType = 'percent' | 'fixed';
@@ -88,7 +83,10 @@ export class CouponsService {
   // ─────────── admin CRUD ───────────
 
   async create(input: CreateCouponInput) {
-    if (input.discountType === 'percent' && (input.discountValue <= 0 || input.discountValue > 100)) {
+    if (
+      input.discountType === 'percent' &&
+      (input.discountValue <= 0 || input.discountValue > 100)
+    ) {
       throw new BadRequestException('percent discount must be between 0 and 100');
     }
     if (input.discountType === 'fixed' && input.discountValue <= 0) {
@@ -138,31 +136,20 @@ export class CouponsService {
       if (c.valid_until && new Date(c.valid_until) < now) return false;
 
       // 2) featured window — coupon must explicitly opt in via metadata
-      const featured = c?.metadata?.featured as
-        | CouponFeaturedConfig
-        | undefined;
+      const featured = c?.metadata?.featured as CouponFeaturedConfig | undefined;
       if (!featured?.isFeatured) return false;
-      const from = featured.featuredFrom
-        ? new Date(featured.featuredFrom)
-        : null;
-      const until = featured.featuredUntil
-        ? new Date(featured.featuredUntil)
-        : null;
+      const from = featured.featuredFrom ? new Date(featured.featuredFrom) : null;
+      const until = featured.featuredUntil ? new Date(featured.featuredUntil) : null;
       if (from && from > now) return false;
       if (until && until < now) return false;
 
       // 3) redemption cap
-      if (
-        c.max_redemptions != null &&
-        c.redemptions_count >= c.max_redemptions
-      ) {
+      if (c.max_redemptions != null && c.redemptions_count >= c.max_redemptions) {
         return false;
       }
       // 4) plan filter — only when caller passes planId AND coupon is plan-scoped
       if (c.applies_to === 'specific_plans') {
-        const allowed: string[] = Array.isArray(c.applicable_plan_ids)
-          ? c.applicable_plan_ids
-          : [];
+        const allowed: string[] = Array.isArray(c.applicable_plan_ids) ? c.applicable_plan_ids : [];
         if (filters.planId && !allowed.includes(filters.planId)) return false;
       }
       return true;
@@ -209,11 +196,7 @@ export class CouponsService {
     ) {
       throw new BadRequestException('percent discount must be between 0 and 100');
     }
-    if (
-      input.discountType === 'fixed' &&
-      input.discountValue != null &&
-      input.discountValue <= 0
-    ) {
+    if (input.discountType === 'fixed' && input.discountValue != null && input.discountValue <= 0) {
       throw new BadRequestException('fixed discount must be positive');
     }
 
@@ -263,9 +246,7 @@ export class CouponsService {
     } catch (err: any) {
       // Surface friendlier error for unique-code collisions on rename.
       if (err?.code === 'P2002') {
-        throw new BadRequestException(
-          'รหัสคูปองนี้ถูกใช้แล้ว — กรุณาเลือกรหัสอื่น',
-        );
+        throw new BadRequestException('รหัสคูปองนี้ถูกใช้แล้ว — กรุณาเลือกรหัสอื่น');
       }
       throw err;
     }
@@ -312,10 +293,7 @@ export class CouponsService {
     if (coupon.valid_until && new Date(coupon.valid_until) < now) {
       return { valid: false, reason: 'คูปองหมดอายุแล้ว' };
     }
-    if (
-      coupon.max_redemptions != null &&
-      coupon.redemptions_count >= coupon.max_redemptions
-    ) {
+    if (coupon.max_redemptions != null && coupon.redemptions_count >= coupon.max_redemptions) {
       return { valid: false, reason: 'คูปองถูกใช้ครบจำนวนสูงสุดแล้ว' };
     }
     if (coupon.applies_to === 'specific_plans') {
@@ -369,16 +347,11 @@ export class CouponsService {
     const filtered = rows.filter((c: any) => {
       if (c.valid_from && new Date(c.valid_from) > now) return false;
       if (c.valid_until && new Date(c.valid_until) < now) return false;
-      if (
-        c.max_redemptions != null &&
-        c.redemptions_count >= c.max_redemptions
-      ) {
+      if (c.max_redemptions != null && c.redemptions_count >= c.max_redemptions) {
         return false;
       }
       if (c.applies_to === 'specific_plans') {
-        const allowed: string[] = Array.isArray(c.applicable_plan_ids)
-          ? c.applicable_plan_ids
-          : [];
+        const allowed: string[] = Array.isArray(c.applicable_plan_ids) ? c.applicable_plan_ids : [];
         if (filters.planId && !allowed.includes(filters.planId)) return false;
       }
       return true;
@@ -408,10 +381,7 @@ export class CouponsService {
       return { valid: false, reason: 'Coupon has expired' };
     }
 
-    if (
-      coupon.max_redemptions != null &&
-      coupon.redemptions_count >= coupon.max_redemptions
-    ) {
+    if (coupon.max_redemptions != null && coupon.redemptions_count >= coupon.max_redemptions) {
       return { valid: false, reason: 'Coupon redemption limit reached' };
     }
 
@@ -493,11 +463,7 @@ export class CouponsService {
 
   // ─────────── helpers ───────────
 
-  private computeDiscount(
-    type: DiscountType,
-    value: number,
-    invoiceAmount: number,
-  ): number {
+  private computeDiscount(type: DiscountType, value: number, invoiceAmount: number): number {
     if (type === 'percent') {
       return Math.round((invoiceAmount * value) / 100);
     }

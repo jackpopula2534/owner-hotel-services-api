@@ -110,10 +110,7 @@ export class HotelTerminalUsersService {
     return {};
   }
 
-  private mergeMetadata(
-    raw: string | null,
-    patch: HotelTerminalMetadata,
-  ): string {
+  private mergeMetadata(raw: string | null, patch: HotelTerminalMetadata): string {
     return JSON.stringify({ ...this.parseMetadata(raw), ...patch });
   }
 
@@ -125,9 +122,7 @@ export class HotelTerminalUsersService {
       where: { email: dto.email },
     });
     if (existing) {
-      throw new ConflictException(
-        `A user with email "${dto.email}" already exists`,
-      );
+      throw new ConflictException(`A user with email "${dto.email}" already exists`);
     }
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
@@ -168,9 +163,7 @@ export class HotelTerminalUsersService {
       where: { id: dto.employeeId, tenantId },
     });
     if (!employee) {
-      throw new NotFoundException(
-        'Employee not found or does not belong to your tenant',
-      );
+      throw new NotFoundException('Employee not found or does not belong to your tenant');
     }
 
     if (await this.prisma.user.findUnique({ where: { email: employee.email } })) {
@@ -288,9 +281,7 @@ export class HotelTerminalUsersService {
     };
   }
 
-  async findAll(
-    tenantId: string,
-  ): Promise<{ success: true; data: HotelTerminalUserResponse[] }> {
+  async findAll(tenantId: string): Promise<{ success: true; data: HotelTerminalUserResponse[] }> {
     const users = await this.prisma.user.findMany({
       where: {
         tenantId,
@@ -300,9 +291,7 @@ export class HotelTerminalUsersService {
     });
     return {
       success: true,
-      data: await Promise.all(
-        users.map((u) => this.formatWithProperty(u as unknown as UserLike)),
-      ),
+      data: await Promise.all(users.map((u) => this.formatWithProperty(u as unknown as UserLike))),
     };
   }
 
@@ -329,9 +318,7 @@ export class HotelTerminalUsersService {
       where: { id: userId, tenantId },
     });
     if (!user) {
-      throw new BadRequestException(
-        'User not found or does not belong to your tenant',
-      );
+      throw new BadRequestException('User not found or does not belong to your tenant');
     }
 
     const data: Record<string, unknown> = {};
@@ -346,10 +333,7 @@ export class HotelTerminalUsersService {
       const patch: HotelTerminalMetadata = {};
       if (dto.permissions !== undefined) patch.permissions = dto.permissions;
       if (dto.propertyId !== undefined) patch.propertyId = dto.propertyId;
-      data.metadata = this.mergeMetadata(
-        (user as unknown as UserLike).metadata,
-        patch,
-      );
+      data.metadata = this.mergeMetadata((user as unknown as UserLike).metadata, patch);
     }
 
     const updated = await this.prisma.user.update({
@@ -462,9 +446,7 @@ export class HotelTerminalUsersService {
     const department = caller.department?.trim();
 
     if (!primaryTenantId) {
-      this.logger.warn(
-        '[hotel-terminal] listImportableEmployees called without tenantId',
-      );
+      this.logger.warn('[hotel-terminal] listImportableEmployees called without tenantId');
       return {
         success: true,
         data: [],
@@ -512,10 +494,7 @@ export class HotelTerminalUsersService {
       propertyId: true,
       status: true,
     } as const;
-    const ORDER_BY = [
-      { firstName: 'asc' as const },
-      { lastName: 'asc' as const },
-    ];
+    const ORDER_BY = [{ firstName: 'asc' as const }, { lastName: 'asc' as const }];
 
     // Step 1 — count + page from the primary tenant.
     let resolvedTenantId = primaryTenantId;
@@ -580,12 +559,7 @@ export class HotelTerminalUsersService {
     // means the *page* may show fewer rows than `limit` if some on the page
     // are terminated; the count we surface (`total`) is the pre-filter count
     // since per-page filtering is the safer trade-off (vs running TWO counts).
-    const HIDDEN_STATUSES = new Set([
-      'terminated',
-      'resigned',
-      'inactive',
-      'deleted',
-    ]);
+    const HIDDEN_STATUSES = new Set(['terminated', 'resigned', 'inactive', 'deleted']);
     const filtered = employees.filter((e) => {
       const s = (e.status ?? '').toLowerCase().trim();
       return !HIDDEN_STATUSES.has(s);
@@ -650,10 +624,7 @@ export class HotelTerminalUsersService {
         );
       }
       diagnostic = {
-        reason:
-          globalEmployeeCount === 0
-            ? 'no_employees_in_database'
-            : 'no_employees_for_tenant',
+        reason: globalEmployeeCount === 0 ? 'no_employees_in_database' : 'no_employees_for_tenant',
         primaryTenantId,
         resolvedTenantId,
         globalEmployeeCount,
@@ -721,16 +692,12 @@ export class HotelTerminalUsersService {
     });
     return {
       success: true,
-      data: rows
-        .map((r) => r.department)
-        .filter((d): d is string => !!d && d.trim().length > 0),
+      data: rows.map((r) => r.department).filter((d): d is string => !!d && d.trim().length > 0),
     };
   }
 
   /** Serialize user + property name. */
-  private async formatWithProperty(
-    user: UserLike,
-  ): Promise<HotelTerminalUserResponse> {
+  private async formatWithProperty(user: UserLike): Promise<HotelTerminalUserResponse> {
     const meta = this.parseMetadata(user.metadata);
     let propertyName: string | null = null;
     if (meta.propertyId) {

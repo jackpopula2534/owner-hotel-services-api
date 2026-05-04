@@ -14,22 +14,12 @@ import {
   Request,
   UseGuards,
 } from '@nestjs/common';
-import {
-  ApiBearerAuth,
-  ApiOperation,
-  ApiResponse,
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { RolesGuard } from '@/common/guards/roles.guard';
 import { Roles } from '@/common/decorators/roles.decorator';
 import { Public } from '@/common/decorators/public.decorator';
-import {
-  AddonEntity,
-  AddonService,
-  AddonStatus,
-  PaginatedAddons,
-} from './addon.service';
+import { AddonEntity, AddonService, AddonStatus, PaginatedAddons } from './addon.service';
 import { CreateAddonDto } from './dto/create-addon.dto';
 import { UpdateAddonDto } from './dto/update-addon.dto';
 import { QueryAddonDto } from './dto/query-addon.dto';
@@ -119,9 +109,7 @@ export class AddonController {
   @ApiResponse({ status: 201, description: 'Add-on created' })
   @ApiResponse({ status: 409, description: 'Code already exists' })
   @Post()
-  async create(
-    @Body() dto: CreateAddonDto,
-  ): Promise<{ success: true; data: AddonEntity }> {
+  async create(@Body() dto: CreateAddonDto): Promise<{ success: true; data: AddonEntity }> {
     const data = await this.addonService.create(dto);
     return { success: true, data };
   }
@@ -170,9 +158,7 @@ export class AddonController {
   @ApiResponse({ status: 204, description: 'Deleted' })
   @HttpCode(HttpStatus.NO_CONTENT)
   @Delete(':id')
-  async remove(
-    @Param('id', new ParseUUIDPipe()) id: string,
-  ): Promise<void> {
+  async remove(@Param('id', new ParseUUIDPipe()) id: string): Promise<void> {
     await this.addonService.remove(id);
   }
 }

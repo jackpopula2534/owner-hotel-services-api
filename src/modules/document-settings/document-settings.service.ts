@@ -9,10 +9,7 @@ export class DocumentSettingsService {
   constructor(private readonly prisma: PrismaService) {}
 
   /** Get or create document settings for a property */
-  async getByProperty(
-    tenantId: string,
-    propertyId: string,
-  ): Promise<Record<string, unknown>> {
+  async getByProperty(tenantId: string, propertyId: string): Promise<Record<string, unknown>> {
     const existing = await this.prisma.documentSettings.findUnique({
       where: { tenantId_propertyId: { tenantId, propertyId } },
     });
@@ -65,10 +62,7 @@ export class DocumentSettingsService {
   }
 
   /** Remove logo */
-  async removeLogo(
-    tenantId: string,
-    propertyId: string,
-  ): Promise<Record<string, unknown>> {
+  async removeLogo(tenantId: string, propertyId: string): Promise<Record<string, unknown>> {
     const settings = await this.prisma.documentSettings.findUnique({
       where: { tenantId_propertyId: { tenantId, propertyId } },
     });

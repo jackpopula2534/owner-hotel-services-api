@@ -10,12 +10,7 @@ import {
   UseGuards,
   Req,
 } from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiBearerAuth,
-  ApiResponse,
-} from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { Request } from 'express';
 import { UsersService } from './users.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -37,9 +32,7 @@ function getCallerContext(req: Request, user: CallerUser) {
   return {
     callerId: user?.id,
     callerRole: user?.role,
-    ipAddress:
-      (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
-      req.ip,
+    ipAddress: (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip,
   };
 }
 
@@ -54,12 +47,8 @@ export class UsersController {
   @ApiOperation({ summary: 'Get all users' })
   @ApiResponse({ status: 200, description: 'List of users' })
   @Roles('admin', 'tenant_admin', 'platform_admin')
-  async findAll(
-    @Query() query: AdminListUsersQueryDto,
-    @CurrentUser() user: CallerUser,
-  ) {
-    const tenantId =
-      user.role === 'platform_admin' ? undefined : user?.tenantId;
+  async findAll(@Query() query: AdminListUsersQueryDto, @CurrentUser() user: CallerUser) {
+    const tenantId = user.role === 'platform_admin' ? undefined : user?.tenantId;
     return this.usersService.findAll(query, tenantId);
   }
 
@@ -69,8 +58,7 @@ export class UsersController {
   @ApiResponse({ status: 404, description: 'User not found' })
   @Roles('admin', 'tenant_admin', 'platform_admin')
   async findOne(@Param('id') id: string, @CurrentUser() user: CallerUser) {
-    const tenantId =
-      user.role === 'platform_admin' ? undefined : user?.tenantId;
+    const tenantId = user.role === 'platform_admin' ? undefined : user?.tenantId;
     return this.usersService.findOne(id, tenantId);
   }
 
@@ -83,8 +71,7 @@ export class UsersController {
     @Body() updateUserDto: any,
     @CurrentUser() user: CallerUser,
   ) {
-    const tenantId =
-      user.role === 'platform_admin' ? undefined : user?.tenantId;
+    const tenantId = user.role === 'platform_admin' ? undefined : user?.tenantId;
     return this.usersService.update(id, updateUserDto, tenantId, user.id);
   }
 
@@ -93,8 +80,7 @@ export class UsersController {
   @ApiResponse({ status: 200, description: 'User deleted successfully' })
   @Roles('admin', 'tenant_admin', 'platform_admin')
   async remove(@Param('id') id: string, @CurrentUser() user: CallerUser) {
-    const tenantId =
-      user.role === 'platform_admin' ? undefined : user?.tenantId;
+    const tenantId = user.role === 'platform_admin' ? undefined : user?.tenantId;
     return this.usersService.remove(id, tenantId);
   }
 
@@ -114,14 +100,8 @@ export class UsersController {
     @Req() req: Request,
     @CurrentUser() user: CallerUser,
   ) {
-    const tenantId =
-      user.role === 'platform_admin' ? undefined : user?.tenantId;
-    return this.usersService.updateStatus(
-      id,
-      dto,
-      tenantId,
-      getCallerContext(req, user),
-    );
+    const tenantId = user.role === 'platform_admin' ? undefined : user?.tenantId;
+    return this.usersService.updateStatus(id, dto, tenantId, getCallerContext(req, user));
   }
 
   @Post(':id/suspend')
@@ -134,50 +114,26 @@ export class UsersController {
     @Req() req: Request,
     @CurrentUser() user: CallerUser,
   ) {
-    const tenantId =
-      user.role === 'platform_admin' ? undefined : user?.tenantId;
-    return this.usersService.suspend(
-      id,
-      dto,
-      tenantId,
-      getCallerContext(req, user),
-    );
+    const tenantId = user.role === 'platform_admin' ? undefined : user?.tenantId;
+    return this.usersService.suspend(id, dto, tenantId, getCallerContext(req, user));
   }
 
   @Post(':id/activate')
   @ApiOperation({ summary: 'เปิดใช้งานผู้ใช้ (กลับเป็น active)' })
   @ApiResponse({ status: 200, description: 'User activated' })
   @Roles('admin', 'tenant_admin', 'platform_admin')
-  async activate(
-    @Param('id') id: string,
-    @Req() req: Request,
-    @CurrentUser() user: CallerUser,
-  ) {
-    const tenantId =
-      user.role === 'platform_admin' ? undefined : user?.tenantId;
-    return this.usersService.activate(
-      id,
-      tenantId,
-      getCallerContext(req, user),
-    );
+  async activate(@Param('id') id: string, @Req() req: Request, @CurrentUser() user: CallerUser) {
+    const tenantId = user.role === 'platform_admin' ? undefined : user?.tenantId;
+    return this.usersService.activate(id, tenantId, getCallerContext(req, user));
   }
 
   @Post(':id/deactivate')
   @ApiOperation({ summary: 'ปิดใช้งานผู้ใช้ชั่วคราว (inactive)' })
   @ApiResponse({ status: 200, description: 'User deactivated' })
   @Roles('admin', 'tenant_admin', 'platform_admin')
-  async deactivate(
-    @Param('id') id: string,
-    @Req() req: Request,
-    @CurrentUser() user: CallerUser,
-  ) {
-    const tenantId =
-      user.role === 'platform_admin' ? undefined : user?.tenantId;
-    return this.usersService.deactivate(
-      id,
-      tenantId,
-      getCallerContext(req, user),
-    );
+  async deactivate(@Param('id') id: string, @Req() req: Request, @CurrentUser() user: CallerUser) {
+    const tenantId = user.role === 'platform_admin' ? undefined : user?.tenantId;
+    return this.usersService.deactivate(id, tenantId, getCallerContext(req, user));
   }
 
   @Patch(':id/expiration')
@@ -190,13 +146,7 @@ export class UsersController {
     @Req() req: Request,
     @CurrentUser() user: CallerUser,
   ) {
-    const tenantId =
-      user.role === 'platform_admin' ? undefined : user?.tenantId;
-    return this.usersService.setExpiration(
-      id,
-      dto,
-      tenantId,
-      getCallerContext(req, user),
-    );
+    const tenantId = user.role === 'platform_admin' ? undefined : user?.tenantId;
+    return this.usersService.setExpiration(id, dto, tenantId, getCallerContext(req, user));
   }
 }

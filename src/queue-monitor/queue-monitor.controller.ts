@@ -18,10 +18,7 @@ export class QueueMonitorController {
 
   @Get(':name/failed')
   @ApiOperation({ summary: 'List failed jobs for a queue' })
-  async failed(
-    @Param('name') name: string,
-    @Query('limit') limit?: string,
-  ) {
+  async failed(@Param('name') name: string, @Query('limit') limit?: string) {
     return this.service.listFailed(name, limit ? parseInt(limit, 10) : 50);
   }
 

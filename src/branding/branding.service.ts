@@ -138,8 +138,6 @@ export class BrandingService {
   private isValidDomain(s: string): boolean {
     // Simple TLD check; sufficient for storing — full validation happens
     // when the DNS resolver actually queries the record.
-    return /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/.test(
-      s,
-    );
+    return /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/.test(s);
   }
 }

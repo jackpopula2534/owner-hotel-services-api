@@ -8,13 +8,7 @@ import { DunningService } from './dunning.service';
 import { DunningController } from './dunning.controller';
 
 @Module({
-  imports: [
-    PrismaModule,
-    ConfigModule,
-    EmailModule,
-    TenantsModule,
-    ScheduleModule.forRoot(),
-  ],
+  imports: [PrismaModule, ConfigModule, EmailModule, TenantsModule, ScheduleModule.forRoot()],
   controllers: [DunningController],
   providers: [DunningService],
   exports: [DunningService],

@@ -152,6 +152,7 @@ model Guest {
   isVip              Boolean   @default(false)
   vipLevel           String?
   vehiclePlateNumber String?
+  specialNotes       String?   @db.Text
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
   bookings           Booking[]
@@ -4240,4 +4241,34 @@ model ApprovalFlowStepApprover {
   @@map("approval_flow_step_approvers")
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Bank Accounts — master data for company bank accounts shown on billing page.
+// Supports multiple banks; customers pick one when paying via bank transfer.
+// ─────────────────────────────────────────────────────────────────────────────
+model BankAccount {
+  id            String   @id @default(uuid())
+  /// ชื่อธนาคาร เช่น "กสิกรไทย", "ไทยพาณิชย์"
+  bankName      String   @db.VarChar(100)
+  /// รหัสธนาคาร เช่น "KBANK", "SCB", "KTB"
+  bankCode      String   @db.VarChar(20)
+  /// ชื่อบัญชี
+  accountName   String   @db.VarChar(200)
+  /// เลขที่บัญชี
+  accountNumber String   @db.VarChar(20)
+  /// สาขา (optional)
+  branch        String?  @db.VarChar(150)
+  /// URL โลโก้ธนาคาร (optional)
+  logoUrl       String?  @db.VarChar(500)
+  /// แสดงบนหน้า billing หรือไม่
+  isActive      Boolean  @default(true)
+  /// บัญชีหลัก — แสดงขึ้นก่อน
+  isDefault     Boolean  @default(false)
+  /// ลำดับการแสดงผล
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([isActive, sortOrder])
+  @@map("bank_accounts")
+}
 

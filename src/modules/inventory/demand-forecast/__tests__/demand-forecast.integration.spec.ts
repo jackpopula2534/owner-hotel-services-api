@@ -5,6 +5,9 @@ import { DemandForecastModule } from '../demand-forecast.module';
 import { PrismaService } from '@/prisma/prisma.service';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AddonGuard } from '@/common/guards/addon.guard';
+import { AddonService } from '@/modules/addons/addon.service';
+import { CacheService } from '@/cache/cache.service';
+import { mockAddonService, mockCacheService } from '@/common/test';
 
 describe('DemandForecast Integration Tests', () => {
   let app: INestApplication;
@@ -59,6 +62,10 @@ describe('DemandForecast Integration Tests', () => {
       .useClass(MockJwtAuthGuard)
       .overrideGuard(AddonGuard)
       .useClass(MockAddonGuard)
+      .overrideProvider(AddonService)
+      .useValue(mockAddonService())
+      .overrideProvider(CacheService)
+      .useValue(mockCacheService())
       .compile();
 
     app = moduleFixture.createNestApplication();

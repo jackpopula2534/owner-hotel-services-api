@@ -101,11 +101,7 @@ export class UsageMeteringService {
   }
 
   /** Read a single tenant/metric snapshot for a period (defaults to now). */
-  async getSnapshot(
-    tenantId: string,
-    metricCode: string,
-    period?: string,
-  ): Promise<UsageSnapshot> {
+  async getSnapshot(tenantId: string, metricCode: string, period?: string): Promise<UsageSnapshot> {
     const p = period || this.periodKey();
     const row = await (this.prisma as any).usage_counters.findUnique({
       where: {

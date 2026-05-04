@@ -112,9 +112,7 @@ export class WarehouseUsersService {
     }
   }
 
-  async findAll(
-    tenantId: string,
-  ): Promise<{ success: true; data: WarehouseUserResponse[] }> {
+  async findAll(tenantId: string): Promise<{ success: true; data: WarehouseUserResponse[] }> {
     const users = await this.prisma.user.findMany({
       where: {
         tenantId,

@@ -91,9 +91,7 @@ describe('QueueMonitorService', () => {
 
   it('retryFailed throws NotFound when job missing', async () => {
     mockEmailQueue.getJob.mockResolvedValue(null);
-    await expect(service.retryFailed('email', 'missing')).rejects.toThrow(
-      NotFoundException,
-    );
+    await expect(service.retryFailed('email', 'missing')).rejects.toThrow(NotFoundException);
   });
 
   it('removeFailed calls Job.remove()', async () => {

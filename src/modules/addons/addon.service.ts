@@ -1,9 +1,4 @@
-import {
-  ConflictException,
-  Injectable,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
+import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
 import { CacheService } from '@/cache/cache.service';
@@ -156,10 +151,7 @@ export class AddonService {
     const where: Record<string, unknown> = {};
 
     if (query.search) {
-      where.OR = [
-        { code: { contains: query.search } },
-        { name: { contains: query.search } },
-      ];
+      where.OR = [{ code: { contains: query.search } }, { name: { contains: query.search } }];
     }
     if (typeof query.isActive === 'boolean') {
       where.is_active = query.isActive ? 1 : 0;

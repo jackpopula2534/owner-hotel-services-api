@@ -40,8 +40,24 @@ describe('PurchaseOrders HTTP — Sprint 1+2 endpoints', () => {
       warehouseId: 'wh-1',
       supplier: { name: 'Acme Supplier' },
       items: [
-        { id: 'poi-1', itemId: 'item-A', quantity: 100, receivedQty: 0, unitPrice: 100, totalPrice: 10000, item: { name: 'Towel', sku: 'TWL-001', unit: 'pcs' } },
-        { id: 'poi-2', itemId: 'item-B', quantity: 50, receivedQty: 0, unitPrice: 200, totalPrice: 10000, item: { name: 'Soap', sku: 'SOAP-001', unit: 'pcs' } },
+        {
+          id: 'poi-1',
+          itemId: 'item-A',
+          quantity: 100,
+          receivedQty: 0,
+          unitPrice: 100,
+          totalPrice: 10000,
+          item: { name: 'Towel', sku: 'TWL-001', unit: 'pcs' },
+        },
+        {
+          id: 'poi-2',
+          itemId: 'item-B',
+          quantity: 50,
+          receivedQty: 0,
+          unitPrice: 200,
+          totalPrice: 10000,
+          item: { name: 'Soap', sku: 'SOAP-001', unit: 'pcs' },
+        },
       ],
       goodsReceives: [],
     },
@@ -58,7 +74,15 @@ describe('PurchaseOrders HTTP — Sprint 1+2 endpoints', () => {
       warehouseId: 'wh-1',
       supplier: { name: 'Beta Supplier' },
       items: [
-        { id: 'poi-3', itemId: 'item-C', quantity: 100, receivedQty: 60, unitPrice: 500, totalPrice: 50000, item: { name: 'Bottle', sku: 'BT-001', unit: 'pcs' } },
+        {
+          id: 'poi-3',
+          itemId: 'item-C',
+          quantity: 100,
+          receivedQty: 60,
+          unitPrice: 500,
+          totalPrice: 50000,
+          item: { name: 'Bottle', sku: 'BT-001', unit: 'pcs' },
+        },
       ],
       goodsReceives: [
         {
@@ -69,7 +93,14 @@ describe('PurchaseOrders HTTP — Sprint 1+2 endpoints', () => {
           invoiceNumber: 'INV-9921',
           totalAmount: 30_000,
           items: [
-            { id: 'gri-1', itemId: 'item-C', receivedQty: 60, rejectedQty: 0, lotId: null, expiryDate: null },
+            {
+              id: 'gri-1',
+              itemId: 'item-C',
+              receivedQty: 60,
+              rejectedQty: 0,
+              lotId: null,
+              expiryDate: null,
+            },
           ],
         },
       ],
@@ -90,10 +121,7 @@ describe('PurchaseOrders HTTP — Sprint 1+2 endpoints', () => {
   beforeAll(async () => {
     const moduleRef: TestingModule = await Test.createTestingModule({
       controllers: [PurchaseOrdersController],
-      providers: [
-        PurchaseOrdersService,
-        { provide: PrismaService, useValue: mockPrismaService },
-      ],
+      providers: [PurchaseOrdersService, { provide: PrismaService, useValue: mockPrismaService }],
     })
       // Bypass auth guards — they need full app context that isn't relevant
       // to verifying route+service+DTO behavior.

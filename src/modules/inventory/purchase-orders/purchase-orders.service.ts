@@ -49,14 +49,12 @@ export interface PurchaseOrderTrackingRow {
     receivedLineCount: number;
     pendingLineCount: number;
   };
-  latestGr:
-    | {
-        id: string;
-        grNumber: string;
-        status: string;
-        receiveDate: Date;
-      }
-    | null;
+  latestGr: {
+    id: string;
+    grNumber: string;
+    status: string;
+    receiveDate: Date;
+  } | null;
 }
 
 export interface PurchaseOrderTrackingSummary {
@@ -134,7 +132,13 @@ export interface PurchaseOrderVarianceRow {
   expectedDate: Date | null;
   forceClosedAt: Date | null;
   forceClosedReason: string | null;
-  reason: 'SHORT_DELIVERY' | 'OVER_DELIVERY' | 'INVOICE_MISMATCH' | 'OVERDUE' | 'FORCE_CLOSED' | 'NONE';
+  reason:
+    | 'SHORT_DELIVERY'
+    | 'OVER_DELIVERY'
+    | 'INVOICE_MISMATCH'
+    | 'OVERDUE'
+    | 'FORCE_CLOSED'
+    | 'NONE';
   suggestedAction: string;
 }
 
@@ -562,7 +566,10 @@ export class PurchaseOrdersService {
   async findVariance(
     tenantId: string,
     query: { from?: string; to?: string; supplierId?: string },
-  ): Promise<{ data: PurchaseOrderVarianceRow[]; meta: { total: number; netDeltaAmount: number } }> {
+  ): Promise<{
+    data: PurchaseOrderVarianceRow[];
+    meta: { total: number; netDeltaAmount: number };
+  }> {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -632,8 +639,7 @@ export class PurchaseOrdersService {
 
       // Pro-rate delta value off the PO total — keeps the figure sensitive
       // to discounts and tax that are baked into totalAmount.
-      const deltaAmount =
-        orderedQty > 0 ? (Number(po.totalAmount) / orderedQty) * deltaQty : 0;
+      const deltaAmount = orderedQty > 0 ? (Number(po.totalAmount) / orderedQty) * deltaQty : 0;
 
       let reason: PurchaseOrderVarianceRow['reason'] = 'NONE';
       let suggestedAction = '';
@@ -653,10 +659,7 @@ export class PurchaseOrdersService {
           reason = 'SHORT_DELIVERY';
           suggestedAction = 'ติดตามซัพ';
         }
-      } else if (
-        invoicedQty !== 0 &&
-        invoicedQty !== receivedQty
-      ) {
+      } else if (invoicedQty !== 0 && invoicedQty !== receivedQty) {
         reason = 'INVOICE_MISMATCH';
         suggestedAction = 'โต้แย้ง invoice';
       }
@@ -775,8 +778,7 @@ export class PurchaseOrdersService {
     });
 
     // Helper — pick the bucket date (approvedAt preferred, createdAt fallback)
-    const bucketDate = (po: (typeof pos)[number]): Date =>
-      po.approvedAt ?? po.createdAt;
+    const bucketDate = (po: (typeof pos)[number]): Date => po.approvedAt ?? po.createdAt;
 
     // ── Month totals ─────────────────────────────────────────────────────────
     let thisMonth = 0;
@@ -787,8 +789,7 @@ export class PurchaseOrdersService {
     const monthIndex = (d: Date): number => {
       // Months between trendStart and d, clamped to [0, 11].
       const diff =
-        (d.getFullYear() - trendStart.getFullYear()) * 12 +
-        (d.getMonth() - trendStart.getMonth());
+        (d.getFullYear() - trendStart.getFullYear()) * 12 + (d.getMonth() - trendStart.getMonth());
       if (diff < 0) return -1;
       if (diff > 11) return -1;
       return diff;
@@ -834,10 +835,7 @@ export class PurchaseOrdersService {
       }
     }
 
-    const deltaPct =
-      lastMonth > 0
-        ? Math.round(((thisMonth - lastMonth) / lastMonth) * 100)
-        : null;
+    const deltaPct = lastMonth > 0 ? Math.round(((thisMonth - lastMonth) / lastMonth) * 100) : null;
 
     // ── Build category list ──────────────────────────────────────────────────
     // Take top 3 by amount + lump the tail into "อื่น ๆ" so the card
@@ -845,9 +843,7 @@ export class PurchaseOrdersService {
     // from the line-level sum (closer to true cost of goods) rather than the
     // PO totalAmount which includes shipping/tax — keeps the % proportional
     // to procurement value, not invoice-level overhead.
-    const sorted = Array.from(categoryTotals.values()).sort(
-      (a, b) => b.total - a.total,
-    );
+    const sorted = Array.from(categoryTotals.values()).sort((a, b) => b.total - a.total);
     const topN = 3;
     const top = sorted.slice(0, topN);
     const tail = sorted.slice(topN);
@@ -890,10 +886,7 @@ export class PurchaseOrdersService {
    * to their parent GoodsReceive — Prisma doesn't support a nested
    * `orderBy` on grand-children so we resolve it in-memory.
    */
-  async findReceiving(
-    id: string,
-    tenantId: string,
-  ): Promise<PurchaseOrderReceivingDetail> {
+  async findReceiving(id: string, tenantId: string): Promise<PurchaseOrderReceivingDetail> {
     const po = await this.prisma.purchaseOrder.findUnique({
       where: { id },
       select: {

@@ -1,6 +1,12 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { AuditLogService } from '../../audit-log/audit-log.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  mockAuditLogService,
+  mockEventEmitter,
+} from '../../common/test/mock-providers';
 import {
   CreateMaintenanceTaskDto,
   MaintenanceCategory,
@@ -38,6 +44,8 @@ describe('MaintenanceService', () => {
           provide: PrismaService,
           useValue: prismaMock,
         },
+        { provide: AuditLogService, useValue: mockAuditLogService() },
+        { provide: EventEmitter2, useValue: mockEventEmitter() },
       ],
     }).compile();
 

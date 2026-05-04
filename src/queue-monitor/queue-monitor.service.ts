@@ -69,9 +69,7 @@ export class QueueMonitorService {
           workers: workers.length,
         });
       } catch (err) {
-        this.logger.warn(
-          `Queue ${name} unavailable: ${err instanceof Error ? err.message : err}`,
-        );
+        this.logger.warn(`Queue ${name} unavailable: ${err instanceof Error ? err.message : err}`);
         out.push({
           name,
           counts: { waiting: 0, active: 0, completed: 0, failed: 0, delayed: 0, paused: 0 },

@@ -73,10 +73,7 @@ export class PurchaseOrdersController {
     @Query('propertyId') propertyId: string | undefined,
     @Req() req: { user: { tenantId: string } },
   ): Promise<{ success: boolean; data: unknown }> {
-    const data = await this.purchaseOrdersService.findSpendSummary(
-      req.user.tenantId,
-      propertyId,
-    );
+    const data = await this.purchaseOrdersService.findSpendSummary(req.user.tenantId, propertyId);
     return { success: true, data };
   }
 

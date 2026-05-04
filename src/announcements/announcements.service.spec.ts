@@ -47,9 +47,9 @@ describe('AnnouncementsService', () => {
 
   describe('create', () => {
     it('rejects empty title', async () => {
-      await expect(
-        service.create({ title: '   ', body: 'x', severity: 'info' }),
-      ).rejects.toThrow(BadRequestException);
+      await expect(service.create({ title: '   ', body: 'x', severity: 'info' })).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('defaults audience to all and uses now for publishedAt', async () => {
@@ -89,9 +89,7 @@ describe('AnnouncementsService', () => {
 
     it('marks isRead=true when read row exists', async () => {
       mockAnnFindMany.mockResolvedValue([baseAnn]);
-      mockReadsFindMany.mockResolvedValue([
-        { announcement_id: 'a1', tenant_id: 't1' },
-      ]);
+      mockReadsFindMany.mockResolvedValue([{ announcement_id: 'a1', tenant_id: 't1' }]);
       const r = await service.listForTenant('t1', 'active');
       expect(r[0].isRead).toBe(true);
     });

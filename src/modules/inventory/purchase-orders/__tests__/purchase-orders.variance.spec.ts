@@ -24,22 +24,19 @@ describe('PurchaseOrdersService — Sprint 4 Variance + Force Close', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     const moduleRef: TestingModule = await Test.createTestingModule({
-      providers: [
-        PurchaseOrdersService,
-        { provide: PrismaService, useValue: mockPrisma },
-      ],
+      providers: [PurchaseOrdersService, { provide: PrismaService, useValue: mockPrisma }],
     }).compile();
     service = moduleRef.get(PurchaseOrdersService);
   });
 
   describe('forceClose', () => {
     it('rejects when reason is missing or too short', async () => {
-      await expect(
-        service.forceClose('po-1', userId, '', tenantId),
-      ).rejects.toBeInstanceOf(BadRequestException);
-      await expect(
-        service.forceClose('po-1', userId, 'abc', tenantId),
-      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.forceClose('po-1', userId, '', tenantId)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      await expect(service.forceClose('po-1', userId, 'abc', tenantId)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
     });
 
     it('throws NotFoundException when PO does not exist', async () => {
@@ -76,7 +73,17 @@ describe('PurchaseOrdersService — Sprint 4 Variance + Force Close', () => {
           poNumber: 'PO-X',
           status: 'CLOSED',
           items: [],
-          supplier: { name: 'X', id: 's', code: null, contactPerson: null, email: null, phone: null, address: null, taxId: null, paymentTerms: null },
+          supplier: {
+            name: 'X',
+            id: 's',
+            code: null,
+            contactPerson: null,
+            email: null,
+            phone: null,
+            address: null,
+            taxId: null,
+            paymentTerms: null,
+          },
           goodsReceives: [],
           forceClosedAt: new Date(),
           forceClosedReason: 'supplier bankrupt — short by 200',
@@ -252,17 +259,31 @@ describe('PurchaseOrdersService — Sprint 4 Variance + Force Close', () => {
       mockPrisma.purchaseOrder.findMany.mockResolvedValue([
         // -4000
         {
-          id: 'a', poNumber: 'A', status: 'PARTIALLY_RECEIVED', totalAmount: 10_000,
-          expectedDate: new Date('2099-01-01'), supplierId: 's', supplier: { name: 'X' },
+          id: 'a',
+          poNumber: 'A',
+          status: 'PARTIALLY_RECEIVED',
+          totalAmount: 10_000,
+          expectedDate: new Date('2099-01-01'),
+          supplierId: 's',
+          supplier: { name: 'X' },
           items: [{ quantity: 100, receivedQty: 60, totalPrice: 10_000 }],
-          goodsReceives: [], forceClosedAt: null, forceClosedReason: null,
+          goodsReceives: [],
+          forceClosedAt: null,
+          forceClosedReason: null,
         },
         // +200
         {
-          id: 'b', poNumber: 'B', status: 'FULLY_RECEIVED', totalAmount: 1_000,
-          expectedDate: null, supplierId: 's', supplier: { name: 'X' },
+          id: 'b',
+          poNumber: 'B',
+          status: 'FULLY_RECEIVED',
+          totalAmount: 1_000,
+          expectedDate: null,
+          supplierId: 's',
+          supplier: { name: 'X' },
           items: [{ quantity: 100, receivedQty: 120, totalPrice: 1_000 }],
-          goodsReceives: [], forceClosedAt: null, forceClosedReason: null,
+          goodsReceives: [],
+          forceClosedAt: null,
+          forceClosedReason: null,
         },
       ]);
 

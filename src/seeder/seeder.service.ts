@@ -16,7 +16,14 @@ import { SubscriptionStatus } from '../subscriptions/entities/subscription.entit
 import { InvoiceStatus } from '../invoices/entities/invoice.entity';
 import { PaymentMethod, PaymentStatus } from '../payments/entities/payment.entity';
 import { PrismaService } from '../prisma/prisma.service';
-import { CostCenterType, CostCategory, WarehouseType, PurchaseRequisitionStatus, PurchaseOrderStatus, SupplierQuoteStatus } from '@prisma/client';
+import {
+  CostCenterType,
+  CostCategory,
+  WarehouseType,
+  PurchaseRequisitionStatus,
+  PurchaseOrderStatus,
+  SupplierQuoteStatus,
+} from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -466,7 +473,8 @@ export class SeederService {
       {
         code: 'HR_MODULE',
         name: 'HR Module',
-        description: 'ระบบ HR ครบวงจร: จัดการพนักงาน เงินเดือน การลา และเชื่อมข้อมูลทีมแม่บ้าน/ช่าง',
+        description:
+          'ระบบ HR ครบวงจร: จัดการพนักงาน เงินเดือน การลา และเชื่อมข้อมูลทีมแม่บ้าน/ช่าง',
         price: 1200,
         billingCycle: AddonBillingCycle.MONTHLY,
         category: 'HR',
@@ -4947,7 +4955,12 @@ export class SeederService {
 
     // Only seed for the premium demo tenant (SUB-002)
     const allTenants = await this.tenantsService.findAll();
-    const tenant = allTenants.find(t => (t as any).name_en === 'Mountain View Resort' || (t as any).slug === 'mountain' || t.name === 'Mountain View Resort (Premium Test)');
+    const tenant = allTenants.find(
+      (t) =>
+        (t as any).name_en === 'Mountain View Resort' ||
+        (t as any).slug === 'mountain' ||
+        t.name === 'Mountain View Resort (Premium Test)',
+    );
     if (!tenant) {
       this.logger.warn('  ⚠️ Demo tenant (mountain) not found — skipping inventory seed');
       return;
@@ -4966,15 +4979,15 @@ export class SeederService {
 
     // ── 1. Item Categories (hierarchical) ────────────────────────────────────
     const categoryDefs = [
-      { code: 'CAT-FB',    name: 'F&B วัตถุดิบ',        parentCode: null },
-      { code: 'CAT-FB-DRY',name: 'ของแห้ง',              parentCode: 'CAT-FB' },
-      { code: 'CAT-FB-VEG',name: 'ผักและผลไม้',           parentCode: 'CAT-FB' },
-      { code: 'CAT-FB-BEV',name: 'เครื่องดื่ม',            parentCode: 'CAT-FB' },
-      { code: 'CAT-ROOM',  name: 'ของใช้ห้องพัก',         parentCode: null },
-      { code: 'CAT-ROOM-BED', name: 'ผ้าปูและผ้าห่ม',    parentCode: 'CAT-ROOM' },
-      { code: 'CAT-ROOM-AMEN',name: 'Amenities',          parentCode: 'CAT-ROOM' },
-      { code: 'CAT-CLEAN', name: 'น้ำยาทำความสะอาด',      parentCode: null },
-      { code: 'CAT-MAINT', name: 'อุปกรณ์ซ่อมบำรุง',       parentCode: null },
+      { code: 'CAT-FB', name: 'F&B วัตถุดิบ', parentCode: null },
+      { code: 'CAT-FB-DRY', name: 'ของแห้ง', parentCode: 'CAT-FB' },
+      { code: 'CAT-FB-VEG', name: 'ผักและผลไม้', parentCode: 'CAT-FB' },
+      { code: 'CAT-FB-BEV', name: 'เครื่องดื่ม', parentCode: 'CAT-FB' },
+      { code: 'CAT-ROOM', name: 'ของใช้ห้องพัก', parentCode: null },
+      { code: 'CAT-ROOM-BED', name: 'ผ้าปูและผ้าห่ม', parentCode: 'CAT-ROOM' },
+      { code: 'CAT-ROOM-AMEN', name: 'Amenities', parentCode: 'CAT-ROOM' },
+      { code: 'CAT-CLEAN', name: 'น้ำยาทำความสะอาด', parentCode: null },
+      { code: 'CAT-MAINT', name: 'อุปกรณ์ซ่อมบำรุง', parentCode: null },
     ];
 
     const categoryMap: Record<string, string> = {};
@@ -4985,7 +4998,14 @@ export class SeederService {
       });
       if (!existing) {
         const created = await this.prisma.itemCategory.create({
-          data: { tenantId, code: cat.code, name: cat.name, parentId, isActive: true, sortOrder: 0 },
+          data: {
+            tenantId,
+            code: cat.code,
+            name: cat.name,
+            parentId,
+            isActive: true,
+            sortOrder: 0,
+          },
         });
         categoryMap[cat.code] = created.id;
         this.logger.log(`  ✓ Category: ${cat.name}`);
@@ -4997,23 +5017,39 @@ export class SeederService {
     // ── 2. Suppliers ─────────────────────────────────────────────────────────
     const supplierDefs = [
       {
-        code: 'SUP-MAKRO',  name: 'แม็คโคร (Makro)', contactPerson: 'จัดซื้อส่วนกลาง',
-        email: 'order@makro.co.th', phone: '02-999-9999', paymentTerms: 'NET30',
+        code: 'SUP-MAKRO',
+        name: 'แม็คโคร (Makro)',
+        contactPerson: 'จัดซื้อส่วนกลาง',
+        email: 'order@makro.co.th',
+        phone: '02-999-9999',
+        paymentTerms: 'NET30',
         leadTimeDays: 2,
       },
       {
-        code: 'SUP-BIGC',   name: 'บิ๊กซี ซัพพลาย', contactPerson: 'ฝ่ายขายส่ง',
-        email: 'wholesale@bigc.co.th', phone: '02-888-8888', paymentTerms: 'COD',
+        code: 'SUP-BIGC',
+        name: 'บิ๊กซี ซัพพลาย',
+        contactPerson: 'ฝ่ายขายส่ง',
+        email: 'wholesale@bigc.co.th',
+        phone: '02-888-8888',
+        paymentTerms: 'COD',
         leadTimeDays: 1,
       },
       {
-        code: 'SUP-CLEAN',  name: 'บริษัท ซัพพลายคลีน จำกัด', contactPerson: 'คุณสมหวัง',
-        email: 'sales@supplyclean.th', phone: '086-111-2222', paymentTerms: 'NET15',
+        code: 'SUP-CLEAN',
+        name: 'บริษัท ซัพพลายคลีน จำกัด',
+        contactPerson: 'คุณสมหวัง',
+        email: 'sales@supplyclean.th',
+        phone: '086-111-2222',
+        paymentTerms: 'NET15',
         leadTimeDays: 3,
       },
       {
-        code: 'SUP-HOTEL',  name: 'Hotel Amenities TH', contactPerson: 'คุณนารี',
-        email: 'info@hotelamenities.th', phone: '088-555-6666', paymentTerms: 'NET30',
+        code: 'SUP-HOTEL',
+        name: 'Hotel Amenities TH',
+        contactPerson: 'คุณนารี',
+        email: 'info@hotelamenities.th',
+        phone: '088-555-6666',
+        paymentTerms: 'NET30',
         leadTimeDays: 5,
       },
     ];
@@ -5036,10 +5072,10 @@ export class SeederService {
 
     // ── 3. Warehouses ─────────────────────────────────────────────────────────
     const warehouseDefs = [
-      { code: 'WH-MAIN',  name: 'คลังกลาง',       type: 'GENERAL',      isDefault: true },
-      { code: 'WH-KITCH', name: 'คลังครัว',        type: 'KITCHEN',      isDefault: false },
-      { code: 'WH-HK',    name: 'คลัง Housekeeping', type: 'HOUSEKEEPING', isDefault: false },
-      { code: 'WH-MAINT', name: 'คลังช่างซ่อม',    type: 'MAINTENANCE',  isDefault: false },
+      { code: 'WH-MAIN', name: 'คลังกลาง', type: 'GENERAL', isDefault: true },
+      { code: 'WH-KITCH', name: 'คลังครัว', type: 'KITCHEN', isDefault: false },
+      { code: 'WH-HK', name: 'คลัง Housekeeping', type: 'HOUSEKEEPING', isDefault: false },
+      { code: 'WH-MAINT', name: 'คลังช่างซ่อม', type: 'MAINTENANCE', isDefault: false },
     ];
 
     const warehouseMap: Record<string, string> = {};
@@ -5062,93 +5098,235 @@ export class SeederService {
     const itemDefs = [
       // Room Amenities
       {
-        sku: 'SOAP-75G',   name: 'สบู่ก้อน 75g',         catCode: 'CAT-ROOM-AMEN', unit: 'PIECE',
-        reorderPoint: 200, reorderQty: 500, minStock: 50, costMethod: 'WEIGHTED_AVG',
-        isPerishable: false, supplierCode: 'SUP-HOTEL', unitPrice: 18,
+        sku: 'SOAP-75G',
+        name: 'สบู่ก้อน 75g',
+        catCode: 'CAT-ROOM-AMEN',
+        unit: 'PIECE',
+        reorderPoint: 200,
+        reorderQty: 500,
+        minStock: 50,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-HOTEL',
+        unitPrice: 18,
       },
       {
-        sku: 'SHAMP-30ML', name: 'แชมพู 30ml',            catCode: 'CAT-ROOM-AMEN', unit: 'BOTTLE',
-        reorderPoint: 150, reorderQty: 400, minStock: 30, costMethod: 'WEIGHTED_AVG',
-        isPerishable: false, supplierCode: 'SUP-HOTEL', unitPrice: 22,
+        sku: 'SHAMP-30ML',
+        name: 'แชมพู 30ml',
+        catCode: 'CAT-ROOM-AMEN',
+        unit: 'BOTTLE',
+        reorderPoint: 150,
+        reorderQty: 400,
+        minStock: 30,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-HOTEL',
+        unitPrice: 22,
       },
       {
-        sku: 'COND-30ML',  name: 'ครีมนวด 30ml',           catCode: 'CAT-ROOM-AMEN', unit: 'BOTTLE',
-        reorderPoint: 150, reorderQty: 400, minStock: 30, costMethod: 'WEIGHTED_AVG',
-        isPerishable: false, supplierCode: 'SUP-HOTEL', unitPrice: 22,
+        sku: 'COND-30ML',
+        name: 'ครีมนวด 30ml',
+        catCode: 'CAT-ROOM-AMEN',
+        unit: 'BOTTLE',
+        reorderPoint: 150,
+        reorderQty: 400,
+        minStock: 30,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-HOTEL',
+        unitPrice: 22,
       },
       {
-        sku: 'TOWEL-BATH', name: 'ผ้าเช็ดตัว',             catCode: 'CAT-ROOM-BED',  unit: 'PIECE',
-        reorderPoint: 100, reorderQty: 200, minStock: 50, costMethod: 'WEIGHTED_AVG',
-        isPerishable: false, supplierCode: 'SUP-HOTEL', unitPrice: 120,
+        sku: 'TOWEL-BATH',
+        name: 'ผ้าเช็ดตัว',
+        catCode: 'CAT-ROOM-BED',
+        unit: 'PIECE',
+        reorderPoint: 100,
+        reorderQty: 200,
+        minStock: 50,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-HOTEL',
+        unitPrice: 120,
       },
       {
-        sku: 'TOWEL-FACE', name: 'ผ้าเช็ดหน้า',            catCode: 'CAT-ROOM-BED',  unit: 'PIECE',
-        reorderPoint: 100, reorderQty: 200, minStock: 50, costMethod: 'WEIGHTED_AVG',
-        isPerishable: false, supplierCode: 'SUP-HOTEL', unitPrice: 60,
+        sku: 'TOWEL-FACE',
+        name: 'ผ้าเช็ดหน้า',
+        catCode: 'CAT-ROOM-BED',
+        unit: 'PIECE',
+        reorderPoint: 100,
+        reorderQty: 200,
+        minStock: 50,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-HOTEL',
+        unitPrice: 60,
       },
       {
-        sku: 'SHEET-STD',  name: 'ผ้าปูที่นอน (Standard)',  catCode: 'CAT-ROOM-BED',  unit: 'SET',
-        reorderPoint: 30,  reorderQty: 60,  minStock: 15, costMethod: 'WEIGHTED_AVG',
-        isPerishable: false, supplierCode: 'SUP-HOTEL', unitPrice: 350,
+        sku: 'SHEET-STD',
+        name: 'ผ้าปูที่นอน (Standard)',
+        catCode: 'CAT-ROOM-BED',
+        unit: 'SET',
+        reorderPoint: 30,
+        reorderQty: 60,
+        minStock: 15,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-HOTEL',
+        unitPrice: 350,
       },
       // F&B Dry goods
       {
-        sku: 'RICE-25KG',  name: 'ข้าวหอมมะลิ 25kg',       catCode: 'CAT-FB-DRY',    unit: 'BAG',
-        reorderPoint: 10,  reorderQty: 20,  minStock: 5,  costMethod: 'WEIGHTED_AVG',
-        isPerishable: true, defaultShelfLifeDays: 365, supplierCode: 'SUP-MAKRO', unitPrice: 780,
+        sku: 'RICE-25KG',
+        name: 'ข้าวหอมมะลิ 25kg',
+        catCode: 'CAT-FB-DRY',
+        unit: 'BAG',
+        reorderPoint: 10,
+        reorderQty: 20,
+        minStock: 5,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: true,
+        defaultShelfLifeDays: 365,
+        supplierCode: 'SUP-MAKRO',
+        unitPrice: 780,
       },
       {
-        sku: 'FLOUR-1KG',  name: 'แป้งอเนกประสงค์ 1kg',    catCode: 'CAT-FB-DRY',    unit: 'KG',
-        reorderPoint: 20,  reorderQty: 50,  minStock: 5,  costMethod: 'WEIGHTED_AVG',
-        isPerishable: true, defaultShelfLifeDays: 180, supplierCode: 'SUP-MAKRO', unitPrice: 32,
+        sku: 'FLOUR-1KG',
+        name: 'แป้งอเนกประสงค์ 1kg',
+        catCode: 'CAT-FB-DRY',
+        unit: 'KG',
+        reorderPoint: 20,
+        reorderQty: 50,
+        minStock: 5,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: true,
+        defaultShelfLifeDays: 180,
+        supplierCode: 'SUP-MAKRO',
+        unitPrice: 32,
       },
       {
-        sku: 'OIL-5L',     name: 'น้ำมันพืช 5 ลิตร',        catCode: 'CAT-FB-DRY',    unit: 'BOTTLE',
-        reorderPoint: 10,  reorderQty: 24,  minStock: 3,  costMethod: 'WEIGHTED_AVG',
-        isPerishable: true, defaultShelfLifeDays: 365, supplierCode: 'SUP-MAKRO', unitPrice: 220,
+        sku: 'OIL-5L',
+        name: 'น้ำมันพืช 5 ลิตร',
+        catCode: 'CAT-FB-DRY',
+        unit: 'BOTTLE',
+        reorderPoint: 10,
+        reorderQty: 24,
+        minStock: 3,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: true,
+        defaultShelfLifeDays: 365,
+        supplierCode: 'SUP-MAKRO',
+        unitPrice: 220,
       },
       {
-        sku: 'SUGAR-1KG',  name: 'น้ำตาลทราย 1kg',          catCode: 'CAT-FB-DRY',    unit: 'KG',
-        reorderPoint: 10,  reorderQty: 30,  minStock: 5,  costMethod: 'WEIGHTED_AVG',
-        isPerishable: true, defaultShelfLifeDays: 730, supplierCode: 'SUP-MAKRO', unitPrice: 28,
+        sku: 'SUGAR-1KG',
+        name: 'น้ำตาลทราย 1kg',
+        catCode: 'CAT-FB-DRY',
+        unit: 'KG',
+        reorderPoint: 10,
+        reorderQty: 30,
+        minStock: 5,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: true,
+        defaultShelfLifeDays: 730,
+        supplierCode: 'SUP-MAKRO',
+        unitPrice: 28,
       },
       // Beverages
       {
-        sku: 'WATER-600',  name: 'น้ำดื่ม 600ml (ลัง 24)',   catCode: 'CAT-FB-BEV',    unit: 'BOX',
-        reorderPoint: 20,  reorderQty: 50,  minStock: 10, costMethod: 'WEIGHTED_AVG',
-        isPerishable: true, defaultShelfLifeDays: 365, supplierCode: 'SUP-MAKRO', unitPrice: 90,
+        sku: 'WATER-600',
+        name: 'น้ำดื่ม 600ml (ลัง 24)',
+        catCode: 'CAT-FB-BEV',
+        unit: 'BOX',
+        reorderPoint: 20,
+        reorderQty: 50,
+        minStock: 10,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: true,
+        defaultShelfLifeDays: 365,
+        supplierCode: 'SUP-MAKRO',
+        unitPrice: 90,
       },
       {
-        sku: 'COLA-330',   name: 'น้ำอัดลม 330ml (ลัง 24)', catCode: 'CAT-FB-BEV',    unit: 'BOX',
-        reorderPoint: 10,  reorderQty: 20,  minStock: 5,  costMethod: 'WEIGHTED_AVG',
-        isPerishable: true, defaultShelfLifeDays: 365, supplierCode: 'SUP-BIGC', unitPrice: 180,
+        sku: 'COLA-330',
+        name: 'น้ำอัดลม 330ml (ลัง 24)',
+        catCode: 'CAT-FB-BEV',
+        unit: 'BOX',
+        reorderPoint: 10,
+        reorderQty: 20,
+        minStock: 5,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: true,
+        defaultShelfLifeDays: 365,
+        supplierCode: 'SUP-BIGC',
+        unitPrice: 180,
       },
       // Cleaning Supplies
       {
-        sku: 'DETERGENT',  name: 'น้ำยาซักผ้า 5L',           catCode: 'CAT-CLEAN',     unit: 'BOTTLE',
-        reorderPoint: 10,  reorderQty: 24,  minStock: 3,  costMethod: 'WEIGHTED_AVG',
-        isPerishable: false, supplierCode: 'SUP-CLEAN', unitPrice: 180,
+        sku: 'DETERGENT',
+        name: 'น้ำยาซักผ้า 5L',
+        catCode: 'CAT-CLEAN',
+        unit: 'BOTTLE',
+        reorderPoint: 10,
+        reorderQty: 24,
+        minStock: 3,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-CLEAN',
+        unitPrice: 180,
       },
       {
-        sku: 'FLOOR-CLN',  name: 'น้ำยาถูพื้น 5L',            catCode: 'CAT-CLEAN',     unit: 'BOTTLE',
-        reorderPoint: 8,   reorderQty: 20,  minStock: 2,  costMethod: 'WEIGHTED_AVG',
-        isPerishable: false, supplierCode: 'SUP-CLEAN', unitPrice: 150,
+        sku: 'FLOOR-CLN',
+        name: 'น้ำยาถูพื้น 5L',
+        catCode: 'CAT-CLEAN',
+        unit: 'BOTTLE',
+        reorderPoint: 8,
+        reorderQty: 20,
+        minStock: 2,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-CLEAN',
+        unitPrice: 150,
       },
       {
-        sku: 'TOILET-CLN', name: 'น้ำยาล้างห้องน้ำ 750ml',    catCode: 'CAT-CLEAN',     unit: 'BOTTLE',
-        reorderPoint: 20,  reorderQty: 48,  minStock: 5,  costMethod: 'WEIGHTED_AVG',
-        isPerishable: false, supplierCode: 'SUP-CLEAN', unitPrice: 65,
+        sku: 'TOILET-CLN',
+        name: 'น้ำยาล้างห้องน้ำ 750ml',
+        catCode: 'CAT-CLEAN',
+        unit: 'BOTTLE',
+        reorderPoint: 20,
+        reorderQty: 48,
+        minStock: 5,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-CLEAN',
+        unitPrice: 65,
       },
       // Maintenance Parts
       {
-        sku: 'BULB-E27',   name: 'หลอดไฟ LED E27 9W',        catCode: 'CAT-MAINT',     unit: 'PIECE',
-        reorderPoint: 20,  reorderQty: 50,  minStock: 10, costMethod: 'WEIGHTED_AVG',
-        isPerishable: false, supplierCode: 'SUP-BIGC', unitPrice: 85,
+        sku: 'BULB-E27',
+        name: 'หลอดไฟ LED E27 9W',
+        catCode: 'CAT-MAINT',
+        unit: 'PIECE',
+        reorderPoint: 20,
+        reorderQty: 50,
+        minStock: 10,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-BIGC',
+        unitPrice: 85,
       },
       {
-        sku: 'FILTER-AC',  name: 'ฟิลเตอร์แอร์',             catCode: 'CAT-MAINT',     unit: 'PIECE',
-        reorderPoint: 10,  reorderQty: 20,  minStock: 5,  costMethod: 'WEIGHTED_AVG',
-        isPerishable: false, supplierCode: 'SUP-BIGC', unitPrice: 120,
+        sku: 'FILTER-AC',
+        name: 'ฟิลเตอร์แอร์',
+        catCode: 'CAT-MAINT',
+        unit: 'PIECE',
+        reorderPoint: 10,
+        reorderQty: 20,
+        minStock: 5,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-BIGC',
+        unitPrice: 120,
       },
     ];
 
@@ -5163,10 +5341,16 @@ export class SeederService {
       if (!existing) {
         const created = await this.prisma.inventoryItem.create({
           data: {
-            tenantId, sku: item.sku, name: item.name, categoryId: catId,
-            unit: item.unit as any, costMethod: item.costMethod as any,
-            reorderPoint: item.reorderPoint, reorderQty: item.reorderQty,
-            minStock: item.minStock, isPerishable: item.isPerishable,
+            tenantId,
+            sku: item.sku,
+            name: item.name,
+            categoryId: catId,
+            unit: item.unit as any,
+            costMethod: item.costMethod as any,
+            reorderPoint: item.reorderPoint,
+            reorderQty: item.reorderQty,
+            minStock: item.minStock,
+            isPerishable: item.isPerishable,
             defaultShelfLifeDays: item.defaultShelfLifeDays ?? null,
             isActive: true,
           },
@@ -5187,8 +5371,11 @@ export class SeederService {
         if (!existingLink) {
           await this.prisma.itemSupplier.create({
             data: {
-              itemId, supplierId: suppId, unitPrice: item.unitPrice,
-              currency: 'THB', isPreferred: true,
+              itemId,
+              supplierId: suppId,
+              unitPrice: item.unitPrice,
+              currency: 'THB',
+              isPreferred: true,
             },
           });
         }
@@ -5199,25 +5386,25 @@ export class SeederService {
     // ── 5. Warehouse Stocks (initial balances) ────────────────────────────────
     const stockDefs: Array<{ sku: string; whCode: string; qty: number; avgCost: number }> = [
       // Housekeeping warehouse stocks
-      { sku: 'SOAP-75G',   whCode: 'WH-HK',    qty: 320, avgCost: 18 },
-      { sku: 'SHAMP-30ML', whCode: 'WH-HK',    qty: 280, avgCost: 22 },
-      { sku: 'COND-30ML',  whCode: 'WH-HK',    qty: 260, avgCost: 22 },
-      { sku: 'TOWEL-BATH', whCode: 'WH-HK',    qty: 180, avgCost: 120 },
-      { sku: 'TOWEL-FACE', whCode: 'WH-HK',    qty: 180, avgCost: 60 },
-      { sku: 'SHEET-STD',  whCode: 'WH-HK',    qty: 45,  avgCost: 350 },
-      { sku: 'DETERGENT',  whCode: 'WH-HK',    qty: 18,  avgCost: 180 },
-      { sku: 'TOILET-CLN', whCode: 'WH-HK',    qty: 32,  avgCost: 65 },
+      { sku: 'SOAP-75G', whCode: 'WH-HK', qty: 320, avgCost: 18 },
+      { sku: 'SHAMP-30ML', whCode: 'WH-HK', qty: 280, avgCost: 22 },
+      { sku: 'COND-30ML', whCode: 'WH-HK', qty: 260, avgCost: 22 },
+      { sku: 'TOWEL-BATH', whCode: 'WH-HK', qty: 180, avgCost: 120 },
+      { sku: 'TOWEL-FACE', whCode: 'WH-HK', qty: 180, avgCost: 60 },
+      { sku: 'SHEET-STD', whCode: 'WH-HK', qty: 45, avgCost: 350 },
+      { sku: 'DETERGENT', whCode: 'WH-HK', qty: 18, avgCost: 180 },
+      { sku: 'TOILET-CLN', whCode: 'WH-HK', qty: 32, avgCost: 65 },
       // Kitchen warehouse stocks
-      { sku: 'RICE-25KG',  whCode: 'WH-KITCH', qty: 15,  avgCost: 780 },
-      { sku: 'FLOUR-1KG',  whCode: 'WH-KITCH', qty: 25,  avgCost: 32 },
-      { sku: 'OIL-5L',     whCode: 'WH-KITCH', qty: 12,  avgCost: 220 },
-      { sku: 'SUGAR-1KG',  whCode: 'WH-KITCH', qty: 20,  avgCost: 28 },
-      { sku: 'WATER-600',  whCode: 'WH-KITCH', qty: 35,  avgCost: 90 },
-      { sku: 'COLA-330',   whCode: 'WH-KITCH', qty: 15,  avgCost: 180 },
+      { sku: 'RICE-25KG', whCode: 'WH-KITCH', qty: 15, avgCost: 780 },
+      { sku: 'FLOUR-1KG', whCode: 'WH-KITCH', qty: 25, avgCost: 32 },
+      { sku: 'OIL-5L', whCode: 'WH-KITCH', qty: 12, avgCost: 220 },
+      { sku: 'SUGAR-1KG', whCode: 'WH-KITCH', qty: 20, avgCost: 28 },
+      { sku: 'WATER-600', whCode: 'WH-KITCH', qty: 35, avgCost: 90 },
+      { sku: 'COLA-330', whCode: 'WH-KITCH', qty: 15, avgCost: 180 },
       // Maintenance warehouse stocks
-      { sku: 'BULB-E27',   whCode: 'WH-MAINT', qty: 35,  avgCost: 85 },
-      { sku: 'FILTER-AC',  whCode: 'WH-MAINT', qty: 12,  avgCost: 120 },
-      { sku: 'FLOOR-CLN',  whCode: 'WH-MAINT', qty: 10,  avgCost: 150 },
+      { sku: 'BULB-E27', whCode: 'WH-MAINT', qty: 35, avgCost: 85 },
+      { sku: 'FILTER-AC', whCode: 'WH-MAINT', qty: 12, avgCost: 120 },
+      { sku: 'FLOOR-CLN', whCode: 'WH-MAINT', qty: 10, avgCost: 150 },
     ];
 
     let stockCount = 0;
@@ -5232,7 +5419,8 @@ export class SeederService {
       if (!existing) {
         await this.prisma.warehouseStock.create({
           data: {
-            warehouseId, itemId,
+            warehouseId,
+            itemId,
             quantity: stock.qty,
             avgCost: stock.avgCost,
             totalValue: stock.qty * stock.avgCost,
@@ -5247,26 +5435,26 @@ export class SeederService {
     // Define what gets auto-deducted per room type per housekeeping task
     const templateDefs = [
       // Standard room checkout
-      { roomType: 'standard',  taskType: 'checkout', sku: 'SOAP-75G',   qty: 2 },
-      { roomType: 'standard',  taskType: 'checkout', sku: 'SHAMP-30ML', qty: 1 },
-      { roomType: 'standard',  taskType: 'checkout', sku: 'COND-30ML',  qty: 1 },
-      { roomType: 'standard',  taskType: 'checkout', sku: 'TOWEL-BATH', qty: 1 },
-      { roomType: 'standard',  taskType: 'checkout', sku: 'TOWEL-FACE', qty: 1 },
+      { roomType: 'standard', taskType: 'checkout', sku: 'SOAP-75G', qty: 2 },
+      { roomType: 'standard', taskType: 'checkout', sku: 'SHAMP-30ML', qty: 1 },
+      { roomType: 'standard', taskType: 'checkout', sku: 'COND-30ML', qty: 1 },
+      { roomType: 'standard', taskType: 'checkout', sku: 'TOWEL-BATH', qty: 1 },
+      { roomType: 'standard', taskType: 'checkout', sku: 'TOWEL-FACE', qty: 1 },
       // Deluxe room checkout
-      { roomType: 'deluxe',    taskType: 'checkout', sku: 'SOAP-75G',   qty: 2 },
-      { roomType: 'deluxe',    taskType: 'checkout', sku: 'SHAMP-30ML', qty: 2 },
-      { roomType: 'deluxe',    taskType: 'checkout', sku: 'COND-30ML',  qty: 2 },
-      { roomType: 'deluxe',    taskType: 'checkout', sku: 'TOWEL-BATH', qty: 2 },
-      { roomType: 'deluxe',    taskType: 'checkout', sku: 'TOWEL-FACE', qty: 2 },
+      { roomType: 'deluxe', taskType: 'checkout', sku: 'SOAP-75G', qty: 2 },
+      { roomType: 'deluxe', taskType: 'checkout', sku: 'SHAMP-30ML', qty: 2 },
+      { roomType: 'deluxe', taskType: 'checkout', sku: 'COND-30ML', qty: 2 },
+      { roomType: 'deluxe', taskType: 'checkout', sku: 'TOWEL-BATH', qty: 2 },
+      { roomType: 'deluxe', taskType: 'checkout', sku: 'TOWEL-FACE', qty: 2 },
       // Suite checkout
-      { roomType: 'suite',     taskType: 'checkout', sku: 'SOAP-75G',   qty: 4 },
-      { roomType: 'suite',     taskType: 'checkout', sku: 'SHAMP-30ML', qty: 3 },
-      { roomType: 'suite',     taskType: 'checkout', sku: 'COND-30ML',  qty: 3 },
-      { roomType: 'suite',     taskType: 'checkout', sku: 'TOWEL-BATH', qty: 3 },
-      { roomType: 'suite',     taskType: 'checkout', sku: 'TOWEL-FACE', qty: 3 },
+      { roomType: 'suite', taskType: 'checkout', sku: 'SOAP-75G', qty: 4 },
+      { roomType: 'suite', taskType: 'checkout', sku: 'SHAMP-30ML', qty: 3 },
+      { roomType: 'suite', taskType: 'checkout', sku: 'COND-30ML', qty: 3 },
+      { roomType: 'suite', taskType: 'checkout', sku: 'TOWEL-BATH', qty: 3 },
+      { roomType: 'suite', taskType: 'checkout', sku: 'TOWEL-FACE', qty: 3 },
       // Daily turndown
-      { roomType: 'standard',  taskType: 'daily',    sku: 'TOILET-CLN', qty: 1 },
-      { roomType: 'deluxe',    taskType: 'daily',    sku: 'TOILET-CLN', qty: 1 },
+      { roomType: 'standard', taskType: 'daily', sku: 'TOILET-CLN', qty: 1 },
+      { roomType: 'deluxe', taskType: 'daily', sku: 'TOILET-CLN', qty: 1 },
     ];
 
     let templateCount = 0;
@@ -5280,8 +5468,13 @@ export class SeederService {
       if (!existing) {
         await this.prisma.roomTypeAmenityTemplate.create({
           data: {
-            tenantId, roomType: tmpl.roomType, taskType: tmpl.taskType,
-            itemId, quantity: tmpl.qty, warehouseId, isActive: true,
+            tenantId,
+            roomType: tmpl.roomType,
+            taskType: tmpl.taskType,
+            itemId,
+            quantity: tmpl.qty,
+            warehouseId,
+            isActive: true,
           },
         });
         templateCount++;
@@ -5297,17 +5490,27 @@ export class SeederService {
     if (!existingRecipe) {
       const recipe = await this.prisma.inventoryRecipe.create({
         data: {
-          tenantId, menuItemId: 'DEMO-KAOPAT-001', menuItemName: 'ข้าวผัดกุ้ง',
-          servings: 1, isActive: true, notes: 'สูตรมาตรฐาน',
+          tenantId,
+          menuItemId: 'DEMO-KAOPAT-001',
+          menuItemName: 'ข้าวผัดกุ้ง',
+          servings: 1,
+          isActive: true,
+          notes: 'สูตรมาตรฐาน',
         },
       });
       const riceId = itemMap['RICE-25KG'];
-      const oilId  = itemMap['OIL-5L'];
+      const oilId = itemMap['OIL-5L'];
       if (riceId && oilId) {
         await this.prisma.inventoryRecipeIngredient.createMany({
           data: [
             { recipeId: recipe.id, itemId: riceId, quantity: 0.2, unit: 'กก.', wastagePercent: 5 },
-            { recipeId: recipe.id, itemId: oilId,  quantity: 0.02, unit: 'ลิตร', wastagePercent: 10 },
+            {
+              recipeId: recipe.id,
+              itemId: oilId,
+              quantity: 0.02,
+              unit: 'ลิตร',
+              wastagePercent: 10,
+            },
           ],
         });
         this.logger.log(`  ✓ Recipe seeded: ข้าวผัดกุ้ง`);
@@ -5358,11 +5561,11 @@ export class SeederService {
       return;
     }
 
-    const mainWarehouse = warehouses.find(w => w.code === 'WH-MAIN') || warehouses[0];
+    const mainWarehouse = warehouses.find((w) => w.code === 'WH-MAIN') || warehouses[0];
 
     // Helper: find item by SKU prefix
-    const findItem = (skuPrefix: string) => items.find(i => i.sku.startsWith(skuPrefix));
-    const findSupplier = (code: string) => suppliers.find(s => s.code === code);
+    const findItem = (skuPrefix: string) => items.find((i) => i.sku.startsWith(skuPrefix));
+    const findSupplier = (code: string) => suppliers.find((s) => s.code === code);
 
     // ── Generate document number
     const generateDocNumber = async (prefix: string, docType: string): Promise<string> => {
@@ -5407,9 +5610,27 @@ export class SeederService {
       // PR-1 Items
       await this.prisma.purchaseRequisitionItem.createMany({
         data: [
-          { purchaseRequisitionId: pr1.id, itemId: soapItem.id, quantity: 200, estimatedUnitPrice: 15, estimatedTotalPrice: 3000 },
-          { purchaseRequisitionId: pr1.id, itemId: shampooItem.id, quantity: 200, estimatedUnitPrice: 25, estimatedTotalPrice: 5000 },
-          { purchaseRequisitionId: pr1.id, itemId: towelItem.id, quantity: 50, estimatedUnitPrice: 150, estimatedTotalPrice: 7500 },
+          {
+            purchaseRequisitionId: pr1.id,
+            itemId: soapItem.id,
+            quantity: 200,
+            estimatedUnitPrice: 15,
+            estimatedTotalPrice: 3000,
+          },
+          {
+            purchaseRequisitionId: pr1.id,
+            itemId: shampooItem.id,
+            quantity: 200,
+            estimatedUnitPrice: 25,
+            estimatedTotalPrice: 5000,
+          },
+          {
+            purchaseRequisitionId: pr1.id,
+            itemId: towelItem.id,
+            quantity: 50,
+            estimatedUnitPrice: 150,
+            estimatedTotalPrice: 7500,
+          },
         ],
       });
 
@@ -5437,9 +5658,33 @@ export class SeederService {
       // Quote items for Hotel Amenities
       await this.prisma.supplierQuoteItem.createMany({
         data: [
-          { supplierQuoteId: sq1Hotel.id, itemId: soapItem.id, quantity: 200, unitPrice: 12, discount: 0, taxRate: 7, totalPrice: 2568 },
-          { supplierQuoteId: sq1Hotel.id, itemId: shampooItem.id, quantity: 200, unitPrice: 20, discount: 0, taxRate: 7, totalPrice: 4280 },
-          { supplierQuoteId: sq1Hotel.id, itemId: towelItem.id, quantity: 50, unitPrice: 140, discount: 500, taxRate: 7, totalPrice: 7167 },
+          {
+            supplierQuoteId: sq1Hotel.id,
+            itemId: soapItem.id,
+            quantity: 200,
+            unitPrice: 12,
+            discount: 0,
+            taxRate: 7,
+            totalPrice: 2568,
+          },
+          {
+            supplierQuoteId: sq1Hotel.id,
+            itemId: shampooItem.id,
+            quantity: 200,
+            unitPrice: 20,
+            discount: 0,
+            taxRate: 7,
+            totalPrice: 4280,
+          },
+          {
+            supplierQuoteId: sq1Hotel.id,
+            itemId: towelItem.id,
+            quantity: 50,
+            unitPrice: 140,
+            discount: 500,
+            taxRate: 7,
+            totalPrice: 7167,
+          },
         ],
       });
 
@@ -5466,9 +5711,33 @@ export class SeederService {
 
       await this.prisma.supplierQuoteItem.createMany({
         data: [
-          { supplierQuoteId: sq1Makro.id, itemId: soapItem.id, quantity: 200, unitPrice: 18, discount: 0, taxRate: 7, totalPrice: 3852 },
-          { supplierQuoteId: sq1Makro.id, itemId: shampooItem.id, quantity: 200, unitPrice: 28, discount: 0, taxRate: 7, totalPrice: 5992 },
-          { supplierQuoteId: sq1Makro.id, itemId: towelItem.id, quantity: 50, unitPrice: 160, discount: 0, taxRate: 7, totalPrice: 8560 },
+          {
+            supplierQuoteId: sq1Makro.id,
+            itemId: soapItem.id,
+            quantity: 200,
+            unitPrice: 18,
+            discount: 0,
+            taxRate: 7,
+            totalPrice: 3852,
+          },
+          {
+            supplierQuoteId: sq1Makro.id,
+            itemId: shampooItem.id,
+            quantity: 200,
+            unitPrice: 28,
+            discount: 0,
+            taxRate: 7,
+            totalPrice: 5992,
+          },
+          {
+            supplierQuoteId: sq1Makro.id,
+            itemId: towelItem.id,
+            quantity: 50,
+            unitPrice: 160,
+            discount: 0,
+            taxRate: 7,
+            totalPrice: 8560,
+          },
         ],
       });
 
@@ -5510,9 +5779,30 @@ export class SeederService {
           notes: 'สร้างจาก PR ' + pr1Number,
           items: {
             create: [
-              { itemId: soapItem.id, quantity: 200, unitPrice: 12, discount: 0, taxRate: 7, totalPrice: 2568 },
-              { itemId: shampooItem.id, quantity: 200, unitPrice: 20, discount: 0, taxRate: 7, totalPrice: 4280 },
-              { itemId: towelItem.id, quantity: 50, unitPrice: 140, discount: 5, taxRate: 7, totalPrice: 7167 },
+              {
+                itemId: soapItem.id,
+                quantity: 200,
+                unitPrice: 12,
+                discount: 0,
+                taxRate: 7,
+                totalPrice: 2568,
+              },
+              {
+                itemId: shampooItem.id,
+                quantity: 200,
+                unitPrice: 20,
+                discount: 0,
+                taxRate: 7,
+                totalPrice: 4280,
+              },
+              {
+                itemId: towelItem.id,
+                quantity: 50,
+                unitPrice: 140,
+                discount: 5,
+                taxRate: 7,
+                totalPrice: 7167,
+              },
             ],
           },
         },
@@ -5550,11 +5840,29 @@ export class SeederService {
       });
 
       const pr2Items = [
-        { purchaseRequisitionId: pr2.id, itemId: detergentItem.id, quantity: 30, estimatedUnitPrice: 250, estimatedTotalPrice: 7500 },
-        { purchaseRequisitionId: pr2.id, itemId: floorCleanItem.id, quantity: 20, estimatedUnitPrice: 180, estimatedTotalPrice: 3600 },
+        {
+          purchaseRequisitionId: pr2.id,
+          itemId: detergentItem.id,
+          quantity: 30,
+          estimatedUnitPrice: 250,
+          estimatedTotalPrice: 7500,
+        },
+        {
+          purchaseRequisitionId: pr2.id,
+          itemId: floorCleanItem.id,
+          quantity: 20,
+          estimatedUnitPrice: 180,
+          estimatedTotalPrice: 3600,
+        },
       ];
       if (toiletCleanItem) {
-        pr2Items.push({ purchaseRequisitionId: pr2.id, itemId: toiletCleanItem.id, quantity: 25, estimatedUnitPrice: 120, estimatedTotalPrice: 3000 });
+        pr2Items.push({
+          purchaseRequisitionId: pr2.id,
+          itemId: toiletCleanItem.id,
+          quantity: 25,
+          estimatedUnitPrice: 120,
+          estimatedTotalPrice: 3000,
+        });
       }
       await this.prisma.purchaseRequisitionItem.createMany({ data: pr2Items });
 
@@ -5579,11 +5887,35 @@ export class SeederService {
       });
 
       const sq2CleanItems = [
-        { supplierQuoteId: sq2Clean.id, itemId: detergentItem.id, quantity: 30, unitPrice: 230, discount: 5, taxRate: 7, totalPrice: 7009.5 },
-        { supplierQuoteId: sq2Clean.id, itemId: floorCleanItem.id, quantity: 20, unitPrice: 165, discount: 0, taxRate: 7, totalPrice: 3531 },
+        {
+          supplierQuoteId: sq2Clean.id,
+          itemId: detergentItem.id,
+          quantity: 30,
+          unitPrice: 230,
+          discount: 5,
+          taxRate: 7,
+          totalPrice: 7009.5,
+        },
+        {
+          supplierQuoteId: sq2Clean.id,
+          itemId: floorCleanItem.id,
+          quantity: 20,
+          unitPrice: 165,
+          discount: 0,
+          taxRate: 7,
+          totalPrice: 3531,
+        },
       ];
       if (toiletCleanItem) {
-        sq2CleanItems.push({ supplierQuoteId: sq2Clean.id, itemId: toiletCleanItem.id, quantity: 25, unitPrice: 110, discount: 0, taxRate: 7, totalPrice: 2942.5 });
+        sq2CleanItems.push({
+          supplierQuoteId: sq2Clean.id,
+          itemId: toiletCleanItem.id,
+          quantity: 25,
+          unitPrice: 110,
+          discount: 0,
+          taxRate: 7,
+          totalPrice: 2942.5,
+        });
       }
       await this.prisma.supplierQuoteItem.createMany({ data: sq2CleanItems });
 
@@ -5608,15 +5940,41 @@ export class SeederService {
       });
 
       const sq2BigcItems = [
-        { supplierQuoteId: sq2Bigc.id, itemId: detergentItem.id, quantity: 30, unitPrice: 270, discount: 0, taxRate: 7, totalPrice: 8667 },
-        { supplierQuoteId: sq2Bigc.id, itemId: floorCleanItem.id, quantity: 20, unitPrice: 200, discount: 0, taxRate: 7, totalPrice: 4280 },
+        {
+          supplierQuoteId: sq2Bigc.id,
+          itemId: detergentItem.id,
+          quantity: 30,
+          unitPrice: 270,
+          discount: 0,
+          taxRate: 7,
+          totalPrice: 8667,
+        },
+        {
+          supplierQuoteId: sq2Bigc.id,
+          itemId: floorCleanItem.id,
+          quantity: 20,
+          unitPrice: 200,
+          discount: 0,
+          taxRate: 7,
+          totalPrice: 4280,
+        },
       ];
       if (toiletCleanItem) {
-        sq2BigcItems.push({ supplierQuoteId: sq2Bigc.id, itemId: toiletCleanItem.id, quantity: 25, unitPrice: 130, discount: 0, taxRate: 7, totalPrice: 3477.5 });
+        sq2BigcItems.push({
+          supplierQuoteId: sq2Bigc.id,
+          itemId: toiletCleanItem.id,
+          quantity: 25,
+          unitPrice: 130,
+          discount: 0,
+          taxRate: 7,
+          totalPrice: 3477.5,
+        });
       }
       await this.prisma.supplierQuoteItem.createMany({ data: sq2BigcItems });
 
-      this.logger.log(`  ✓ PR-2 (${pr2Number}): น้ำยาทำความสะอาด — QUOTES_RECEIVED (2 quotes, ready to compare)`);
+      this.logger.log(
+        `  ✓ PR-2 (${pr2Number}): น้ำยาทำความสะอาด — QUOTES_RECEIVED (2 quotes, ready to compare)`,
+      );
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -5647,15 +6005,43 @@ export class SeederService {
       });
 
       const pr3Items = [
-        { purchaseRequisitionId: pr3.id, itemId: riceItem.id, quantity: 10, estimatedUnitPrice: 45, estimatedTotalPrice: 450 },
-        { purchaseRequisitionId: pr3.id, itemId: flourItem.id, quantity: 5, estimatedUnitPrice: 35, estimatedTotalPrice: 175 },
+        {
+          purchaseRequisitionId: pr3.id,
+          itemId: riceItem.id,
+          quantity: 10,
+          estimatedUnitPrice: 45,
+          estimatedTotalPrice: 450,
+        },
+        {
+          purchaseRequisitionId: pr3.id,
+          itemId: flourItem.id,
+          quantity: 5,
+          estimatedUnitPrice: 35,
+          estimatedTotalPrice: 175,
+        },
       ];
-      if (oilItem) pr3Items.push({ purchaseRequisitionId: pr3.id, itemId: oilItem.id, quantity: 8, estimatedUnitPrice: 65, estimatedTotalPrice: 520 });
-      if (sugarItem) pr3Items.push({ purchaseRequisitionId: pr3.id, itemId: sugarItem.id, quantity: 5, estimatedUnitPrice: 30, estimatedTotalPrice: 150 });
+      if (oilItem)
+        pr3Items.push({
+          purchaseRequisitionId: pr3.id,
+          itemId: oilItem.id,
+          quantity: 8,
+          estimatedUnitPrice: 65,
+          estimatedTotalPrice: 520,
+        });
+      if (sugarItem)
+        pr3Items.push({
+          purchaseRequisitionId: pr3.id,
+          itemId: sugarItem.id,
+          quantity: 5,
+          estimatedUnitPrice: 30,
+          estimatedTotalPrice: 150,
+        });
 
       await this.prisma.purchaseRequisitionItem.createMany({ data: pr3Items });
 
-      this.logger.log(`  ✓ PR-3 (${pr3Number}): วัตถุดิบอาหาร — APPROVED (ready to request quotes)`);
+      this.logger.log(
+        `  ✓ PR-3 (${pr3Number}): วัตถุดิบอาหาร — APPROVED (ready to request quotes)`,
+      );
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -5682,8 +6068,20 @@ export class SeederService {
 
       await this.prisma.purchaseRequisitionItem.createMany({
         data: [
-          { purchaseRequisitionId: pr4.id, itemId: bulbItem.id, quantity: 50, estimatedUnitPrice: 85, estimatedTotalPrice: 4250 },
-          { purchaseRequisitionId: pr4.id, itemId: filterItem.id, quantity: 20, estimatedUnitPrice: 350, estimatedTotalPrice: 7000 },
+          {
+            purchaseRequisitionId: pr4.id,
+            itemId: bulbItem.id,
+            quantity: 50,
+            estimatedUnitPrice: 85,
+            estimatedTotalPrice: 4250,
+          },
+          {
+            purchaseRequisitionId: pr4.id,
+            itemId: filterItem.id,
+            quantity: 20,
+            estimatedUnitPrice: 350,
+            estimatedTotalPrice: 7000,
+          },
         ],
       });
 
@@ -5706,7 +6104,12 @@ export class SeederService {
     this.logger.log('📊 Seeding Cost Accounting data...');
 
     const allTenants2 = await this.tenantsService.findAll();
-    const tenant = allTenants2.find(t => (t as any).name_en === 'Mountain View Resort' || (t as any).slug === 'mountain' || t.name === 'Mountain View Resort (Premium Test)');
+    const tenant = allTenants2.find(
+      (t) =>
+        (t as any).name_en === 'Mountain View Resort' ||
+        (t as any).slug === 'mountain' ||
+        t.name === 'Mountain View Resort (Premium Test)',
+    );
     if (!tenant) {
       this.logger.warn('  ⚠️ Demo tenant not found — skipping cost accounting seed');
       return;
@@ -5726,12 +6129,17 @@ export class SeederService {
 
     // ── 1. Cost Centers (USALI standard) ─────────────────────────────────────
     const centerDefs = [
-      { code: 'CC-ROOMS', name: 'Rooms Division',              type: 'ROOMS',           sortOrder: 1 },
-      { code: 'CC-FB',    name: 'Food & Beverage',             type: 'FOOD_BEVERAGE',   sortOrder: 2 },
-      { code: 'CC-ADMIN', name: 'Administrative & General',    type: 'ADMIN_GENERAL',   sortOrder: 3 },
-      { code: 'CC-SM',    name: 'Sales & Marketing',           type: 'SALES_MARKETING', sortOrder: 4 },
-      { code: 'CC-MAINT', name: 'Property Operations & Maint', type: 'MAINTENANCE_DEPT',sortOrder: 5 },
-      { code: 'CC-ENERGY',name: 'Energy / Utilities',          type: 'ENERGY',          sortOrder: 6 },
+      { code: 'CC-ROOMS', name: 'Rooms Division', type: 'ROOMS', sortOrder: 1 },
+      { code: 'CC-FB', name: 'Food & Beverage', type: 'FOOD_BEVERAGE', sortOrder: 2 },
+      { code: 'CC-ADMIN', name: 'Administrative & General', type: 'ADMIN_GENERAL', sortOrder: 3 },
+      { code: 'CC-SM', name: 'Sales & Marketing', type: 'SALES_MARKETING', sortOrder: 4 },
+      {
+        code: 'CC-MAINT',
+        name: 'Property Operations & Maint',
+        type: 'MAINTENANCE_DEPT',
+        sortOrder: 5,
+      },
+      { code: 'CC-ENERGY', name: 'Energy / Utilities', type: 'ENERGY', sortOrder: 6 },
     ];
 
     const centerMap: Record<string, string> = {};
@@ -5753,24 +6161,24 @@ export class SeederService {
     // ── 2. Cost Types ─────────────────────────────────────────────────────────
     const typeDefs = [
       // Material
-      { code: 'CT-AMEN',  name: 'Room Amenities',    category: 'MATERIAL',  sortOrder: 1 },
-      { code: 'CT-INGR',  name: 'F&B Ingredients',   category: 'MATERIAL',  sortOrder: 2 },
-      { code: 'CT-PARTS', name: 'Maintenance Parts',  category: 'MATERIAL',  sortOrder: 3 },
-      { code: 'CT-CLEAN', name: 'Cleaning Supplies',  category: 'MATERIAL',  sortOrder: 4 },
+      { code: 'CT-AMEN', name: 'Room Amenities', category: 'MATERIAL', sortOrder: 1 },
+      { code: 'CT-INGR', name: 'F&B Ingredients', category: 'MATERIAL', sortOrder: 2 },
+      { code: 'CT-PARTS', name: 'Maintenance Parts', category: 'MATERIAL', sortOrder: 3 },
+      { code: 'CT-CLEAN', name: 'Cleaning Supplies', category: 'MATERIAL', sortOrder: 4 },
       // Labor
-      { code: 'CT-SAL',   name: 'Staff Salary',       category: 'LABOR',     sortOrder: 5 },
-      { code: 'CT-BEN',   name: 'Staff Benefits',     category: 'LABOR',     sortOrder: 6 },
-      { code: 'CT-OT',    name: 'Overtime Pay',        category: 'LABOR',     sortOrder: 7 },
+      { code: 'CT-SAL', name: 'Staff Salary', category: 'LABOR', sortOrder: 5 },
+      { code: 'CT-BEN', name: 'Staff Benefits', category: 'LABOR', sortOrder: 6 },
+      { code: 'CT-OT', name: 'Overtime Pay', category: 'LABOR', sortOrder: 7 },
       // Overhead
-      { code: 'CT-ELEC',  name: 'Electricity',        category: 'OVERHEAD',  sortOrder: 8 },
-      { code: 'CT-WATER', name: 'Water & Sewage',      category: 'OVERHEAD',  sortOrder: 9 },
-      { code: 'CT-DEPR',  name: 'Depreciation',        category: 'OVERHEAD',  sortOrder: 10 },
-      { code: 'CT-INS',   name: 'Insurance',           category: 'OVERHEAD',  sortOrder: 11 },
-      { code: 'CT-RENT',  name: 'Rent / Lease',        category: 'OVERHEAD',  sortOrder: 12 },
+      { code: 'CT-ELEC', name: 'Electricity', category: 'OVERHEAD', sortOrder: 8 },
+      { code: 'CT-WATER', name: 'Water & Sewage', category: 'OVERHEAD', sortOrder: 9 },
+      { code: 'CT-DEPR', name: 'Depreciation', category: 'OVERHEAD', sortOrder: 10 },
+      { code: 'CT-INS', name: 'Insurance', category: 'OVERHEAD', sortOrder: 11 },
+      { code: 'CT-RENT', name: 'Rent / Lease', category: 'OVERHEAD', sortOrder: 12 },
       // Revenue
-      { code: 'CT-RREV',  name: 'Room Revenue',        category: 'REVENUE',   sortOrder: 13 },
-      { code: 'CT-FBREV', name: 'F&B Revenue',         category: 'REVENUE',   sortOrder: 14 },
-      { code: 'CT-OREV',  name: 'Other Revenue',       category: 'REVENUE',   sortOrder: 15 },
+      { code: 'CT-RREV', name: 'Room Revenue', category: 'REVENUE', sortOrder: 13 },
+      { code: 'CT-FBREV', name: 'F&B Revenue', category: 'REVENUE', sortOrder: 14 },
+      { code: 'CT-OREV', name: 'Other Revenue', category: 'REVENUE', sortOrder: 15 },
     ];
 
     const typeMap: Record<string, string> = {};
@@ -5796,35 +6204,86 @@ export class SeederService {
     if (!entriesExist) {
       const entryDefs = [
         // Rooms Division costs
-        { centerCode: 'CC-ROOMS', typeCode: 'CT-AMEN',  amount: 18500, desc: 'Room amenities consumption' },
-        { centerCode: 'CC-ROOMS', typeCode: 'CT-CLEAN', amount: 8200,  desc: 'Cleaning supplies - rooms' },
-        { centerCode: 'CC-ROOMS', typeCode: 'CT-SAL',   amount: 95000, desc: 'Housekeeping staff salary' },
-        { centerCode: 'CC-ROOMS', typeCode: 'CT-RREV',  amount: 485000,desc: 'Room revenue this month' },
+        {
+          centerCode: 'CC-ROOMS',
+          typeCode: 'CT-AMEN',
+          amount: 18500,
+          desc: 'Room amenities consumption',
+        },
+        {
+          centerCode: 'CC-ROOMS',
+          typeCode: 'CT-CLEAN',
+          amount: 8200,
+          desc: 'Cleaning supplies - rooms',
+        },
+        {
+          centerCode: 'CC-ROOMS',
+          typeCode: 'CT-SAL',
+          amount: 95000,
+          desc: 'Housekeeping staff salary',
+        },
+        {
+          centerCode: 'CC-ROOMS',
+          typeCode: 'CT-RREV',
+          amount: 485000,
+          desc: 'Room revenue this month',
+        },
         // F&B costs
-        { centerCode: 'CC-FB',    typeCode: 'CT-INGR',  amount: 62000, desc: 'F&B ingredient cost' },
-        { centerCode: 'CC-FB',    typeCode: 'CT-SAL',   amount: 72000, desc: 'F&B staff salary' },
-        { centerCode: 'CC-FB',    typeCode: 'CT-FBREV', amount: 195000,desc: 'F&B revenue this month' },
+        { centerCode: 'CC-FB', typeCode: 'CT-INGR', amount: 62000, desc: 'F&B ingredient cost' },
+        { centerCode: 'CC-FB', typeCode: 'CT-SAL', amount: 72000, desc: 'F&B staff salary' },
+        {
+          centerCode: 'CC-FB',
+          typeCode: 'CT-FBREV',
+          amount: 195000,
+          desc: 'F&B revenue this month',
+        },
         // Admin costs
-        { centerCode: 'CC-ADMIN', typeCode: 'CT-SAL',   amount: 85000, desc: 'Admin staff salary' },
-        { centerCode: 'CC-ADMIN', typeCode: 'CT-BEN',   amount: 12000, desc: 'Staff benefits & insurance' },
+        { centerCode: 'CC-ADMIN', typeCode: 'CT-SAL', amount: 85000, desc: 'Admin staff salary' },
+        {
+          centerCode: 'CC-ADMIN',
+          typeCode: 'CT-BEN',
+          amount: 12000,
+          desc: 'Staff benefits & insurance',
+        },
         // Maintenance
-        { centerCode: 'CC-MAINT', typeCode: 'CT-PARTS', amount: 15500, desc: 'Maintenance parts used' },
-        { centerCode: 'CC-MAINT', typeCode: 'CT-SAL',   amount: 38000, desc: 'Maintenance staff salary' },
+        {
+          centerCode: 'CC-MAINT',
+          typeCode: 'CT-PARTS',
+          amount: 15500,
+          desc: 'Maintenance parts used',
+        },
+        {
+          centerCode: 'CC-MAINT',
+          typeCode: 'CT-SAL',
+          amount: 38000,
+          desc: 'Maintenance staff salary',
+        },
         // Energy
-        { centerCode: 'CC-ENERGY',typeCode: 'CT-ELEC',  amount: 52000, desc: 'Electricity bill' },
-        { centerCode: 'CC-ENERGY',typeCode: 'CT-WATER', amount: 8500,  desc: 'Water & sewage bill' },
+        { centerCode: 'CC-ENERGY', typeCode: 'CT-ELEC', amount: 52000, desc: 'Electricity bill' },
+        {
+          centerCode: 'CC-ENERGY',
+          typeCode: 'CT-WATER',
+          amount: 8500,
+          desc: 'Water & sewage bill',
+        },
       ];
 
       for (const entry of entryDefs) {
         const costCenterId = centerMap[entry.centerCode];
-        const costTypeId   = typeMap[entry.typeCode];
+        const costTypeId = typeMap[entry.typeCode];
         if (!costCenterId || !costTypeId) continue;
         await this.prisma.costEntry.create({
           data: {
-            tenantId, propertyId, costCenterId, costTypeId,
-            amount: entry.amount, period: currentPeriod,
+            tenantId,
+            propertyId,
+            costCenterId,
+            costTypeId,
+            amount: entry.amount,
+            period: currentPeriod,
             description: entry.desc,
-            sourceType: 'manual', isAutoPosted: false, status: 'posted',
+            sourceType: 'manual',
+            isAutoPosted: false,
+            status: 'posted',
             createdBy: 'seeder',
           },
         });
@@ -5840,27 +6299,33 @@ export class SeederService {
     });
     if (!budgetsExist) {
       const budgetDefs = [
-        { centerCode: 'CC-ROOMS', typeCode: 'CT-AMEN',  budget: 20000 },
+        { centerCode: 'CC-ROOMS', typeCode: 'CT-AMEN', budget: 20000 },
         { centerCode: 'CC-ROOMS', typeCode: 'CT-CLEAN', budget: 10000 },
-        { centerCode: 'CC-ROOMS', typeCode: 'CT-SAL',   budget: 100000 },
-        { centerCode: 'CC-FB',    typeCode: 'CT-INGR',  budget: 60000 },
-        { centerCode: 'CC-FB',    typeCode: 'CT-SAL',   budget: 70000 },
-        { centerCode: 'CC-ADMIN', typeCode: 'CT-SAL',   budget: 90000 },
+        { centerCode: 'CC-ROOMS', typeCode: 'CT-SAL', budget: 100000 },
+        { centerCode: 'CC-FB', typeCode: 'CT-INGR', budget: 60000 },
+        { centerCode: 'CC-FB', typeCode: 'CT-SAL', budget: 70000 },
+        { centerCode: 'CC-ADMIN', typeCode: 'CT-SAL', budget: 90000 },
         { centerCode: 'CC-MAINT', typeCode: 'CT-PARTS', budget: 20000 },
-        { centerCode: 'CC-MAINT', typeCode: 'CT-SAL',   budget: 40000 },
-        { centerCode: 'CC-ENERGY',typeCode: 'CT-ELEC',  budget: 55000 },
-        { centerCode: 'CC-ENERGY',typeCode: 'CT-WATER', budget: 10000 },
+        { centerCode: 'CC-MAINT', typeCode: 'CT-SAL', budget: 40000 },
+        { centerCode: 'CC-ENERGY', typeCode: 'CT-ELEC', budget: 55000 },
+        { centerCode: 'CC-ENERGY', typeCode: 'CT-WATER', budget: 10000 },
       ];
 
       for (const b of budgetDefs) {
         const costCenterId = centerMap[b.centerCode];
-        const costTypeId   = typeMap[b.typeCode];
+        const costTypeId = typeMap[b.typeCode];
         if (!costCenterId || !costTypeId) continue;
         await this.prisma.costBudget.create({
           data: {
-            tenantId, propertyId, costCenterId, costTypeId,
-            period: currentPeriod, budgetAmount: b.budget,
-            actualAmount: 0, variance: 0, variancePercent: 0,
+            tenantId,
+            propertyId,
+            costCenterId,
+            costTypeId,
+            period: currentPeriod,
+            budgetAmount: b.budget,
+            actualAmount: 0,
+            variance: 0,
+            variancePercent: 0,
             createdBy: 'seeder',
           },
         });
@@ -5914,11 +6379,17 @@ export class SeederService {
         employeeId: 'MVR-PRC-M01',
         approvalLimit: null, // unlimited
         permissions: [
-          'pr.create', 'pr.approve',
-          'rfq.create', 'quote.compare',
-          'po.create', 'po.approve',
-          'supplier.manage', 'grn.view', 'report.view',
-          'approval-flow.manage', 'user.manage',
+          'pr.create',
+          'pr.approve',
+          'rfq.create',
+          'quote.compare',
+          'po.create',
+          'po.approve',
+          'supplier.manage',
+          'grn.view',
+          'report.view',
+          'approval-flow.manage',
+          'user.manage',
         ],
       },
       {
@@ -5928,7 +6399,14 @@ export class SeederService {
         role: 'buyer',
         employeeId: 'MVR-PRC-B01',
         approvalLimit: 50_000,
-        permissions: ['pr.create', 'rfq.create', 'quote.compare', 'po.create', 'supplier.view', 'report.view'],
+        permissions: [
+          'pr.create',
+          'rfq.create',
+          'quote.compare',
+          'po.create',
+          'supplier.view',
+          'report.view',
+        ],
       },
       {
         email: 'buyer2@mountainviewresort.test',
@@ -5937,7 +6415,14 @@ export class SeederService {
         role: 'buyer',
         employeeId: 'MVR-PRC-B02',
         approvalLimit: 50_000,
-        permissions: ['pr.create', 'rfq.create', 'quote.compare', 'po.create', 'supplier.view', 'report.view'],
+        permissions: [
+          'pr.create',
+          'rfq.create',
+          'quote.compare',
+          'po.create',
+          'supplier.view',
+          'report.view',
+        ],
       },
       {
         email: 'approver1@mountainviewresort.test',

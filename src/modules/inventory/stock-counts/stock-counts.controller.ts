@@ -83,7 +83,10 @@ export class StockCountsController {
       },
     },
   })
-  async findAll(@CurrentUser() user: JwtPayload, @Query() query: QueryStockCountDto): Promise<{ success: boolean } & PaginatedResponse<StockCountDetail>> {
+  async findAll(
+    @CurrentUser() user: JwtPayload,
+    @Query() query: QueryStockCountDto,
+  ): Promise<{ success: boolean } & PaginatedResponse<StockCountDetail>> {
     const result = await this.stockCountsService.findAll(user.tenantId, query);
     return { success: true, ...result };
   }
@@ -122,7 +125,10 @@ export class StockCountsController {
     },
   })
   @ApiResponse({ status: 404, description: 'Stock count not found' })
-  async findOne(@CurrentUser() user: JwtPayload, @Param('id') id: string): Promise<{ success: boolean; data: StockCountDetail }> {
+  async findOne(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+  ): Promise<{ success: boolean; data: StockCountDetail }> {
     const data = await this.stockCountsService.findOne(id, user.tenantId);
     return { success: true, data };
   }
@@ -140,7 +146,10 @@ export class StockCountsController {
     status: 400,
     description: 'Validation error or invalid warehouse',
   })
-  async create(@CurrentUser() user: JwtPayload, @Body() createDto: CreateStockCountDto): Promise<{ success: boolean; data: StockCountDetail }> {
+  async create(
+    @CurrentUser() user: JwtPayload,
+    @Body() createDto: CreateStockCountDto,
+  ): Promise<{ success: boolean; data: StockCountDetail }> {
     const data = await this.stockCountsService.create(createDto, user.sub, user.tenantId);
     return { success: true, data };
   }
@@ -153,7 +162,10 @@ export class StockCountsController {
     status: 409,
     description: 'Invalid status transition',
   })
-  async startCount(@CurrentUser() user: JwtPayload, @Param('id') id: string): Promise<{ success: boolean; data: StockCountDetail }> {
+  async startCount(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+  ): Promise<{ success: boolean; data: StockCountDetail }> {
     const data = await this.stockCountsService.startCount(id, user.sub, user.tenantId);
     return { success: true, data };
   }
@@ -198,7 +210,10 @@ export class StockCountsController {
     status: 409,
     description: 'Stock count not in IN_PROGRESS status',
   })
-  async completeCount(@CurrentUser() user: JwtPayload, @Param('id') id: string): Promise<{ success: boolean; data: StockCountDetail }> {
+  async completeCount(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+  ): Promise<{ success: boolean; data: StockCountDetail }> {
     const data = await this.stockCountsService.completeCount(id, user.sub, user.tenantId);
     return { success: true, data };
   }
@@ -216,7 +231,10 @@ export class StockCountsController {
     status: 409,
     description: 'Stock count not in COMPLETED status',
   })
-  async approveCount(@CurrentUser() user: JwtPayload, @Param('id') id: string): Promise<{ success: boolean; data: StockCountDetail }> {
+  async approveCount(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+  ): Promise<{ success: boolean; data: StockCountDetail }> {
     const data = await this.stockCountsService.approveCount(id, user.sub, user.tenantId);
     return { success: true, data };
   }
@@ -232,7 +250,10 @@ export class StockCountsController {
     status: 409,
     description: 'Cannot cancel approved or already cancelled count',
   })
-  async cancelCount(@CurrentUser() user: JwtPayload, @Param('id') id: string): Promise<{ success: boolean; data: StockCountDetail }> {
+  async cancelCount(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+  ): Promise<{ success: boolean; data: StockCountDetail }> {
     const data = await this.stockCountsService.cancelCount(id, user.tenantId);
     return { success: true, data };
   }

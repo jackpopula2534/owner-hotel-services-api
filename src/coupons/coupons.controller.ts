@@ -1,13 +1,4 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Param,
-  Patch,
-  Post,
-  Query,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -93,19 +84,13 @@ export class CouponsController {
   // ── Tenant endpoints ──
   @Post('validate')
   @ApiOperation({ summary: 'Validate a coupon code without redeeming it' })
-  async validate(
-    @CurrentUser() user: any,
-    @Body() body: Omit<ValidateCouponInput, 'tenantId'>,
-  ) {
+  async validate(@CurrentUser() user: any, @Body() body: Omit<ValidateCouponInput, 'tenantId'>) {
     return this.couponsService.validate({ ...body, tenantId: user.tenant_id });
   }
 
   @Post('redeem')
   @ApiOperation({ summary: 'Redeem a coupon (atomically applies discount)' })
-  async redeem(
-    @CurrentUser() user: any,
-    @Body() body: Omit<RedeemCouponInput, 'tenantId'>,
-  ) {
+  async redeem(@CurrentUser() user: any, @Body() body: Omit<RedeemCouponInput, 'tenantId'>) {
     return this.couponsService.redeem({ ...body, tenantId: user.tenant_id });
   }
 }

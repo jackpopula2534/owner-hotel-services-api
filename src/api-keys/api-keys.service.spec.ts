@@ -1,9 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import {
-  BadRequestException,
-  ForbiddenException,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ApiKeysService } from './api-keys.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -57,9 +53,9 @@ describe('ApiKeysService', () => {
     });
 
     it('rejects empty scope list', async () => {
-      await expect(
-        service.create({ tenantId: 't1', name: 'X', scopes: [] }),
-      ).rejects.toThrow(BadRequestException);
+      await expect(service.create({ tenantId: 't1', name: 'X', scopes: [] })).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('returns plaintext only on creation', async () => {
@@ -148,16 +144,12 @@ describe('ApiKeysService', () => {
         tenant_id: 't1',
         revoked_at: null,
       });
-      await expect(service.revoke('k1', 'other')).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(service.revoke('k1', 'other')).rejects.toThrow(ForbiddenException);
     });
 
     it('throws NotFound for unknown key', async () => {
       mockFindUnique.mockResolvedValue(null);
-      await expect(service.revoke('missing', 't1')).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(service.revoke('missing', 't1')).rejects.toThrow(NotFoundException);
     });
 
     it('is idempotent for already-revoked key', async () => {

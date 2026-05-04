@@ -1,9 +1,4 @@
-import {
-  BadRequestException,
-  Injectable,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
@@ -195,10 +190,8 @@ export class ApprovalFlowsService {
         name: dto.name,
         description: dto.description,
         documentType: dto.documentType,
-        minAmount:
-          dto.minAmount !== undefined ? this.serializeAmount(dto.minAmount) : undefined,
-        maxAmount:
-          dto.maxAmount !== undefined ? this.serializeAmount(dto.maxAmount) : undefined,
+        minAmount: dto.minAmount !== undefined ? this.serializeAmount(dto.minAmount) : undefined,
+        maxAmount: dto.maxAmount !== undefined ? this.serializeAmount(dto.maxAmount) : undefined,
         isActive: dto.isActive,
         isDefault: dto.isDefault,
         ...(dto.steps

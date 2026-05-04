@@ -51,10 +51,7 @@ export class ProcurementStockService {
           deletedAt: null,
           ...(query.categoryId && { categoryId: query.categoryId }),
           ...(query.search && {
-            OR: [
-              { sku: { contains: query.search } },
-              { name: { contains: query.search } },
-            ],
+            OR: [{ sku: { contains: query.search } }, { name: { contains: query.search } }],
           }),
         },
       },
@@ -177,12 +174,14 @@ export class ProcurementStockService {
         isPerishable: s.item.isPerishable,
         status,
         // The deficit / excess tells the buyer "how much" not just "above/below".
-        deficit: status === 'LOW' || status === 'OUT_OF_STOCK'
-          ? Math.max(0, this.effectiveReorderPoint(s.item) - s.quantity)
-          : 0,
-        excess: status === 'OVERSTOCK' && s.item.maxStock != null
-          ? Math.max(0, s.quantity - s.item.maxStock)
-          : 0,
+        deficit:
+          status === 'LOW' || status === 'OUT_OF_STOCK'
+            ? Math.max(0, this.effectiveReorderPoint(s.item) - s.quantity)
+            : 0,
+        excess:
+          status === 'OVERSTOCK' && s.item.maxStock != null
+            ? Math.max(0, s.quantity - s.item.maxStock)
+            : 0,
         preferredSupplier: preferred
           ? {
               id: preferred.supplierId,
@@ -278,9 +277,7 @@ export class ProcurementStockService {
 
     return lots.map((lot) => {
       const daysLeft = lot.expiryDate
-        ? Math.floor(
-            (lot.expiryDate.getTime() - today.getTime()) / 86_400_000,
-          )
+        ? Math.floor((lot.expiryDate.getTime() - today.getTime()) / 86_400_000)
         : null;
       const isExpired = daysLeft != null && daysLeft < 0;
 

@@ -1,9 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import {
-  BadRequestException,
-  ForbiddenException,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { DataExportService } from './data-export.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -17,13 +13,11 @@ describe('DataExportService', () => {
   beforeEach(async () => {
     mockFindFirst = jest.fn();
     mockFindUnique = jest.fn();
-    mockCreate = jest
-      .fn()
-      .mockImplementation(async ({ data }) => ({
-        id: 'req-1',
-        status: 'queued',
-        ...data,
-      }));
+    mockCreate = jest.fn().mockImplementation(async ({ data }) => ({
+      id: 'req-1',
+      status: 'queued',
+      ...data,
+    }));
     mockUpdate = jest.fn().mockResolvedValue({});
 
     const module: TestingModule = await Test.createTestingModule({
@@ -64,9 +58,7 @@ describe('DataExportService', () => {
 
     it('rejects when an in-flight request already exists', async () => {
       mockFindFirst.mockResolvedValue({ id: 'existing', status: 'processing' });
-      await expect(service.request({ tenantId: 't1' })).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(service.request({ tenantId: 't1' })).rejects.toThrow(BadRequestException);
       expect(mockCreate).not.toHaveBeenCalled();
     });
 
@@ -91,9 +83,7 @@ describe('DataExportService', () => {
         download_url: 'https://signed.example/x',
         download_expires_at: new Date(Date.now() + 3600_000),
       });
-      expect(await service.getDownloadUrl('req-1', 't1')).toBe(
-        'https://signed.example/x',
-      );
+      expect(await service.getDownloadUrl('req-1', 't1')).toBe('https://signed.example/x');
     });
 
     it('rejects cross-tenant access', async () => {
@@ -104,9 +94,7 @@ describe('DataExportService', () => {
         download_url: 'x',
         download_expires_at: new Date(Date.now() + 1000),
       });
-      await expect(service.getDownloadUrl('req-1', 't2')).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(service.getDownloadUrl('req-1', 't2')).rejects.toThrow(ForbiddenException);
     });
 
     it('rejects when download URL has expired', async () => {
@@ -117,9 +105,7 @@ describe('DataExportService', () => {
         download_url: 'x',
         download_expires_at: new Date(Date.now() - 1000),
       });
-      await expect(service.getDownloadUrl('req-1', 't1')).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(service.getDownloadUrl('req-1', 't1')).rejects.toThrow(BadRequestException);
     });
 
     it('rejects when status is still queued', async () => {
@@ -128,16 +114,12 @@ describe('DataExportService', () => {
         tenant_id: 't1',
         status: 'queued',
       });
-      await expect(service.getDownloadUrl('req-1', 't1')).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(service.getDownloadUrl('req-1', 't1')).rejects.toThrow(BadRequestException);
     });
 
     it('throws NotFound for unknown request', async () => {
       mockFindUnique.mockResolvedValue(null);
-      await expect(service.getDownloadUrl('missing', 't1')).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(service.getDownloadUrl('missing', 't1')).rejects.toThrow(NotFoundException);
     });
   });
 

@@ -1,14 +1,4 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  Param,
-  Post,
-  Query,
-  Req,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -48,10 +38,7 @@ export class ImpersonationController {
 
   @Delete(':sessionId')
   @ApiOperation({ summary: 'End an impersonation session' })
-  async end(
-    @CurrentUser() user: any,
-    @Param('sessionId') sessionId: string,
-  ) {
+  async end(@CurrentUser() user: any, @Param('sessionId') sessionId: string) {
     await this.service.end(sessionId, user.id || user.user_id);
     return { success: true };
   }

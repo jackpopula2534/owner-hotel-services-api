@@ -1,8 +1,20 @@
-import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 
-export type ApiKeyScope = 'read:bookings' | 'write:bookings' | 'read:rooms' | 'write:rooms' | 'read:guests' | 'admin';
+export type ApiKeyScope =
+  | 'read:bookings'
+  | 'write:bookings'
+  | 'read:rooms'
+  | 'write:rooms'
+  | 'read:guests'
+  | 'admin';
 
 export interface CreateApiKeyInput {
   tenantId: string;
@@ -90,7 +102,7 @@ export class ApiKeysService {
     const k = await (this.prisma as any).api_keys.findUnique({ where: { id: keyId } });
     if (!k) throw new NotFoundException('API key not found');
     if (k.tenant_id !== tenantId) {
-      throw new ForbiddenException('Cannot revoke another tenant\'s key');
+      throw new ForbiddenException("Cannot revoke another tenant's key");
     }
     if (k.revoked_at) return; // idempotent
     await (this.prisma as any).api_keys.update({
@@ -117,10 +129,12 @@ export class ApiKeysService {
     if (row.expires_at && new Date(row.expires_at) < new Date()) return null;
 
     // Record last-used timestamp asynchronously (best-effort).
-    void (this.prisma as any).api_keys.update({
-      where: { id: row.id },
-      data: { last_used_at: new Date() },
-    }).catch(() => {});
+    void (this.prisma as any).api_keys
+      .update({
+        where: { id: row.id },
+        data: { last_used_at: new Date() },
+      })
+      .catch(() => {});
 
     return {
       keyId: row.id,

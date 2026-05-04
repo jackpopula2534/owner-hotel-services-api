@@ -72,7 +72,9 @@ export class AddonGuard implements CanActivate {
       // tenantId missing → the JWT is stale or was issued before onboarding completed.
       // Return 401 so the frontend's token-refresh interceptor kicks in and
       // prompts a re-login — NOT 403, which would show a misleading "no permission" toast.
-      this.logger.warn(`AddonGuard: tenantId missing in JWT for user — returning 401 to trigger re-login`);
+      this.logger.warn(
+        `AddonGuard: tenantId missing in JWT for user — returning 401 to trigger re-login`,
+      );
       throw new UnauthorizedException({
         code: 'TENANT_MISSING',
         message: 'Session expired or account setup incomplete. Please log in again.',

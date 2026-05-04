@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ProcurementStockService } from '../procurement-stock.service';
 import { PrismaService } from '@/prisma/prisma.service';
+import { withPrismaFallback } from '@/common/test';
 import { StockBalanceFilter } from '../dto/query-balance.dto';
 import { LotExpiryFilter } from '../dto/query-expiring.dto';
 
@@ -18,21 +19,23 @@ describe('ProcurementStockService', () => {
   const tenantId = 'tenant-001';
 
   // Helper — build a `WarehouseStock` row in the shape findMany returns.
-  const stock = (overrides: Partial<{
-    warehouseId: string;
-    itemId: string;
-    quantity: number;
-    avgCost: number;
-    totalValue: number;
-    sku: string;
-    name: string;
-    reorderPoint: number;
-    minStock: number;
-    maxStock: number | null;
-    isPerishable: boolean;
-    categoryId: string | null;
-    itemSuppliers: any[];
-  }> = {}) => ({
+  const stock = (
+    overrides: Partial<{
+      warehouseId: string;
+      itemId: string;
+      quantity: number;
+      avgCost: number;
+      totalValue: number;
+      sku: string;
+      name: string;
+      reorderPoint: number;
+      minStock: number;
+      maxStock: number | null;
+      isPerishable: boolean;
+      categoryId: string | null;
+      itemSuppliers: any[];
+    }> = {},
+  ) => ({
     warehouseId: overrides.warehouseId ?? 'wh-1',
     itemId: overrides.itemId ?? 'item-1',
     quantity: overrides.quantity ?? 100,
@@ -55,7 +58,7 @@ describe('ProcurementStockService', () => {
     },
   });
 
-  const mockPrisma = {
+  const mockPrisma = withPrismaFallback({
     warehouseStock: {
       findMany: jest.fn(),
       aggregate: jest.fn().mockResolvedValue({ _sum: { totalValue: 0 } }),
@@ -67,15 +70,12 @@ describe('ProcurementStockService', () => {
       findMany: jest.fn().mockResolvedValue([]),
       count: jest.fn().mockResolvedValue(0),
     },
-  };
+  });
 
   beforeEach(async () => {
     jest.clearAllMocks();
     const moduleRef: TestingModule = await Test.createTestingModule({
-      providers: [
-        ProcurementStockService,
-        { provide: PrismaService, useValue: mockPrisma },
-      ],
+      providers: [ProcurementStockService, { provide: PrismaService, useValue: mockPrisma }],
     }).compile();
     service = moduleRef.get(ProcurementStockService);
   });

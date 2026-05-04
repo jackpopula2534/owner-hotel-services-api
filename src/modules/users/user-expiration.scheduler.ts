@@ -73,7 +73,10 @@ export class UserExpirationScheduler {
 
     this.logger.warn(
       `Auto-expired ${count} user(s): ${candidates
-        .map((u) => `${u.email || u.id} (tenant: ${u.tenantId ?? '-'}, expiresAt: ${u.expiresAt?.toISOString()})`)
+        .map(
+          (u) =>
+            `${u.email || u.id} (tenant: ${u.tenantId ?? '-'}, expiresAt: ${u.expiresAt?.toISOString()})`,
+        )
         .join(', ')}`,
     );
 

@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-  BadRequestException,
-} from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@/prisma/prisma.service';
 import { QrCodeService } from '@/common/services/qr-code.service';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -85,11 +80,7 @@ export class QRService {
   }
 
   // ─── Generate PDF label sheet (A4 grid) ─────────────────────────────────────
-  async getItemLabelsPDF(
-    tenantId: string,
-    itemId: string,
-    count: number = 12,
-  ): Promise<Buffer> {
+  async getItemLabelsPDF(tenantId: string, itemId: string, count: number = 12): Promise<Buffer> {
     const item = await this.prisma.inventoryItem.findFirst({
       where: { id: itemId, tenantId, deletedAt: null },
     });
@@ -106,11 +97,7 @@ export class QRService {
     return this.generateLabelSheet(payload, item.name, item.sku, count);
   }
 
-  async getLotLabelsPDF(
-    tenantId: string,
-    lotId: string,
-    count: number = 1,
-  ): Promise<Buffer> {
+  async getLotLabelsPDF(tenantId: string, lotId: string, count: number = 1): Promise<Buffer> {
     const lot = await this.prisma.inventoryLot.findFirst({
       where: { id: lotId, tenantId },
       include: { item: true },
@@ -221,13 +208,19 @@ export class QRService {
         doc.image(qrBuffer, x, y, { width: qrSize, height: qrSize });
 
         // Text labels
-        doc.font('Helvetica-Bold').fontSize(8).text(name, x, y + qrSize + 4, {
-          width: cellWidth - 2 * padding,
-          ellipsis: true,
-        });
-        doc.font('Helvetica').fontSize(7).text(code, x, y + qrSize + 16, {
-          width: cellWidth - 2 * padding,
-        });
+        doc
+          .font('Helvetica-Bold')
+          .fontSize(8)
+          .text(name, x, y + qrSize + 4, {
+            width: cellWidth - 2 * padding,
+            ellipsis: true,
+          });
+        doc
+          .font('Helvetica')
+          .fontSize(7)
+          .text(code, x, y + qrSize + 16, {
+            width: cellWidth - 2 * padding,
+          });
 
         if (labelText) {
           doc.fontSize(6).text(labelText, x, y + qrSize + 28, {

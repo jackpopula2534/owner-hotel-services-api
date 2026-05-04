@@ -126,7 +126,16 @@ export class UsersService {
     const oldData = await this.findOne(id, tenantId);
 
     // ห้ามแก้ password / status / expiration ผ่าน endpoint นี้ (ใช้ endpoint เฉพาะ)
-    const { password, status, expiresAt, suspendedAt, suspendedBy, suspendedReason, deactivatedAt, ...safeData } = updateUserDto;
+    const {
+      password,
+      status,
+      expiresAt,
+      suspendedAt,
+      suspendedBy,
+      suspendedReason,
+      deactivatedAt,
+      ...safeData
+    } = updateUserDto;
 
     const result = await this.prisma.user.update({
       where: { id },
@@ -192,7 +201,12 @@ export class UsersService {
     return updated;
   }
 
-  async suspend(id: string, dto: SuspendUserDto, tenantId: string | undefined, caller: CallerContext) {
+  async suspend(
+    id: string,
+    dto: SuspendUserDto,
+    tenantId: string | undefined,
+    caller: CallerContext,
+  ) {
     return this.updateStatus(
       id,
       { status: UserStatus.SUSPENDED, reason: dto.reason },
@@ -228,7 +242,10 @@ export class UsersService {
     const updateData: Record<string, any> = { expiresAt: newExpiresAt };
     if (newExpiresAt && newExpiresAt.getTime() <= Date.now()) {
       updateData.status = UserStatus.EXPIRED;
-    } else if (oldUser.status === UserStatus.EXPIRED && (!newExpiresAt || newExpiresAt.getTime() > Date.now())) {
+    } else if (
+      oldUser.status === UserStatus.EXPIRED &&
+      (!newExpiresAt || newExpiresAt.getTime() > Date.now())
+    ) {
       // ขยายอายุของ user ที่หมดอายุไปแล้ว → กลับมา active
       updateData.status = UserStatus.ACTIVE;
     }

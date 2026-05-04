@@ -471,9 +471,7 @@ describe('CouponsService', () => {
   describe('update', () => {
     it('throws NotFound when coupon does not exist', async () => {
       mockCoupons.findUnique.mockResolvedValue(null);
-      await expect(
-        service.update('missing', { name: 'X' }),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.update('missing', { name: 'X' })).rejects.toThrow(NotFoundException);
     });
 
     it('writes only the provided fields and uppercases code', async () => {
@@ -539,9 +537,7 @@ describe('CouponsService', () => {
     it('translates Prisma P2002 into a friendly error', async () => {
       mockCoupons.findUnique.mockResolvedValue({ id: 'c1', metadata: null });
       mockCoupons.update.mockRejectedValue({ code: 'P2002' });
-      await expect(
-        service.update('c1', { code: 'DUPE' }),
-      ).rejects.toThrow(BadRequestException);
+      await expect(service.update('c1', { code: 'DUPE' })).rejects.toThrow(BadRequestException);
     });
 
     it('clears applicable_plan_ids when scope leaves specific_plans', async () => {

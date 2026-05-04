@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
 import { DemandForecastService } from '../demand-forecast.service';
 import { PrismaService } from '@/prisma/prisma.service';
+import { withPrismaFallback } from '@/common/test';
 
 describe('DemandForecastService', () => {
   let service: DemandForecastService;
@@ -10,7 +11,7 @@ describe('DemandForecastService', () => {
   const mockTenantId = 'tenant-123';
   const mockPropertyId = 'property-456';
 
-  const mockPrismaService = {
+  const mockPrismaService = withPrismaFallback({
     booking: {
       findMany: jest.fn(),
     },
@@ -20,7 +21,7 @@ describe('DemandForecastService', () => {
     roomType: {
       findMany: jest.fn(),
     },
-  };
+  });
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({

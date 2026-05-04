@@ -154,7 +154,10 @@ export class UpdateQCTemplateDto {
   @IsOptional()
   itemId?: string;
 
-  @ApiPropertyOptional({ description: 'Replacement checklist items (replaces all existing)', type: [CreateChecklistItemDto] })
+  @ApiPropertyOptional({
+    description: 'Replacement checklist items (replaces all existing)',
+    type: [CreateChecklistItemDto],
+  })
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })

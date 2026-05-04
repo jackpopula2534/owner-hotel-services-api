@@ -90,10 +90,7 @@ describe('PurchaseOrdersService — findTracking()', () => {
     jest.clearAllMocks();
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        PurchaseOrdersService,
-        { provide: PrismaService, useValue: mockPrismaService },
-      ],
+      providers: [PurchaseOrdersService, { provide: PrismaService, useValue: mockPrismaService }],
     }).compile();
 
     service = module.get<PurchaseOrdersService>(PurchaseOrdersService);
@@ -232,18 +229,14 @@ describe('PurchaseOrdersService — findTracking()', () => {
           // approvedRows: 1 PO @ 100k, 0% received → pendingValue 100k
           {
             totalAmount: 100_000,
-            items: [
-              { quantity: 100, receivedQty: 0 },
-            ],
+            items: [{ quantity: 100, receivedQty: 0 }],
           },
         ])
         .mockResolvedValueOnce([
           // partialRows: 1 PO @ 50k, 60% received → pendingValue 20k
           {
             totalAmount: 50_000,
-            items: [
-              { quantity: 100, receivedQty: 60 },
-            ],
+            items: [{ quantity: 100, receivedQty: 60 }],
           },
         ]);
       mockPrismaService.purchaseOrder.count

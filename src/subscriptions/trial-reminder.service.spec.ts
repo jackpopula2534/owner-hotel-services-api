@@ -78,9 +78,7 @@ describe('TrialReminderService', () => {
     expect(args.context.daysLeft).toBe(7);
     expect(args.context.hotelName).toBe('Sukjai Hotel');
     expect(prismaHistoryCreate).toHaveBeenCalledTimes(1);
-    expect(prismaHistoryCreate.mock.calls[0][0].data.eventType).toBe(
-      'trial_reminder_sent',
-    );
+    expect(prismaHistoryCreate.mock.calls[0][0].data.eventType).toBe('trial_reminder_sent');
   });
 
   it('skips when a reminder for the same bucket was already sent', async () => {

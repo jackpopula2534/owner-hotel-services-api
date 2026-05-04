@@ -106,7 +106,8 @@ export class QCService {
 
     // Validate scope fields when changing appliesTo or the associated ID.
     if (effectiveAppliesTo === 'CATEGORY') {
-      const effectiveCategoryId = dto.categoryId ?? (existing.appliesTo === 'CATEGORY' ? existing.categoryId : undefined);
+      const effectiveCategoryId =
+        dto.categoryId ?? (existing.appliesTo === 'CATEGORY' ? existing.categoryId : undefined);
       if (!effectiveCategoryId) {
         throw new BadRequestException('ต้องระบุ categoryId เมื่อ appliesTo = CATEGORY');
       }
@@ -120,7 +121,8 @@ export class QCService {
     }
 
     if (effectiveAppliesTo === 'ITEM') {
-      const effectiveItemId = dto.itemId ?? (existing.appliesTo === 'ITEM' ? existing.itemId : undefined);
+      const effectiveItemId =
+        dto.itemId ?? (existing.appliesTo === 'ITEM' ? existing.itemId : undefined);
       if (!effectiveItemId) {
         throw new BadRequestException('ต้องระบุ itemId เมื่อ appliesTo = ITEM');
       }
@@ -135,26 +137,27 @@ export class QCService {
 
     // Build scalar update payload — only include fields actually sent by client.
     const scalarUpdate: Record<string, unknown> = {};
-    if (dto.name !== undefined)     scalarUpdate.name     = dto.name;
+    if (dto.name !== undefined) scalarUpdate.name = dto.name;
     if (dto.isActive !== undefined) scalarUpdate.isActive = dto.isActive;
     if (dto.appliesTo !== undefined) {
-      scalarUpdate.appliesTo  = dto.appliesTo;
+      scalarUpdate.appliesTo = dto.appliesTo;
       // Nullify the opposite scope ID when switching scope type.
-      scalarUpdate.categoryId = dto.appliesTo === 'CATEGORY' ? (dto.categoryId ?? existing.categoryId) : null;
-      scalarUpdate.itemId     = dto.appliesTo === 'ITEM'     ? (dto.itemId     ?? existing.itemId)     : null;
+      scalarUpdate.categoryId =
+        dto.appliesTo === 'CATEGORY' ? (dto.categoryId ?? existing.categoryId) : null;
+      scalarUpdate.itemId = dto.appliesTo === 'ITEM' ? (dto.itemId ?? existing.itemId) : null;
     } else {
       // Scope type unchanged — allow updating individual IDs in place.
       if (dto.categoryId !== undefined) scalarUpdate.categoryId = dto.categoryId;
-      if (dto.itemId     !== undefined) scalarUpdate.itemId     = dto.itemId;
+      if (dto.itemId !== undefined) scalarUpdate.itemId = dto.itemId;
     }
 
     // If checklistItems were sent, replace the entire set inside a transaction.
     if (dto.checklistItems !== undefined) {
       const checklistData = dto.checklistItems.map((ci, idx) => ({
-        label:         ci.label,
-        type:          ci.type,
-        required:      ci.required ?? true,
-        orderIndex:    typeof ci.orderIndex === 'number' ? ci.orderIndex : idx,
+        label: ci.label,
+        type: ci.type,
+        required: ci.required ?? true,
+        orderIndex: typeof ci.orderIndex === 'number' ? ci.orderIndex : idx,
         passCondition: ci.passCondition ? (ci.passCondition as unknown as object) : undefined,
       }));
 

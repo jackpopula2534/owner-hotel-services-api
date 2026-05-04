@@ -10,10 +10,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
-import {
-  CreatePRItemDto,
-  PurchaseRequisitionPriority,
-} from './create-purchase-requisition.dto';
+import { CreatePRItemDto, PurchaseRequisitionPriority } from './create-purchase-requisition.dto';
 
 export class UpdatePurchaseRequisitionDto {
   @ApiProperty({

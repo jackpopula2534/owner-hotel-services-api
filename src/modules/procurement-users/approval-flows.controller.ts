@@ -12,13 +12,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import {
-  ApiBearerAuth,
-  ApiOperation,
-  ApiQuery,
-  ApiResponse,
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -54,7 +48,9 @@ export class ApprovalFlowsController {
 
   private assertAdmin(caller: AuthenticatedCaller): void {
     if (!ADMIN_ROLES.has(caller.role)) {
-      throw new ForbiddenException('Only tenant admins and procurement managers can manage approval flows');
+      throw new ForbiddenException(
+        'Only tenant admins and procurement managers can manage approval flows',
+      );
     }
   }
 
@@ -69,10 +65,7 @@ export class ApprovalFlowsController {
   @Throttle({ default: { limit: 20, ttl: 60 } })
   @ApiOperation({ summary: 'Create an approval flow template' })
   @ApiResponse({ status: 201, description: 'Flow created' })
-  async create(
-    @Body() dto: CreateApprovalFlowDto,
-    @CurrentUser() caller: AuthenticatedCaller,
-  ) {
+  async create(@Body() dto: CreateApprovalFlowDto, @CurrentUser() caller: AuthenticatedCaller) {
     this.assertAdmin(caller);
     return this.service.create(dto, this.assertTenant(caller), caller.userId);
   }
@@ -94,10 +87,7 @@ export class ApprovalFlowsController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Get approval flow detail' })
-  async findOne(
-    @Param('id') id: string,
-    @CurrentUser() caller: AuthenticatedCaller,
-  ) {
+  async findOne(@Param('id') id: string, @CurrentUser() caller: AuthenticatedCaller) {
     this.assertAdmin(caller);
     return this.service.findOne(id, this.assertTenant(caller));
   }
@@ -119,10 +109,7 @@ export class ApprovalFlowsController {
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete an approval flow' })
-  async remove(
-    @Param('id') id: string,
-    @CurrentUser() caller: AuthenticatedCaller,
-  ) {
+  async remove(@Param('id') id: string, @CurrentUser() caller: AuthenticatedCaller) {
     this.assertAdmin(caller);
     return this.service.remove(id, this.assertTenant(caller));
   }

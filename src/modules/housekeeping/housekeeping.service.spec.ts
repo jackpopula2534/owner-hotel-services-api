@@ -1,7 +1,9 @@
 import { BadRequestException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuditLogService } from '../../audit-log/audit-log.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { mockEventEmitter } from '../../common/test/mock-providers';
 import { HousekeepingService } from './housekeeping.service';
 
 describe('HousekeepingService', () => {
@@ -32,6 +34,7 @@ describe('HousekeepingService', () => {
         HousekeepingService,
         { provide: PrismaService, useValue: prismaMock },
         { provide: AuditLogService, useValue: auditLogServiceMock },
+        { provide: EventEmitter2, useValue: mockEventEmitter() },
       ],
     }).compile();
 

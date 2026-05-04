@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  NotFoundException,
-  BadRequestException,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
 import { CreatePurchaseRequisitionDto } from './dto/create-purchase-requisition.dto';
@@ -23,7 +18,9 @@ export class PurchaseRequisitionsService {
    * Resolve user UUIDs to full names (firstName + lastName).
    * Returns a Map<userId, fullName>.
    */
-  private async resolveUserNames(userIds: (string | null | undefined)[]): Promise<Map<string, string>> {
+  private async resolveUserNames(
+    userIds: (string | null | undefined)[],
+  ): Promise<Map<string, string>> {
     const validIds = userIds.filter((id): id is string => !!id);
     if (validIds.length === 0) return new Map();
 
@@ -276,12 +273,7 @@ export class PurchaseRequisitionsService {
     // Create in transaction: generate PR number, create PR and items
     const pr = await this.prisma.$transaction(async (tx) => {
       // Generate PR number
-      const prNumber = await this.generateDocNumber(
-        tenantId,
-        'PURCHASE_REQUISITION',
-        'PR',
-        tx,
-      );
+      const prNumber = await this.generateDocNumber(tenantId, 'PURCHASE_REQUISITION', 'PR', tx);
 
       // Create purchase requisition
       const newPr = await tx.purchaseRequisition.create({
@@ -316,17 +308,11 @@ export class PurchaseRequisitionsService {
       return newPr;
     });
 
-    this.logger.log(
-      `Purchase requisition created: ${pr.id} (${pr.prNumber}) by user ${userId}`,
-    );
+    this.logger.log(`Purchase requisition created: ${pr.id} (${pr.prNumber}) by user ${userId}`);
     return this.findOne(pr.id, tenantId);
   }
 
-  async update(
-    id: string,
-    dto: UpdatePurchaseRequisitionDto,
-    tenantId: string,
-  ): Promise<unknown> {
+  async update(id: string, dto: UpdatePurchaseRequisitionDto, tenantId: string): Promise<unknown> {
     const pr = await this.prisma.purchaseRequisition.findUnique({
       where: { id },
     });
@@ -384,9 +370,7 @@ export class PurchaseRequisitionsService {
         });
 
         if (existingSuppliers.length !== uniqueSupplierIds.length) {
-          throw new NotFoundException(
-            'One or more preferred suppliers not found',
-          );
+          throw new NotFoundException('One or more preferred suppliers not found');
         }
       }
     }
@@ -449,17 +433,11 @@ export class PurchaseRequisitionsService {
       },
     });
 
-    this.logger.log(
-      `Purchase requisition submitted for approval: ${id} (${updated.prNumber})`,
-    );
+    this.logger.log(`Purchase requisition submitted for approval: ${id} (${updated.prNumber})`);
     return this.findOne(updated.id, tenantId);
   }
 
-  async approve(
-    id: string,
-    userId: string,
-    tenantId: string,
-  ): Promise<unknown> {
+  async approve(id: string, userId: string, tenantId: string): Promise<unknown> {
     const pr = await this.prisma.purchaseRequisition.findUnique({
       where: { id },
     });
@@ -469,9 +447,7 @@ export class PurchaseRequisitionsService {
     }
 
     if (pr.status !== PurchaseRequisitionStatus.PENDING_APPROVAL) {
-      throw new BadRequestException(
-        'Only PENDING_APPROVAL purchase requisitions can be approved',
-      );
+      throw new BadRequestException('Only PENDING_APPROVAL purchase requisitions can be approved');
     }
 
     const updated = await this.prisma.purchaseRequisition.update({
@@ -484,17 +460,11 @@ export class PurchaseRequisitionsService {
       },
     });
 
-    this.logger.log(
-      `Purchase requisition approved: ${id} (${updated.prNumber}) by user ${userId}`,
-    );
+    this.logger.log(`Purchase requisition approved: ${id} (${updated.prNumber}) by user ${userId}`);
     return this.findOne(updated.id, tenantId);
   }
 
-  async requestQuotes(
-    id: string,
-    supplierIds: string[],
-    tenantId: string,
-  ): Promise<unknown> {
+  async requestQuotes(id: string, supplierIds: string[], tenantId: string): Promise<unknown> {
     const pr = await this.prisma.purchaseRequisition.findUnique({
       where: { id },
     });
@@ -504,9 +474,7 @@ export class PurchaseRequisitionsService {
     }
 
     if (pr.status !== PurchaseRequisitionStatus.APPROVED) {
-      throw new BadRequestException(
-        'Only APPROVED purchase requisitions can request quotes',
-      );
+      throw new BadRequestException('Only APPROVED purchase requisitions can request quotes');
     }
 
     if (!supplierIds || supplierIds.length === 0) {
@@ -555,12 +523,7 @@ export class PurchaseRequisitionsService {
     return this.findOne(updated.id, tenantId);
   }
 
-  async cancel(
-    id: string,
-    reason: string,
-    userId: string,
-    tenantId: string,
-  ): Promise<unknown> {
+  async cancel(id: string, reason: string, userId: string, tenantId: string): Promise<unknown> {
     const pr = await this.prisma.purchaseRequisition.findUnique({
       where: { id },
     });
@@ -617,15 +580,11 @@ export class PurchaseRequisitionsService {
     }
 
     if (pr.status !== PurchaseRequisitionStatus.PENDING_QUOTES) {
-      throw new BadRequestException(
-        'Only PENDING_QUOTES purchase requisitions can create POs',
-      );
+      throw new BadRequestException('Only PENDING_QUOTES purchase requisitions can create POs');
     }
 
     // Verify selected quote exists and belongs to this PR
-    const selectedQuote = pr.supplierQuotes.find(
-      (quote) => quote.id === selectedQuoteId,
-    );
+    const selectedQuote = pr.supplierQuotes.find((quote) => quote.id === selectedQuoteId);
 
     if (!selectedQuote) {
       throw new NotFoundException('Selected quote not found for this PR');
@@ -643,16 +602,11 @@ export class PurchaseRequisitionsService {
     // Create PO in transaction
     const result = await this.prisma.$transaction(async (tx) => {
       // Generate PO number
-      const poNumber = await this.generateDocNumber(
-        tenantId,
-        'PURCHASE_ORDER',
-        'PO',
-        tx,
-      );
+      const poNumber = await this.generateDocNumber(tenantId, 'PURCHASE_ORDER', 'PO', tx);
 
       // Calculate totals from quote items
       let subtotal = 0;
-      let taxAmount = 0;
+      const taxAmount = 0;
 
       selectedQuote.items.forEach((item) => {
         subtotal += Number(item.totalPrice) || 0;
@@ -681,9 +635,7 @@ export class PurchaseRequisitionsService {
 
       // Create PO items from PR items
       const poItems = pr.items.map((prItem, index) => {
-        const quoteItem = selectedQuote.items.find(
-          (qi) => qi.itemId === prItem.itemId,
-        );
+        const quoteItem = selectedQuote.items.find((qi) => qi.itemId === prItem.itemId);
 
         return {
           purchaseOrderId: po.id,
