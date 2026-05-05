@@ -116,11 +116,19 @@ export class AllExceptionsFilter implements ExceptionFilter {
       // hasn't been regenerated after a schema change — surface that hint so
       // the team doesn't have to dig into server logs.
       const prismaMsg = exception.message || '';
+      // Extract the first meaningful line from the Prisma error (it tends to be verbose)
+      const firstLine = prismaMsg.split('\n').find((l) => l.trim().length > 0) ?? prismaMsg;
       const looksLikeUnknownArg = /Unknown (arg|argument) `(?<field>[^`]+)`/.exec(prismaMsg);
+      const looksLikeInvalidValue = /Invalid value for argument `(?<field>[^`]+)`/.exec(prismaMsg);
+      const looksLikeMissing = /Argument `(?<field>[^`]+)` is missing/.exec(prismaMsg);
       if (looksLikeUnknownArg?.groups?.field) {
         message = `ข้อมูลไม่ถูกต้อง: ฟิลด์ "${looksLikeUnknownArg.groups.field}" ไม่อยู่ใน Prisma client — กรุณา run \`npm run prisma:migrate\` เพื่อ regenerate client หลัง pull schema ใหม่`;
+      } else if (looksLikeMissing?.groups?.field) {
+        message = `ข้อมูลไม่ครบ: ฟิลด์ "${looksLikeMissing.groups.field}" จำเป็นต้องระบุค่า (required field missing)`;
+      } else if (looksLikeInvalidValue?.groups?.field) {
+        message = `ค่าไม่ถูกต้อง: ฟิลด์ "${looksLikeInvalidValue.groups.field}" มีประเภทข้อมูลผิด — ${firstLine}`;
       } else {
-        message = 'ข้อมูลไม่ถูกต้องตามโครงสร้างฐานข้อมูล (Database validation error)';
+        message = `ข้อมูลไม่ถูกต้องตามโครงสร้างฐานข้อมูล — ${firstLine.substring(0, 120)}`;
       }
       this.logger.error(`Prisma validation: ${prismaMsg}`, undefined, requestId);
 

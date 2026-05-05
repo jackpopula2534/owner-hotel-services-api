@@ -197,6 +197,9 @@ export class StockCountsService {
       const scNumber = await this.generateSCNumber(tenantId, tx);
 
       // 3. Create StockCount record
+      if (!userId) {
+        throw new BadRequestException('User ID is missing from authentication token. Please log in again.');
+      }
       const stockCount = await tx.stockCount.create({
         data: {
           tenantId,
@@ -205,7 +208,7 @@ export class StockCountsService {
           countDate: new Date(dto.countDate),
           countType: dto.countType || CountTypeDto.FULL,
           status: 'PLANNED',
-          notes: dto.notes,
+          notes: dto.notes || null,
           createdBy: userId,
         },
       });

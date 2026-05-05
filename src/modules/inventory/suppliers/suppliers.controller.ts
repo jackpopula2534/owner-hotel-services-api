@@ -36,11 +36,12 @@ export class SuppliersController {
     @Query('search') search?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
-  ): Promise<{ success: boolean; data: unknown }> {
+  ) {
     const pageNum = Math.max(1, Number(page) || 1);
     const limitNum = Math.min(100, Math.max(1, Number(limit) || 20));
-    const data = await this.suppliersService.findAll(req.user.tenantId, search, pageNum, limitNum);
-    return { success: true, data };
+    // Return paginated result directly — TransformInterceptor จะ wrap { success, data, meta } ให้เอง
+    // ห้าม double-wrap ด้วย { success: true, data: paginatedResult } เพราะจะทำให้ meta ออกมาผิดชั้น
+    return this.suppliersService.findAll(req.user.tenantId, search, pageNum, limitNum);
   }
 
   @Get(':id')

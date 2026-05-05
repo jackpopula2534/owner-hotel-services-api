@@ -65,21 +65,19 @@ export class AdminHotelsService {
     // Get users count and owner info for each tenant
     const data: AdminHotelListItemDto[] = await Promise.all(
       tenants.map(async (tenant) => {
-        // Get users count for this tenant
-        const usersCount = await this.prismaService.user.count({
-          where: { tenantId: tenant.id },
-        });
-
-        // Get owner (tenant_admin) for this tenant
-        const owner = await this.prismaService.user.findFirst({
-          where: {
-            tenantId: tenant.id,
-            role: 'tenant_admin',
-          },
-        });
-
-        // Calculate revenue from paid invoices
-        const revenue = await this.calculateTenantRevenue(tenant.id);
+        // Count actual rooms from Room table (not the cached roomCount column)
+        const [roomsCount, usersCount, owner, revenue] = await Promise.all([
+          this.prismaService.room.count({
+            where: { tenantId: tenant.id },
+          }),
+          this.prismaService.user.count({
+            where: { tenantId: tenant.id },
+          }),
+          this.prismaService.user.findFirst({
+            where: { tenantId: tenant.id, role: 'tenant_admin' },
+          }),
+          this.calculateTenantRevenue(tenant.id),
+        ]);
 
         return {
           id: tenant.id,
@@ -88,7 +86,7 @@ export class AdminHotelsService {
             ? `${owner.firstName || ''} ${owner.lastName || ''}`.trim() || owner.email
             : 'N/A',
           plan: tenant.subscription?.plan?.name || 'No Plan',
-          rooms: tenant.roomCount,
+          rooms: roomsCount,
           users: usersCount,
           status: tenant.status,
           revenue,
@@ -142,21 +140,19 @@ export class AdminHotelsService {
       throw new NotFoundException(`Hotel with ID "${id}" not found`);
     }
 
-    // Get owner (tenant_admin) for this tenant
-    const owner = await this.prismaService.user.findFirst({
-      where: {
-        tenantId: tenant.id,
-        role: 'tenant_admin',
-      },
-    });
-
-    // Get users count for this tenant
-    const usersCount = await this.prismaService.user.count({
-      where: { tenantId: tenant.id },
-    });
-
-    // Calculate revenue from paid invoices
-    const revenue = await this.calculateTenantRevenue(tenant.id);
+    // Fetch owner, real room count, user count, and revenue in parallel
+    const [owner, roomsCount, usersCount, revenue] = await Promise.all([
+      this.prismaService.user.findFirst({
+        where: { tenantId: tenant.id, role: 'tenant_admin' },
+      }),
+      this.prismaService.room.count({
+        where: { tenantId: tenant.id },
+      }),
+      this.prismaService.user.count({
+        where: { tenantId: tenant.id },
+      }),
+      this.calculateTenantRevenue(tenant.id),
+    ]);
 
     return {
       id: tenant.id,
@@ -165,18 +161,17 @@ export class AdminHotelsService {
         ? `${owner.firstName || ''} ${owner.lastName || ''}`.trim() || owner.email
         : 'N/A',
       email: owner?.email || 'N/A',
-      createdAt: tenant.createdAt.toISOString().split('T')[0],
-      rooms: tenant.roomCount,
+      createdAt: this.toDateString(tenant.createdAt),
+      rooms: roomsCount,
       users: usersCount,
       plan: tenant.subscription?.plan?.name || 'No Plan',
       status: tenant.status,
       revenue,
       subscription: {
-        expiresAt: tenant.subscription?.endDate
-          ? tenant.subscription.endDate.toISOString().split('T')[0]
-          : tenant.trialEndsAt
-            ? tenant.trialEndsAt.toISOString().split('T')[0]
-            : 'N/A',
+        expiresAt:
+          this.toDateString(tenant.subscription?.endDate) ||
+          this.toDateString(tenant.trialEndsAt) ||
+          'N/A',
       },
     };
   }
@@ -253,6 +248,21 @@ export class AdminHotelsService {
       message: `Notification of type "${dto.type}" sent to ${owner.email}`,
       notificationType: dto.type,
     };
+  }
+
+  /**
+   * Helper: Safely convert Date | string | null | undefined → 'YYYY-MM-DD' | null
+   * Guards against TypeORM returning stored dates as strings instead of Date objects
+   */
+  private toDateString(value: Date | string | null | undefined): string | null {
+    if (!value) return null;
+    try {
+      const d = value instanceof Date ? value : new Date(value);
+      if (isNaN(d.getTime())) return null;
+      return d.toISOString().split('T')[0];
+    } catch {
+      return null;
+    }
   }
 
   /**

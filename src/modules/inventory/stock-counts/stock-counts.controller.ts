@@ -21,7 +21,8 @@ import { RequireAddon } from '@/common/decorators/require-addon.decorator';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
 
 interface JwtPayload {
-  sub: string;
+  id: string;
+  userId: string;
   tenantId: string;
   email: string;
   role: string;
@@ -150,7 +151,7 @@ export class StockCountsController {
     @CurrentUser() user: JwtPayload,
     @Body() createDto: CreateStockCountDto,
   ): Promise<{ success: boolean; data: StockCountDetail }> {
-    const data = await this.stockCountsService.create(createDto, user.sub, user.tenantId);
+    const data = await this.stockCountsService.create(createDto, user.id, user.tenantId);
     return { success: true, data };
   }
 
@@ -166,7 +167,7 @@ export class StockCountsController {
     @CurrentUser() user: JwtPayload,
     @Param('id') id: string,
   ): Promise<{ success: boolean; data: StockCountDetail }> {
-    const data = await this.stockCountsService.startCount(id, user.sub, user.tenantId);
+    const data = await this.stockCountsService.startCount(id, user.id, user.tenantId);
     return { success: true, data };
   }
 
@@ -193,7 +194,7 @@ export class StockCountsController {
       id,
       itemId,
       updateDto,
-      user.sub,
+      user.id,
       user.tenantId,
     );
     return { success: true, data };
@@ -214,7 +215,7 @@ export class StockCountsController {
     @CurrentUser() user: JwtPayload,
     @Param('id') id: string,
   ): Promise<{ success: boolean; data: StockCountDetail }> {
-    const data = await this.stockCountsService.completeCount(id, user.sub, user.tenantId);
+    const data = await this.stockCountsService.completeCount(id, user.id, user.tenantId);
     return { success: true, data };
   }
 
@@ -235,7 +236,7 @@ export class StockCountsController {
     @CurrentUser() user: JwtPayload,
     @Param('id') id: string,
   ): Promise<{ success: boolean; data: StockCountDetail }> {
-    const data = await this.stockCountsService.approveCount(id, user.sub, user.tenantId);
+    const data = await this.stockCountsService.approveCount(id, user.id, user.tenantId);
     return { success: true, data };
   }
 
