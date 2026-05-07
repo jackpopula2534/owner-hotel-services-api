@@ -86,4 +86,9 @@ export class CreateStockMovementDto {
   @IsOptional()
   @IsDateString()
   expiryDate?: string;
+
+  @ApiPropertyOptional({ description: 'Lot ID — links this movement to a specific inventory lot' })
+  @IsOptional()
+  @IsString()
+  lotId?: string;
 }

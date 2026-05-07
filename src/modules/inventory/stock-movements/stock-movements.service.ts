@@ -8,6 +8,7 @@ import {
 import { CreateStockMovementDto, StockMovementTypeDto } from './dto/create-stock-movement.dto';
 import { CreateTransferDto } from './dto/create-transfer.dto';
 import { QueryStockMovementDto } from './dto/query-stock-movement.dto';
+import { LotsService } from '../lots/lots.service';
 
 export interface PaginatedResponse<T> {
   data: T[];
@@ -69,6 +70,7 @@ export class StockMovementsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly lotsService: LotsService,
   ) {}
 
   /**
@@ -227,6 +229,80 @@ export class StockMovementsService {
       }
     }
 
+    // ── Auto-create Lot for GOODS_RECEIVE on perishable/lot-tracked items ───────
+    // When receiving stock via this modal (not via GR flow), we still need to
+    // create an InventoryLot so the item is traceable. We generate the lot
+    // number + expiry date here, then pass the lotId into the transaction below.
+    let autoCreatedLotId: string | undefined;
+    if (dto.type === StockMovementTypeDto.GOODS_RECEIVE) {
+      const needsLot =
+        (item as any).isPerishable || (item as any).requiresLotTracking;
+      if (needsLot && !dto.lotId) {
+        // Generate lot number via sequence (outside tx to keep the tx short)
+        const lotNumber = await this.lotsService.generateLotNumber(tenantId);
+
+        // Calculate expiry date: use provided value, or derive from shelf life
+        let expiryDate: Date | undefined;
+        if (dto.expiryDate) {
+          expiryDate = new Date(dto.expiryDate);
+        } else if ((item as any).defaultShelfLifeDays) {
+          expiryDate = new Date();
+          expiryDate.setDate(expiryDate.getDate() + (item as any).defaultShelfLifeDays);
+        }
+
+        const newLot = await this.prisma.inventoryLot.create({
+          data: {
+            tenantId,
+            itemId: dto.itemId,
+            warehouseId: dto.warehouseId,
+            lotNumber,
+            batchNumber: dto.batchNumber,
+            initialQty: dto.quantity,
+            remainingQty: dto.quantity,
+            unitCost: dto.unitCost,
+            expiryDate: expiryDate ?? null,
+            status: 'ACTIVE',
+          },
+        });
+        autoCreatedLotId = newLot.id;
+      }
+    }
+
+    // ── Resolve lotId for outbound movements ────────────────────────────────────
+    // Callers may pass an explicit lotId via dto.lotId.
+    // For outbound types without an explicit lot, auto-FEFO pick one.
+    const explicitLotId: string | undefined = dto.lotId || autoCreatedLotId || undefined;
+
+    const outboundLotTypes = [
+      StockMovementTypeDto.GOODS_ISSUE,
+      StockMovementTypeDto.ADJUSTMENT_OUT,
+      StockMovementTypeDto.WASTE,
+      StockMovementTypeDto.RETURN_SUPPLIER,
+    ];
+    const isOutboundLotType = outboundLotTypes.includes(dto.type);
+
+    // For ADJUSTMENT_IN: if a lotId is provided we will increment that lot's
+    // remainingQty; otherwise we leave lot tracking to the caller (GR flow).
+    const inboundLotTypes = [StockMovementTypeDto.ADJUSTMENT_IN];
+    const isInboundLotType = inboundLotTypes.includes(dto.type);
+
+    let resolvedLotId: string | undefined = explicitLotId;
+
+    if (isOutboundLotType && !resolvedLotId) {
+      // Auto FEFO pick — returns the first lot with enough remainingQty
+      const picks = await this.pickLotsForIssue(
+        tenantId,
+        dto.itemId,
+        dto.warehouseId,
+        dto.quantity,
+      );
+      // Single-lot path: resolve here and proceed in one transaction.
+      // Multi-lot path is handled by createWithFEFO; here we take the first pick.
+      if (picks.length > 0) {
+        resolvedLotId = picks[0].lotId;
+      }
+    }
+
     // Execute transaction for atomicity
     const result = await this.prisma.$transaction(async (tx) => {
       // Create the stock movement record
@@ -247,12 +323,51 @@ export class StockMovementsService {
           batchNumber: dto.batchNumber,
           expiryDate: dto.expiryDate ? new Date(dto.expiryDate) : null,
           createdBy: userId,
+          // Link to lot when available
+          ...(resolvedLotId ? { lotId: resolvedLotId } : {}),
         },
         include: {
           warehouse: { select: { id: true, name: true } },
           item: { select: { id: true, name: true, sku: true } },
         },
       });
+
+      // ── Sync InventoryLot.remainingQty ──────────────────────────────────────
+      if (resolvedLotId) {
+        if (isOutboundLotType) {
+          // Deduct from lot
+          const lot = await tx.inventoryLot.findUnique({ where: { id: resolvedLotId } });
+          if (!lot) {
+            throw new BadRequestException(`Lot ${resolvedLotId} not found`);
+          }
+          if (lot.remainingQty < dto.quantity) {
+            throw new BadRequestException(
+              `Lot ${lot.lotNumber} มีสต็อกเหลือ ${lot.remainingQty} หน่วย แต่ต้องการ ${dto.quantity} หน่วย`,
+            );
+          }
+          const newRemaining = lot.remainingQty - dto.quantity;
+          await tx.inventoryLot.update({
+            where: { id: resolvedLotId },
+            data: {
+              remainingQty: newRemaining,
+              // Mark lot as DEPLETED when fully consumed
+              status: newRemaining === 0 ? 'EXHAUSTED' : lot.status,
+              updatedAt: new Date(),
+            },
+          });
+        } else if (isInboundLotType) {
+          // Increment lot remainingQty for ADJUSTMENT_IN
+          await tx.inventoryLot.update({
+            where: { id: resolvedLotId },
+            data: {
+              remainingQty: { increment: dto.quantity },
+              // Re-activate lot if it was depleted
+              status: 'ACTIVE',
+              updatedAt: new Date(),
+            },
+          });
+        }
+      }
 
       // Update warehouse stock balance
       await this.updateWarehouseStock(
@@ -529,32 +644,36 @@ export class StockMovementsService {
       throw new BadRequestException(`Unknown movement type: ${movementType}`);
     }
 
-    // Get or create warehouse stock
-    let warehouseStock = await tx.warehouseStock.findFirst({
-      where: {
-        warehouseId,
-        itemId,
-      },
+    // Fetch existing stock record (warehouseId + itemId is the unique key).
+    // NOTE: WarehouseStock has no tenantId column — do NOT include it here.
+    const warehouseStock = await tx.warehouseStock.findFirst({
+      where: { warehouseId, itemId },
     });
 
     if (!warehouseStock) {
-      // Create new warehouse stock entry
+      // No stock record yet — only inbound movements are allowed to bootstrap one.
       if (isOutbound) {
         throw new BadRequestException(
-          `Cannot issue items: no stock record for item ${itemId} in warehouse ${warehouseId}`,
+          `ไม่มีสต็อกสินค้าในคลังนี้ ไม่สามารถดำเนินการได้ (item: ${itemId}, warehouse: ${warehouseId})`,
         );
       }
 
-      warehouseStock = await tx.warehouseStock.create({
-        data: {
+      // Bootstrap a new WarehouseStock row for this item/warehouse pair.
+      // Use upsert so that concurrent requests cannot race into a duplicate-key error.
+      await tx.warehouseStock.upsert({
+        where: { warehouseId_itemId: { warehouseId, itemId } },
+        create: {
           id: this.generateUUID(),
           warehouseId,
           itemId,
           quantity,
           avgCost: unitCost,
           totalValue: quantity * unitCost,
-          tenantId,
-          createdAt: new Date(),
+        },
+        update: {
+          // If a concurrent request already created the row, add to it instead.
+          quantity: { increment: quantity },
+          totalValue: { increment: quantity * unitCost },
           updatedAt: new Date(),
         },
       });
@@ -567,34 +686,34 @@ export class StockMovementsService {
     let newTotalValue: number;
 
     if (isInbound) {
-      // Inbound movement: increase quantity and recalculate average cost
-      const oldQuantity = warehouseStock.quantity;
-      const oldAvgCost = warehouseStock.avgCost || 0;
+      // Inbound: increase quantity and recalculate weighted average cost.
+      const oldQuantity = Number(warehouseStock.quantity);
+      const oldAvgCost = Number(warehouseStock.avgCost) || 0;
 
       newQuantity = oldQuantity + quantity;
 
-      // Weighted average cost formula:
-      // newAvgCost = ((oldQty * oldAvgCost) + (newQty * unitCost)) / (oldQty + newQty)
-      newAvgCost = (oldQuantity * oldAvgCost + quantity * unitCost) / newQuantity;
+      // Weighted average cost: ((oldQty * oldAvgCost) + (newQty * unitCost)) / totalQty
+      newAvgCost = newQuantity > 0
+        ? (oldQuantity * oldAvgCost + quantity * unitCost) / newQuantity
+        : unitCost;
 
       newTotalValue = newQuantity * newAvgCost;
     } else {
-      // Outbound movement: decrease quantity, validate sufficient stock
-      if (warehouseStock.quantity < quantity) {
+      // Outbound: validate sufficient stock then deduct.
+      const currentQty = Number(warehouseStock.quantity);
+      if (currentQty < quantity) {
         throw new BadRequestException(
-          `Insufficient stock: warehouse has ${warehouseStock.quantity} units but trying to issue ${quantity} units`,
+          `สต็อกไม่เพียงพอ: คลังมี ${currentQty} หน่วย แต่ต้องการเบิก ${quantity} หน่วย`,
         );
       }
 
-      newQuantity = warehouseStock.quantity - quantity;
-      const avgCost = warehouseStock.avgCost || 0;
-      newTotalValue = newQuantity * avgCost;
-
-      // Average cost remains the same for outbound movements
-      newAvgCost = warehouseStock.avgCost;
+      newQuantity = currentQty - quantity;
+      // Average cost is unchanged on outbound movements.
+      newAvgCost = Number(warehouseStock.avgCost) || 0;
+      newTotalValue = newQuantity * newAvgCost;
     }
 
-    // Update warehouse stock
+    // Persist the updated stock balance.
     await tx.warehouseStock.update({
       where: { id: warehouseStock.id },
       data: {

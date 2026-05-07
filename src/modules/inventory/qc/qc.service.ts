@@ -391,11 +391,113 @@ export class QCService {
       },
     });
     if (!record) throw new NotFoundException(`ไม่พบ QC Record ID: ${id}`);
+
+    // Resolve inspector name from user table so the UI can display a
+    // human-readable name instead of a raw UUID.
+    let inspectedByName: string | null = null;
+    if (record.inspectedBy) {
+      const inspector = await this.prisma.user.findUnique({
+        where: { id: record.inspectedBy },
+        select: { firstName: true, lastName: true, email: true },
+      });
+      if (inspector) {
+        inspectedByName =
+          [inspector.firstName, inspector.lastName].filter(Boolean).join(' ') ||
+          inspector.email ||
+          null;
+      }
+    }
+
+    // Fetch GR + PO snapshot separately to avoid mixing Prisma include/select
+    // and keep TypeScript happy. Only fetched when a GR is linked.
+    let grSnapshot: {
+      grNumber: string;
+      receiveDate: Date | null;
+      purchaseOrderId: string | null;
+      poNumber: string | null;
+      poOrderDate: Date | null;
+      supplier: { id: string; name: string; code: string | null } | null;
+      // GR items = สินค้าที่รับเข้าจริงในรอบ GR นี้ (ยอด receivedQty ไม่ใช่ยอดสั่งซื้อตาม PO)
+      grItems: Array<{
+        id: string;
+        itemId: string | null;
+        itemName: string | null;
+        sku: string | null;
+        receivedQty: number;
+        orderedQty: number | null;
+        rejectedQty: number;
+      }>;
+    } | null = null;
+
+    if (record.goodsReceiveId) {
+      const gr = await this.prisma.goodsReceive.findUnique({
+        where: { id: record.goodsReceiveId },
+        select: {
+          grNumber: true,
+          receiveDate: true,
+          purchaseOrderId: true,
+          // GR items — รายการที่รับเข้าจริงในใบ GR นี้ (ใช้ receivedQty)
+          items: {
+            select: {
+              id: true,
+              receivedQty: true,
+              orderedQty: true,
+              rejectedQty: true,
+              item: { select: { id: true, name: true, sku: true } },
+            },
+            orderBy: { createdAt: 'asc' },
+          },
+          purchaseOrder: {
+            select: {
+              id: true,
+              poNumber: true,
+              orderDate: true,
+              supplier: { select: { id: true, name: true, code: true } },
+            },
+          },
+        },
+      });
+
+      if (gr) {
+        const po = gr.purchaseOrder;
+        grSnapshot = {
+          grNumber: gr.grNumber,
+          receiveDate: gr.receiveDate ?? null,
+          purchaseOrderId: po?.id ?? null,
+          poNumber: po?.poNumber ?? null,
+          poOrderDate: po?.orderDate ?? null,
+          supplier: po?.supplier
+            ? { id: po.supplier.id, name: po.supplier.name, code: po.supplier.code }
+            : null,
+          grItems: gr.items.map((itm) => ({
+            id: itm.id,
+            itemId: itm.item?.id ?? null,
+            itemName: itm.item?.name ?? null,
+            sku: itm.item?.sku ?? null,
+            receivedQty: itm.receivedQty,
+            orderedQty: itm.orderedQty ?? null,
+            rejectedQty: itm.rejectedQty,
+          })),
+        };
+      }
+    }
+
     // Surface the GR status as a flat field so the frontend can decide
     // whether to show Accept/Reject buttons or an "already accepted" badge.
     return {
       ...record,
       goodsReceiveStatus: record.goodsReceive?.status ?? null,
+      // Inspector display name
+      inspectedByName,
+      // GR / PO snapshot fields (null when no GR linked)
+      goodsReceiveNumber: grSnapshot?.grNumber ?? null,
+      goodsReceiveDate: grSnapshot?.receiveDate ?? null,
+      purchaseOrderId: grSnapshot?.purchaseOrderId ?? null,
+      purchaseOrderNumber: grSnapshot?.poNumber ?? null,
+      purchaseOrderDate: grSnapshot?.poOrderDate ?? null,
+      supplier: grSnapshot?.supplier ?? null,
+      grItems: grSnapshot?.grItems ?? [],
+      grItemCount: grSnapshot?.grItems.length ?? 0,
     };
   }
 

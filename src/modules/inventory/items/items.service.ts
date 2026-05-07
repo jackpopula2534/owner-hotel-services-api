@@ -209,6 +209,7 @@ export class ItemsService {
           imageUrl: true,
           isPerishable: true,
           defaultShelfLifeDays: true,
+          requiresLotTracking: true,
           reorderPoint: true,
           category: { select: { id: true, name: true } },
         },

@@ -30,11 +30,11 @@ export class LotsService {
 
     const seq = await db.documentSequence.upsert({
       where: { tenantId_docType_yearMonth: { tenantId, docType: 'LOT', yearMonth } },
-      update: { currentNumber: { increment: 1 } },
-      create: { tenantId, docType: 'LOT', yearMonth, currentNumber: 1 },
+      update: { lastNumber: { increment: 1 } },
+      create: { tenantId, docType: 'LOT', prefix: 'LOT', yearMonth, lastNumber: 1 },
     });
 
-    return `LOT-${yearMonth}-${String(seq.currentNumber).padStart(4, '0')}`;
+    return `LOT-${yearMonth}-${String(seq.lastNumber).padStart(4, '0')}`;
   }
 
   // ─── Create lot ──────────────────────────────────────────────────────────────
