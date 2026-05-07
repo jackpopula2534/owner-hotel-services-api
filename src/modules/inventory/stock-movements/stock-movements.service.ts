@@ -9,7 +9,7 @@ import { CreateStockMovementDto, StockMovementTypeDto } from './dto/create-stock
 import { CreateTransferDto } from './dto/create-transfer.dto';
 import { QueryStockMovementDto } from './dto/query-stock-movement.dto';
 
-interface PaginatedResponse<T> {
+export interface PaginatedResponse<T> {
   data: T[];
   meta: {
     page: number;

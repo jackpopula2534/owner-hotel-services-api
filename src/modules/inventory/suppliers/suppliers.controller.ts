@@ -13,7 +13,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
-import { SuppliersService } from './suppliers.service';
+import { SuppliersService, PaginatedResponse } from './suppliers.service';
 import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
@@ -36,7 +36,7 @@ export class SuppliersController {
     @Query('search') search?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
-  ) {
+  ): Promise<PaginatedResponse<any>> {
     const pageNum = Math.max(1, Number(page) || 1);
     const limitNum = Math.min(100, Math.max(1, Number(limit) || 20));
     // Return paginated result directly — TransformInterceptor จะ wrap { success, data, meta } ให้เอง

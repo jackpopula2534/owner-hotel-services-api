@@ -31,7 +31,7 @@ function deserializeSupplier<T extends { tags?: string | null }>(
   return { ...supplier, tags };
 }
 
-interface PaginatedResponse<T> {
+export interface PaginatedResponse<T> {
   data: T[];
   meta: {
     page: number;
