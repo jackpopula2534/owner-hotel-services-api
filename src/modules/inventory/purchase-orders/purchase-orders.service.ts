@@ -5,6 +5,7 @@ import {
   ConflictException,
   Logger,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
 import {
@@ -17,6 +18,10 @@ import {
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { QueryPurchaseOrderDto, PurchaseOrderStatus } from './dto/query-purchase-order.dto';
+import {
+  INVENTORY_EVENTS,
+  PurchaseOrderApprovedEvent,
+} from '../events/inventory.events';
 import {
   QueryPurchaseOrderTrackingDto,
   PurchaseOrderTrackingStatus,
@@ -196,7 +201,10 @@ type PurchaseOrderItemWithDiscountType = Prisma.PurchaseOrderItemGetPayload<
 export class PurchaseOrdersService {
   private readonly logger = new Logger(PurchaseOrdersService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly eventEmitter: EventEmitter2,
+  ) {}
 
   /**
    * Resolve user UUIDs to full names (firstName + lastName).
@@ -258,6 +266,8 @@ export class PurchaseOrdersService {
       status: string;
       supplierId: string;
       supplierName: string;
+      /** Nested supplier object — same data as supplierName, kept for frontend compat */
+      supplier: { id: string; name: string };
       propertyId: string;
       warehouseId: string;
       expectedDate: Date | null;
@@ -298,7 +308,7 @@ export class PurchaseOrdersService {
           status: true,
           supplierId: true,
           supplier: {
-            select: { name: true },
+            select: { id: true, name: true },
           },
           propertyId: true,
           warehouseId: true,
@@ -321,6 +331,12 @@ export class PurchaseOrdersService {
         status: po.status,
         supplierId: po.supplierId,
         supplierName: po.supplier?.name || 'Unknown',
+        // Include nested supplier object so frontend components that rely on
+        // `po.supplier.name` (e.g. CreateGoodsReceiveModal dropdown) work correctly.
+        supplier: {
+          id: po.supplierId,
+          name: po.supplier?.name || 'Unknown',
+        },
         propertyId: po.propertyId,
         warehouseId: po.warehouseId,
         expectedDate: po.expectedDate,
@@ -371,16 +387,27 @@ export class PurchaseOrdersService {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
+    // When `overdue` is requested we narrow the status set to only the open
+    // statuses that can actually be overdue (APPROVED / PARTIALLY_RECEIVED) and
+    // add the expectedDate < today constraint.  We must NOT spread these as
+    // top-level keys because a second `status` key would silently override the
+    // first one in a JS object literal — instead we build them into a single
+    // coherent clause from the start.
+    const overdueStatuses: PurchaseOrderStatus[] = [
+      PurchaseOrderStatus.APPROVED,
+      PurchaseOrderStatus.PARTIALLY_RECEIVED,
+    ];
+    const resolvedStatusFilter: PurchaseOrderStatus[] = query.overdue
+      ? overdueStatuses
+      : statusFilter;
+
     const where: Prisma.PurchaseOrderWhereInput = {
       tenantId,
-      status: { in: statusFilter },
+      status: { in: resolvedStatusFilter },
       ...(query.supplierId && { supplierId: query.supplierId }),
       ...(query.warehouseId && { warehouseId: query.warehouseId }),
       ...(query.search && { poNumber: { contains: query.search } }),
-      ...(query.overdue && {
-        expectedDate: { lt: today },
-        status: { in: [PurchaseOrderStatus.APPROVED, PurchaseOrderStatus.PARTIALLY_RECEIVED] },
-      }),
+      ...(query.overdue && { expectedDate: { lt: today } }),
     };
 
     const [rows, total] = await Promise.all([
@@ -1483,6 +1510,19 @@ export class PurchaseOrdersService {
     });
 
     this.logger.log(`Purchase order approved: ${id} (${updated.poNumber}) by user ${userId}`);
+
+    // Emit event so the procurement WS gateway can push a `po.approved` message
+    // to the tenant's procurement room — the tracking page listens for this and
+    // refreshes its KPI cards immediately without a full manual reload.
+    const approvedEvent: PurchaseOrderApprovedEvent = {
+      purchaseOrderId: updated.id,
+      poNumber: updated.poNumber,
+      tenantId: updated.tenantId,
+      approvedBy: userId,
+      approvedAt: updated.approvedAt ?? new Date(),
+    };
+    this.eventEmitter.emit(INVENTORY_EVENTS.PO_APPROVED, approvedEvent);
+
     return this.findOne(updated.id, tenantId);
   }
 

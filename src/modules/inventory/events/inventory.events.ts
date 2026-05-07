@@ -12,6 +12,8 @@ export const INVENTORY_EVENTS = {
   GR_COMPLETED: 'gr.completed',
   /** Emitted by PurchaseOrdersService when a PO transitions to PARTIAL/FULL/CLOSED. */
   PO_RECEIVED: 'po.received',
+  /** Emitted by PurchaseOrdersService when a PO is approved (PENDING_APPROVAL → APPROVED). */
+  PO_APPROVED: 'po.approved',
 } as const;
 
 // Event payloads
@@ -72,6 +74,18 @@ export interface GoodsReceiveCompletedEvent {
     expiryDate: string | null;
   }>;
   receivedBy: string;
+}
+
+/**
+ * Emitted when a PO is approved (PENDING_APPROVAL → APPROVED).
+ * Consumers can use this to refresh the tracking page or push WS notifications.
+ */
+export interface PurchaseOrderApprovedEvent {
+  purchaseOrderId: string;
+  poNumber: string;
+  tenantId: string;
+  approvedBy: string;
+  approvedAt: Date;
 }
 
 /**

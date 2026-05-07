@@ -11,6 +11,7 @@ import { Server, Socket } from 'socket.io';
 import {
   INVENTORY_EVENTS,
   GoodsReceiveCompletedEvent,
+  PurchaseOrderApprovedEvent,
   PurchaseOrderReceivedEvent,
 } from '../events/inventory.events';
 
@@ -25,6 +26,7 @@ import {
  *
  * Outbound events on the WS layer:
  *   `gr.completed` — payload = GoodsReceiveCompletedEvent
+ *   `po.approved`  — payload = PurchaseOrderApprovedEvent
  *   `po.received`  — payload = PurchaseOrderReceivedEvent
  *
  * Client must `emit('procurement.subscribe', { tenantId })` after connect to
@@ -87,6 +89,14 @@ export class ProcurementEventsGateway implements OnGatewayConnection, OnGatewayD
     this.logger.log(
       `→ ${room} gr.completed ${event.grNumber} (po=${event.purchaseOrderId ?? 'walk-in'})`,
     );
+  }
+
+  @OnEvent(INVENTORY_EVENTS.PO_APPROVED, { async: true })
+  handlePoApproved(event: PurchaseOrderApprovedEvent): void {
+    if (!this.server) return;
+    const room = `procurement:${event.tenantId}`;
+    this.server.to(room).emit('po.approved', event);
+    this.logger.log(`→ ${room} po.approved ${event.poNumber} by ${event.approvedBy}`);
   }
 
   @OnEvent(INVENTORY_EVENTS.PO_RECEIVED, { async: true })
