@@ -71,6 +71,8 @@ import { StaffModule } from './modules/staff/staff.module';
 import { MaintenanceModule } from './modules/maintenance/maintenance.module';
 import { AddonModule } from './modules/addons/addon.module';
 import { BankAccountsModule } from './modules/bank-accounts/bank-accounts.module';
+import { PaymentSettingsModule } from './modules/payment-settings/payment-settings.module';
+import { PaymentAccountsModule } from './modules/payment-accounts/payment-accounts.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { ProcurementUsersModule } from './modules/procurement-users/procurement-users.module';
 import { WarehouseUsersModule } from './modules/warehouse-users/warehouse-users.module';
@@ -157,6 +159,8 @@ import { DocumentSettingsModule } from './modules/document-settings/document-set
     MaintenanceModule,
     AddonModule,
     BankAccountsModule,
+    PaymentSettingsModule,
+    PaymentAccountsModule,
     InventoryModule,
     ProcurementUsersModule,
     WarehouseUsersModule,

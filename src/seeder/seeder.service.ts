@@ -26,6 +26,11 @@ import {
 } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { v4 as uuidv4 } from 'uuid';
+import {
+  buildBangkokDateTime,
+  DEFAULT_CHECK_IN_TIME,
+  DEFAULT_CHECK_OUT_TIME,
+} from '../common/availability/availability.util';
 
 @Injectable()
 export class SeederService {
@@ -56,6 +61,7 @@ export class SeederService {
       await this.seedFeatures();
       await this.seedAddOns();
       await this.seedPlanFeatures();
+      await this.seedPlanAddons();
       await this.seedAdmins();
       await this.seedUsers();
       await this.seedAdminPanelTestData();
@@ -230,8 +236,17 @@ export class SeederService {
    * the latest definitions (renaming a feature, retagging a category, etc.).
    */
   private async seedFeatures(): Promise<void> {
-    this.logger.log('⚙️ Seeding Features (master catalog)...');
+    this.logger.log('⚙️ Seeding Features (master catalog — toggle/limit only)...');
 
+    /**
+     * Features = ความสามารถพื้นฐานของระบบ (system capabilities).
+     * เก็บเฉพาะ type = TOGGLE (เปิด/ปิด) และ LIMIT (เพิ่ม cap) เท่านั้น
+     * type = MODULE ย้ายไปเก็บใน `add_ons` table (ดู seedAddOns) เพื่อไม่ให้
+     * ข้อมูลซ้ำกับ Add-on catalog
+     *
+     * Code style: lower_snake_case
+     * Categories: CORE, PMS, REPORTING, ADVANCED (4 หมวด — ไม่ทับ Add-ons)
+     */
     const features = [
       // ─── CORE ─────────────────────────────────────────────
       {
@@ -248,12 +263,23 @@ export class SeederService {
       {
         code: 'extra_user',
         name: 'Extra User',
-        description: 'เพิ่มจำนวน user ที่ใช้งานได้',
+        description: 'เพิ่มจำนวน user ที่ใช้งานได้เกิน cap ของแผน',
         type: FeatureType.LIMIT,
         category: 'CORE',
         icon: 'Users',
         displayOrder: 20,
         priceMonthly: 200,
+        isActive: true,
+      },
+      {
+        code: 'audit_log',
+        name: 'Audit Log',
+        description: 'บันทึกประวัติการแก้ไขข้อมูลเพื่อ compliance และ traceability',
+        type: FeatureType.TOGGLE,
+        category: 'CORE',
+        icon: 'FileText',
+        displayOrder: 30,
+        priceMonthly: 290,
         isActive: true,
       },
 
@@ -269,55 +295,15 @@ export class SeederService {
         priceMonthly: 500,
         isActive: true,
       },
-
-      // ─── RESTAURANT ───────────────────────────────────────
       {
-        code: 'RESTAURANT_MODULE',
-        name: 'Restaurant & F&B Module',
-        description: 'ระบบจัดการร้านอาหาร F&B: เมนู หมวดหมู่ จองโต๊ะ และเชื่อม Folio แขก',
-        type: FeatureType.MODULE,
-        category: 'RESTAURANT',
-        icon: 'UtensilsCrossed',
-        displayOrder: 10,
-        priceMonthly: 990,
-        isActive: true,
-      },
-      {
-        code: 'POS_MODULE',
-        name: 'POS System',
-        description: 'ระบบ POS ครบวงจร: รับออเดอร์ ส่งครัว (KDS) ชำระเงิน และจัดการ User POS',
-        type: FeatureType.MODULE,
-        category: 'RESTAURANT',
-        icon: 'ShoppingCart',
+        code: 'multi_property',
+        name: 'Multi-Property Management',
+        description: 'จัดการโรงแรมหลายสาขาภายใต้บัญชีเดียว สลับ property ได้รวดเร็ว',
+        type: FeatureType.LIMIT,
+        category: 'PMS',
+        icon: 'Layers',
         displayOrder: 20,
-        priceMonthly: 790,
-        isActive: true,
-      },
-
-      // ─── HR ───────────────────────────────────────────────
-      {
-        code: 'HR_MODULE',
-        name: 'HR Module',
-        description:
-          'ระบบ HR ครบวงจร: จัดการพนักงาน เงินเดือน การลา และเชื่อมข้อมูลกับทีมแม่บ้าน/ช่าง',
-        type: FeatureType.MODULE,
-        category: 'HR',
-        icon: 'Briefcase',
-        displayOrder: 10,
-        priceMonthly: 1200,
-        isActive: true,
-      },
-
-      // ─── HOUSEKEEPING ─────────────────────────────────────
-      {
-        code: 'housekeeping',
-        name: 'Housekeeping Management',
-        description: 'ระบบจัดการงานทำความสะอาดและสถานะห้องพัก real-time',
-        type: FeatureType.TOGGLE,
-        category: 'HOUSEKEEPING',
-        icon: 'Sparkles',
-        displayOrder: 10,
-        priceMonthly: 500,
+        priceMonthly: 0,
         isActive: true,
       },
 
@@ -326,7 +312,7 @@ export class SeederService {
         code: 'advanced_report',
         name: 'Advanced Report',
         description: 'รายงานขั้นสูงและ analytics สำหรับผู้บริหาร',
-        type: FeatureType.MODULE,
+        type: FeatureType.TOGGLE,
         category: 'REPORTING',
         icon: 'BarChart3',
         displayOrder: 10,
@@ -334,108 +320,38 @@ export class SeederService {
         isActive: true,
       },
       {
-        code: 'extra_analytics',
-        name: 'Extra Analytics',
-        description: 'Dashboard และ Analytics เชิงลึก พร้อม custom metrics',
-        type: FeatureType.MODULE,
+        code: 'daily_manager_report',
+        name: 'Daily Manager Report',
+        description: 'รายงานสรุปประจำวันส่งอัตโนมัติทุกเช้าให้ GM พร้อม KPI ครบ',
+        type: FeatureType.TOGGLE,
         category: 'REPORTING',
-        icon: 'TrendingUp',
+        icon: 'BarChart3',
         displayOrder: 20,
-        priceMonthly: 990,
-        isActive: true,
-      },
-
-      // ─── INTEGRATION ──────────────────────────────────────
-      {
-        code: 'ota_booking',
-        name: 'OTA Booking Integration',
-        description: 'เชื่อมต่อกับ Booking.com, Agoda, และ OTA อื่นๆ',
-        type: FeatureType.MODULE,
-        category: 'INTEGRATION',
-        icon: 'Globe',
-        displayOrder: 10,
-        priceMonthly: 990,
-        isActive: true,
-      },
-      {
-        code: 'CHANNEL_MANAGER',
-        name: 'Channel Manager',
-        description: 'เชื่อมต่อกับ OTA อัตโนมัติ sync ราคาและห้องพักแบบ real-time',
-        type: FeatureType.MODULE,
-        category: 'INTEGRATION',
-        icon: 'Network',
-        displayOrder: 20,
-        priceMonthly: 1490,
-        isActive: true,
-      },
-      {
-        code: 'api_access',
-        name: 'API Access',
-        description: 'เข้าถึง API สำหรับ integration กับระบบอื่น',
-        type: FeatureType.MODULE,
-        category: 'INTEGRATION',
-        icon: 'Plug',
-        displayOrder: 30,
-        priceMonthly: 1500,
+        priceMonthly: 290,
         isActive: true,
       },
 
       // ─── ADVANCED ─────────────────────────────────────────
       {
-        code: 'automation',
-        name: 'Automation System',
-        description: 'ระบบอัตโนมัติสำหรับจัดการ booking และ workflow',
-        type: FeatureType.MODULE,
+        code: 'api_access',
+        name: 'API Access',
+        description: 'เข้าถึง API สำหรับ integration กับระบบอื่น (REST + Webhooks)',
+        type: FeatureType.TOGGLE,
         category: 'ADVANCED',
-        icon: 'Zap',
+        icon: 'Plug',
         displayOrder: 10,
-        priceMonthly: 990,
+        priceMonthly: 1500,
         isActive: true,
       },
       {
-        code: 'custom_branding',
-        name: 'Custom Branding',
-        description: 'กำหนด branding และ logo ของโรงแรมในทุก touchpoint',
-        type: FeatureType.MODULE,
+        code: 'webhook_events',
+        name: 'Webhook Events',
+        description: 'ส่ง webhook events ออกไประบบภายนอกเมื่อมี booking/payment events',
+        type: FeatureType.TOGGLE,
         category: 'ADVANCED',
-        icon: 'Palette',
+        icon: 'Network',
         displayOrder: 20,
-        priceMonthly: 1490,
-        isActive: true,
-      },
-      {
-        code: 'LOYALTY_MODULE',
-        name: 'Loyalty & Rewards',
-        description: 'โปรแกรมสะสมแต้มแขกประจำ ส่วนลด และ reward tiers',
-        type: FeatureType.MODULE,
-        category: 'ADVANCED',
-        icon: 'Gift',
-        displayOrder: 30,
-        priceMonthly: 590,
-        isActive: true,
-      },
-      {
-        code: 'INVENTORY_MODULE',
-        name: 'Inventory Management',
-        description:
-          'ระบบคลังสินค้าครบวงจร: คุมสต็อก เบิก-รับสินค้า สั่งซื้อ นับสต็อก และแจ้งเตือนสต็อกต่ำ',
-        type: FeatureType.MODULE,
-        category: 'ADVANCED',
-        icon: 'Package',
-        displayOrder: 40,
         priceMonthly: 990,
-        isActive: true,
-      },
-      {
-        code: 'COST_ACCOUNTING_MODULE',
-        name: 'Cost Accounting',
-        description:
-          'ระบบบัญชีต้นทุน USALI: ติดตามต้นทุนรายแผนก P&L ปิดงวดรายเดือน วิเคราะห์ food cost และ dashboard KPI โรงแรม',
-        type: FeatureType.MODULE,
-        category: 'ADVANCED',
-        icon: 'Calculator',
-        displayOrder: 50,
-        priceMonthly: 1490,
         isActive: true,
       },
     ];
@@ -443,11 +359,11 @@ export class SeederService {
     for (const featureData of features) {
       await this.featuresService.upsertByCode(featureData);
       this.logger.log(
-        `  ✓ Upserted feature: ${featureData.code} [${featureData.category}] (฿${featureData.priceMonthly}/mo)`,
+        `  ✓ Upserted feature: ${featureData.code} [${featureData.category}/${featureData.type}] (฿${featureData.priceMonthly}/mo)`,
       );
     }
 
-    this.logger.log(`  ✅ Seeded ${features.length} features across 9 categories`);
+    this.logger.log(`  ✅ Seeded ${features.length} features across 4 categories (toggle/limit only)`);
   }
 
   /**
@@ -466,24 +382,19 @@ export class SeederService {
    *     subscription detail modal (see Mountain View Resort example).
    */
   private async seedAddOns(): Promise<void> {
-    this.logger.log('🔌 Seeding Add-ons (master catalog)...');
+    this.logger.log('🔌 Seeding Add-ons (master catalog — sellable modules only)...');
 
+    /**
+     * Add-ons = โมดูลที่ขายเป็นแพ็กเกจ (sellable modules).
+     * แต่ละ add-on เป็น "module ใหญ่" ที่ลูกค้าซื้อทับบนแผนหลัก เช่น POS, HR
+     *
+     * Code style: UPPER_SNAKE_CASE (ตรงกับ AddonCode constants ที่ AddonGuard
+     *   ใช้ผ่าน `@RequireAddon('POS_MODULE')`)
+     * Categories: RESTAURANT, HR, HOUSEKEEPING, MAINTENANCE, INTEGRATION,
+     *   ADVANCED, REPORTING (7 หมวด — ไม่ทับ Features)
+     */
     const addons = [
-      // ─── PAID MODULE ADD-ONS (uppercase codes match AddonGate) ───
-      {
-        code: 'HR_MODULE',
-        name: 'HR Module',
-        description:
-          'ระบบ HR ครบวงจร: จัดการพนักงาน เงินเดือน การลา และเชื่อมข้อมูลทีมแม่บ้าน/ช่าง',
-        price: 1200,
-        billingCycle: AddonBillingCycle.MONTHLY,
-        category: 'HR',
-        icon: 'Briefcase',
-        displayOrder: 10,
-        minQuantity: 1,
-        maxQuantity: 1,
-        isActive: true,
-      },
+      // ─── RESTAURANT ───────────────────────────────────────
       {
         code: 'RESTAURANT_MODULE',
         name: 'Restaurant & F&B Module',
@@ -492,7 +403,7 @@ export class SeederService {
         billingCycle: AddonBillingCycle.MONTHLY,
         category: 'RESTAURANT',
         icon: 'UtensilsCrossed',
-        displayOrder: 20,
+        displayOrder: 110,
         minQuantity: 1,
         maxQuantity: 1,
         isActive: true,
@@ -505,11 +416,29 @@ export class SeederService {
         billingCycle: AddonBillingCycle.MONTHLY,
         category: 'RESTAURANT',
         icon: 'ShoppingCart',
-        displayOrder: 30,
+        displayOrder: 120,
         minQuantity: 1,
         maxQuantity: 1,
         isActive: true,
       },
+
+      // ─── HR ───────────────────────────────────────────────
+      {
+        code: 'HR_MODULE',
+        name: 'HR Module',
+        description:
+          'ระบบ HR ครบวงจร: จัดการพนักงาน เงินเดือน การลา และเชื่อมข้อมูลทีมแม่บ้าน/ช่าง',
+        price: 1200,
+        billingCycle: AddonBillingCycle.MONTHLY,
+        category: 'HR',
+        icon: 'Briefcase',
+        displayOrder: 210,
+        minQuantity: 1,
+        maxQuantity: 1,
+        isActive: true,
+      },
+
+      // ─── HOUSEKEEPING ─────────────────────────────────────
       {
         code: 'HOUSEKEEPING_MODULE',
         name: 'Housekeeping Module',
@@ -518,11 +447,28 @@ export class SeederService {
         billingCycle: AddonBillingCycle.MONTHLY,
         category: 'HOUSEKEEPING',
         icon: 'Sparkles',
-        displayOrder: 40,
+        displayOrder: 310,
         minQuantity: 1,
         maxQuantity: 1,
         isActive: true,
       },
+
+      // ─── MAINTENANCE ──────────────────────────────────────
+      {
+        code: 'MAINTENANCE_MODULE',
+        name: 'Maintenance Module',
+        description: 'ระบบบำรุงรักษา: ใบแจ้งซ่อม, preventive schedule, asset register, QR code',
+        price: 490,
+        billingCycle: AddonBillingCycle.MONTHLY,
+        category: 'MAINTENANCE',
+        icon: 'Sparkles',
+        displayOrder: 410,
+        minQuantity: 1,
+        maxQuantity: 1,
+        isActive: true,
+      },
+
+      // ─── INTEGRATION ──────────────────────────────────────
       {
         code: 'CHANNEL_MANAGER',
         name: 'Channel Manager',
@@ -531,11 +477,41 @@ export class SeederService {
         billingCycle: AddonBillingCycle.MONTHLY,
         category: 'INTEGRATION',
         icon: 'Network',
-        displayOrder: 50,
+        displayOrder: 510,
         minQuantity: 1,
         maxQuantity: 1,
         isActive: true,
       },
+      {
+        code: 'OTA_INTEGRATION',
+        name: 'OTA Booking Integration',
+        description: 'เชื่อมต่อกับ Booking.com, Agoda, Expedia, และ OTA อื่นๆ',
+        price: 990,
+        billingCycle: AddonBillingCycle.MONTHLY,
+        category: 'INTEGRATION',
+        icon: 'Globe',
+        displayOrder: 520,
+        minQuantity: 1,
+        maxQuantity: 1,
+        isActive: true,
+      },
+
+      // ─── REPORTING ────────────────────────────────────────
+      {
+        code: 'EXTRA_ANALYTICS',
+        name: 'Extra Analytics',
+        description: 'รายงานและ Analytics ขั้นสูง พร้อม custom dashboards และ ML forecasting',
+        price: 990,
+        billingCycle: AddonBillingCycle.MONTHLY,
+        category: 'REPORTING',
+        icon: 'TrendingUp',
+        displayOrder: 610,
+        minQuantity: 1,
+        maxQuantity: 1,
+        isActive: true,
+      },
+
+      // ─── ADVANCED ─────────────────────────────────────────
       {
         code: 'LOYALTY_MODULE',
         name: 'Loyalty & Rewards',
@@ -544,7 +520,7 @@ export class SeederService {
         billingCycle: AddonBillingCycle.MONTHLY,
         category: 'ADVANCED',
         icon: 'Gift',
-        displayOrder: 60,
+        displayOrder: 710,
         minQuantity: 1,
         maxQuantity: 1,
         isActive: true,
@@ -558,7 +534,7 @@ export class SeederService {
         billingCycle: AddonBillingCycle.MONTHLY,
         category: 'ADVANCED',
         icon: 'Package',
-        displayOrder: 70,
+        displayOrder: 720,
         minQuantity: 1,
         maxQuantity: 1,
         isActive: true,
@@ -572,74 +548,33 @@ export class SeederService {
         billingCycle: AddonBillingCycle.MONTHLY,
         category: 'ADVANCED',
         icon: 'Calculator',
-        displayOrder: 80,
-        minQuantity: 1,
-        maxQuantity: 1,
-        isActive: true,
-      },
-
-      // ─── PLATFORM ADD-ONS (lowercase codes — match subscription detail UI) ───
-      {
-        code: 'ota_booking',
-        name: 'OTA Booking Integration',
-        description: 'เชื่อมต่อกับ Booking.com, Agoda, และ OTA อื่นๆ',
-        price: 990,
-        billingCycle: AddonBillingCycle.MONTHLY,
-        category: 'INTEGRATION',
-        icon: 'Globe',
-        displayOrder: 90,
+        displayOrder: 730,
         minQuantity: 1,
         maxQuantity: 1,
         isActive: true,
       },
       {
-        code: 'automation',
+        code: 'AUTOMATION_MODULE',
         name: 'Automation System',
-        description: 'ระบบอัตโนมัติสำหรับจัดการ booking และ workflow',
+        description: 'ระบบอัตโนมัติสำหรับจัดการ booking workflow และ task scheduler',
         price: 990,
         billingCycle: AddonBillingCycle.MONTHLY,
         category: 'ADVANCED',
         icon: 'Zap',
-        displayOrder: 100,
+        displayOrder: 740,
         minQuantity: 1,
         maxQuantity: 1,
         isActive: true,
       },
       {
-        code: 'api_access',
-        name: 'API Access',
-        description: 'เข้าถึง API สำหรับ integration กับระบบอื่น',
-        price: 1990,
-        billingCycle: AddonBillingCycle.MONTHLY,
-        category: 'INTEGRATION',
-        icon: 'Plug',
-        displayOrder: 110,
-        minQuantity: 1,
-        maxQuantity: 1,
-        isActive: true,
-      },
-      {
-        code: 'extra_analytics',
-        name: 'Extra Analytics',
-        description: 'รายงานและ Analytics ขั้นสูง พร้อม custom dashboards',
-        price: 990,
-        billingCycle: AddonBillingCycle.MONTHLY,
-        category: 'REPORTING',
-        icon: 'TrendingUp',
-        displayOrder: 120,
-        minQuantity: 1,
-        maxQuantity: 1,
-        isActive: true,
-      },
-      {
-        code: 'custom_branding',
+        code: 'CUSTOM_BRANDING',
         name: 'Custom Branding',
-        description: 'กำหนด branding และ logo ของโรงแรมในทุก touchpoint',
+        description: 'กำหนด branding และ logo ของโรงแรมในทุก touchpoint (white-label)',
         price: 1490,
         billingCycle: AddonBillingCycle.MONTHLY,
         category: 'ADVANCED',
         icon: 'Palette',
-        displayOrder: 130,
+        displayOrder: 750,
         minQuantity: 1,
         maxQuantity: 1,
         isActive: true,
@@ -653,72 +588,177 @@ export class SeederService {
       );
     }
 
-    this.logger.log(`  ✅ Seeded ${addons.length} add-ons across 6 categories`);
+    this.logger.log(`  ✅ Seeded ${addons.length} add-ons across 7 categories (modules only)`);
   }
 
   /**
-   * 3️⃣ Seed Plan Features (ฟีเจอร์ที่แถมมากับ plan)
+   * 3️⃣ Seed Plan Features (toggle/limit features bundled with each plan)
+   *
+   * Modules ที่เป็น sellable add-on (HR, POS, Restaurant, …) ไม่ได้ผูกผ่าน
+   * plan_features — ใช้ plan_addons แทน (ดู seedPlanAddons ด้านล่าง)
    */
   private async seedPlanFeatures(): Promise<void> {
-    this.logger.log('🔗 Seeding Plan Features...');
+    this.logger.log('🔗 Seeding Plan Features (toggle/limit bundling)...');
 
+    const planFree = await this.plansService.findByCode('FREE');
     const planS = await this.plansService.findByCode('S');
     const planM = await this.plansService.findByCode('M');
     const planL = await this.plansService.findByCode('L');
 
     const basicReport = await this.featuresService.findByCode('basic_report');
-    const housekeeping = await this.featuresService.findByCode('housekeeping');
+    const taxInvoice = await this.featuresService.findByCode('tax_invoice');
+    const advancedReport = await this.featuresService.findByCode('advanced_report');
+    const auditLog = await this.featuresService.findByCode('audit_log');
+    const dailyManagerReport = await this.featuresService.findByCode('daily_manager_report');
+    const apiAccess = await this.featuresService.findByCode('api_access');
 
-    // Plan S - แถม Basic Report
-    if (planS && basicReport) {
-      const existing = await this.planFeaturesService.findByPlanId(planS.id);
-      if (existing.length === 0) {
-        await this.planFeaturesService.create({
-          planId: planS.id,
-          featureId: basicReport.id,
-        });
-        this.logger.log(`  ✓ Added basic_report to Plan S`);
-      }
+    // Plan FREE — ลองใช้ฟรี: basic report
+    await this.assignPlanFeatures(planFree?.id, [basicReport]);
+
+    // Plan S — basic + tax invoice
+    await this.assignPlanFeatures(planS?.id, [basicReport, taxInvoice]);
+
+    // Plan M — basic + tax + advanced + audit log
+    await this.assignPlanFeatures(planM?.id, [basicReport, taxInvoice, advancedReport, auditLog]);
+
+    // Plan L — ทุก toggle/limit features
+    await this.assignPlanFeatures(planL?.id, [
+      basicReport,
+      taxInvoice,
+      advancedReport,
+      auditLog,
+      dailyManagerReport,
+      apiAccess,
+    ]);
+  }
+
+  private async assignPlanFeatures(
+    planId: string | undefined,
+    features: Array<{ id: string; code?: string } | null | undefined>,
+  ): Promise<void> {
+    if (!planId) return;
+    const existing = await this.planFeaturesService.findByPlanId(planId);
+    const existingFeatureIds = new Set(
+      existing.map((pf: any) => pf.featureId ?? pf.feature_id),
+    );
+
+    for (const feature of features) {
+      if (!feature) continue;
+      if (existingFeatureIds.has(feature.id)) continue;
+      await this.planFeaturesService.create({ planId, featureId: feature.id });
+      this.logger.log(`  ✓ plan_features: ${planId} ← ${feature.code ?? feature.id}`);
     }
+  }
 
-    // Plan M - แถม Basic Report + Housekeeping
-    if (planM && basicReport && housekeeping) {
-      const existing = await this.planFeaturesService.findByPlanId(planM.id);
-      if (existing.length === 0) {
-        await this.planFeaturesService.create({
-          planId: planM.id,
-          featureId: basicReport.id,
-        });
-        await this.planFeaturesService.create({
-          planId: planM.id,
-          featureId: housekeeping.id,
-        });
-        this.logger.log(`  ✓ Added basic_report + housekeeping to Plan M`);
-      }
-    }
+  /**
+   * 3️⃣B Seed Plan Add-ons (sellable modules bundled with each plan)
+   *
+   * Bundles modules from `add_ons` into specific plans via the `plan_addons`
+   * join table. Tenants on those plans get module entitlement automatically
+   * — see AddonService.getActiveAddons() which unions plan_features +
+   * plan_addons + subscription_features.
+   */
+  private async seedPlanAddons(): Promise<void> {
+    this.logger.log('🧩 Seeding Plan Add-ons (sellable modules per plan)...');
 
-    // Plan L - แถม Basic Report + Housekeeping + Advanced Report
-    if (planL && basicReport && housekeeping) {
-      const existing = await this.planFeaturesService.findByPlanId(planL.id);
-      if (existing.length === 0) {
-        const advancedReport = await this.featuresService.findByCode('advanced_report');
+    const planFree = await this.plansService.findByCode('FREE');
+    const planS = await this.plansService.findByCode('S');
+    const planM = await this.plansService.findByCode('M');
+    const planL = await this.plansService.findByCode('L');
 
-        await this.planFeaturesService.create({
-          planId: planL.id,
-          featureId: basicReport.id,
-        });
-        await this.planFeaturesService.create({
-          planId: planL.id,
-          featureId: housekeeping.id,
-        });
-        if (advancedReport) {
-          await this.planFeaturesService.create({
-            planId: planL.id,
-            featureId: advancedReport.id,
-          });
-        }
-        this.logger.log(`  ✓ Added basic_report + housekeeping + advanced_report to Plan L`);
-      }
+    // Resolve add-ons by code through Prisma since AddonService.findByCode
+    // does not exist; the catalog was just upserted in seedAddOns.
+    const addOnsClient = (this.prisma as unknown as {
+      add_ons: { findUnique: (a: Record<string, unknown>) => Promise<any | null> };
+    }).add_ons;
+    const findAddon = async (code: string) => addOnsClient.findUnique({ where: { code } });
+
+    const restaurantModule = await findAddon('RESTAURANT_MODULE');
+    const posModule = await findAddon('POS_MODULE');
+    const hrModule = await findAddon('HR_MODULE');
+    const housekeepingModule = await findAddon('HOUSEKEEPING_MODULE');
+    const maintenanceModule = await findAddon('MAINTENANCE_MODULE');
+    const channelManager = await findAddon('CHANNEL_MANAGER');
+    const otaIntegration = await findAddon('OTA_INTEGRATION');
+    const extraAnalytics = await findAddon('EXTRA_ANALYTICS');
+    const loyaltyModule = await findAddon('LOYALTY_MODULE');
+    const inventoryModule = await findAddon('INVENTORY_MODULE');
+    const costAccountingModule = await findAddon('COST_ACCOUNTING_MODULE');
+    const automationModule = await findAddon('AUTOMATION_MODULE');
+    const customBranding = await findAddon('CUSTOM_BRANDING');
+
+    // Plan FREE — Trial: include every module so tenants can evaluate full
+    // surface area for 14 days. Matches the "Full Access" trial policy.
+    await this.assignPlanAddons(planFree?.id, [
+      restaurantModule,
+      posModule,
+      hrModule,
+      housekeepingModule,
+      maintenanceModule,
+      channelManager,
+      otaIntegration,
+      extraAnalytics,
+      loyaltyModule,
+      inventoryModule,
+      costAccountingModule,
+      automationModule,
+      customBranding,
+    ]);
+
+    // Plan S (Starter) — small hotel essentials
+    await this.assignPlanAddons(planS?.id, [housekeepingModule, otaIntegration]);
+
+    // Plan M (Professional) — adds restaurant ops + analytics
+    await this.assignPlanAddons(planM?.id, [
+      housekeepingModule,
+      maintenanceModule,
+      restaurantModule,
+      posModule,
+      otaIntegration,
+      extraAnalytics,
+      loyaltyModule,
+    ]);
+
+    // Plan L (Enterprise) — everything except CUSTOM_BRANDING (sold à la carte)
+    await this.assignPlanAddons(planL?.id, [
+      restaurantModule,
+      posModule,
+      hrModule,
+      housekeepingModule,
+      maintenanceModule,
+      channelManager,
+      otaIntegration,
+      extraAnalytics,
+      loyaltyModule,
+      inventoryModule,
+      costAccountingModule,
+      automationModule,
+    ]);
+  }
+
+  private async assignPlanAddons(
+    planId: string | undefined,
+    addons: Array<{ id: string; code?: string } | null>,
+  ): Promise<void> {
+    if (!planId) return;
+
+    const planAddonsClient = (this.prisma as unknown as {
+      plan_addons: {
+        findUnique: (a: Record<string, unknown>) => Promise<any | null>;
+        create: (a: Record<string, unknown>) => Promise<any>;
+      };
+    }).plan_addons;
+
+    for (const addon of addons) {
+      if (!addon) continue;
+      const existing = await planAddonsClient.findUnique({
+        where: { plan_id_addon_id: { plan_id: planId, addon_id: addon.id } },
+      });
+      if (existing) continue;
+      await planAddonsClient.create({
+        data: { plan_id: planId, addon_id: addon.id },
+      });
+      this.logger.log(`  ✓ plan_addons: ${planId} ← ${addon.code ?? addon.id}`);
     }
   }
 
@@ -797,35 +837,16 @@ export class SeederService {
       return;
     }
 
-    // Get features for add-ons
-    const extraAnalytics = await this.featuresService.findByCode('extra_analytics');
-    const customBranding = await this.featuresService.findByCode('custom_branding');
-    const otaBooking = await this.featuresService.findByCode('ota_booking');
-    const automation = await this.featuresService.findByCode('automation');
+    // Lookup the toggle/limit features that test hotels can be charged extra
+    // for via subscription_features. Module entitlements (HR, POS, …) are
+    // delivered through plan_addons (see seedPlanAddons), so we don't fetch
+    // them here.
     const apiAccess = await this.featuresService.findByCode('api_access');
     const taxInvoice = await this.featuresService.findByCode('tax_invoice');
     const extraUser = await this.featuresService.findByCode('extra_user');
     const advancedReport = await this.featuresService.findByCode('advanced_report');
-    const housekeeping = await this.featuresService.findByCode('housekeeping');
-    const hrModule = await this.featuresService.findByCode('HR_MODULE');
-    const restaurantModule = await this.featuresService.findByCode('RESTAURANT_MODULE');
-    const posModule = await this.featuresService.findByCode('POS_MODULE');
-    const inventoryModule = await this.featuresService.findByCode('INVENTORY_MODULE');
-    const costAccountingModule = await this.featuresService.findByCode('COST_ACCOUNTING_MODULE');
-
-    // ข้อมูลโรงแรมตาม UI Screenshot
-    const allFeatures = [
-      { feature: extraAnalytics, price: 990 },
-      { feature: customBranding, price: 1490 },
-      { feature: otaBooking, price: 990 },
-      { feature: automation, price: 990 },
-      { feature: apiAccess, price: 1990 },
-      { feature: taxInvoice, price: 500 },
-      { feature: extraUser, price: 200 },
-      { feature: advancedReport, price: 500 },
-      { feature: housekeeping, price: 500 },
-      { feature: hrModule, price: 1200 },
-    ];
+    const auditLog = await this.featuresService.findByCode('audit_log');
+    const dailyManagerReport = await this.featuresService.findByCode('daily_manager_report');
 
     // Dynamic dates based on current date — subscriptions always valid when seeding
     const now = new Date();
@@ -870,9 +891,11 @@ export class SeederService {
           firstName: 'Somchai',
           lastName: 'Jaidee',
         },
+        // Tenant-level extras (subscription_features). Module add-ons are
+        // delivered through the plan itself via seedPlanAddons.
         addons: [
-          { feature: extraAnalytics, price: 990 },
-          { feature: customBranding, price: 1490 },
+          { feature: taxInvoice, price: 500 },
+          { feature: advancedReport, price: 500 },
         ],
         invoices: [{ amount: 7470, status: InvoiceStatus.PAID, daysAgo: 0 }],
       },
@@ -898,21 +921,16 @@ export class SeederService {
           firstName: 'Premium',
           lastName: 'Tester',
         },
+        // Tenant-level extras (subscription_features). Mountain View tests
+        // the "all toggles on" path — modules are wired through plan_addons
+        // for plan L (see seedPlanAddons), so they don't appear here.
         addons: [
-          { feature: otaBooking, price: 990 },
-          { feature: automation, price: 990 },
-          { feature: apiAccess, price: 1990 },
-          { feature: extraAnalytics, price: 990 },
-          { feature: customBranding, price: 1490 },
+          { feature: apiAccess, price: 1500 },
           { feature: extraUser, price: 200 },
           { feature: taxInvoice, price: 500 },
           { feature: advancedReport, price: 500 },
-          { feature: housekeeping, price: 500 },
-          { feature: hrModule, price: 1200 },
-          { feature: restaurantModule, price: 990 },
-          { feature: posModule, price: 790 },
-          { feature: inventoryModule, price: 990 },
-          { feature: costAccountingModule, price: 1490 },
+          { feature: auditLog, price: 290 },
+          { feature: dailyManagerReport, price: 290 },
         ],
         invoices: [{ amount: 23200, status: InvoiceStatus.PAID, daysAgo: 0 }],
       },
@@ -1391,13 +1409,35 @@ export class SeederService {
           const room = rooms[Math.floor(Math.random() * rooms.length)];
           const guest = allGuests[Math.floor(Math.random() * allGuests.length)];
 
-          // สร้างวันที่จองหลาก ๆ (อดีต, ปัจจุบัน, อนาคต)
+          // สร้างวันที่จอง — ใช้เวลามาตรฐาน Bangkok (14:00 เช็คอิน, 12:00 เช็คเอาท์)
+          // เพื่อให้ availability check (overlap + cleaning buffer) ทำงานถูกต้อง
+          // ห้าม use raw `new Date(today)` เพราะจะติด time ของวินาทีที่ seed รัน
+          // ทำให้ scheduledCheckIn/Out ผิด และห้องดูเหมือนถูกจองทั้งวัน
           const daysOffset = Math.floor(Math.random() * 60) - 30; // -30 to +30 days
-          const checkInDate = new Date(today);
-          checkInDate.setDate(checkInDate.getDate() + daysOffset);
+          const nightCount = Math.floor(Math.random() * 4) + 1; // 1-4 nights
 
-          const checkOutDate = new Date(checkInDate);
-          checkOutDate.setDate(checkOutDate.getDate() + (Math.floor(Math.random() * 4) + 1)); // 1-4 nights
+          // Build date-only strings (YYYY-MM-DD) based on today + offset (in UTC-safe way)
+          const checkInBase = new Date(today);
+          checkInBase.setUTCDate(checkInBase.getUTCDate() + daysOffset);
+          const checkInDateStr = checkInBase.toISOString().split('T')[0];
+
+          const checkOutBase = new Date(checkInBase);
+          checkOutBase.setUTCDate(checkOutBase.getUTCDate() + nightCount);
+          const checkOutDateStr = checkOutBase.toISOString().split('T')[0];
+
+          // Standard Bangkok times for scheduled fields — single source of truth
+          const scheduledCheckInDate = buildBangkokDateTime(
+            checkInDateStr,
+            DEFAULT_CHECK_IN_TIME,
+          );
+          const scheduledCheckOutDate = buildBangkokDateTime(
+            checkOutDateStr,
+            DEFAULT_CHECK_OUT_TIME,
+          );
+
+          // Legacy checkIn/checkOut fields: store as midnight UTC for consistency
+          const checkInDate = new Date(`${checkInDateStr}T00:00:00.000Z`);
+          const checkOutDate = new Date(`${checkOutDateStr}T00:00:00.000Z`);
 
           // กำหนด status ตามวันที่
           let status = 'confirmed';
@@ -1407,11 +1447,7 @@ export class SeederService {
             status = 'checked_in'; // ใน 1 วัน = checked_in
           else status = 'confirmed'; // อนาคต = confirmed
 
-          const nights = Math.max(
-            1,
-            Math.ceil((checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24)),
-          );
-          const totalPrice = Number(room.price) * nights;
+          const totalPrice = Number(room.price) * nightCount;
 
           try {
             const createdBooking = await this.prisma.booking.create({
@@ -1427,6 +1463,8 @@ export class SeederService {
                 guestPhone: guest.phone || '+66-8-0000-0000',
                 checkIn: checkInDate,
                 checkOut: checkOutDate,
+                scheduledCheckIn: scheduledCheckInDate,
+                scheduledCheckOut: scheduledCheckOutDate,
                 status: status,
                 totalPrice: totalPrice,
                 notes: 'Demo booking created by seeder',

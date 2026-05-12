@@ -10,6 +10,8 @@ import { Repository } from 'typeorm';
 import { Plan } from '../plans/entities/plan.entity';
 import { PlanFeature } from '../plan-features/entities/plan-feature.entity';
 import { Feature } from '../features/entities/feature.entity';
+import { AddonService } from '../modules/addons/addon.service';
+import { PrismaService } from '../prisma/prisma.service';
 import {
   AdminPlansListDto,
   AdminPlanItemDto,
@@ -33,7 +35,45 @@ export class AdminPlansService {
     private planFeaturesRepository: Repository<PlanFeature>,
     @InjectRepository(Feature)
     private featuresRepository: Repository<Feature>,
+    private readonly addonService: AddonService,
+    private readonly prisma: PrismaService,
   ) {}
+
+  /**
+   * Build a Map<planId, count> of how many add-ons each given plan has
+   * assigned via `plan_addons`. Used to surface "Add-ons: N รายการ" badges
+   * on the admin plan cards.
+   *
+   * Returns counts only — fetching full add-on rows here would be wasteful
+   * because the card just shows a number. The detail list lives behind the
+   * "จัดการ Add-ons" modal.
+   */
+  private async countAddonsByPlanIds(planIds: string[]): Promise<Map<string, number>> {
+    const counts = new Map<string, number>();
+    if (planIds.length === 0) return counts;
+
+    // The Prisma client may not yet expose `plan_addons` in its generated
+    // types until the next `prisma generate` runs after the migration; use
+    // the runtime-available cast to keep TypeScript happy.
+    const planAddonsClient = (this.prisma as unknown as {
+      plan_addons: {
+        groupBy: (args: Record<string, unknown>) => Promise<
+          Array<{ plan_id: string; _count: { _all: number } }>
+        >;
+      };
+    }).plan_addons;
+
+    const grouped = await planAddonsClient.groupBy({
+      by: ['plan_id'],
+      where: { plan_id: { in: planIds } },
+      _count: { _all: true },
+    });
+
+    for (const row of grouped) {
+      counts.set(row.plan_id, row._count._all);
+    }
+    return counts;
+  }
 
   /**
    * GET /api/v1/admin/plans
@@ -48,6 +88,8 @@ export class AdminPlansService {
       .addOrderBy('plan.name', 'ASC')
       .getMany();
 
+    const addonCounts = await this.countAddonsByPlanIds(plans.map((p) => p.id));
+
     const data: AdminPlanItemDto[] = plans.map((plan) => ({
       id: plan.id,
       code: plan.code,
@@ -60,6 +102,7 @@ export class AdminPlansService {
       isActive: plan.isActive !== false,
       subscriptionCount: plan.subscriptions?.length || 0,
       featureCount: plan.planFeatures?.length || 0,
+      addonCount: addonCounts.get(plan.id) ?? 0,
       // Sales Page fields
       description: plan.description,
       displayOrder: plan.displayOrder,
@@ -98,6 +141,8 @@ export class AdminPlansService {
         priceMonthly: Number(pf.feature?.priceMonthly || 0),
       })) || [];
 
+    const addonCountMap = await this.countAddonsByPlanIds([plan.id]);
+
     return {
       id: plan.id,
       code: plan.code,
@@ -110,6 +155,7 @@ export class AdminPlansService {
       isActive: plan.isActive !== false,
       planFeatures,
       subscriptionCount: plan.subscriptions?.length || 0,
+      addonCount: addonCountMap.get(plan.id) ?? 0,
       // Sales Page fields
       description: plan.description,
       displayOrder: plan.displayOrder,
@@ -334,6 +380,10 @@ export class AdminPlansService {
 
     this.logger.log(`Assigned feature "${feature.name}" to plan "${plan.name}" (${plan.code})`);
 
+    // Bust the entitlement cache for every tenant currently on this plan so
+    // their sidebar reflects the new feature without waiting for the 5min TTL.
+    await this.addonService.invalidateAddonCacheForPlan(planId);
+
     return this.findOne(planId);
   }
 
@@ -378,6 +428,10 @@ export class AdminPlansService {
     await this.planFeaturesRepository.remove(planFeature);
 
     this.logger.log(`Removed feature "${feature.name}" from plan "${plan.name}" (${plan.code})`);
+
+    // Bust the entitlement cache for every tenant currently on this plan so
+    // their sidebar reflects the removed feature without waiting for the TTL.
+    await this.addonService.invalidateAddonCacheForPlan(planId);
 
     return {
       message: `Feature "${feature.name}" removed from plan "${plan.name}" successfully`,

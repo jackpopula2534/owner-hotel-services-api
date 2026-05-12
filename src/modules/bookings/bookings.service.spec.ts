@@ -173,11 +173,13 @@ describe('BookingsService', () => {
         'tenant-1',
       );
 
+      // Times are interpreted in Bangkok timezone (UTC+7), so 15:00 BKK = 08:00 UTC.
+      // This matches buildScheduledDateTime which appends +07:00 to date-only strings.
       expect(prismaMock.booking.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            scheduledCheckIn: new Date('2026-04-10T15:00:00.000Z'),
-            scheduledCheckOut: new Date('2026-04-12T12:00:00.000Z'),
+            scheduledCheckIn: new Date('2026-04-10T08:00:00.000Z'),
+            scheduledCheckOut: new Date('2026-04-12T05:00:00.000Z'),
             totalPrice: 4000,
           }),
         }),

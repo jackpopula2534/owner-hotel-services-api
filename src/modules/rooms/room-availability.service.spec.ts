@@ -69,11 +69,70 @@ describe('RoomAvailabilityService', () => {
         'tenant-1',
       );
 
+      // nextAvailableAt = scheduledCheckOut + 90min cleaning buffer
       expect(result).toEqual({
         available: false,
-        reason: 'Booking booking-1',
-        nextAvailableAt: new Date('2026-04-11T11:00:00.000Z'),
+        reason: 'Booking booking-1 (incl. cleaning buffer)',
+        nextAvailableAt: new Date('2026-04-11T12:30:00.000Z'),
       });
+    });
+
+    it('allows back-to-back booking when gap >= cleaning buffer', async () => {
+      // Existing checkout 12:00 + 60min buffer = available at 13:00
+      // New check-in at 14:00 → OK
+      prismaMock.room.findFirst.mockResolvedValue({
+        id: 'room-1',
+        tenantId: 'tenant-1',
+        property: { cleaningBufferMinutes: 60 },
+      });
+      prismaMock.booking.findMany.mockResolvedValue([
+        {
+          id: 'prev-booking',
+          scheduledCheckIn: new Date('2026-05-13T07:00:00.000Z'), // May 13 14:00 BKK
+          scheduledCheckOut: new Date('2026-05-14T05:00:00.000Z'), // May 14 12:00 BKK
+          actualCheckOut: null,
+          status: 'confirmed',
+        },
+      ]);
+
+      const result = await service.checkRoomAvailable(
+        'room-1',
+        new Date('2026-05-14T07:00:00.000Z'), // May 14 14:00 BKK
+        new Date('2026-05-15T05:00:00.000Z'), // May 15 12:00 BKK
+        'tenant-1',
+      );
+
+      expect(result.available).toBe(true);
+    });
+
+    it('blocks back-to-back booking when gap < cleaning buffer', async () => {
+      // Existing checkout 12:00 + 60min buffer = available at 13:00
+      // New check-in at 12:30 → BLOCKED (only 30min gap, need 60min)
+      prismaMock.room.findFirst.mockResolvedValue({
+        id: 'room-1',
+        tenantId: 'tenant-1',
+        property: { cleaningBufferMinutes: 60 },
+      });
+      prismaMock.booking.findMany.mockResolvedValue([
+        {
+          id: 'prev-booking',
+          scheduledCheckIn: new Date('2026-05-13T07:00:00.000Z'),
+          scheduledCheckOut: new Date('2026-05-14T05:00:00.000Z'), // May 14 12:00 BKK
+          actualCheckOut: null,
+          status: 'confirmed',
+        },
+      ]);
+
+      const result = await service.checkRoomAvailable(
+        'room-1',
+        new Date('2026-05-14T05:30:00.000Z'), // May 14 12:30 BKK (only 30min after checkout)
+        new Date('2026-05-15T05:00:00.000Z'),
+        'tenant-1',
+      );
+
+      expect(result.available).toBe(false);
+      expect(result.reason).toContain('cleaning buffer');
+      expect(result.nextAvailableAt).toEqual(new Date('2026-05-14T06:00:00.000Z')); // 13:00 BKK
     });
 
     it('blocks a checked-out room until cleaning buffer ends', async () => {
@@ -157,7 +216,7 @@ describe('RoomAvailabilityService', () => {
   });
 
   describe('buildScheduledDateTime', () => {
-    it('builds a check-in datetime using property defaults', async () => {
+    it('builds a check-in datetime using property defaults (Bangkok TZ, machine-independent)', async () => {
       prismaMock.property.findFirst.mockResolvedValue({
         standardCheckInTime: '15:30',
         standardCheckOutTime: '12:00',
@@ -165,11 +224,8 @@ describe('RoomAvailabilityService', () => {
 
       const result = await service.buildScheduledDateTime('2026-04-15', 'checkIn', 'property-1');
 
-      expect(result.getFullYear()).toBe(2026);
-      expect(result.getMonth()).toBe(3);
-      expect(result.getDate()).toBe(15);
-      expect(result.getHours()).toBe(15);
-      expect(result.getMinutes()).toBe(30);
+      // 15:30 Bangkok = 08:30 UTC — assert via ISO string for TZ independence
+      expect(result.toISOString()).toBe('2026-04-15T08:30:00.000Z');
     });
 
     it('throws on invalid date format', async () => {

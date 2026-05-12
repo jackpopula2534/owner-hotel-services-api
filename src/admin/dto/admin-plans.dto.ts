@@ -317,6 +317,12 @@ export class AdminPlanItemDto {
   @ApiPropertyOptional({ example: 3 })
   featureCount?: number;
 
+  @ApiPropertyOptional({
+    example: 2,
+    description: 'Number of add-ons bundled with this plan via plan_addons',
+  })
+  addonCount?: number;
+
   // Sales Page fields
   @ApiPropertyOptional({
     example: 'เริ่มต้นใช้งานได้ทันที พร้อมทดลองใช้ฟรี 14 วัน',
@@ -388,6 +394,12 @@ export class PlanResponseDto {
 
   @ApiPropertyOptional({ example: 5 })
   subscriptionCount?: number;
+
+  @ApiPropertyOptional({
+    example: 2,
+    description: 'Number of add-ons bundled with this plan via plan_addons',
+  })
+  addonCount?: number;
 
   // Sales Page fields
   @ApiPropertyOptional({

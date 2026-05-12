@@ -7,6 +7,8 @@ import {
   Min,
   Max,
   IsUUID,
+  Matches,
+  MaxLength,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -54,6 +56,20 @@ export class GenerateQRCodeDto {
   @IsOptional()
   @IsString()
   tenantId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'PromptPay ID ที่จะใช้สร้าง QR — ถ้าไม่ส่งจะ fallback ไปใช้ PROMPTPAY_ID จาก env config. ต้องเป็นเบอร์มือถือ 10 หลัก หรือเลขบัตรประชาชน 13 หลัก',
+    example: '0812345678',
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(/^(0\d{9}|\d{13})$/, {
+    message:
+      'promptpayId ต้องเป็นเบอร์มือถือ 10 หลัก หรือเลขบัตรประชาชน 13 หลัก',
+  })
+  @MaxLength(20)
+  promptpayId?: string;
 }
 
 export class QRCodeResponseDto {

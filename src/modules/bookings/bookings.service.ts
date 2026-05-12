@@ -13,6 +13,14 @@ import { TaskType, TaskPriority } from '../housekeeping/dto/create-housekeeping-
 import { PaymentsService } from '../../payments/payments.service';
 import { PaymentMethod, PaymentStatus } from '../../payments/entities/payment.entity';
 import { Prisma } from '@prisma/client';
+import {
+  applyCleaningBuffer,
+  buildBangkokDateTime,
+  DEFAULT_CHECK_IN_TIME,
+  DEFAULT_CHECK_OUT_TIME,
+  DEFAULT_CLEANING_BUFFER_MINUTES,
+  resolveTimeWithFallback,
+} from '../../common/availability/availability.util';
 
 // ─── Activity Types ───────────────────────────────────────────────────────────
 
@@ -116,18 +124,13 @@ export class BookingsService {
     return parsed;
   }
 
+  /**
+   * Thin wrapper around the shared availability util so existing callers
+   * inside this service keep working. New code should call
+   * `buildBangkokDateTime` directly.
+   */
   private buildScheduledDateTime(value: string, fallbackTime: string): Date {
-    if (value.includes('T')) {
-      return new Date(value);
-    }
-
-    const [hours, minutes] = fallbackTime.split(':').map(Number);
-    // Treat the time as Bangkok local time (UTC+7) by appending the offset.
-    // e.g. "2026-04-23" + "14:00" → "2026-04-23T14:00:00+07:00" = 07:00 UTC stored in DB,
-    // which renders correctly as 14:00 when displayed in Bangkok timezone.
-    const hh = String(hours).padStart(2, '0');
-    const mm = String(minutes).padStart(2, '0');
-    return new Date(`${value}T${hh}:${mm}:00+07:00`);
+    return buildBangkokDateTime(value, fallbackTime);
   }
 
   private asNonEmptyString(value: unknown): string | undefined {
@@ -764,24 +767,40 @@ export class BookingsService {
       throw new NotFoundException('Room not found in this property');
     }
 
-    // Build scheduled check-in/out datetimes with property standard times (Bangkok UTC+7)
-    // ใช้ buildScheduledDateTime แทน parseBookingDate ซึ่งจะ return midnight UTC สำหรับ date-only string
-    // เช่น "2026-04-15" + "14:00" → 2026-04-15T14:00:00+07:00 = 07:00 UTC
-    const scheduledCheckInForOverlap = this.buildScheduledDateTime(
-      checkIn,
-      createBookingDto.checkInTime ?? property.standardCheckInTime ?? '14:00',
+    // Build scheduled check-in/out datetimes using the shared util.
+    // - resolveTimeWithFallback handles: user time → property time → default ('14:00'/'12:00')
+    // - buildBangkokDateTime appends the +07:00 offset for date-only strings
+    const effectiveCheckInTime = resolveTimeWithFallback(
+      createBookingDto.checkInTime,
+      property.standardCheckInTime,
+      DEFAULT_CHECK_IN_TIME,
     );
-    const scheduledCheckOutForOverlap = this.buildScheduledDateTime(
-      checkOut,
-      createBookingDto.checkOutTime ?? property.standardCheckOutTime ?? '12:00',
+    const effectiveCheckOutTime = resolveTimeWithFallback(
+      createBookingDto.checkOutTime,
+      property.standardCheckOutTime,
+      DEFAULT_CHECK_OUT_TIME,
+    );
+    const scheduledCheckInForOverlap = buildBangkokDateTime(checkIn, effectiveCheckInTime);
+    const scheduledCheckOutForOverlap = buildBangkokDateTime(checkOut, effectiveCheckOutTime);
+
+    // Apply symmetric cleaning buffer so back-to-back bookings respect
+    // the property's cleaningBufferMinutes setting.
+    const cleaningBufferMinutes =
+      property.cleaningBufferMinutes ?? DEFAULT_CLEANING_BUFFER_MINUTES;
+    const { overlapStart, overlapEnd } = applyCleaningBuffer(
+      scheduledCheckInForOverlap,
+      scheduledCheckOutForOverlap,
+      cleaningBufferMinutes,
     );
 
     this.logger.debug(
-      `Overlap check: scheduledCheckIn=${scheduledCheckInForOverlap.toISOString()}, scheduledCheckOut=${scheduledCheckOutForOverlap.toISOString()}`,
+      `Overlap check: scheduledCheckIn=${scheduledCheckInForOverlap.toISOString()}, scheduledCheckOut=${scheduledCheckOutForOverlap.toISOString()}, buffer=${cleaningBufferMinutes}min`,
     );
 
     // Check room availability — include pending so double-booking is blocked immediately
-    // overlap condition: existing.scheduledCheckIn < newCheckOut AND existing.scheduledCheckOut > newCheckIn
+    // overlap condition (with buffer):
+    //   existing.scheduledCheckIn < (newCheckOut + buffer) AND
+    //   existing.scheduledCheckOut > (newCheckIn - buffer)
     const [existingBooking, existingBookingFallback] = await Promise.all([
       // Primary check: ใช้ scheduledCheckIn/Out ซึ่งเก็บ time ถูกต้อง
       this.prisma.booking.findFirst({
@@ -789,8 +808,8 @@ export class BookingsService {
           roomId,
           tenantId,
           status: { in: ['pending', 'confirmed', 'checked_in'] },
-          scheduledCheckIn: { lt: scheduledCheckOutForOverlap },
-          scheduledCheckOut: { gt: scheduledCheckInForOverlap },
+          scheduledCheckIn: { lt: overlapEnd },
+          scheduledCheckOut: { gt: overlapStart },
         },
       }),
       // Fallback: สำหรับ booking เก่าที่ไม่มี scheduledCheckIn
@@ -800,8 +819,8 @@ export class BookingsService {
           tenantId,
           status: { in: ['pending', 'confirmed', 'checked_in'] },
           scheduledCheckIn: null,
-          checkIn: { lt: scheduledCheckOutForOverlap },
-          checkOut: { gt: scheduledCheckInForOverlap },
+          checkIn: { lt: overlapEnd },
+          checkOut: { gt: overlapStart },
         },
       }),
     ]);
@@ -880,14 +899,11 @@ export class BookingsService {
       extraBedGuests: occupancy.extraBedGuests,
       checkIn: toDateTime(createBookingDto.checkIn),
       checkOut: toDateTime(createBookingDto.checkOut),
-      scheduledCheckIn: this.buildScheduledDateTime(
-        createBookingDto.checkIn,
-        createBookingDto.checkInTime ?? property.standardCheckInTime ?? '14:00',
-      ),
-      scheduledCheckOut: this.buildScheduledDateTime(
-        createBookingDto.checkOut,
-        createBookingDto.checkOutTime ?? property.standardCheckOutTime ?? '11:00',
-      ),
+      // Persistence uses the SAME resolved times as the overlap check above
+      // — this guarantees the booking we just validated is stored with
+      // exactly the dates we checked. No more 11:00 vs 12:00 drift.
+      scheduledCheckIn: scheduledCheckInForOverlap,
+      scheduledCheckOut: scheduledCheckOutForOverlap,
       status: createBookingDto.status || 'pending',
       notes: createBookingDto.notes || undefined,
       channelId: createBookingDto.channelId || undefined,

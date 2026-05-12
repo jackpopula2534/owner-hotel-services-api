@@ -15,6 +15,45 @@ export class PublicPlanFeatureDto {
   priceMonthly: number;
 }
 
+/**
+ * Add-on bundled with a plan (admin-curated via /admin/plans/:id/addons).
+ *
+ * Distinct from `PublicPlanFeatureDto` — this comes from the `add_ons`
+ * catalog (managed in /admin/addons) rather than the `features` table.
+ *
+ * `price` is informational only — once an add-on is included with a plan
+ * it is granted to subscribers without an extra charge; the plan's monthly
+ * price already accounts for it.
+ */
+export class PublicPlanAddonDto {
+  @ApiProperty({ example: 'uuid-1234' })
+  id: string;
+
+  @ApiProperty({ example: 'POS_MODULE' })
+  code: string;
+
+  @ApiProperty({ example: 'POS System' })
+  name: string;
+
+  @ApiPropertyOptional({ example: 'ระบบ POS ครบวงจร' })
+  description?: string;
+
+  @ApiProperty({ example: 790 })
+  price: number;
+
+  @ApiProperty({
+    example: 'monthly',
+    enum: ['monthly', 'yearly', 'one_time'],
+  })
+  billingCycle: string;
+
+  @ApiPropertyOptional({ example: 'Restaurant' })
+  category?: string;
+
+  @ApiPropertyOptional({ example: 'shopping-cart' })
+  icon?: string;
+}
+
 export class PublicPlanDto {
   @ApiProperty({ example: 'uuid-1234' })
   id: string;
@@ -101,6 +140,13 @@ export class PublicPlanDto {
     description: 'Optional add-on features',
   })
   addOnFeatures?: PublicPlanFeatureDto[];
+
+  @ApiPropertyOptional({
+    type: [PublicPlanAddonDto],
+    description:
+      'Add-ons bundled with this plan (no extra charge). Sourced from plan_addons join table — set by admin in /admin/plans/:id/addons.',
+  })
+  includedAddOns?: PublicPlanAddonDto[];
 }
 
 export class PublicPlansListDto {

@@ -19,11 +19,20 @@ export const ADDON_CODES = {
 
 export type AddonCode = (typeof ADDON_CODES)[keyof typeof ADDON_CODES];
 
+export type AddonSource = 'plan' | 'subscription';
+
 export interface AddonStatus {
   code: string;
   name: string;
   isActive: boolean;
   expiresAt: string | null;
+  /**
+   * Where the entitlement comes from:
+   * - 'plan'         → feature included in the tenant's current plan (set by Admin in Plans → Features)
+   * - 'subscription' → standalone add-on attached to the subscription (set by Admin/Tenant in Add-ons)
+   * Both sources unlock the same UI; this field is only for diagnostics/analytics.
+   */
+  source: AddonSource;
 }
 
 /**
@@ -71,56 +80,128 @@ export class AddonService {
   // Tenant-facing logic (existing)
   // -------------------------------------------------------------------------
 
+  /**
+   * Statuses that count as "the tenant currently owns this subscription".
+   * - active : paying customer
+   * - trial  : free-trial period; trial plans still grant whatever the Admin
+   *            attached to the trial plan in `plan_features`.
+   * `pending`, `cancelled`, `expired` deliberately excluded — those tenants
+   * should not see paid menus.
+   */
+  private readonly ENTITLEMENT_STATUSES = ['active', 'trial'] as const;
+
   async hasActiveAddon(tenantId: string, addonCode: AddonCode): Promise<boolean> {
     const cacheKey = `${tenantId}:${addonCode}`;
     return this.cacheService.getOrSet<boolean>(
       cacheKey,
       async () => {
-        const record = await this.prisma.subscription_features.findFirst({
-          where: {
-            is_active: 1,
-            features: { code: addonCode },
-            subscriptions: {
-              tenant_id: tenantId,
-              status: 'active',
-            },
-          },
-          select: { id: true },
-        });
-        return record !== null;
+        const addons = await this.getActiveAddons(tenantId);
+        return addons.some((a) => a.code === addonCode && a.isActive);
       },
       { ttl: this.CACHE_TTL, namespace: this.CACHE_NS },
     );
   }
 
+  /**
+   * Returns every "module"-type entitlement the tenant currently has,
+   * unioning two sources:
+   *   1) plan_features  → modules included in the tenant's plan (Admin-controlled)
+   *   2) subscription_features → standalone add-ons attached to the subscription
+   *
+   * Deduplicates by feature code; `source: 'plan'` wins when both sides match
+   * because plan-level entitlements typically don't expire mid-cycle.
+   */
   async getActiveAddons(tenantId: string): Promise<AddonStatus[]> {
     const cacheKey = `${tenantId}:all`;
     return this.cacheService.getOrSet<AddonStatus[]>(
       cacheKey,
       async () => {
-        const records = await this.prisma.subscription_features.findMany({
+        const subscription = await this.prisma.subscriptions.findFirst({
           where: {
-            is_active: 1,
-            subscriptions: {
-              tenant_id: tenantId,
-              status: 'active',
-            },
-            features: {
-              type: 'module',
-            },
+            tenant_id: tenantId,
+            status: { in: [...this.ENTITLEMENT_STATUSES] },
           },
+          orderBy: { created_at: 'desc' },
+          // Cast `include` through `any` because the generated Prisma client
+          // may not yet know about `plan_addons` (a fresh model added in the
+          // 20260510120000 migration). After `npx prisma generate` runs on the
+          // build host the cast can be removed.
           include: {
-            features: {
-              select: { code: true, name: true },
+            plans_subscriptions_plan_idToplans: {
+              include: {
+                plan_features: {
+                  include: {
+                    features: {
+                      select: { code: true, name: true, type: true, is_active: true },
+                    },
+                  },
+                },
+                ...({ plan_addons: { include: { add_ons: true } } } as any),
+              },
+            } as any,
+            subscription_features: {
+              where: { is_active: 1 },
+              include: {
+                features: {
+                  select: { code: true, name: true, type: true, is_active: true },
+                },
+              },
             },
           },
         });
-        return records.map((r) => ({
-          code: r.features.code,
-          name: r.features.name,
-          isActive: true,
-          expiresAt: null,
-        }));
+
+        if (!subscription) return [];
+
+        const merged = new Map<string, AddonStatus>();
+        const plan = subscription.plans_subscriptions_plan_idToplans as any;
+
+        // 1) Plan-level features set by Admin in the Plans page (highest priority).
+        const planFeatures = (plan?.plan_features ?? []) as any[];
+        for (const pf of planFeatures) {
+          const f = pf.features;
+          if (!f || f.type !== 'module' || f.is_active !== 1) continue;
+          merged.set(f.code, {
+            code: f.code,
+            name: f.name,
+            isActive: true,
+            expiresAt: null,
+            source: 'plan',
+          });
+        }
+
+        // 2) Plan-level add-ons (curated by Admin via /admin/plans/:id/addons).
+        // The `add_ons` table has no `type` column — by convention every add-on
+        // is a sellable module, so we don't filter by type here.
+        const planAddons = (plan?.plan_addons ?? []) as any[];
+        for (const pa of planAddons) {
+          const a = pa.add_ons;
+          if (!a) continue;
+          if (Number(a.is_active) !== 1) continue;
+          if (merged.has(a.code)) continue; // feature source wins
+          merged.set(a.code, {
+            code: a.code,
+            name: a.name,
+            isActive: true,
+            expiresAt: null,
+            source: 'plan',
+          });
+        }
+
+        // 3) Standalone add-ons attached to the subscription.
+        for (const sf of subscription.subscription_features) {
+          const f = sf.features;
+          if (!f || f.type !== 'module' || f.is_active !== 1) continue;
+          if (merged.has(f.code)) continue; // plan source wins
+          merged.set(f.code, {
+            code: f.code,
+            name: f.name,
+            isActive: true,
+            expiresAt: null,
+            source: 'subscription',
+          });
+        }
+
+        return Array.from(merged.values());
       },
       { ttl: this.CACHE_TTL, namespace: this.CACHE_NS },
     );
@@ -136,6 +217,29 @@ export class AddonService {
       await this.cacheService.del(key, ns);
     }
     this.logger.log(`Addon cache invalidated for tenant ${tenantId} (${allCodes.length + 1} keys)`);
+  }
+
+  /**
+   * Invalidate the addon cache for every tenant subscribed to a given plan.
+   * Called after Admin changes the plan's feature list so the sidebar of all
+   * affected tenants picks up the new entitlements without waiting for the
+   * 5-minute TTL.
+   */
+  async invalidateAddonCacheForPlan(planId: string): Promise<void> {
+    const subs = await this.prisma.subscriptions.findMany({
+      where: {
+        plan_id: planId,
+        status: { in: [...this.ENTITLEMENT_STATUSES] },
+      },
+      select: { tenant_id: true },
+    });
+    const uniqueTenants = Array.from(new Set(subs.map((s) => s.tenant_id)));
+    for (const tenantId of uniqueTenants) {
+      await this.invalidateAddonCache(tenantId);
+    }
+    this.logger.log(
+      `Addon cache invalidated for ${uniqueTenants.length} tenant(s) on plan ${planId}`,
+    );
   }
 
   // -------------------------------------------------------------------------

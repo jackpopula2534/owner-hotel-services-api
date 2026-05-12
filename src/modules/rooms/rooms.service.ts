@@ -4,6 +4,15 @@ import { AuditLogService } from '../../audit-log/audit-log.service';
 import { CreateRoomDto } from './dto/create-room.dto';
 import { UpdateRoomDto } from './dto/update-room.dto';
 import { Prisma } from '@prisma/client';
+import {
+  applyCleaningBuffer,
+  buildBangkokDateTime,
+  DEFAULT_CHECK_IN_TIME,
+  DEFAULT_CHECK_OUT_TIME,
+  DEFAULT_CLEANING_BUFFER_MINUTES,
+  resolveTimeWithFallback,
+  UNBOOKABLE_ROOM_STATUSES,
+} from '../../common/availability/availability.util';
 
 @Injectable()
 export class RoomsService {
@@ -369,53 +378,68 @@ export class RoomsService {
     }
 
     try {
-      // Get property settings for standard check-in/out times (fallback)
-      let standardCheckInTime = '14:00';
-      let standardCheckOutTime = '12:00';
+      // Step 1: resolve property time settings (fallback chain handled by util)
+      let propertyCheckInTime: string | null = null;
+      let propertyCheckOutTime: string | null = null;
+      let cleaningBufferMinutes: number = DEFAULT_CLEANING_BUFFER_MINUTES;
 
       if (propertyId) {
         const property = await this.prisma.property.findFirst({
           where: { id: propertyId, tenantId },
-          select: { standardCheckInTime: true, standardCheckOutTime: true },
+          select: {
+            standardCheckInTime: true,
+            standardCheckOutTime: true,
+            cleaningBufferMinutes: true,
+          },
         });
         if (property) {
-          standardCheckInTime = property.standardCheckInTime ?? '14:00';
-          standardCheckOutTime = property.standardCheckOutTime ?? '12:00';
+          propertyCheckInTime = property.standardCheckInTime;
+          propertyCheckOutTime = property.standardCheckOutTime;
+          cleaningBufferMinutes = property.cleaningBufferMinutes ?? DEFAULT_CLEANING_BUFFER_MINUTES;
         }
       }
 
-      // ใช้เวลาที่ user ส่งมาก่อน ถ้าไม่มีค่อย fallback เป็น property standard time
-      // ตัวอย่าง: user เลือก checkIn 10:00 → ใช้ 10:00 แทน 14:00
-      // เพื่อให้ overlap check ถูกต้องตามเวลาที่ผู้จองต้องการเข้าพักจริง
-      const effectiveCheckInTime = checkInTime ?? standardCheckInTime;
-      const effectiveCheckOutTime = checkOutTime ?? standardCheckOutTime;
-
-      // Build DateTime objects with proper check-in/out times in Bangkok timezone (UTC+7)
-      // e.g. "2026-04-17" + "10:00" → 2026-04-17T10:00:00+07:00 (Apr 17 03:00 UTC)
-      const checkInDate = new Date(`${checkIn}T${effectiveCheckInTime}:00+07:00`);
-      const checkOutDate = new Date(`${checkOut}T${effectiveCheckOutTime}:00+07:00`);
-
-      this.logger.debug(
-        `Availability check: ${checkIn} ${effectiveCheckInTime} → ${checkOut} ${effectiveCheckOutTime} (UTC: ${checkInDate.toISOString()} → ${checkOutDate.toISOString()})`,
+      const effectiveCheckInTime = resolveTimeWithFallback(
+        checkInTime,
+        propertyCheckInTime,
+        DEFAULT_CHECK_IN_TIME,
+      );
+      const effectiveCheckOutTime = resolveTimeWithFallback(
+        checkOutTime,
+        propertyCheckOutTime,
+        DEFAULT_CHECK_OUT_TIME,
       );
 
-      // ใช้ scheduledCheckIn/scheduledCheckOut ซึ่งเก็บ date+time จริง
-      // แทน checkIn/checkOut ที่อาจเป็นแค่ date โดยไม่มี time
-      // overlap condition: existing.scheduledCheckIn < newCheckOut AND existing.scheduledCheckOut > newCheckIn
+      // Step 2: build Bangkok-local datetimes and expand by cleaning buffer
+      const checkInDate = buildBangkokDateTime(checkIn, effectiveCheckInTime);
+      const checkOutDate = buildBangkokDateTime(checkOut, effectiveCheckOutTime);
+      const { overlapStart, overlapEnd } = applyCleaningBuffer(
+        checkInDate,
+        checkOutDate,
+        cleaningBufferMinutes,
+      );
+
+      this.logger.debug(
+        `Availability check: ${checkIn} ${effectiveCheckInTime} → ${checkOut} ${effectiveCheckOutTime} ` +
+          `(buffer: ${cleaningBufferMinutes}min, UTC range: ${overlapStart.toISOString()} → ${overlapEnd.toISOString()})`,
+      );
+
+      // Step 3: find conflicting bookings via overlap query.
+      // overlap (with buffer): existing.scheduledCheckIn < overlapEnd AND existing.scheduledCheckOut > overlapStart
       const bookingWhere: any = {
         tenantId,
         status: { in: ['pending', 'confirmed', 'checked_in'] },
-        scheduledCheckIn: { lt: checkOutDate },
-        scheduledCheckOut: { gt: checkInDate },
+        scheduledCheckIn: { lt: overlapEnd },
+        scheduledCheckOut: { gt: overlapStart },
       };
 
-      // fallback: สำหรับ booking เก่าที่ไม่มี scheduledCheckIn/Out ให้ check จาก checkIn/checkOut ด้วย
+      // fallback for legacy bookings that have no scheduledCheckIn/Out
       const bookingWhereFallback: any = {
         tenantId,
         status: { in: ['pending', 'confirmed', 'checked_in'] },
         scheduledCheckIn: null,
-        checkIn: { lt: checkOutDate },
-        checkOut: { gt: checkInDate },
+        checkIn: { lt: overlapEnd },
+        checkOut: { gt: overlapStart },
       };
 
       if (propertyId) {
@@ -435,7 +459,12 @@ export class RoomsService {
         ]),
       ];
 
-      const roomWhere: any = { tenantId, status: 'available' };
+      // Step 4: exclude only "truly unbookable" room statuses
+      // (current 'occupied'/'cleaning'/'dirty' rooms still accept future bookings).
+      const roomWhere: any = {
+        tenantId,
+        status: { notIn: [...UNBOOKABLE_ROOM_STATUSES] },
+      };
       if (propertyId) roomWhere.propertyId = propertyId;
       if (occupiedRoomIds.length > 0) roomWhere.id = { notIn: occupiedRoomIds };
 

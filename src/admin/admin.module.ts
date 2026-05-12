@@ -12,6 +12,7 @@ import { PlansModule } from '../plans/plans.module';
 import { FeaturesModule } from '../features/features.module';
 import { PlanFeaturesModule } from '../plan-features/plan-features.module';
 import { SubscriptionFeaturesModule } from '../subscription-features/subscription-features.module';
+import { AddonModule } from '../modules/addons/addon.module';
 
 // Controllers
 import { AdminHotelsController } from './admin-hotels.controller';
@@ -23,6 +24,7 @@ import { AdminBillingCycleController } from './admin-billing-cycle.controller';
 import { AdminRefundCreditController } from './admin-refund-credit.controller';
 import { AdminFeaturesController } from './admin-features.controller';
 import { AdminPlansController } from './admin-plans.controller';
+import { AdminPlanAddonsController } from './admin-plan-addons.controller';
 
 // Services
 import { AdminHotelsService } from './admin-hotels.service';
@@ -34,6 +36,7 @@ import { AdminBillingCycleService } from './admin-billing-cycle.service';
 import { AdminRefundCreditService } from './admin-refund-credit.service';
 import { AdminFeaturesService } from './admin-features.service';
 import { AdminPlansService } from './admin-plans.service';
+import { AdminPlanAddonsService } from './admin-plan-addons.service';
 
 @Module({
   imports: [
@@ -48,6 +51,7 @@ import { AdminPlansService } from './admin-plans.service';
     FeaturesModule, // → Repository<Feature>
     PlanFeaturesModule, // → Repository<PlanFeature>
     SubscriptionFeaturesModule, // → Repository<SubscriptionFeature>, Repository<SubscriptionFeatureLogs>
+    AddonModule, // → AddonService (entitlement cache invalidation when plans/features change)
     PrismaModule, // → PrismaService (used by several admin services for user queries)
   ],
   controllers: [
@@ -60,6 +64,7 @@ import { AdminPlansService } from './admin-plans.service';
     AdminRefundCreditController,
     AdminFeaturesController,
     AdminPlansController,
+    AdminPlanAddonsController,
   ],
   providers: [
     AdminHotelsService,
@@ -71,6 +76,7 @@ import { AdminPlansService } from './admin-plans.service';
     AdminRefundCreditService,
     AdminFeaturesService,
     AdminPlansService,
+    AdminPlanAddonsService,
   ],
   exports: [
     AdminHotelsService,
@@ -82,6 +88,7 @@ import { AdminPlansService } from './admin-plans.service';
     AdminRefundCreditService,
     AdminFeaturesService,
     AdminPlansService,
+    AdminPlanAddonsService,
   ],
 })
 export class AdminModule {}

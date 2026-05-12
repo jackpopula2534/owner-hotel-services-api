@@ -31,9 +31,13 @@ export class PromptPayService {
 
   /**
    * Generate PromptPay QR Code
+   *
+   * Priority สำหรับเลือก PromptPay ID:
+   *   1. dto.promptpayId — ที่ frontend ส่งมา (เลือกจาก PaymentAccount default)
+   *   2. this.promptpayId — fallback ไปค่า PROMPTPAY_ID จาก env config
    */
   async generateQRCode(dto: GenerateQRCodeDto): Promise<QRCodeResponseDto> {
-    const promptpayId = this.promptpayId;
+    const promptpayId = dto.promptpayId?.trim() || this.promptpayId;
 
     if (!promptpayId) {
       throw new BadRequestException('PromptPay ID not configured');
