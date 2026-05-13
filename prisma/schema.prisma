@@ -3982,3 +3982,32 @@ enum invoices_status {
   rejected
   voided
 }
+
+// ─── Addon Trial Requests ─────────────────────────────────────────────────────
+
+enum addon_trial_request_status {
+  pending
+  approved
+  rejected
+  expired
+}
+
+model addon_trial_requests {
+  id          String                       @id @default(uuid())
+  tenant_id   String
+  addon_code  String
+  addon_name  String?
+  status      addon_trial_request_status   @default(pending)
+  note        String?                      @db.Text
+  admin_note  String?                      @db.Text
+  approved_by String?
+  approved_at DateTime?                    @db.DateTime(6)
+  expires_at  DateTime?                    @db.DateTime(6)
+  created_at  DateTime                     @default(now()) @db.DateTime(6)
+  updated_at  DateTime                     @default(now()) @updatedAt @db.DateTime(6)
+
+  @@index([tenant_id])
+  @@index([status])
+  @@index([tenant_id, addon_code])
+  @@map("addon_trial_requests")
+}
