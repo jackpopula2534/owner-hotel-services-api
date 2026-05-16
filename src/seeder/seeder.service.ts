@@ -1052,7 +1052,8 @@ export class SeederService {
 
         // ... (owner creation script remains same)
         const ownerData = hotelData.owner;
-        const hashedPassword = await bcrypt.hash('password123', 10);
+        const seedPassword = process.env.SEED_DEFAULT_PASSWORD || 'SeedDev@2026!';
+        const hashedPassword = await bcrypt.hash(seedPassword, 10);
 
         try {
           const existingOwner = await this.prisma.user.findUnique({
@@ -1597,7 +1598,7 @@ export class SeederService {
       },
     ];
 
-    const defaultPassword = 'Staff@123';
+    const defaultPassword = process.env.SEED_STAFF_PASSWORD || 'StaffDev@2026!';
     const hashedPassword = await bcrypt.hash(defaultPassword, 10);
     let staffCount = 0;
 
@@ -1724,14 +1725,16 @@ export class SeederService {
     this.logger.log('  ⚠️  เฉพาะ subscription customers เท่านั้น (ห้าม admin roles)');
     this.logger.log('');
     this.logger.log('  🏨 Demo Hotel Owners:');
-    this.logger.log('  premium.test@email.com      / password123   (Mountain View - Premium)');
-    this.logger.log('  somchai@email.com           / password123   (Sukjai Hotel)');
-    this.logger.log('  seaside@email.com           / password123   (Seaside Stay)');
-    this.logger.log('  garden@email.com            / password123   (Garden Resort)');
+    this.logger.log('  premium.test@email.com      (Mountain View - Premium)');
+    this.logger.log('  somchai@email.com           (Sukjai Hotel)');
+    this.logger.log('  seaside@email.com           (Seaside Stay)');
+    this.logger.log('  garden@email.com            (Garden Resort)');
+    this.logger.log('  📌 Password: ดูที่ SEED_DEFAULT_PASSWORD ใน .env (ไม่แสดง log)');
     this.logger.log('');
     this.logger.log('  👷 Hotel Staff:');
-    this.logger.log(`  manager*.hotel.test        / Staff@123     (General Manager)`);
-    this.logger.log(`  receptionist*.hotel.test   / Staff@123     (Front Desk Agent)`);
+    this.logger.log(`  manager*.hotel.test        (General Manager)`);
+    this.logger.log(`  receptionist*.hotel.test   (Front Desk Agent)`);
+    this.logger.log(`  📌 Staff password: ดูที่ SEED_STAFF_PASSWORD ใน .env (ไม่แสดง log)`);
     this.logger.log('');
     this.logger.log('  👥 Demo Guests (for booking tests):');
     this.logger.log('  somchai.jaidia@example.com (Somchai Jaidee - Thailand)');

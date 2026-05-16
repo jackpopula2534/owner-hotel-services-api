@@ -25,6 +25,10 @@ import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import {
+  maskPayrollRecord,
+  maskPayrollList,
+} from '../../common/utils/payroll-mask.util';
 
 @ApiTags('hr / payroll')
 @ApiBearerAuth('JWT-auth')
@@ -43,9 +47,11 @@ export class HrPayrollController {
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
   async getSummary(
     @Query() query: Record<string, string>,
-    @CurrentUser() user: { tenantId?: string },
+    @CurrentUser() user: { tenantId?: string; role?: string },
   ) {
-    return this.payrollService.getSummary(query, user.tenantId!);
+    // Summary totals: mask salary fields for non-hr roles
+    const result = await this.payrollService.getSummary(query, user.tenantId!);
+    return maskPayrollRecord(result as Record<string, unknown>, user.role);
   }
 
   // ─── List & Detail ────────────────────────────────────────────────────────
@@ -62,9 +68,16 @@ export class HrPayrollController {
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
   async findAll(
     @Query() query: Record<string, string>,
-    @CurrentUser() user: { tenantId?: string },
+    @CurrentUser() user: { tenantId?: string; role?: string },
   ) {
-    return this.payrollService.findAll(query, user.tenantId!);
+    const result = await this.payrollService.findAll(query, user.tenantId!);
+    return {
+      ...result,
+      data: maskPayrollList(
+        result.data as Record<string, unknown>[],
+        user.role,
+      ),
+    };
   }
 
   @Get(':id')
@@ -73,8 +86,12 @@ export class HrPayrollController {
   @ApiResponse({ status: 200, description: 'Payroll detail with items' })
   @ApiResponse({ status: 404, description: 'Not found' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
-  async findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
-    return this.payrollService.findOne(id, user.tenantId!);
+  async findOne(
+    @Param('id') id: string,
+    @CurrentUser() user: { tenantId?: string; role?: string },
+  ) {
+    const payroll = await this.payrollService.findOne(id, user.tenantId!);
+    return maskPayrollRecord(payroll as Record<string, unknown>, user.role);
   }
 
   // ─── Run Payroll ──────────────────────────────────────────────────────────

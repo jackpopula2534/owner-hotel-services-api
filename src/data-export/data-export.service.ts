@@ -5,7 +5,10 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bull';
+import { Queue } from 'bull';
 import { PrismaService } from '../prisma/prisma.service';
+import { DATA_EXPORT_QUEUE, DATA_EXPORT_JOBS } from './data-export.constants';
 
 export type ExportKind = 'export' | 'erasure';
 
@@ -19,15 +22,17 @@ export interface RequestExportInput {
 export class DataExportService {
   private readonly logger = new Logger(DataExportService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @InjectQueue(DATA_EXPORT_QUEUE) private readonly exportQueue: Queue,
+  ) {}
 
   /**
-   * Tenant requests a data export. Returns immediately with a queued
-   * request id; a separate worker (Bull queue, not in this PR) does the
-   * actual archiving + S3 upload.
+   * Tenant requests a data export/erasure.
+   * Returns immediately with a queued request id.
+   * Bull worker (DataExportProcessor) does the actual work asynchronously.
    *
-   * Self-service rate-limit: only one in-flight request per tenant per
-   * 24h to avoid abuse.
+   * Self-service rate-limit: only one in-flight request per tenant per kind per 24h.
    */
   async request(input: RequestExportInput): Promise<{ id: string; status: string }> {
     const kind: ExportKind = input.kind || 'export';
@@ -43,7 +48,7 @@ export class DataExportService {
       throw new BadRequestException('มีคำขอกำลังดำเนินการอยู่ กรุณารอจนเสร็จก่อนสร้างคำขอใหม่');
     }
 
-    const request = await (this.prisma as any).data_export_requests.create({
+    const exportRequest = await (this.prisma as any).data_export_requests.create({
       data: {
         tenant_id: input.tenantId,
         requested_by_user_id: input.userId,
@@ -52,9 +57,33 @@ export class DataExportService {
       },
     });
 
-    this.logger.log(`Data ${kind} requested: tenant=${input.tenantId} request=${request.id}`);
+    // ── Enqueue Bull job สำหรับ actual processing ──────────────
+    const jobName =
+      kind === 'erasure'
+        ? DATA_EXPORT_JOBS.PROCESS_ERASURE
+        : DATA_EXPORT_JOBS.PROCESS_EXPORT;
 
-    return { id: request.id, status: request.status };
+    await this.exportQueue.add(
+      jobName,
+      {
+        requestId: exportRequest.id,
+        tenantId: input.tenantId,
+        userId: input.userId,
+        kind,
+      },
+      {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 10_000 },
+        removeOnComplete: 50,
+        removeOnFail: 20,
+      },
+    );
+
+    this.logger.log(
+      `Data ${kind} queued: tenant=${input.tenantId} request=${exportRequest.id}`,
+    );
+
+    return { id: exportRequest.id, status: exportRequest.status };
   }
 
   /**

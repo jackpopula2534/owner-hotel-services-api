@@ -34,6 +34,10 @@ import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import {
+  maskEmployeePayroll,
+  maskEmployeeListPayroll,
+} from '../../common/utils/payroll-mask.util';
 
 @ApiTags('hr')
 @ApiBearerAuth('JWT-auth')
@@ -130,8 +134,18 @@ export class HrController {
   @ApiResponse({ status: 200, description: 'List of employees' })
   @ApiResponse({ status: 403, description: 'HR add-on not active' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
-  async findAll(@Query() query: any, @CurrentUser() user: { tenantId?: string }) {
-    return this.hrService.findAll(query, user?.tenantId);
+  async findAll(
+    @Query() query: any,
+    @CurrentUser() user: { tenantId?: string; role?: string },
+  ) {
+    const result = await this.hrService.findAll(query, user?.tenantId);
+    return {
+      ...result,
+      data: maskEmployeeListPayroll(
+        result.data as Record<string, unknown>[],
+        user.role,
+      ),
+    };
   }
 
   @Get(':id')
@@ -140,8 +154,12 @@ export class HrController {
   @ApiResponse({ status: 404, description: 'Employee not found' })
   @ApiResponse({ status: 403, description: 'HR add-on not active' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
-  async findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
-    return this.hrService.findOne(id, user?.tenantId);
+  async findOne(
+    @Param('id') id: string,
+    @CurrentUser() user: { tenantId?: string; role?: string },
+  ) {
+    const employee = await this.hrService.findOne(id, user?.tenantId);
+    return maskEmployeePayroll(employee as Record<string, unknown>, user.role);
   }
 
   @Post()

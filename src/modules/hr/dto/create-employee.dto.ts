@@ -6,6 +6,7 @@ import {
   IsDateString,
   IsNumber,
   IsArray,
+  IsBoolean,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -190,4 +191,21 @@ export class CreateEmployeeDto {
   @IsArray()
   @IsOptional()
   emergencyContacts?: Record<string, unknown>[];
+
+  // ─── PDPA Consent Fields ─────────────────────────────────────────────────
+  @ApiPropertyOptional({
+    description: 'PDPA consent given by employee (required for create)',
+    example: true,
+  })
+  @IsBoolean()
+  @IsOptional()
+  consentGiven?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'PDPA consent policy version at time of consent',
+    example: '1.0',
+  })
+  @IsString()
+  @IsOptional()
+  consentVersion?: string;
 }

@@ -3,6 +3,50 @@ import { randomUUID } from 'crypto'; // Node.js built-in — no extra dependency
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
 
+const MASKED_VALUE = '[MASKED]';
+const SENSITIVE_KEYS = new Set([
+  'authorization',
+  'cookie',
+  'password',
+  'newpassword',
+  'confirmpassword',
+  'token',
+  'refreshtoken',
+  'accesstoken',
+  'secret',
+  'apikey',
+  'nationalid',
+  'passportnumber',
+  'bankaccount',
+  'bankaccountnumber',
+  'socialsecurity',
+  'taxid',
+  'cardnumber',
+  'cvv',
+]);
+
+const maskUrl = (url: string): string => {
+  const [path, query] = url.split('?');
+  if (!query) return url;
+
+  const params = new URLSearchParams(query);
+  params.forEach((_value, key) => {
+    if (SENSITIVE_KEYS.has(key.toLowerCase())) {
+      params.set(key, MASKED_VALUE);
+    }
+  });
+
+  const maskedQuery = params.toString();
+  return maskedQuery ? `${path}?${maskedQuery}` : path;
+};
+
+const maskMessage = (message: string): string => {
+  return message.replace(
+    /(password|token|refreshToken|accessToken|secret|apiKey|nationalId|passportNumber|bankAccount|socialSecurity|taxId)=([^&\s,}]+)/gi,
+    (_match, key) => `${key}=${MASKED_VALUE}`,
+  );
+};
+
 @Injectable()
 export class LoggingInterceptor implements NestInterceptor {
   private readonly logger = new Logger('HTTP');
@@ -10,6 +54,7 @@ export class LoggingInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     const request = context.switchToHttp().getRequest();
     const { method, url, ip } = request;
+    const safeUrl = maskUrl(url);
     const userId = request.user?.id ?? request.user?.userId ?? null;
     const start = Date.now();
 
@@ -26,7 +71,7 @@ export class LoggingInterceptor implements NestInterceptor {
             JSON.stringify({
               type: 'request',
               method,
-              url,
+              url: safeUrl,
               statusCode,
               durationMs: Date.now() - start,
               ip,
@@ -45,21 +90,22 @@ export class LoggingInterceptor implements NestInterceptor {
          * AllExceptionsFilter already logs the full stack; here we only log the
          * timing + identity fields to avoid duplicate verbose output in production.
          */
-        error: (err: any) => {
+        error: (err: { status?: number; statusCode?: number; response?: { statusCode?: number }; message?: string }) => {
           const statusCode: number =
             err?.status ?? err?.statusCode ?? err?.response?.statusCode ?? 500;
+          const message = err?.message ?? String(err);
           this.logger.error(
             JSON.stringify({
               type: 'request',
               method,
-              url,
+              url: safeUrl,
               statusCode,
               durationMs: Date.now() - start,
               ip,
               userId,
               requestId,
               // Keep error.message for quick correlation; stack is in the filter log
-              error: err?.message ?? String(err),
+              error: maskMessage(message),
             }),
           );
         },

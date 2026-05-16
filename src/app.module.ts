@@ -1,5 +1,7 @@
-import { Module } from '@nestjs/common';
-import { APP_GUARD, Reflector } from '@nestjs/core';
+import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
+import { APP_FILTER, APP_GUARD, Reflector } from '@nestjs/core';
+import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { LanguageMiddleware } from './common/middleware/language.middleware';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { SubscriptionGuard } from './subscription/subscription.guard';
@@ -70,6 +72,7 @@ import { SearchModule } from './modules/search/search.module';
 import { StaffModule } from './modules/staff/staff.module';
 import { MaintenanceModule } from './modules/maintenance/maintenance.module';
 import { AddonModule } from './modules/addons/addon.module';
+import { AddonTrialRequestModule } from './modules/addon-trial-requests/addon-trial-request.module';
 import { BankAccountsModule } from './modules/bank-accounts/bank-accounts.module';
 import { PaymentSettingsModule } from './modules/payment-settings/payment-settings.module';
 import { PaymentAccountsModule } from './modules/payment-accounts/payment-accounts.module';
@@ -79,6 +82,8 @@ import { WarehouseUsersModule } from './modules/warehouse-users/warehouse-users.
 import { HotelTerminalUsersModule } from './modules/hotel-terminal-users/hotel-terminal-users.module';
 import { CostAccountingModule } from './modules/cost-accounting/cost-accounting.module';
 import { DocumentSettingsModule } from './modules/document-settings/document-settings.module';
+import { ScheduleModule } from '@nestjs/schedule';
+import { DataRetentionModule } from './common/data-retention.module';
 
 @Module({
   imports: [
@@ -158,6 +163,7 @@ import { DocumentSettingsModule } from './modules/document-settings/document-set
     StaffModule,
     MaintenanceModule,
     AddonModule,
+    AddonTrialRequestModule,
     BankAccountsModule,
     PaymentSettingsModule,
     PaymentAccountsModule,
@@ -173,6 +179,8 @@ import { DocumentSettingsModule } from './modules/document-settings/document-set
         limit: 100, // 100 requests per IP per window (global default)
       },
     ]),
+    ScheduleModule.forRoot(), // PDPA cron jobs (DataRetentionModule)
+    DataRetentionModule,
   ],
   providers: [
     {
@@ -183,6 +191,20 @@ import { DocumentSettingsModule } from './modules/document-settings/document-set
       provide: APP_GUARD,
       useClass: SubscriptionGuard,
     },
+    {
+      // Register the global exception filter as a DI-managed provider so it
+      // can inject I18nService and localise error messages per request.
+      provide: APP_FILTER,
+      useClass: AllExceptionsFilter,
+    },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  /**
+   * Wire the LanguageMiddleware to every route so each request has `req.language`
+   * resolved before guards/filters run.
+   */
+  configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(LanguageMiddleware).forRoutes('*');
+  }
+}

@@ -131,6 +131,11 @@ export class LineNotifyService {
       },
     });
 
+    await this.recordThirdPartyAudit(tenantId, userId, 'line_notify_connected', {
+      targetType,
+      enabledEventCount: Object.values(LineNotifyEventType).length,
+    });
+
     this.logger.log(`Line Notify connected for tenant ${tenantId}, user ${userId}`);
   }
 
@@ -213,6 +218,9 @@ export class LineNotifyService {
         where: { id: token.id },
         data: { isActive: false },
       });
+      await this.recordThirdPartyAudit(tenantId, userId, 'line_notify_disconnected', {
+        targetType: token.targetType,
+      });
     }
 
     this.logger.log(`Line Notify disconnected for tenant ${tenantId}, user ${userId}`);
@@ -240,7 +248,11 @@ export class LineNotifyService {
       return false;
     }
 
-    return this.sendMessage(token.accessToken, dto);
+    const sent = await this.sendMessage(token.accessToken, dto);
+    await this.recordThirdPartyAudit(tenantId, userId, 'line_notify_message_sent', {
+      status: sent ? 'sent' : 'failed',
+    });
+    return sent;
   }
 
   /**
@@ -329,6 +341,31 @@ export class LineNotifyService {
     } catch (error) {
       this.logger.error(`Failed to send Line Notify message: ${error.message}`);
       return false;
+    }
+  }
+
+  private async recordThirdPartyAudit(
+    tenantId: string,
+    userId: string,
+    action: string,
+    metadata: Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      await this.prisma.analyticsEvent.create({
+        data: {
+          tenantId,
+          userId,
+          eventName: `third_party_dpa.${action}`,
+          metadata: {
+            provider: 'line_notify',
+            ...metadata,
+          },
+        },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Failed to record LINE DPA audit: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 

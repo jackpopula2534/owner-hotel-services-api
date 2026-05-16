@@ -169,6 +169,33 @@
     "notFound": "ไม่พบข้อมูลที่ค้นหา",
     "unauthorized": "ไม่มีสิทธิ์เข้าถึง",
     "forbidden": "ไม่ได้รับอนุญาต",
-    "serverError": "เกิดข้อผิดพลาดที่เซิร์ฟเวอร์"
+    "serverError": "เกิดข้อผิดพลาดที่เซิร์ฟเวอร์",
+    "http": {
+      "BAD_REQUEST": "คำขอไม่ถูกต้อง",
+      "UNAUTHORIZED": "ไม่มีสิทธิ์เข้าถึง — กรุณาเข้าสู่ระบบ",
+      "FORBIDDEN": "ถูกปฏิเสธการเข้าถึง",
+      "NOT_FOUND": "ไม่พบข้อมูลที่ต้องการ",
+      "CONFLICT": "ข้อมูลขัดแย้งกับที่มีอยู่ในระบบ",
+      "UNPROCESSABLE_ENTITY": "ข้อมูลไม่ผ่านการตรวจสอบ",
+      "TOO_MANY_REQUESTS": "ส่งคำขอบ่อยเกินไป กรุณาลองใหม่ภายหลัง",
+      "INTERNAL_SERVER_ERROR": "เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์",
+      "SERVICE_UNAVAILABLE": "บริการไม่พร้อมให้บริการชั่วคราว"
+    },
+    "prisma": {
+      "P2002": "ข้อมูลนี้มีอยู่ในระบบแล้ว",
+      "P2003": "ไม่สามารถดำเนินการได้เนื่องจากสัมพันธ์กับข้อมูลอื่น",
+      "P2025": "ไม่พบข้อมูลที่ต้องการ",
+      "VALIDATION_ERROR": "ข้อมูลไม่ถูกต้องตามโครงสร้างฐานข้อมูล",
+      "SCHEMA_NOT_READY": "ตารางข้อมูลยังไม่พร้อม กรุณา run migration ก่อนใช้งาน"
+    },
+    "validation": {
+      "page must be a number string": "page ต้องเป็นตัวเลข (เช่น 1, 2, 3)",
+      "limit must be a number string": "limit ต้องเป็นตัวเลข (เช่น 10, 20, 50)",
+      "page must be an integer number": "page ต้องเป็นตัวเลขจำนวนเต็ม",
+      "limit must be an integer number": "limit ต้องเป็นตัวเลขจำนวนเต็ม",
+      "page must not be less than 1": "page ต้องมีค่าอย่างน้อย 1",
+      "limit must not be less than 1": "limit ต้องมีค่าอย่างน้อย 1",
+      "limit must not be greater than 100": "limit ต้องไม่เกิน 100 รายการต่อหน้า"
+    }
   }
 }

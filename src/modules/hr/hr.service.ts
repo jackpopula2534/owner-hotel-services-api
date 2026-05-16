@@ -146,11 +146,15 @@ export class HrService {
       }
     }
 
+    // Auto-set consentAt when consentGiven = true (PDPA requirement)
+    const consentAt = rest.consentGiven === true ? new Date() : undefined;
+
     return (this.prisma.employee as any).create({
       data: {
         ...rest,
         ...(startDate ? { startDate: new Date(startDate) } : {}),
         ...(dateOfBirth ? { dateOfBirth: new Date(dateOfBirth) } : {}),
+        ...(consentAt ? { consentAt } : {}),
         propertyId: finalPropertyId,
         tenantId,
         ...(employeeCode ? { employeeCode } : {}),

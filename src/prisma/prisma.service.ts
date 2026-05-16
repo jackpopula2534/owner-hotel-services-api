@@ -1,5 +1,6 @@
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
+import { EncryptionService } from '../common/services/encryption.service';
 
 /**
  * PrismaService wraps PrismaClient.
@@ -14,13 +15,77 @@ import { PrismaClient } from '@prisma/client';
  *       the manual `declare` properties below and the file
  *       `src/types/prisma-extensions.d.ts`.
  */
+
+/**
+ * Fields ที่ต้อง encrypt/decrypt อัตโนมัติ ตาม PDPA
+ * Key = Prisma model name, Value = array of field names
+ */
+const SENSITIVE_FIELDS: Record<string, string[]> = {
+  Guest: ['nationalId', 'passportNumber'],
+  Employee: ['nationalId', 'bankAccount', 'socialSecurity', 'taxId'],
+};
+
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(PrismaService.name);
+
+  constructor(private readonly encryptionService: EncryptionService) {
+    super();
+    this._registerEncryptionMiddleware();
+  }
+
   async onModuleInit() {
     await this.$connect();
   }
 
   async onModuleDestroy() {
     await this.$disconnect();
+  }
+
+  /**
+   * Prisma Middleware: auto-encrypt ก่อน save, auto-decrypt หลัง read
+   * ทำงานกับ model ที่อยู่ใน SENSITIVE_FIELDS เท่านั้น
+   */
+  private _registerEncryptionMiddleware() {
+    this.$use(async (params, next) => {
+      const fields = params.model ? SENSITIVE_FIELDS[params.model] : undefined;
+
+      // ── ENCRYPT ก่อน write ──
+      if (fields && ['create', 'update', 'upsert'].includes(params.action)) {
+        const data =
+          params.action === 'upsert'
+            ? { ...params.args.create, ...params.args.update }
+            : params.args.data;
+
+        if (data && typeof data === 'object') {
+          for (const field of fields) {
+            if (data[field] != null) {
+              data[field] = this.encryptionService.encrypt(data[field] as string);
+            }
+          }
+        }
+      }
+
+      const result = await next(params);
+
+      // ── DECRYPT หลัง read ──
+      if (fields && result) {
+        if (Array.isArray(result)) {
+          result.forEach((row) => this._decryptRow(row, fields));
+        } else if (typeof result === 'object') {
+          this._decryptRow(result, fields);
+        }
+      }
+
+      return result;
+    });
+  }
+
+  private _decryptRow(row: Record<string, unknown>, fields: string[]) {
+    for (const field of fields) {
+      if (row[field] != null) {
+        row[field] = this.encryptionService.decrypt(row[field] as string);
+      }
+    }
   }
 }

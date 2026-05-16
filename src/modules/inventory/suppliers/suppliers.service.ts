@@ -31,6 +31,19 @@ function deserializeSupplier<T extends { tags?: string | null }>(
   return { ...supplier, tags };
 }
 
+function maskTaxId(taxId?: string | null): string | null | undefined {
+  if (!taxId) return taxId;
+  const visible = taxId.replace(/\D/g, '').slice(-4);
+  return visible ? `***-***-${visible}` : '***';
+}
+
+function maskSupplierTaxId<T extends { taxId?: string | null }>(supplier: T): T {
+  return {
+    ...supplier,
+    taxId: maskTaxId(supplier.taxId),
+  };
+}
+
 export interface PaginatedResponse<T> {
   data: T[];
   meta: {
@@ -82,7 +95,7 @@ export class SuppliersService {
     ]);
 
     return {
-      data: data.map(deserializeSupplier),
+      data: data.map((supplier) => maskSupplierTaxId(deserializeSupplier(supplier))),
       meta: {
         page,
         limit,
@@ -124,7 +137,7 @@ export class SuppliersService {
       throw new NotFoundException(`Supplier with ID ${id} not found for tenant ${tenantId}`);
     }
 
-    return deserializeSupplier(supplier);
+    return maskSupplierTaxId(deserializeSupplier(supplier));
   }
 
   async create(dto: CreateSupplierDto, tenantId: string): Promise<Supplier> {
@@ -154,7 +167,7 @@ export class SuppliersService {
         `Created supplier ${supplier.id} (code: ${supplier.code}) for tenant ${tenantId}`,
       );
 
-      return deserializeSupplier(supplier) as unknown as Supplier;
+      return maskSupplierTaxId(deserializeSupplier(supplier)) as unknown as Supplier;
     } catch (error) {
       this.logger.error(`Failed to create supplier for tenant ${tenantId}`, error);
       throw error;
@@ -204,7 +217,7 @@ export class SuppliersService {
 
       this.logger.log(`Updated supplier ${id} for tenant ${tenantId}`);
 
-      return deserializeSupplier(updated) as unknown as Supplier;
+      return maskSupplierTaxId(deserializeSupplier(updated)) as unknown as Supplier;
     } catch (error) {
       this.logger.error(`Failed to update supplier ${id}`, error);
       throw error;

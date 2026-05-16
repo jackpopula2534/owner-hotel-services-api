@@ -110,4 +110,19 @@ export class CreateGuestDto {
   @IsString()
   @MaxLength(2000)
   specialNotes?: string;
+
+  // ── PDPA Consent fields (S1-02) ──────────────────────────
+  @ApiProperty({
+    example: true,
+    description: 'ผู้ใช้ยินยอมตาม PDPA — required สำหรับ create (ไม่ required สำหรับ edit)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  consentGiven?: boolean;
+
+  @ApiPropertyOptional({ example: '1.0', description: 'Version ของ Privacy Policy ที่ยินยอม' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  consentVersion?: string;
 }

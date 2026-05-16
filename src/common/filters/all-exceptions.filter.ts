@@ -18,10 +18,14 @@ import {
   HttpException,
   HttpStatus,
   Logger,
+  Optional,
+  Injectable,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { QueryFailedError, EntityNotFoundError, TypeORMError } from 'typeorm';
+import { I18nService } from '../../i18n/i18n.service';
+import { SupportedLanguage } from '../../i18n/dto/i18n.dto';
 
 /** Shape matching api-design.md */
 interface ErrorBody {
@@ -35,19 +39,37 @@ interface ErrorBody {
   requestId?: string;
 }
 
+@Injectable()
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name);
+
+  // I18nService is optional so the filter still works in unit tests that
+  // construct the filter directly without a Nest container.
+  constructor(@Optional() private readonly i18n?: I18nService) {}
+
+  /**
+   * Look up `key` in the I18nService for the request's locale, falling back to
+   * `defaultMessage` if the service or key is missing.
+   */
+  private t(key: string, lang: SupportedLanguage, defaultMessage: string): string {
+    if (!this.i18n) return defaultMessage;
+    const translated = this.i18n.translate(key, lang);
+    // The I18nService returns the key itself when the translation is missing —
+    // treat that as a miss and fall through to the inline default.
+    return translated && translated !== key ? translated : defaultMessage;
+  }
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
     const requestId = (request as any)['requestId'] as string | undefined;
+    const language = (request.language as SupportedLanguage) ?? SupportedLanguage.TH;
 
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let code = 'INTERNAL_SERVER_ERROR';
-    let message = 'Internal server error';
+    let message = this.t('errors.http.INTERNAL_SERVER_ERROR', language, 'Internal server error');
 
     // ─── NestJS / HTTP ────────────────────────────────────────────────────
     if (exception instanceof HttpException) {
@@ -55,15 +77,19 @@ export class AllExceptionsFilter implements ExceptionFilter {
       const body = exception.getResponse();
 
       if (typeof body === 'string') {
-        message = body;
+        // String body — translate when it's a known status code, otherwise pass through
         code = this.statusToCode(status);
+        message = this.t(`errors.http.${code}`, language, body);
       } else {
         const b = body as Record<string, any>;
         if (Array.isArray(b.message)) {
-          // class-validator returns array of validation messages — join & translate
-          message = this.translateValidationMessages(b.message);
+          // class-validator returns array of validation messages — translate per-line
+          message = this.translateValidationMessages(b.message, language);
+        } else if (b.message) {
+          message = b.message;
         } else {
-          message = b.message ?? exception.message;
+          code = this.statusToCode(status);
+          message = this.t(`errors.http.${code}`, language, exception.message);
         }
         code = b.error
           ? String(b.error).toUpperCase().replace(/\s+/g, '_')
@@ -98,12 +124,15 @@ export class AllExceptionsFilter implements ExceptionFilter {
         );
         status = HttpStatus.SERVICE_UNAVAILABLE;
         code = `SCHEMA_NOT_READY`;
-        message =
-          'ตารางข้อมูลยังไม่พร้อม กรุณา run migration ก่อนใช้งาน (Database table not found — please run prisma migrate)';
+        message = this.t(
+          'errors.prisma.SCHEMA_NOT_READY',
+          language,
+          'Database table not found — please run prisma migrate',
+        );
       } else {
         status = this.prismaStatus(exception.code);
         code = `PRISMA_${exception.code}`;
-        message = this.getPrismaMessage(exception);
+        message = this.getPrismaMessage(exception, language);
         this.logger.error(`Prisma ${exception.code}: ${exception.message}`, undefined, requestId);
       }
 
@@ -147,14 +176,14 @@ export class AllExceptionsFilter implements ExceptionFilter {
     } else if (exception instanceof EntityNotFoundError) {
       status = HttpStatus.NOT_FOUND;
       code = 'RECORD_NOT_FOUND';
-      message = 'ไม่พบข้อมูลที่ต้องการ (Record not found)';
+      message = this.t('errors.prisma.P2025', language, 'Record not found');
       this.logger.warn(`TypeORM EntityNotFound: ${exception.message}`, requestId);
 
       // ─── TypeORM base (connection lost, etc.) ────────────────────────────
     } else if (exception instanceof TypeORMError) {
       status = HttpStatus.INTERNAL_SERVER_ERROR;
       code = 'DATABASE_ERROR';
-      message = 'เกิดข้อผิดพลาดในการเชื่อมต่อฐานข้อมูล (Database error)';
+      message = this.t('errors.serverError', language, 'Database error');
       this.logger.error(`TypeORMError: ${(exception as Error).stack}`, undefined, requestId);
 
       // ─── Generic / unknown ────────────────────────────────────────────────
@@ -180,7 +209,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
    * Translate class-validator English messages to user-friendly Thai/English.
    * Keeps custom Thai messages (from DTO decorators) as-is.
    */
-  private translateValidationMessages(messages: string[]): string {
+  private translateValidationMessages(messages: string[], language: SupportedLanguage): string {
     const translations: Record<string, string> = {
       'page must be a number string': 'page ต้องเป็นตัวเลข (เช่น 1, 2, 3)',
       'limit must be a number string': 'limit ต้องเป็นตัวเลข (เช่น 10, 20, 50)',
@@ -194,7 +223,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const translated = messages.map((msg) => {
       // If the message is already in Thai (contains Thai chars) — keep as-is
       if (/[\u0E00-\u0E7F]/.test(msg)) return msg;
-      return translations[msg.toLowerCase()] ?? msg;
+      const lower = msg.toLowerCase();
+      return this.t(`errors.validation.${lower}`, language, translations[lower] ?? msg);
     });
 
     return translated.join(', ');
@@ -225,7 +255,10 @@ export class AllExceptionsFilter implements ExceptionFilter {
     return map[code] ?? HttpStatus.BAD_REQUEST;
   }
 
-  private getPrismaMessage(exception: Prisma.PrismaClientKnownRequestError): string {
+  private getPrismaMessage(
+    exception: Prisma.PrismaClientKnownRequestError,
+    language: SupportedLanguage,
+  ): string {
     switch (exception.code) {
       case 'P2002': {
         // MySQL returns meta.target as a string (constraint name e.g. "employees_employeeCode_key")
@@ -236,14 +269,27 @@ export class AllExceptionsFilter implements ExceptionFilter {
           : typeof rawTarget === 'string'
             ? rawTarget
             : 'field';
-        return `ข้อมูลนี้มีอยู่ในระบบแล้ว (${target} already exists)`;
+        const base = this.t(
+          'errors.prisma.P2002',
+          language,
+          'This record already exists',
+        );
+        return `${base} (${target})`;
       }
       case 'P2025':
-        return 'ไม่พบข้อมูลที่ต้องการ (Record not found)';
+        return this.t('errors.prisma.P2025', language, 'Record not found');
       case 'P2003':
-        return 'ไม่สามารถดำเนินการได้เนื่องจากสัมพันธ์กับข้อมูลอื่น (Foreign key constraint failed)';
+        return this.t(
+          'errors.prisma.P2003',
+          language,
+          'Foreign key constraint failed',
+        );
       default:
-        return `เกิดข้อผิดพลาดในการจัดการฐานข้อมูล (${exception.code})`;
+        return this.t(
+          'errors.generic',
+          language,
+          `Database error (${exception.code})`,
+        );
     }
   }
 

@@ -1,7 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { getQueueToken } from '@nestjs/bull';
 import { DataExportService } from './data-export.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { DATA_EXPORT_QUEUE } from './data-export.processor';
 
 describe('DataExportService', () => {
   let service: DataExportService;
@@ -34,6 +36,10 @@ describe('DataExportService', () => {
               update: mockUpdate,
             },
           },
+        },
+        {
+          provide: getQueueToken(DATA_EXPORT_QUEUE),
+          useValue: { add: jest.fn().mockResolvedValue({ id: 'job-1' }) },
         },
       ],
     }).compile();

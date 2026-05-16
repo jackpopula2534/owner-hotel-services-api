@@ -33,6 +33,9 @@ export class GuestsService {
     'vipLevel',
     'vehiclePlateNumber',
     'specialNotes',
+    // PDPA consent fields (S1-02)
+    'consentGiven',
+    'consentVersion',
   ] as const;
 
   /** Pick only writable fields from a DTO and drop undefined values. */
@@ -144,8 +147,14 @@ export class GuestsService {
     // keys from leaking into Prisma when this service is called from internal
     // code that bypasses the ValidationPipe whitelist. firstName/lastName are
     // guaranteed by CreateGuestDto's @IsNotEmpty validators.
+    // PDPA: บันทึก consent timestamp และ IP (S1-02)
+    const consentData = createGuestDto.consentGiven
+      ? { consentGiven: true, consentAt: new Date(), consentVersion: createGuestDto.consentVersion ?? '1.0' }
+      : {};
+
     const data = {
       ...this.sanitize(createGuestDto),
+      ...consentData,
       tenantId,
     } as Parameters<PrismaService['guest']['create']>[0]['data'];
 

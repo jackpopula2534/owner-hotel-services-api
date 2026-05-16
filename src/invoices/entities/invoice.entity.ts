@@ -50,6 +50,9 @@ export class Invoice {
   })
   status: InvoiceStatus;
 
+  @Column({ name: 'booking_id', length: 36, nullable: true })
+  bookingId: string;
+
   @Column({ name: 'due_date', type: 'date' })
   dueDate: Date;
 

@@ -120,6 +120,13 @@ model Guest {
   vehiclePlateNumber String?
   vipLevel           String?
   specialNotes       String?   @db.Text
+  // ── PDPA Consent (S1-02) ──────────────────────────────────
+  consentGiven       Boolean   @default(false)
+  consentAt          DateTime?
+  consentVersion     String?   @db.VarChar(20)
+  consentIpAddress   String?   @db.VarChar(45)
+  // ── Right to Erasure (S2-02) ─────────────────────────────
+  anonymizedAt       DateTime?
   bookings           Booking[]
 
   @@index([tenantId])
@@ -639,6 +646,13 @@ model Employee {
   bankName          String?
   notes             String?          @db.Text
   initialSalary     Decimal?         @db.Decimal(12, 2)
+  // ── PDPA Consent (S1-03) ──────────────────────────────────
+  consentGiven      Boolean          @default(false)
+  consentAt         DateTime?
+  consentVersion    String?          @db.VarChar(20)
+  consentIpAddress  String?          @db.VarChar(45)
+  // ── Right to Erasure (S2-02) ─────────────────────────────
+  anonymizedAt      DateTime?
   hrDepartment      HrDepartment?    @relation(fields: [departmentId], references: [id])
   hrPosition        HrPosition?      @relation(fields: [positionId], references: [id])
   property          Property?        @relation(fields: [propertyId], references: [id])
@@ -1452,6 +1466,24 @@ model OnboardingStep {
   @@unique([tenantId, stepKey])
   @@index([tenantId])
   @@map("onboarding_steps")
+}
+
+model DpaAcceptance {
+  id         String   @id @default(uuid()) @db.VarChar(36)
+  tenantId   String   @db.VarChar(36)
+  userId     String   @db.VarChar(36)
+  version    String   @db.VarChar(20)
+  title      String   @db.VarChar(255)
+  ipAddress  String?  @db.VarChar(45)
+  userAgent  String?  @db.Text
+  acceptedAt DateTime @default(now()) @db.DateTime(6)
+  createdAt  DateTime @default(now()) @db.DateTime(6)
+  updatedAt  DateTime @default(now()) @updatedAt @db.DateTime(6)
+
+  @@unique([tenantId, version])
+  @@index([tenantId])
+  @@index([userId])
+  @@map("dpa_acceptances")
 }
 
 model LoyaltyPoint {

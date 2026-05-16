@@ -20,6 +20,10 @@ describe('OnboardingService', () => {
       create: jest.fn(),
       update: jest.fn(),
     },
+    dpaAcceptance: {
+      findFirst: jest.fn(),
+      upsert: jest.fn(),
+    },
   };
 
   const mockTenantsService = {
@@ -40,6 +44,10 @@ describe('OnboardingService', () => {
       findMany: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+    },
+    dpaAcceptance: {
+      findFirst: jest.fn(),
+      upsert: jest.fn(),
     },
     plans: {
       create: jest.fn(),
@@ -146,55 +154,29 @@ describe('OnboardingService', () => {
       expect(result.subscription).toEqual(mockSubscription);
       expect(result.message).toContain('14 days');
       expect(tenantsService.create).toHaveBeenCalled();
-      expect(plansService.findByCode).toHaveBeenCalledWith('TRIAL');
+      expect(plansService.findByCode).toHaveBeenCalledWith('FREE');
       expect(subscriptionsService.create).toHaveBeenCalled();
     });
 
-    it('should create default trial plan if not found', async () => {
+    it('should throw when free trial plan is not found', async () => {
       const mockTenant = {
         id: 'tenant-1',
         name: 'Test Hotel',
         status: TenantStatus.TRIAL,
       };
 
-      const mockCreatedPlan = {
-        id: 'trial-plan-' + Date.now(),
-        code: 'TRIAL',
-        name: 'Free Trial (Full Access)',
-      };
-
-      const mockSubscription = {
-        id: 'sub-1',
-        tenantId: 'tenant-1',
-        planId: mockCreatedPlan.id,
-        status: SubscriptionStatus.TRIAL,
-      };
-
-      const mockProperty = {
-        id: 'prop-1',
-        tenantId: 'tenant-1',
-        name: 'Test Hotel',
-        code: 'TST0001',
-        isDefault: true,
-      };
-
       mockTenantsService.create.mockResolvedValue(mockTenant);
       mockPlansService.findByCode.mockResolvedValue(null);
-      mockPrismaServiceForOnboarding.plans.create.mockResolvedValue(mockCreatedPlan);
-      mockSubscriptionsService.create.mockResolvedValue(mockSubscription);
-      mockPrismaServiceForOnboarding.features.findMany.mockResolvedValue([]);
-      mockPrismaServiceForOnboarding.property.create.mockResolvedValue(mockProperty);
 
-      const result = await service.registerHotel(
+      await expect(service.registerHotel(
         {
           name: 'Test Hotel',
         },
         14,
-      );
+      )).rejects.toThrow('Free Trial plan (code: FREE) not found');
 
-      expect(result.tenant).toEqual(mockTenant);
-      expect(mockPrismaServiceForOnboarding.plans.create).toHaveBeenCalled();
-      expect(subscriptionsService.create).toHaveBeenCalled();
+      expect(mockPrismaServiceForOnboarding.plans.create).not.toHaveBeenCalled();
+      expect(subscriptionsService.create).not.toHaveBeenCalled();
     });
   });
 
@@ -317,6 +299,79 @@ describe('OnboardingService', () => {
 
       expect(result.isCompleted).toBe(false);
       expect(result.completedAt).toBeNull();
+    });
+  });
+
+  describe('DPA acceptance', () => {
+    it('should return accepted DPA status', async () => {
+      const acceptedAt = new Date('2026-05-14T00:00:00.000Z');
+      mockPrismaServiceForOnboarding.dpaAcceptance.findFirst.mockResolvedValue({
+        tenantId: 'tenant-1',
+        version: '1.0',
+        acceptedAt,
+      });
+
+      const result = await service.getDpaStatus('tenant-1');
+
+      expect(result).toEqual({
+        accepted: true,
+        version: '1.0',
+        acceptedAt,
+      });
+      expect(mockPrismaServiceForOnboarding.dpaAcceptance.findFirst).toHaveBeenCalledWith({
+        where: { tenantId: 'tenant-1' },
+        orderBy: { acceptedAt: 'desc' },
+      });
+    });
+
+    it('should accept DPA for tenant and user', async () => {
+      const acceptedAt = new Date('2026-05-14T00:00:00.000Z');
+      mockPrismaServiceForOnboarding.dpaAcceptance.upsert.mockResolvedValue({
+        id: 'dpa-1',
+        tenantId: 'tenant-1',
+        userId: 'user-1',
+        version: '1.0',
+        title: 'StaySync Data Processing Agreement',
+        acceptedAt,
+      });
+
+      const result = await service.acceptDpa('tenant-1', 'user-1', {
+        accepted: true,
+        version: '1.0',
+      });
+
+      expect(result.id).toBe('dpa-1');
+      expect(mockPrismaServiceForOnboarding.dpaAcceptance.upsert).toHaveBeenCalledWith({
+        where: {
+          tenantId_version: {
+            tenantId: 'tenant-1',
+            version: '1.0',
+          },
+        },
+        create: {
+          tenantId: 'tenant-1',
+          userId: 'user-1',
+          version: '1.0',
+          title: 'StaySync Data Processing Agreement',
+          ipAddress: undefined,
+          userAgent: undefined,
+          acceptedAt: expect.any(Date),
+        },
+        update: {
+          userId: 'user-1',
+          title: 'StaySync Data Processing Agreement',
+          ipAddress: undefined,
+          userAgent: undefined,
+          acceptedAt: expect.any(Date),
+        },
+      });
+    });
+
+    it('should reject DPA acceptance when checkbox is false', async () => {
+      await expect(service.acceptDpa('tenant-1', 'user-1', {
+        accepted: false,
+        version: '1.0',
+      })).rejects.toThrow('DPA must be accepted before continuing onboarding');
     });
   });
 });

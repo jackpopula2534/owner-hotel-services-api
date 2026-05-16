@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantsService } from '../tenants/tenants.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
@@ -6,6 +6,7 @@ import { PlansService } from '../plans/plans.service';
 import { CreateTenantDto } from '../tenants/dto/create-tenant.dto';
 import { TenantStatus } from '../tenants/entities/tenant.entity';
 import { SubscriptionStatus } from '../subscriptions/entities/subscription.entity';
+import { AcceptDpaDto } from './dto/accept-dpa.dto';
 
 export interface OnboardingResult {
   tenant: any;
@@ -13,6 +14,12 @@ export interface OnboardingResult {
   trialEndsAt: Date;
   message: string;
   property: any;
+}
+
+export interface DpaStatusResult {
+  accepted: boolean;
+  version: string | null;
+  acceptedAt: Date | null;
 }
 
 @Injectable()
@@ -192,6 +199,69 @@ export class OnboardingService {
       data: {
         isCompleted,
         completedAt: isCompleted ? new Date() : null,
+      },
+    });
+  }
+
+  async getDpaStatus(tenantId?: string): Promise<DpaStatusResult> {
+    if (!tenantId) {
+      return {
+        accepted: false,
+        version: null,
+        acceptedAt: null,
+      };
+    }
+
+    const acceptance = await this.prisma.dpaAcceptance.findFirst({
+      where: { tenantId },
+      orderBy: { acceptedAt: 'desc' },
+    });
+
+    return {
+      accepted: Boolean(acceptance),
+      version: acceptance?.version ?? null,
+      acceptedAt: acceptance?.acceptedAt ?? null,
+    };
+  }
+
+  async acceptDpa(
+    tenantId: string | undefined,
+    userId: string | undefined,
+    dto: AcceptDpaDto,
+    audit?: { ipAddress?: string; userAgent?: string },
+  ) {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required to accept the DPA');
+    }
+    if (!userId) {
+      throw new BadRequestException('User ID is required to accept the DPA');
+    }
+    if (!dto.accepted) {
+      throw new BadRequestException('DPA must be accepted before continuing onboarding');
+    }
+
+    return this.prisma.dpaAcceptance.upsert({
+      where: {
+        tenantId_version: {
+          tenantId,
+          version: dto.version,
+        },
+      },
+      create: {
+        tenantId,
+        userId,
+        version: dto.version,
+        title: dto.title ?? 'StaySync Data Processing Agreement',
+        ipAddress: audit?.ipAddress,
+        userAgent: audit?.userAgent,
+        acceptedAt: new Date(),
+      },
+      update: {
+        userId,
+        title: dto.title ?? 'StaySync Data Processing Agreement',
+        ipAddress: audit?.ipAddress,
+        userAgent: audit?.userAgent,
+        acceptedAt: new Date(),
       },
     });
   }

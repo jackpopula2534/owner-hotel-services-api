@@ -76,7 +76,7 @@ export class OrderPublicController {
   @Throttle({ default: { limit: 10, ttl: 60 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: '[Public] Lookup guest by name or nationalId (QR ordering)',
+    summary: '[Public] Lookup guest by name only (QR ordering)',
   })
   @ApiParam({ name: 'restaurantId' })
   @ApiBody({ type: GuestLookupDto })

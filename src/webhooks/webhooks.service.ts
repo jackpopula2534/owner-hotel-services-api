@@ -64,6 +64,14 @@ export class WebhooksService {
           error_message: verified ? null : 'Signature verification failed',
         },
       });
+      await this.recordThirdPartyAudit({
+        provider: input.provider,
+        action: 'payment_webhook_ingested',
+        eventType: input.eventType,
+        status: verified ? 'received' : 'failed',
+        eventId: created.id,
+        tenantId: typeof input.payload.tenantId === 'string' ? input.payload.tenantId : undefined,
+      });
 
       if (!verified) {
         this.logger.warn(
@@ -114,5 +122,35 @@ export class WebhooksService {
       return false;
     }
     return verifyHmacSha256(input.rawBody, input.signature, secret);
+  }
+
+  private async recordThirdPartyAudit(input: {
+    provider: string;
+    action: string;
+    eventType?: string;
+    status: string;
+    eventId?: string;
+    tenantId?: string;
+  }): Promise<void> {
+    try {
+      await this.prisma.analyticsEvent.create({
+        data: {
+          tenantId: input.tenantId,
+          eventName: `third_party_dpa.${input.action}`,
+          metadata: {
+            provider: input.provider,
+            eventType: input.eventType,
+            status: input.status,
+            eventId: input.eventId,
+          },
+        },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Failed to record third-party DPA audit: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 }

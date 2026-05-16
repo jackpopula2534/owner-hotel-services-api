@@ -612,6 +612,11 @@ export class OrderService {
     matched: boolean;
     guest?: { id: string; firstName: string; lastName: string; isVip: boolean };
   }> {
+    const normalizedQuery = query.trim();
+    if (normalizedQuery.length < 2) {
+      throw new BadRequestException('Guest lookup requires at least 2 characters');
+    }
+
     const restaurant = await this.prisma.restaurant.findFirst({
       where: { id: restaurantId },
     });
@@ -626,9 +631,8 @@ export class OrderService {
       where: {
         tenantId,
         OR: [
-          { firstName: { contains: query } },
-          { lastName: { contains: query } },
-          { nationalId: { contains: query } },
+          { firstName: { contains: normalizedQuery } },
+          { lastName: { contains: normalizedQuery } },
         ],
       },
       select: {
