@@ -84,6 +84,9 @@ import { CostAccountingModule } from './modules/cost-accounting/cost-accounting.
 import { DocumentSettingsModule } from './modules/document-settings/document-settings.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { DataRetentionModule } from './common/data-retention.module';
+import { TenantModule } from './common/tenant/tenant.module';
+import { TenantContextMiddleware } from './common/tenant/tenant-context.middleware';
+import { TenantGuard } from './common/guards/tenant.guard';
 
 @Module({
   imports: [
@@ -98,6 +101,7 @@ import { DataRetentionModule } from './common/data-retention.module';
       maxListeners: 20,
       verboseMemoryLeak: true,
     }),
+    TenantModule, // ← global tenant context — must load before PrismaModule
     PrismaModule,
     AuthModule,
     GuestsModule,
@@ -188,6 +192,17 @@ import { DataRetentionModule } from './common/data-retention.module';
       useClass: ThrottlerGuard,
     },
     {
+      // W2.1 — TenantGuard registered GLOBALLY so cross-tenant URL-param
+      // attempts are blocked on every controller automatically. Defence in
+      // depth on top of the Prisma `$use` tenant-scope middleware
+      // (which patches `where` clauses on every query).
+      //
+      // The guard skips routes annotated with @Public and is a no-op for
+      // platform-admin roles — see TenantGuard for details.
+      provide: APP_GUARD,
+      useClass: TenantGuard,
+    },
+    {
       provide: APP_GUARD,
       useClass: SubscriptionGuard,
     },
@@ -205,6 +220,12 @@ export class AppModule implements NestModule {
    * resolved before guards/filters run.
    */
   configure(consumer: MiddlewareConsumer): void {
-    consumer.apply(LanguageMiddleware).forRoutes('*');
+    // Order matters: TenantContextMiddleware must run before the JWT guard
+    // so that the AsyncLocalStorage frame exists when the guard decodes the
+    // token. Express runs middleware in registration order — register the
+    // tenant context first.
+    consumer
+      .apply(TenantContextMiddleware, LanguageMiddleware)
+      .forRoutes('*');
   }
 }

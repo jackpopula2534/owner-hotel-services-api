@@ -1,6 +1,8 @@
 import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { EncryptionService } from '../common/services/encryption.service';
+import { TenantContextService } from '../common/tenant/tenant-context.service';
+import { createTenantScopeMiddleware } from '../common/tenant/tenant-scope.middleware';
 
 /**
  * PrismaService wraps PrismaClient.
@@ -29,9 +31,33 @@ const SENSITIVE_FIELDS: Record<string, string[]> = {
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PrismaService.name);
 
-  constructor(private readonly encryptionService: EncryptionService) {
+  /**
+   * Middleware registration order matters:
+   *   1. Tenant scope FIRST — patches `where` / `data` with tenantId before
+   *      any other middleware sees the args. This ensures encryption,
+   *      validation, audit logging all operate on a tenant-correct payload.
+   *   2. Encryption SECOND — encrypts/decrypts PDPA-sensitive fields after
+   *      the tenant filter is in place.
+   *
+   * @param encryptionService - PDPA AES-256-GCM encryptor
+   * @param tenantContext - AsyncLocalStorage-backed current-tenant accessor
+   */
+  constructor(
+    private readonly encryptionService: EncryptionService,
+    private readonly tenantContext: TenantContextService,
+  ) {
     super();
+    this._registerTenantScopeMiddleware();
     this._registerEncryptionMiddleware();
+  }
+
+  /**
+   * Auto-inject `tenantId` into every query on tenant-scoped models.
+   * Implementation lives in `common/tenant/tenant-scope.middleware.ts`
+   * so the logic can be unit-tested in isolation.
+   */
+  private _registerTenantScopeMiddleware(): void {
+    this.$use(createTenantScopeMiddleware(this.tenantContext));
   }
 
   async onModuleInit() {
