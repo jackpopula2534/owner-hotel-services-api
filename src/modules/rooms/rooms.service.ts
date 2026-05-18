@@ -175,6 +175,29 @@ export class RoomsService {
       this.logger.log(`Falling back to property ${resolvedPropertyId}`);
     }
 
+    // Check room limit against subscription plan
+    const subscription = await this.prisma.subscriptions.findFirst({
+      where: {
+        tenant_id: tenantId,
+        status: { in: ['active', 'trial'] },
+      },
+      include: {
+        plans_subscriptions_plan_idToplans: true,
+      },
+    });
+
+    if (subscription) {
+      const plan = subscription.plans_subscriptions_plan_idToplans;
+      if (plan && plan.max_rooms > 0) {
+        const currentRoomCount = await this.prisma.room.count({ where: { tenantId } });
+        if (currentRoomCount >= plan.max_rooms) {
+          throw new BadRequestException(
+            `ถึงขีดจำกัดจำนวนห้องของแพ็กเกจแล้ว (${plan.max_rooms} ห้อง สำหรับ Plan ${plan.code}) — กรุณาอัปเกรดแพ็กเกจเพื่อเพิ่มห้องพักได้มากขึ้น`,
+          );
+        }
+      }
+    }
+
     // Check for duplicate room number within property
     const existingRoom = await this.prisma.room.findFirst({
       where: {
