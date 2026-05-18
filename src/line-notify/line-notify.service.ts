@@ -1,7 +1,6 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
-import { httpClient } from '@internal/http-client';
 import {
   LineNotifyEventType,
   SendLineNotifyDto,
@@ -32,6 +31,39 @@ export class LineNotifyService {
     this.callbackUrl = this.configService.get<string>('LINE_NOTIFY_CALLBACK_URL', '');
   }
 
+  // ── Internal HTTP helpers (uses Node 20 built-in fetch, enforces HTTPS) ────
+
+  private async fetchPost<T = unknown>(
+    url: string,
+    body: string,
+    headers: Record<string, string>,
+  ): Promise<T> {
+    if (!url.startsWith('https://')) {
+      throw new Error(`HTTPS required — blocked non-HTTPS URL: ${url}`);
+    }
+    const res = await fetch(url, { method: 'POST', body, headers });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    }
+    return res.json() as Promise<T>;
+  }
+
+  private async fetchGet<T = unknown>(
+    url: string,
+    headers: Record<string, string>,
+  ): Promise<T> {
+    if (!url.startsWith('https://')) {
+      throw new Error(`HTTPS required — blocked non-HTTPS URL: ${url}`);
+    }
+    const res = await fetch(url, { method: 'GET', headers });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    }
+    return res.json() as Promise<T>;
+  }
+
+  // ────────────────────────────────────────────────────────────────────────────
+
   /**
    * Generate OAuth authorization URL
    */
@@ -60,18 +92,11 @@ export class LineNotifyService {
         client_secret: this.clientSecret,
       });
 
-      const response = await httpClient.post<LineNotifyTokenResponseDto>(
+      return await this.fetchPost<LineNotifyTokenResponseDto>(
         this.tokenUrl,
         params.toString(),
-        {
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-          enforceHttps: true,
-        },
+        { 'Content-Type': 'application/x-www-form-urlencoded' },
       );
-
-      return response.data;
     } catch (error) {
       this.logger.error(`Failed to exchange code for token: ${error.message}`);
       throw new BadRequestException('Failed to connect Line Notify');
@@ -83,13 +108,9 @@ export class LineNotifyService {
    */
   async getTokenStatus(accessToken: string): Promise<LineNotifyStatusResponseDto> {
     try {
-      const response = await httpClient.get<LineNotifyStatusResponseDto>(this.statusUrl, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-        enforceHttps: true,
+      return await this.fetchGet<LineNotifyStatusResponseDto>(this.statusUrl, {
+        Authorization: `Bearer ${accessToken}`,
       });
-      return response.data;
     } catch (error) {
       this.logger.error(`Failed to get token status: ${error.message}`);
       throw new BadRequestException('Invalid or expired token');
@@ -203,12 +224,11 @@ export class LineNotifyService {
     if (token) {
       // Revoke token on Line side
       try {
-        await httpClient.post(this.revokeUrl, null, {
-          headers: {
-            Authorization: `Bearer ${token.accessToken}`,
-          },
-          enforceHttps: true,
-        });
+        await this.fetchPost(
+          this.revokeUrl,
+          '',
+          { Authorization: `Bearer ${token.accessToken}` },
+        );
       } catch (error) {
         this.logger.warn(`Failed to revoke Line Notify token: ${error.message}`);
       }
@@ -329,12 +349,9 @@ export class LineNotifyService {
         params.append('stickerId', dto.stickerId);
       }
 
-      await httpClient.post(this.notifyApiUrl, params.toString(), {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          Authorization: `Bearer ${accessToken}`,
-        },
-        enforceHttps: true,
+      await this.fetchPost(this.notifyApiUrl, params.toString(), {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: `Bearer ${accessToken}`,
       });
 
       return true;

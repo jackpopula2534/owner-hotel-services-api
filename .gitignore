@@ -52,5 +52,6 @@ uploads/rooms/*.heif
 .env
 .env.local
 .env.*.local
+.env.backup*
 
 
