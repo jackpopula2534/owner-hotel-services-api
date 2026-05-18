@@ -82,18 +82,46 @@ export class AllExceptionsFilter implements ExceptionFilter {
         message = this.t(`errors.http.${code}`, language, body);
       } else {
         const b = body as Record<string, any>;
+
+        // ─── Structured error envelope from helper factories ────────────────
+        // Services can throw HttpException whose body is a plain object with
+        // { code, messageKey, message, details? } — see modules/auth/auth-errors.ts
+        // for the canonical pattern. We honour the `code` directly (stable
+        // contract for the frontend) and look up `messageKey` via i18n so the
+        // response is localised per Accept-Language header.
+        const hasStructuredCode = typeof b.code === 'string' && b.code.length > 0;
+        const hasMessageKey = typeof b.messageKey === 'string' && b.messageKey.length > 0;
+
+        if (hasStructuredCode) {
+          code = b.code as string;
+        }
+
         if (Array.isArray(b.message)) {
           // class-validator returns array of validation messages — translate per-line
           message = this.translateValidationMessages(b.message, language);
+          if (!hasStructuredCode) {
+            code = b.error
+              ? String(b.error).toUpperCase().replace(/\s+/g, '_')
+              : this.statusToCode(status);
+          }
+        } else if (hasMessageKey) {
+          // Prefer the i18n key — falls back to the supplied English `message`
+          // if the translation file doesn't contain it yet.
+          const fallback = typeof b.message === 'string' ? b.message : exception.message;
+          message = this.t(b.messageKey as string, language, fallback);
         } else if (b.message) {
           message = b.message;
+          if (!hasStructuredCode) {
+            code = b.error
+              ? String(b.error).toUpperCase().replace(/\s+/g, '_')
+              : this.statusToCode(status);
+          }
         } else {
-          code = this.statusToCode(status);
+          if (!hasStructuredCode) {
+            code = this.statusToCode(status);
+          }
           message = this.t(`errors.http.${code}`, language, exception.message);
         }
-        code = b.error
-          ? String(b.error).toUpperCase().replace(/\s+/g, '_')
-          : this.statusToCode(status);
       }
 
       // ─── Prisma known errors ──────────────────────────────────────────────

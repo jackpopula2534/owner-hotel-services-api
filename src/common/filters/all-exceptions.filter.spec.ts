@@ -115,4 +115,63 @@ describe('AllExceptionsFilter i18n behaviour', () => {
     expect(body.error.message).toBe('Forbidden');
     expect(body.error.code).toBe('FORBIDDEN');
   });
+
+  // ── Structured envelope from helper factories (e.g. AuthErrors) ──────────
+  // The filter must honour the `code` set by the service and look up the
+  // i18n key in `messageKey` for the request's language.
+  it('honours { code, messageKey, message } envelopes and translates messageKey', () => {
+    const i18n = makeI18n({
+      th: { 'auth.invalidCredentials': 'อีเมลหรือรหัสผ่านไม่ถูกต้อง' },
+      en: { 'auth.invalidCredentials': 'Invalid email or password' },
+    });
+    const filter = new AllExceptionsFilter(i18n);
+    const { host, response } = makeHost({
+      url: '/api/v1/auth/login',
+      language: SupportedLanguage.TH,
+    });
+
+    filter.catch(
+      new HttpException(
+        {
+          code: 'AUTH_INVALID_CREDENTIALS',
+          messageKey: 'auth.invalidCredentials',
+          message: 'Invalid email or password',
+        },
+        HttpStatus.UNAUTHORIZED,
+      ),
+      host,
+    );
+
+    const body = (response.json as jest.Mock).mock.calls[0][0];
+    expect(body.error.code).toBe('AUTH_INVALID_CREDENTIALS');
+    expect(body.error.message).toBe('อีเมลหรือรหัสผ่านไม่ถูกต้อง');
+  });
+
+  it('serves English when Accept-Language=en for structured envelopes', () => {
+    const i18n = makeI18n({
+      th: { 'auth.emailAlreadyExists': 'อีเมลนี้มีผู้ใช้งานแล้ว' },
+      en: { 'auth.emailAlreadyExists': 'This email is already in use' },
+    });
+    const filter = new AllExceptionsFilter(i18n);
+    const { host, response } = makeHost({
+      url: '/api/v1/auth/register',
+      language: SupportedLanguage.EN,
+    });
+
+    filter.catch(
+      new HttpException(
+        {
+          code: 'AUTH_EMAIL_ALREADY_EXISTS',
+          messageKey: 'auth.emailAlreadyExists',
+          message: 'This email is already in use',
+        },
+        HttpStatus.CONFLICT,
+      ),
+      host,
+    );
+
+    const body = (response.json as jest.Mock).mock.calls[0][0];
+    expect(body.error.code).toBe('AUTH_EMAIL_ALREADY_EXISTS');
+    expect(body.error.message).toBe('This email is already in use');
+  });
 });

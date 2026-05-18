@@ -1,0 +1,90 @@
+# ┌──────────────────────────────────────────────────────────────────────────┐
+# │  StaySync — Gitleaks Secret Scanning Configuration                       │
+# │                                                                          │
+# │  Used by:                                                                │
+# │    • CI: .github/workflows/ci.yml (security job)                         │
+# │    • Local: scripts/install-gitleaks-hook.sh                             │
+# │                                                                          │
+# │  Run locally: gitleaks detect --no-banner --redact                       │
+# │  Run on staged changes only: gitleaks protect --staged --no-banner       │
+# └──────────────────────────────────────────────────────────────────────────┘
+
+title = "StaySync Secret Scanning"
+
+# Pull in upstream defaults (AWS, GCP, GitHub, Stripe, etc.) and extend with
+# our own rules. Without this we'd have to redefine ~120 stock rules ourselves.
+[extend]
+useDefault = true
+
+# ── Project-specific rules ────────────────────────────────────────────────
+
+[[rules]]
+id = "staysync-jwt-secret-leaked-2026-05-17"
+description = "The specific JWT_SECRET that leaked via .env.example before rotation (2026-05-17). Must never appear in any commit again."
+regex = '''952b9e6b192d670b3ca46913f6bd825a614dcf5a5f1ccb1b40215359f726d250b2e92d5602086296b3e11d4d08274dcb12978379c9b3c7e8ecc196cf43f82448'''
+tags = ["jwt", "leaked", "rotated"]
+
+[[rules]]
+id = "staysync-jwt-secret-pattern"
+description = "Any 128-char hex string assigned to JWT_SECRET — these must live in .env, not in code or tracked files."
+regex = '''(?i)JWT_SECRET\s*[:=]\s*['"]?[0-9a-f]{64,256}['"]?'''
+# Allow placeholder values in .env.example only
+[rules.allowlist]
+description = "Allow placeholder values inside .env.example"
+paths = ['''\.env\.example$''']
+regexes = ['''__GENERATE_WITH__|__REPLACE_|<.*>''']
+
+[[rules]]
+id = "staysync-encryption-key-pattern"
+description = "ENCRYPTION_KEY (PDPA AES-256-GCM key) assigned to a 64-hex value."
+regex = '''(?i)ENCRYPTION_KEY\s*[:=]\s*['"]?[0-9a-f]{64}['"]?'''
+[rules.allowlist]
+paths = ['''\.env\.example$''']
+regexes = ['''__GENERATE_WITH__|__REPLACE_|replace_with_''']
+
+[[rules]]
+id = "staysync-pem-private-key"
+description = "PEM-encoded private key block — Firebase service account, RSA, etc."
+regex = '''-----BEGIN (RSA |EC |DSA |OPENSSH |)PRIVATE KEY-----'''
+# Allow the placeholder string in .env.example
+[rules.allowlist]
+paths = ['''\.env\.example$''']
+
+[[rules]]
+id = "staysync-firebase-private-key-content"
+description = "Firebase service-account private key signature — matches the body of the PEM, not just the header."
+regex = '''(?i)FIREBASE_PRIVATE_KEY\s*[:=].*MII[A-Za-z0-9+/=\\n]{200,}'''
+[rules.allowlist]
+paths = ['''\.env\.example$''']
+regexes = ['''__REPLACE_''']
+
+# ── Global allowlist ──────────────────────────────────────────────────────
+# Things gitleaks should ignore globally
+[allowlist]
+description = "Project-wide allowlist for known-safe paths and patterns."
+
+# Skip these paths entirely — they intentionally contain example/test data
+paths = [
+  '''node_modules''',
+  '''dist''',
+  '''coverage''',
+  '''\.git/''',
+  # Generated Prisma client
+  '''node_modules/@prisma/client''',
+  # Audit/incident docs reference the LEAKED value as an example of what to
+  # detect — those mentions are intentional, not real secrets
+  '''GO_LIVE_PLAN\.md$''',
+  '''src/config/env\.validation\.ts$''',
+  '''src/config/env\.validation\.spec\.ts$''',
+  '''\.gitleaks\.toml$''',
+]
+
+# Skip these stopword patterns that frequently false-positive
+regexes = [
+  '''example\.com''',
+  '''localhost''',
+  '''127\.0\.0\.1''',
+  '''test-secret-key-for-ci''',
+  '''__REPLACE_''',
+  '''__GENERATE_WITH__''',
+]

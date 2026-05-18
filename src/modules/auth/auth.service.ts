@@ -15,6 +15,7 @@ import { RegisterDto } from './dto/register.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { CreatePosUserDto } from './dto/create-pos-user.dto';
 import { PosLaunchDto } from './dto/pos-launch.dto';
+import { AuthErrors } from './auth-errors';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 
@@ -63,7 +64,8 @@ export class AuthService {
     });
 
     if (existingUser) {
-      throw new ConflictException('User with this email already exists');
+      this.logger.warn(`Register failed: email ${email} already exists`);
+      throw AuthErrors.emailAlreadyExists(email);
     }
 
     // Hash password
@@ -187,16 +189,19 @@ export class AuthService {
     });
 
     if (!admin) {
-      throw new UnauthorizedException('Invalid credentials');
+      this.logger.warn(`Admin login failed: no admin with email ${email}`);
+      throw AuthErrors.invalidCredentials();
     }
 
     if (admin.status !== 'active') {
-      throw new UnauthorizedException('Admin account is suspended or inactive');
+      this.logger.warn(`Admin login blocked: ${email} status=${admin.status}`);
+      throw AuthErrors.accountSuspended();
     }
 
     const isPasswordValid = await bcrypt.compare(password, admin.password);
     if (!isPasswordValid) {
-      throw new UnauthorizedException('Invalid credentials');
+      this.logger.warn(`Admin login failed: bad password for ${email}`);
+      throw AuthErrors.invalidCredentials();
     }
 
     const tokens = await this.generateTokens(
@@ -236,7 +241,8 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new UnauthorizedException('Invalid credentials');
+      this.logger.warn(`Login failed: no user with email ${email}`);
+      throw AuthErrors.invalidCredentials();
     }
 
     // ── Lifecycle gate ────────────────────────────────────────────────────────
@@ -258,23 +264,24 @@ export class AuthService {
     }
 
     if (user.status !== 'active') {
-      const message =
-        user.status === 'suspended'
-          ? 'บัญชีของคุณถูกระงับการใช้งาน กรุณาติดต่อผู้ดูแลระบบ'
-          : user.status === 'expired'
-            ? 'บัญชีของคุณหมดอายุการใช้งาน กรุณาติดต่อผู้ดูแลระบบเพื่อต่ออายุ'
-            : user.status === 'inactive'
-              ? 'บัญชีของคุณถูกปิดการใช้งาน กรุณาติดต่อผู้ดูแลระบบ'
-              : 'User account is not active';
-      throw new UnauthorizedException(message);
+      this.logger.warn(`Login blocked: ${email} status=${user.status}`);
+      switch (user.status) {
+        case 'suspended':
+          throw AuthErrors.accountSuspended();
+        case 'expired':
+          throw AuthErrors.accountExpired();
+        case 'inactive':
+          throw AuthErrors.accountInactive();
+        default:
+          throw AuthErrors.accountNotActive();
+      }
     }
     // ────────────────────────────────────────────────────────────────────────
 
     // บล็อก admin-level roles จากการ login ผ่าน /auth/login
     if (this.ADMIN_ONLY_ROLES.includes(user.role)) {
-      throw new UnauthorizedException(
-        'Admin accounts cannot login through this endpoint. Use /api/v1/auth/admin/login instead.',
-      );
+      this.logger.warn(`Login blocked: ${email} is admin-level role=${user.role}`);
+      throw AuthErrors.adminEndpointOnly();
     }
 
     // ── System Access Control ────────────────────────────────────────────────
@@ -284,17 +291,10 @@ export class AuthService {
       try {
         const allowed: string[] = JSON.parse(allowedSystemsRaw);
         if (!allowed.includes(systemContext)) {
-          throw new UnauthorizedException(
-            systemContext === 'pos'
-              ? 'This account is not authorized to access the POS system. Please use a POS staff account.'
-              : systemContext === 'procurement'
-                ? 'บัญชีนี้ไม่มีสิทธิ์เข้าใช้ระบบจัดซื้อ กรุณาติดต่อผู้ดูแลระบบเพื่อขอสิทธิ์เข้าใช้งาน'
-                : systemContext === 'warehouse'
-                  ? 'บัญชีนี้ไม่มีสิทธิ์เข้าใช้ระบบคลังสินค้า กรุณาติดต่อผู้ดูแลระบบเพื่อขอสิทธิ์เข้าใช้งาน'
-                  : systemContext === 'hotel-terminal'
-                    ? 'บัญชีนี้ไม่มีสิทธิ์เข้าใช้ระบบจัดการโรงแรม กรุณาติดต่อผู้ดูแลระบบเพื่อขอสิทธิ์เข้าใช้งาน'
-                    : 'This account is not authorized to access the management dashboard.',
+          this.logger.warn(
+            `Login blocked: ${email} not authorized for system=${systemContext} (allowed=${allowed.join(',')})`,
           );
+          throw AuthErrors.notAuthorizedForSystem(systemContext);
         }
       } catch (e) {
         if (e instanceof UnauthorizedException) throw e;
@@ -308,7 +308,8 @@ export class AuthService {
 
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
-      throw new UnauthorizedException('Invalid credentials');
+      this.logger.warn(`Login failed: bad password for ${email}`);
+      throw AuthErrors.invalidCredentials();
     }
 
     // Determine tenantId: prefer user.tenantId, fallback to default from UserTenant table
@@ -450,7 +451,7 @@ export class AuthService {
     });
 
     if (!tokenRecord) {
-      throw new UnauthorizedException('Invalid refresh token');
+      throw AuthErrors.refreshTokenInvalid();
     }
 
     // Check if token is expired
@@ -459,17 +460,17 @@ export class AuthService {
       await this.prisma.refreshToken.delete({
         where: { id: tokenRecord.id },
       });
-      throw new UnauthorizedException('Refresh token expired');
+      throw AuthErrors.refreshTokenExpired();
     }
 
     // Check if token is revoked
     if (tokenRecord.revokedAt) {
-      throw new UnauthorizedException('Refresh token has been revoked');
+      throw AuthErrors.refreshTokenRevoked();
     }
 
     const account = tokenRecord.admin || tokenRecord.user;
     if (!account) {
-      throw new UnauthorizedException('Account not found');
+      throw AuthErrors.accountNotFound();
     }
 
     const userType = tokenRecord.adminId ? 'admin' : 'user';
@@ -615,7 +616,7 @@ export class AuthService {
     });
 
     if (!resetRecord || resetRecord.expiresAt < new Date()) {
-      throw new BadRequestException('Invalid or expired reset token');
+      throw AuthErrors.resetTokenInvalid();
     }
 
     // Hash new password
@@ -647,7 +648,7 @@ export class AuthService {
       where: { email: dto.email },
     });
     if (existing) {
-      throw new ConflictException(`A user with email "${dto.email}" already exists`);
+      throw AuthErrors.emailAlreadyExists(dto.email);
     }
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
@@ -1023,7 +1024,7 @@ export class AuthService {
         );
       }
 
-      throw new BadRequestException('Could not create session. Please try again later.');
+      throw AuthErrors.sessionCreateFailed();
     }
 
     // Decode the access token to extract the exact expiration timestamp
