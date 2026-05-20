@@ -65,8 +65,7 @@ export class GenerateQRCodeDto {
   @IsOptional()
   @IsString()
   @Matches(/^(0\d{9}|\d{13})$/, {
-    message:
-      'promptpayId ต้องเป็นเบอร์มือถือ 10 หลัก หรือเลขบัตรประชาชน 13 หลัก',
+    message: 'promptpayId ต้องเป็นเบอร์มือถือ 10 หลัก หรือเลขบัตรประชาชน 13 หลัก',
   })
   @MaxLength(20)
   promptpayId?: string;

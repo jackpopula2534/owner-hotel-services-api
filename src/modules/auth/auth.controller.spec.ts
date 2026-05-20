@@ -139,6 +139,7 @@ describe('AuthController', () => {
       expect(authService.login).toHaveBeenCalledWith(
         loginDto,
         expect.objectContaining({ ipAddress: '127.0.0.1' }),
+        'main',
       );
       expect(result).toEqual(mockResult);
     });
@@ -173,8 +174,8 @@ describe('AuthController', () => {
 
       const result = await controller.logout(mockUser, body);
 
-      expect(authService.logout).toHaveBeenCalledWith(mockUser.userId, body.refreshToken);
-      expect(result).toBeUndefined();
+      expect(authService.logout).toHaveBeenCalledWith(mockUser.userId, body.refreshToken, 'main');
+      expect(result).toEqual({ success: true, message: 'Logged out from hotel management dashboard' });
     });
   });
 });

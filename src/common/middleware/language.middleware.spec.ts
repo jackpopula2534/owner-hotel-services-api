@@ -7,10 +7,12 @@ import { LanguageMiddleware } from './language.middleware';
 import { SupportedLanguage } from '../../i18n/dto/i18n.dto';
 import { Request, Response, NextFunction } from 'express';
 
-function makeRequest(opts: {
-  query?: Record<string, string>;
-  acceptLanguage?: string;
-} = {}): Request {
+function makeRequest(
+  opts: {
+    query?: Record<string, string>;
+    acceptLanguage?: string;
+  } = {},
+): Request {
   return {
     query: opts.query ?? {},
     headers: opts.acceptLanguage ? { 'accept-language': opts.acceptLanguage } : {},

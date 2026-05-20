@@ -20,12 +20,7 @@
  * everyone in the same frame is the documented escape hatch for this exact
  * case (see Node.js AsyncLocalStorage docs § "Mutation of the store").
  */
-import {
-  CallHandler,
-  ExecutionContext,
-  Injectable,
-  NestInterceptor,
-} from '@nestjs/common';
+import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Observable } from 'rxjs';
 import { SKIP_TENANT_SCOPE_KEY } from './skip-tenant-scope.decorator';
@@ -66,14 +61,13 @@ export class TenantContextInterceptor implements NestInterceptor {
       return next.handle();
     }
 
-    const skipFromDecorator = this.reflector.getAllAndOverride<boolean>(
-      SKIP_TENANT_SCOPE_KEY,
-      [context.getHandler(), context.getClass()],
-    );
+    const skipFromDecorator = this.reflector.getAllAndOverride<boolean>(SKIP_TENANT_SCOPE_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
 
     const userRole = req.user?.role ?? '';
-    const isPlatformUser =
-      Boolean(req.user?.isPlatformAdmin) || PLATFORM_ROLES.has(userRole);
+    const isPlatformUser = Boolean(req.user?.isPlatformAdmin) || PLATFORM_ROLES.has(userRole);
 
     // Mutate the SAME object the middleware put in ALS. References held by
     // downstream code see the update immediately.

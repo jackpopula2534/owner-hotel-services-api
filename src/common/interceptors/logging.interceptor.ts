@@ -90,7 +90,12 @@ export class LoggingInterceptor implements NestInterceptor {
          * AllExceptionsFilter already logs the full stack; here we only log the
          * timing + identity fields to avoid duplicate verbose output in production.
          */
-        error: (err: { status?: number; statusCode?: number; response?: { statusCode?: number }; message?: string }) => {
+        error: (err: {
+          status?: number;
+          statusCode?: number;
+          response?: { statusCode?: number };
+          message?: string;
+        }) => {
           const statusCode: number =
             err?.status ?? err?.statusCode ?? err?.response?.statusCode ?? 500;
           const message = err?.message ?? String(err);

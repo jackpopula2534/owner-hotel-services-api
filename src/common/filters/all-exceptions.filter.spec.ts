@@ -46,7 +46,10 @@ describe('AllExceptionsFilter i18n behaviour', () => {
       en: { 'errors.http.NOT_FOUND': 'The requested resource was not found' },
     });
     const filter = new AllExceptionsFilter(i18n);
-    const { host, response } = makeHost({ url: '/api/v1/bookings/999', language: SupportedLanguage.TH });
+    const { host, response } = makeHost({
+      url: '/api/v1/bookings/999',
+      language: SupportedLanguage.TH,
+    });
 
     filter.catch(new NotFoundException(), host);
 

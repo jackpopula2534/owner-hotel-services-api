@@ -30,9 +30,7 @@ describe('PromptPayService - generateQRCode', () => {
       },
     }) as any;
 
-  const createMockConfig = (
-    overrides: Record<string, string> = {},
-  ): jest.Mocked<ConfigService> =>
+  const createMockConfig = (overrides: Record<string, string> = {}): jest.Mocked<ConfigService> =>
     ({
       get: jest.fn((key: string, defaultValue?: string) => {
         const values: Record<string, string> = {
@@ -50,9 +48,7 @@ describe('PromptPayService - generateQRCode', () => {
       sendPaymentReceipt: jest.fn(),
     }) as any;
 
-  const buildService = async (
-    configOverrides: Record<string, string> = {},
-  ): Promise<void> => {
+  const buildService = async (configOverrides: Record<string, string> = {}): Promise<void> => {
     const prismaMock = createMockPrisma();
     const configMock = createMockConfig(configOverrides);
     const emailMock = createMockEmail();
@@ -69,8 +65,8 @@ describe('PromptPayService - generateQRCode', () => {
     service = module.get<PromptPayService>(PromptPayService);
     prisma = module.get(PrismaService);
     configService = module.get(ConfigService);
-    (prisma.promptPayTransaction.create as jest.Mock).mockImplementation(
-      ({ data }) => Promise.resolve({ id: 'tx-1', ...data }),
+    (prisma.promptPayTransaction.create as jest.Mock).mockImplementation(({ data }) =>
+      Promise.resolve({ id: 'tx-1', ...data }),
     );
   };
 
@@ -143,9 +139,9 @@ describe('PromptPayService - generateQRCode', () => {
   it('should throw BadRequestException when neither dto.promptpayId nor config is set', async () => {
     await buildService({ PROMPTPAY_ID: '' });
 
-    await expect(
-      service.generateQRCode({ amount: 100 } as GenerateQRCodeDto),
-    ).rejects.toThrow(BadRequestException);
+    await expect(service.generateQRCode({ amount: 100 } as GenerateQRCodeDto)).rejects.toThrow(
+      BadRequestException,
+    );
   });
 });
 

@@ -66,7 +66,7 @@ export class TransformInterceptor<T> implements NestInterceptor<T, Response<T>> 
                   total: (data as Record<string, unknown>).total,
                   page: (data as Record<string, unknown>).page,
                   limit: (data as Record<string, unknown>).limit,
-                  ...((data as Record<string, unknown>).meta as Record<string, unknown> || {}),
+                  ...(((data as Record<string, unknown>).meta as Record<string, unknown>) || {}),
                 },
               }
             : { data }),

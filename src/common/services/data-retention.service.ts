@@ -23,10 +23,8 @@ export class DataRetentionService {
   private readonly logger = new Logger(DataRetentionService.name);
 
   // Retention periods in years (สามารถ override ผ่าน env ได้)
-  private readonly GUEST_RETENTION_YEARS =
-    Number(process.env.RETENTION_GUEST_YEARS) || 5;
-  private readonly EMPLOYEE_RETENTION_YEARS =
-    Number(process.env.RETENTION_EMPLOYEE_YEARS) || 7;
+  private readonly GUEST_RETENTION_YEARS = Number(process.env.RETENTION_GUEST_YEARS) || 5;
+  private readonly EMPLOYEE_RETENTION_YEARS = Number(process.env.RETENTION_EMPLOYEE_YEARS) || 7;
 
   constructor(private readonly anonymizeService: AnonymizeService) {}
 
@@ -44,9 +42,7 @@ export class DataRetentionService {
       `[DataRetention] Starting guest purge (retention=${this.GUEST_RETENTION_YEARS}y)`,
     );
     try {
-      const count = await this.anonymizeService.purgeExpiredGuests(
-        this.GUEST_RETENTION_YEARS,
-      );
+      const count = await this.anonymizeService.purgeExpiredGuests(this.GUEST_RETENTION_YEARS);
       this.logger.log(`[DataRetention] Guest purge complete: ${count} records anonymized`);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -67,9 +63,7 @@ export class DataRetentionService {
       const count = await this.anonymizeService.purgeExpiredEmployees(
         this.EMPLOYEE_RETENTION_YEARS,
       );
-      this.logger.log(
-        `[DataRetention] Employee purge complete: ${count} records anonymized`,
-      );
+      this.logger.log(`[DataRetention] Employee purge complete: ${count} records anonymized`);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       this.logger.error(`[DataRetention] Employee purge failed: ${msg}`);

@@ -25,10 +25,7 @@ import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import {
-  maskPayrollRecord,
-  maskPayrollList,
-} from '../../common/utils/payroll-mask.util';
+import { maskPayrollRecord, maskPayrollList } from '../../common/utils/payroll-mask.util';
 
 @ApiTags('hr / payroll')
 @ApiBearerAuth('JWT-auth')
@@ -73,10 +70,7 @@ export class HrPayrollController {
     const result = await this.payrollService.findAll(query, user.tenantId!);
     return {
       ...result,
-      data: maskPayrollList(
-        result.data as Record<string, unknown>[],
-        user.role,
-      ),
+      data: maskPayrollList(result.data as Record<string, unknown>[], user.role),
     };
   }
 

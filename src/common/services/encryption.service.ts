@@ -19,8 +19,8 @@ export class EncryptionService {
   private readonly logger = new Logger(EncryptionService.name);
   private readonly key: Buffer;
   private readonly ALGORITHM = 'aes-256-gcm';
-  private readonly IV_LENGTH = 12;   // bytes — recommended for GCM
-  private readonly TAG_LENGTH = 16;  // bytes — GCM auth tag
+  private readonly IV_LENGTH = 12; // bytes — recommended for GCM
+  private readonly TAG_LENGTH = 16; // bytes — GCM auth tag
 
   // Sentinel prefix — ใช้ตรวจว่า value เข้ารหัสแล้วหรือยัง
   private readonly ENC_PREFIX = 'enc:';
@@ -50,10 +50,7 @@ export class EncryptionService {
 
     const iv = randomBytes(this.IV_LENGTH);
     const cipher = createCipheriv(this.ALGORITHM, this.key, iv);
-    const encrypted = Buffer.concat([
-      cipher.update(plaintext, 'utf8'),
-      cipher.final(),
-    ]);
+    const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
     const authTag = cipher.getAuthTag();
 
     // IV (12) + AuthTag (16) + CipherText

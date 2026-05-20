@@ -42,6 +42,9 @@ describe('AuthService', () => {
     userTenant: {
       findFirst: jest.fn().mockResolvedValue(null),
     },
+    property: {
+      findFirst: jest.fn().mockResolvedValue(null),
+    },
   };
 
   const mockJwtService = {

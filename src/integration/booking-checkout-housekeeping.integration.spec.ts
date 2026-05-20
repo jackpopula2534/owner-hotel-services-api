@@ -135,8 +135,8 @@ describe('Booking -> Checkout -> Housekeeping integration flow', () => {
     expect(prismaMock.booking.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          scheduledCheckIn: new Date('2026-04-10T14:00:00.000Z'),
-          scheduledCheckOut: new Date('2026-04-12T11:00:00.000Z'),
+          scheduledCheckIn: new Date('2026-04-10T07:00:00.000Z'),
+          scheduledCheckOut: new Date('2026-04-12T04:00:00.000Z'),
         }),
       }),
     );

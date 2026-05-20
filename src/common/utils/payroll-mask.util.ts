@@ -15,12 +15,7 @@
  */
 
 /** Roles ที่มีสิทธิ์เห็นข้อมูลการเงินแบบ full */
-const PRIVILEGED_ROLES = new Set([
-  'platform_admin',
-  'tenant_admin',
-  'admin',
-  'hr',
-]);
+const PRIVILEGED_ROLES = new Set(['platform_admin', 'tenant_admin', 'admin', 'hr']);
 
 const MASKED = '***MASKED***';
 

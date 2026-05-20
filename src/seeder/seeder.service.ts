@@ -361,7 +361,9 @@ export class SeederService {
       );
     }
 
-    this.logger.log(`  ✅ Seeded ${features.length} features across 4 categories (toggle/limit only)`);
+    this.logger.log(
+      `  ✅ Seeded ${features.length} features across 4 categories (toggle/limit only)`,
+    );
   }
 
   /**
@@ -636,9 +638,7 @@ export class SeederService {
   ): Promise<void> {
     if (!planId) return;
     const existing = await this.planFeaturesService.findByPlanId(planId);
-    const existingFeatureIds = new Set(
-      existing.map((pf: any) => pf.featureId ?? pf.feature_id),
-    );
+    const existingFeatureIds = new Set(existing.map((pf: any) => pf.featureId ?? pf.feature_id));
 
     for (const feature of features) {
       if (!feature) continue;
@@ -666,9 +666,11 @@ export class SeederService {
 
     // Resolve add-ons by code through Prisma since AddonService.findByCode
     // does not exist; the catalog was just upserted in seedAddOns.
-    const addOnsClient = (this.prisma as unknown as {
-      add_ons: { findUnique: (a: Record<string, unknown>) => Promise<any | null> };
-    }).add_ons;
+    const addOnsClient = (
+      this.prisma as unknown as {
+        add_ons: { findUnique: (a: Record<string, unknown>) => Promise<any | null> };
+      }
+    ).add_ons;
     const findAddon = async (code: string) => addOnsClient.findUnique({ where: { code } });
 
     const restaurantModule = await findAddon('RESTAURANT_MODULE');
@@ -740,12 +742,14 @@ export class SeederService {
   ): Promise<void> {
     if (!planId) return;
 
-    const planAddonsClient = (this.prisma as unknown as {
-      plan_addons: {
-        findUnique: (a: Record<string, unknown>) => Promise<any | null>;
-        create: (a: Record<string, unknown>) => Promise<any>;
-      };
-    }).plan_addons;
+    const planAddonsClient = (
+      this.prisma as unknown as {
+        plan_addons: {
+          findUnique: (a: Record<string, unknown>) => Promise<any | null>;
+          create: (a: Record<string, unknown>) => Promise<any>;
+        };
+      }
+    ).plan_addons;
 
     for (const addon of addons) {
       if (!addon) continue;
@@ -855,6 +859,14 @@ export class SeederService {
     const activeEnd = new Date(now);
     activeEnd.setMonth(activeEnd.getMonth() + 1);
 
+    // VIP (premium.test): annual plan that keeps the dashboard clear of the
+    // 30-day-renewal Trial banner so QA can exercise full Enterprise UX.
+    // Started 1 month ago, renews 1 YEAR from now.
+    const vipStart = new Date(now);
+    vipStart.setMonth(vipStart.getMonth() - 1);
+    const vipEnd = new Date(now);
+    vipEnd.setFullYear(vipEnd.getFullYear() + 1);
+
     // TRIAL: started today, expires in 14 days
     const trialStart = new Date(now);
     const trialEnd = new Date(now);
@@ -898,7 +910,10 @@ export class SeederService {
         invoices: [{ amount: 7470, status: InvoiceStatus.PAID, daysAgo: 0 }],
       },
       {
-        // SUB-002: Mountain View Resort - Enterprise + ALL add-ons
+        // SUB-002: Mountain View Resort - Enterprise + ALL add-ons (VIP test account)
+        // Uses vipStart/vipEnd (annual term) so the dashboard never shows the
+        // "Trial / renewal in N days" banner — premium.test@email.com must demo
+        // a fully-paid VIP experience.
         code: 'SUB-002',
         slug: 'mountain',
         name: 'Mountain View Resort (Premium Test)',
@@ -909,8 +924,8 @@ export class SeederService {
         plan: planL,
         previousPlan: null,
         subscriptionStatus: SubscriptionStatus.ACTIVE,
-        startDate: activeStart.toISOString().split('T')[0],
-        endDate: activeEnd.toISOString().split('T')[0],
+        startDate: vipStart.toISOString().split('T')[0],
+        endDate: vipEnd.toISOString().split('T')[0],
         email: 'info.mountain@hotel.test',
         phone: '053-123-456',
         address: '456 Mountain Rd, Chiang Mai',
@@ -1425,10 +1440,7 @@ export class SeederService {
           const checkOutDateStr = checkOutBase.toISOString().split('T')[0];
 
           // Standard Bangkok times for scheduled fields — single source of truth
-          const scheduledCheckInDate = buildBangkokDateTime(
-            checkInDateStr,
-            DEFAULT_CHECK_IN_TIME,
-          );
+          const scheduledCheckInDate = buildBangkokDateTime(checkInDateStr, DEFAULT_CHECK_IN_TIME);
           const scheduledCheckOutDate = buildBangkokDateTime(
             checkOutDateStr,
             DEFAULT_CHECK_OUT_TIME,

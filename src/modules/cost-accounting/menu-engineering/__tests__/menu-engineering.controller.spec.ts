@@ -4,6 +4,7 @@ import { MenuEngineeringService } from '../menu-engineering.service';
 import { GenerateSnapshotDto } from '../dto/generate-snapshot.dto';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Decimal } from '@prisma/client/runtime/library';
+import { AddonGuard } from '@/common/guards/addon.guard';
 
 describe('MenuEngineeringController', () => {
   let controller: MenuEngineeringController;
@@ -34,7 +35,10 @@ describe('MenuEngineeringController', () => {
           useValue: mockMenuEngineeringService,
         },
       ],
-    }).compile();
+    })
+      .overrideGuard(AddonGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
 
     controller = module.get<MenuEngineeringController>(MenuEngineeringController);
     service = module.get<MenuEngineeringService>(MenuEngineeringService);

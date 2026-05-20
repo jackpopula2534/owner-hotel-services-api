@@ -38,13 +38,14 @@ export const mockEventEmitter = (): Partial<EventEmitter2> => ({
   removeAllListeners: jest.fn(),
 });
 
-export const mockCacheService = (): Partial<CacheService> => ({
-  get: jest.fn().mockResolvedValue(null),
-  set: jest.fn().mockResolvedValue(undefined),
-  del: jest.fn().mockResolvedValue(undefined),
-  reset: jest.fn().mockResolvedValue(undefined),
-  wrap: jest.fn(async (_key: string, fn: () => unknown) => fn()),
-} as unknown as Partial<CacheService>);
+export const mockCacheService = (): Partial<CacheService> =>
+  ({
+    get: jest.fn().mockResolvedValue(null),
+    set: jest.fn().mockResolvedValue(undefined),
+    del: jest.fn().mockResolvedValue(undefined),
+    reset: jest.fn().mockResolvedValue(undefined),
+    wrap: jest.fn(async (_key: string, fn: () => unknown) => fn()),
+  }) as unknown as Partial<CacheService>;
 
 /**
  * AuditLogService mock that auto-stubs every `log*` helper.
@@ -99,13 +100,14 @@ export const mockAuditLogService = (): Partial<AuditLogService> => {
   return obj as unknown as Partial<AuditLogService>;
 };
 
-export const mockAddonService = (): Partial<AddonService> => ({
-  // AddonGuard typically calls `hasAddon(tenantId, addonKey)` or similar.
-  // Default to `true` so guards do not block by default in unit tests.
-} as unknown as Partial<AddonService>);
+export const mockAddonService = (): Partial<AddonService> =>
+  ({
+    // AddonGuard typically calls `hasAddon(tenantId, addonKey)` or similar.
+    // Default to `true` so guards do not block by default in unit tests.
+  }) as unknown as Partial<AddonService>;
 
-export const mockSelfServicePlanService = (): Partial<SelfServicePlanService> => ({
-} as unknown as Partial<SelfServicePlanService>);
+export const mockSelfServicePlanService = (): Partial<SelfServicePlanService> =>
+  ({}) as unknown as Partial<SelfServicePlanService>;
 
 /**
  * One-stop shop. Spread into `providers: [...]` to satisfy the most common

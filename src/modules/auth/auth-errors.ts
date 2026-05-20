@@ -82,7 +82,12 @@ interface AuthErrorBody {
 /**
  * Factory: build the response body the filter will serialise.
  */
-function body(code: AuthErrorCode, key: string, message: string, details?: Record<string, unknown>): AuthErrorBody {
+function body(
+  code: AuthErrorCode,
+  key: string,
+  message: string,
+  details?: Record<string, unknown>,
+): AuthErrorBody {
   return { code, messageKey: `auth.${key}`, message, ...(details ? { details } : {}) };
 }
 
@@ -244,7 +249,11 @@ export const AuthErrors = {
 
   twoFactorRequired(): HttpException {
     return new UnauthorizedException(
-      body(AUTH_ERROR_CODES.TWO_FACTOR_REQUIRED, 'twoFactorRequired', 'Please enter your 2FA code.'),
+      body(
+        AUTH_ERROR_CODES.TWO_FACTOR_REQUIRED,
+        'twoFactorRequired',
+        'Please enter your 2FA code.',
+      ),
     );
   },
 

@@ -4043,3 +4043,61 @@ model addon_trial_requests {
   @@index([tenant_id, addon_code])
   @@map("addon_trial_requests")
 }
+
+// ─── LINE Messaging / Unified Chat ────────────────────────────────────────────
+
+model Conversation {
+  id           String              @id @default(uuid())
+  tenantId     String
+  channel      String              // "LINE", "FACEBOOK"
+  externalId   String              // LINE userId / FB PSID
+  displayName  String?
+  pictureUrl   String?             @db.Text
+  isActive     Boolean             @default(true)
+  lastMessageAt DateTime?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  messages     Message[]
+  @@unique([tenantId, channel, externalId])
+  @@index([tenantId, channel])
+  @@index([tenantId, lastMessageAt])
+  @@map("conversations")
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  tenantId       String
+  channel        String       // "LINE", "FACEBOOK"
+  direction      String       // "INBOUND" | "OUTBOUND"
+  messageType    String       @default("text") // "text" | "image" | "sticker" | "file"
+  content        String       @db.Text
+  externalMsgId  String?      // LINE messageId / FB mid
+  staffId        String?      // null = auto-reply
+  isAutoReply    Boolean      @default(false)
+  readAt         DateTime?
+  createdAt      DateTime     @default(now())
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  @@index([conversationId])
+  @@index([tenantId, createdAt])
+  @@map("messages")
+}
+
+model AutoReplyTemplate {
+  id          String    @id @default(uuid())
+  tenantId    String
+  name        String
+  channel     String    @default("ALL") // "ALL" | "LINE" | "FACEBOOK"
+  triggerType String    @default("KEYWORD") // "KEYWORD" | "GREETING" | "OUT_OF_HOURS" | "FALLBACK"
+  keywords    Json?     // string[] เช่น ["ราคา","ห้อง"]
+  replyText   String    @db.Text
+  isActive    Boolean   @default(true)
+  priority    Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([tenantId, channel, isActive])
+  @@map("auto_reply_templates")
+}

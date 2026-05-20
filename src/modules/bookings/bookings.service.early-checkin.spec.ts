@@ -57,7 +57,14 @@ describe('BookingsService — requestEarlyCheckIn', () => {
         BookingsService,
         { provide: PrismaService, useValue: prismaMock },
         { provide: AuditLogService, useValue: auditLogMock },
-        { provide: EmailEventsService, useValue: { onBookingCreated: jest.fn(), onBookingCheckout: jest.fn(), sendReviewRequest: jest.fn() } },
+        {
+          provide: EmailEventsService,
+          useValue: {
+            onBookingCreated: jest.fn(),
+            onBookingCheckout: jest.fn(),
+            sendReviewRequest: jest.fn(),
+          },
+        },
         { provide: HousekeepingService, useValue: { createTask: jest.fn() } },
         { provide: InvoicesService, useValue: {} },
         { provide: LoyaltyService, useValue: { addPointsForStay: jest.fn() } },
@@ -72,37 +79,34 @@ describe('BookingsService — requestEarlyCheckIn', () => {
   });
 
   it('rejects when tenantId is missing', async () => {
-    await expect(
-      service.requestEarlyCheckIn('booking-1', undefined),
-    ).rejects.toThrow(BadRequestException);
+    await expect(service.requestEarlyCheckIn('booking-1', undefined)).rejects.toThrow(
+      BadRequestException,
+    );
   });
 
-  it.each(['cancelled', 'checked_out'])(
-    'rejects when booking is in status=%s',
-    async (status) => {
-      prismaMock.booking.findFirst.mockResolvedValue({ ...baseBooking, status });
-      await expect(
-        service.requestEarlyCheckIn('booking-1', 'tenant-1'),
-      ).rejects.toThrow(/Cannot request early check-in/);
-    },
-  );
+  it.each(['cancelled', 'checked_out'])('rejects when booking is in status=%s', async (status) => {
+    prismaMock.booking.findFirst.mockResolvedValue({ ...baseBooking, status });
+    await expect(service.requestEarlyCheckIn('booking-1', 'tenant-1')).rejects.toThrow(
+      /Cannot request early check-in/,
+    );
+  });
 
   it('rejects when early check-in was already requested', async () => {
     prismaMock.booking.findFirst.mockResolvedValue({
       ...baseBooking,
       requestedEarlyCheckIn: true,
     });
-    await expect(
-      service.requestEarlyCheckIn('booking-1', 'tenant-1'),
-    ).rejects.toThrow(/already been requested/);
+    await expect(service.requestEarlyCheckIn('booking-1', 'tenant-1')).rejects.toThrow(
+      /already been requested/,
+    );
   });
 
   it('rejects when property is not found', async () => {
     prismaMock.booking.findFirst.mockResolvedValue(baseBooking);
     prismaMock.property.findFirst.mockResolvedValue(null);
-    await expect(
-      service.requestEarlyCheckIn('booking-1', 'tenant-1'),
-    ).rejects.toThrow(/Property not found/);
+    await expect(service.requestEarlyCheckIn('booking-1', 'tenant-1')).rejects.toThrow(
+      /Property not found/,
+    );
   });
 
   it('rejects when earlyCheckInEnabled is false', async () => {
@@ -112,9 +116,9 @@ describe('BookingsService — requestEarlyCheckIn', () => {
       earlyCheckInFeeType: 'flat',
       earlyCheckInFeeAmount: 500,
     });
-    await expect(
-      service.requestEarlyCheckIn('booking-1', 'tenant-1'),
-    ).rejects.toThrow(/not enabled/);
+    await expect(service.requestEarlyCheckIn('booking-1', 'tenant-1')).rejects.toThrow(
+      /not enabled/,
+    );
   });
 
   it('writes requestedEarlyCheckIn=true (no fee write) when approve=false', async () => {

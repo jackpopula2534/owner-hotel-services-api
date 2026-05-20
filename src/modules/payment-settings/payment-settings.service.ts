@@ -58,10 +58,6 @@ export class PaymentSettingsService {
     });
     if (!settings) return false;
     // ถือว่า setup แล้ว ถ้าเปิดช่องทางชำระเงินอย่างน้อย 1 ช่องทาง
-    return (
-      settings.promptpayEnabled ||
-      settings.bankTransferEnabled ||
-      settings.cashEnabled
-    );
+    return settings.promptpayEnabled || settings.bankTransferEnabled || settings.cashEnabled;
   }
 }

@@ -198,7 +198,9 @@ export class StockCountsService {
 
       // 3. Create StockCount record
       if (!userId) {
-        throw new BadRequestException('User ID is missing from authentication token. Please log in again.');
+        throw new BadRequestException(
+          'User ID is missing from authentication token. Please log in again.',
+        );
       }
       const stockCount = await tx.stockCount.create({
         data: {

@@ -10,13 +10,7 @@ import {
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
-import {
-  ApiBearerAuth,
-  ApiOperation,
-  ApiQuery,
-  ApiResponse,
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -44,10 +38,7 @@ export class PaymentSettingsController {
   @ApiQuery({ name: 'propertyId', required: false })
   @ApiResponse({ status: 200, description: 'Payment settings' })
   @ApiResponse({ status: 404, description: 'Settings not configured yet' })
-  async get(
-    @CurrentUser() user: JwtUser,
-    @Query('propertyId') propertyIdQuery?: string,
-  ) {
+  async get(@CurrentUser() user: JwtUser, @Query('propertyId') propertyIdQuery?: string) {
     const propertyId = await this.resolvePropertyId(user, propertyIdQuery);
     const settings = await this.paymentSettingsService.findByPropertyId(propertyId);
     return { success: true, data: settings };
@@ -72,10 +63,7 @@ export class PaymentSettingsController {
   @ApiOperation({ summary: 'Check if payment setup is complete (for onboarding checklist)' })
   @ApiQuery({ name: 'propertyId', required: false })
   @ApiResponse({ status: 200, description: 'Setup status' })
-  async getStatus(
-    @CurrentUser() user: JwtUser,
-    @Query('propertyId') propertyIdQuery?: string,
-  ) {
+  async getStatus(@CurrentUser() user: JwtUser, @Query('propertyId') propertyIdQuery?: string) {
     try {
       const propertyId = await this.resolvePropertyId(user, propertyIdQuery);
       const isComplete = await this.paymentSettingsService.isSetupComplete(propertyId);
@@ -92,10 +80,7 @@ export class PaymentSettingsController {
    *   3. Fallback: property แรกของ tenant
    * ทุก path ตรวจสอบว่า property เป็นของ user.tenantId
    */
-  private async resolvePropertyId(
-    user: JwtUser,
-    propertyIdQuery?: string,
-  ): Promise<string> {
+  private async resolvePropertyId(user: JwtUser, propertyIdQuery?: string): Promise<string> {
     if (!user.tenantId) {
       throw new UnauthorizedException('Tenant not found in token');
     }

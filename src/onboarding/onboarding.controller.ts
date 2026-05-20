@@ -57,11 +57,7 @@ export class OnboardingController {
 
   @Post('dpa/accept')
   @UseGuards(JwtAuthGuard)
-  async acceptDpa(
-    @Body() dto: AcceptDpaDto,
-    @CurrentUser() user: any,
-    @Req() request: Request,
-  ) {
+  async acceptDpa(@Body() dto: AcceptDpaDto, @CurrentUser() user: any, @Req() request: Request) {
     return this.onboardingService.acceptDpa(user.tenantId, user.userId ?? user.id, dto, {
       ipAddress: request.ip,
       userAgent: request.get('user-agent'),

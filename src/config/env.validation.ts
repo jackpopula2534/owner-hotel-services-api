@@ -135,7 +135,8 @@ export class EnvironmentVariables {
    */
   @IsString()
   @MinLength(64, {
-    message: 'JWT_SECRET must be at least 64 characters (recommended 128). Generate with: openssl rand -hex 64',
+    message:
+      'JWT_SECRET must be at least 64 characters (recommended 128). Generate with: openssl rand -hex 64',
   })
   @Validate(JwtSecretNotLeakedConstraint)
   JWT_SECRET: string;
@@ -177,7 +178,8 @@ export class EnvironmentVariables {
   @IsString()
   @IsOptional()
   @Matches(/^[0-9a-fA-F]{64}$/, {
-    message: 'ENCRYPTION_KEY must be exactly 64 hex chars (32 bytes). Generate with: openssl rand -hex 32',
+    message:
+      'ENCRYPTION_KEY must be exactly 64 hex chars (32 bytes). Generate with: openssl rand -hex 32',
   })
   @Validate(NotPlaceholderConstraint)
   ENCRYPTION_KEY?: string;

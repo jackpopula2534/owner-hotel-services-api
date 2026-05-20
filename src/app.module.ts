@@ -61,6 +61,7 @@ import { AuditLogModule } from './audit-log/audit-log.module';
 import { CacheModule } from './cache/cache.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { LineNotifyModule } from './line-notify/line-notify.module';
+import { MessagingModule } from './modules/messaging/messaging.module';
 import { I18nModule } from './i18n/i18n.module';
 import { DatabaseOptimizationModule } from './database-optimization/database-optimization.module';
 import { MobileApiModule } from './mobile-api/mobile-api.module';
@@ -156,6 +157,7 @@ import { TenantGuard } from './common/guards/tenant.guard';
     CacheModule,
     ReportsModule,
     LineNotifyModule,
+    MessagingModule,
     I18nModule,
     DatabaseOptimizationModule,
     MobileApiModule,
@@ -224,8 +226,6 @@ export class AppModule implements NestModule {
     // so that the AsyncLocalStorage frame exists when the guard decodes the
     // token. Express runs middleware in registration order — register the
     // tenant context first.
-    consumer
-      .apply(TenantContextMiddleware, LanguageMiddleware)
-      .forRoutes('*');
+    consumer.apply(TenantContextMiddleware, LanguageMiddleware).forRoutes('*');
   }
 }

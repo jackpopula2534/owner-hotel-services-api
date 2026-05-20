@@ -83,10 +83,7 @@ describe('AnonymizeService', () => {
     prisma = buildMockPrisma();
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        AnonymizeService,
-        { provide: PrismaService, useValue: prisma },
-      ],
+      providers: [AnonymizeService, { provide: PrismaService, useValue: prisma }],
     }).compile();
 
     service = module.get<AnonymizeService>(AnonymizeService);

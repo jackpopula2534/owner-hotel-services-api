@@ -55,13 +55,15 @@ export class AdminPlansService {
     // The Prisma client may not yet expose `plan_addons` in its generated
     // types until the next `prisma generate` runs after the migration; use
     // the runtime-available cast to keep TypeScript happy.
-    const planAddonsClient = (this.prisma as unknown as {
-      plan_addons: {
-        groupBy: (args: Record<string, unknown>) => Promise<
-          Array<{ plan_id: string; _count: { _all: number } }>
-        >;
-      };
-    }).plan_addons;
+    const planAddonsClient = (
+      this.prisma as unknown as {
+        plan_addons: {
+          groupBy: (
+            args: Record<string, unknown>,
+          ) => Promise<Array<{ plan_id: string; _count: { _all: number } }>>;
+        };
+      }
+    ).plan_addons;
 
     const grouped = await planAddonsClient.groupBy({
       by: ['plan_id'],

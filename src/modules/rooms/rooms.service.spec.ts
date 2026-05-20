@@ -160,14 +160,7 @@ describe('RoomsService.getAvailableRooms', () => {
     prismaMock.room.findMany.mockResolvedValue([]);
 
     await expect(
-      service.getAvailableRooms(
-        '2026-05-14',
-        '2026-05-15',
-        propertyId,
-        tenantId,
-        '14:00',
-        '12:00',
-      ),
+      service.getAvailableRooms('2026-05-14', '2026-05-15', propertyId, tenantId, '14:00', '12:00'),
     ).resolves.toEqual([]);
   });
 

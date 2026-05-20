@@ -168,12 +168,14 @@ describe('OnboardingService', () => {
       mockTenantsService.create.mockResolvedValue(mockTenant);
       mockPlansService.findByCode.mockResolvedValue(null);
 
-      await expect(service.registerHotel(
-        {
-          name: 'Test Hotel',
-        },
-        14,
-      )).rejects.toThrow('Free Trial plan (code: FREE) not found');
+      await expect(
+        service.registerHotel(
+          {
+            name: 'Test Hotel',
+          },
+          14,
+        ),
+      ).rejects.toThrow('Free Trial plan (code: FREE) not found');
 
       expect(mockPrismaServiceForOnboarding.plans.create).not.toHaveBeenCalled();
       expect(subscriptionsService.create).not.toHaveBeenCalled();
@@ -368,10 +370,12 @@ describe('OnboardingService', () => {
     });
 
     it('should reject DPA acceptance when checkbox is false', async () => {
-      await expect(service.acceptDpa('tenant-1', 'user-1', {
-        accepted: false,
-        version: '1.0',
-      })).rejects.toThrow('DPA must be accepted before continuing onboarding');
+      await expect(
+        service.acceptDpa('tenant-1', 'user-1', {
+          accepted: false,
+          version: '1.0',
+        }),
+      ).rejects.toThrow('DPA must be accepted before continuing onboarding');
     });
   });
 });

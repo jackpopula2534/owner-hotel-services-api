@@ -45,22 +45,22 @@ export class AnonymizeService {
     await (this.prisma.guest as any).update({
       where: { id: guestId },
       data: {
-        firstName:          AnonymizeService.REDACTED,
-        lastName:           AnonymizeService.REDACTED,
-        email:              AnonymizeService.REDACTED_EMAIL,
-        phone:              AnonymizeService.REDACTED_PHONE,
-        nationalId:         null,
-        passportNumber:     null,
-        dateOfBirth:        null,
-        nationality:        null,
-        address:            null,
-        city:               null,
-        country:            null,
-        postalCode:         null,
+        firstName: AnonymizeService.REDACTED,
+        lastName: AnonymizeService.REDACTED,
+        email: AnonymizeService.REDACTED_EMAIL,
+        phone: AnonymizeService.REDACTED_PHONE,
+        nationalId: null,
+        passportNumber: null,
+        dateOfBirth: null,
+        nationality: null,
+        address: null,
+        city: null,
+        country: null,
+        postalCode: null,
         vehiclePlateNumber: null,
-        specialNotes:       null,
-        vipLevel:           null,
-        anonymizedAt:       new Date(),
+        specialNotes: null,
+        vipLevel: null,
+        anonymizedAt: new Date(),
       },
     });
 
@@ -92,24 +92,24 @@ export class AnonymizeService {
     await (this.prisma as any).employee.update({
       where: { id: employeeId },
       data: {
-        firstName:       AnonymizeService.REDACTED,
-        lastName:        AnonymizeService.REDACTED,
-        email:           AnonymizeService.REDACTED_EMAIL,
-        phone:           AnonymizeService.REDACTED_PHONE,
-        nationalId:      null,
-        bankAccount:     null,
-        bankName:        null,
-        socialSecurity:  null,
-        taxId:           null,
-        dateOfBirth:     null,
-        address:         null,
+        firstName: AnonymizeService.REDACTED,
+        lastName: AnonymizeService.REDACTED,
+        email: AnonymizeService.REDACTED_EMAIL,
+        phone: AnonymizeService.REDACTED_PHONE,
+        nationalId: null,
+        bankAccount: null,
+        bankName: null,
+        socialSecurity: null,
+        taxId: null,
+        dateOfBirth: null,
+        address: null,
         emergencyContacts: null,
-        educations:      null,
+        educations: null,
         workExperiences: null,
-        notes:           null,
-        nickname:        null,
-        status:          'ANONYMIZED',
-        anonymizedAt:    new Date(),
+        notes: null,
+        nickname: null,
+        status: 'ANONYMIZED',
+        anonymizedAt: new Date(),
       },
     });
 
@@ -148,7 +148,9 @@ export class AnonymizeService {
       }
     }
 
-    this.logger.log(`Data retention purge: anonymized ${count} guests (cutoff=${cutoff.toISOString()})`);
+    this.logger.log(
+      `Data retention purge: anonymized ${count} guests (cutoff=${cutoff.toISOString()})`,
+    );
     return count;
   }
 
@@ -178,7 +180,9 @@ export class AnonymizeService {
       }
     }
 
-    this.logger.log(`Data retention purge: anonymized ${count} employees (cutoff=${cutoff.toISOString()})`);
+    this.logger.log(
+      `Data retention purge: anonymized ${count} employees (cutoff=${cutoff.toISOString()})`,
+    );
     return count;
   }
 }

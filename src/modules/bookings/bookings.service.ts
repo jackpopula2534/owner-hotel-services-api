@@ -785,8 +785,7 @@ export class BookingsService {
 
     // Apply symmetric cleaning buffer so back-to-back bookings respect
     // the property's cleaningBufferMinutes setting.
-    const cleaningBufferMinutes =
-      property.cleaningBufferMinutes ?? DEFAULT_CLEANING_BUFFER_MINUTES;
+    const cleaningBufferMinutes = property.cleaningBufferMinutes ?? DEFAULT_CLEANING_BUFFER_MINUTES;
     const { overlapStart, overlapEnd } = applyCleaningBuffer(
       scheduledCheckInForOverlap,
       scheduledCheckOutForOverlap,

@@ -13,13 +13,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import {
-  ApiBearerAuth,
-  ApiConsumes,
-  ApiOperation,
-  ApiResponse,
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { diskStorage } from 'multer';
 import { extname, join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
@@ -146,9 +140,7 @@ export class BankAccountsController {
   )
   uploadLogo(@UploadedFile() file: MulterFile) {
     if (!file) throw new BadRequestException('No file provided');
-    const baseUrl =
-      process.env.API_BASE_URL ||
-      `http://localhost:${process.env.PORT || 9011}`;
+    const baseUrl = process.env.API_BASE_URL || `http://localhost:${process.env.PORT || 9011}`;
     return { url: `${baseUrl}/uploads/banks/${file.filename}` };
   }
 }

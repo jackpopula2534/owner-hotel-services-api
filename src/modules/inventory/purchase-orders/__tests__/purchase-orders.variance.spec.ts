@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PurchaseOrdersService } from '../purchase-orders.service';
 import { PrismaService } from '@/prisma/prisma.service';
 
@@ -24,7 +25,11 @@ describe('PurchaseOrdersService — Sprint 4 Variance + Force Close', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     const moduleRef: TestingModule = await Test.createTestingModule({
-      providers: [PurchaseOrdersService, { provide: PrismaService, useValue: mockPrisma }],
+      providers: [
+        PurchaseOrdersService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+      ],
     }).compile();
     service = moduleRef.get(PurchaseOrdersService);
   });

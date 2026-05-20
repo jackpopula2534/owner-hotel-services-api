@@ -219,10 +219,7 @@ describe('tenant-scope middleware', () => {
     it('throws — caller should use findFirst', async () => {
       await expect(
         context.run({ tenantId: TENANT_A, skipScope: false }, async () => {
-          await middleware(
-            makeParams('Booking', 'findUnique', { where: { id: 'b1' } }),
-            next,
-          );
+          await middleware(makeParams('Booking', 'findUnique', { where: { id: 'b1' } }), next);
         }),
       ).rejects.toThrow(/findUnique\(\) is not allowed/);
       expect(next).not.toHaveBeenCalled();
@@ -291,10 +288,7 @@ describe('tenant-scope middleware', () => {
 
   describe('no tenant context (cron / seed / REPL)', () => {
     it('passes through unchanged when no ALS frame is active', async () => {
-      await middleware(
-        makeParams('Booking', 'findMany', { where: { id: 'b1' } }),
-        next,
-      );
+      await middleware(makeParams('Booking', 'findMany', { where: { id: 'b1' } }), next);
       expect(next.mock.calls[0][0].args).toEqual({ where: { id: 'b1' } });
     });
 

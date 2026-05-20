@@ -149,7 +149,11 @@ export class GuestsService {
     // guaranteed by CreateGuestDto's @IsNotEmpty validators.
     // PDPA: บันทึก consent timestamp และ IP (S1-02)
     const consentData = createGuestDto.consentGiven
-      ? { consentGiven: true, consentAt: new Date(), consentVersion: createGuestDto.consentVersion ?? '1.0' }
+      ? {
+          consentGiven: true,
+          consentAt: new Date(),
+          consentVersion: createGuestDto.consentVersion ?? '1.0',
+        }
       : {};
 
     const data = {

@@ -3,10 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuditLogService } from '../../audit-log/audit-log.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import {
-  mockAuditLogService,
-  mockEventEmitter,
-} from '../../common/test/mock-providers';
+import { mockAuditLogService, mockEventEmitter } from '../../common/test/mock-providers';
 import {
   CreateMaintenanceTaskDto,
   MaintenanceCategory,

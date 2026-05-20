@@ -3,7 +3,7 @@ import { BadRequestException, ForbiddenException, NotFoundException } from '@nes
 import { getQueueToken } from '@nestjs/bull';
 import { DataExportService } from './data-export.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { DATA_EXPORT_QUEUE } from './data-export.processor';
+import { DATA_EXPORT_QUEUE } from './data-export.constants';
 
 describe('DataExportService', () => {
   let service: DataExportService;

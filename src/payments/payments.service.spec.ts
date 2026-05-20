@@ -55,7 +55,11 @@ describe('PaymentsService', () => {
     service = moduleRef.get(PaymentsService);
     jest.clearAllMocks();
     // Stub the private email helper so tests don't need full template wiring.
-    jest.spyOn(service as unknown as { sendPaymentReceiptEmail: jest.Mock }, 'sendPaymentReceiptEmail')
+    jest
+      .spyOn(
+        service as unknown as { sendPaymentReceiptEmail: jest.Mock },
+        'sendPaymentReceiptEmail',
+      )
       .mockResolvedValue(undefined as never);
   });
 
@@ -152,9 +156,9 @@ describe('PaymentsService', () => {
   describe('rejectPayment', () => {
     it('throws when payment is not found', async () => {
       prismaMock.payments.findFirst.mockResolvedValue(null);
-      await expect(
-        service.rejectPayment('payment-1', 'admin-1', 'tenant-1'),
-      ).rejects.toThrow('Payment not found');
+      await expect(service.rejectPayment('payment-1', 'admin-1', 'tenant-1')).rejects.toThrow(
+        'Payment not found',
+      );
     });
 
     it('writes status=REJECTED with adminId + timestamp', async () => {

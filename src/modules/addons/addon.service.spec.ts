@@ -271,11 +271,21 @@ describe('AddonService - Tenant entitlements', () => {
         plans_subscriptions_plan_idToplans: {
           plan_features: [
             {
-              features: { code: 'RESTAURANT_MODULE', name: 'Restaurant', type: 'module', is_active: 1 },
+              features: {
+                code: 'RESTAURANT_MODULE',
+                name: 'Restaurant',
+                type: 'module',
+                is_active: 1,
+              },
             },
             // non-module feature should be ignored — not all plan_features unlock sidebar items
             {
-              features: { code: 'EARLY_CHECKIN', name: 'Early Check-in', type: 'toggle', is_active: 1 },
+              features: {
+                code: 'EARLY_CHECKIN',
+                name: 'Early Check-in',
+                type: 'toggle',
+                is_active: 1,
+              },
             },
           ],
         },
@@ -316,11 +326,20 @@ describe('AddonService - Tenant entitlements', () => {
         id: 'sub-3',
         plans_subscriptions_plan_idToplans: {
           plan_features: [
-            { features: { code: 'INVENTORY_MODULE', name: 'Inventory', type: 'module', is_active: 1 } },
+            {
+              features: {
+                code: 'INVENTORY_MODULE',
+                name: 'Inventory',
+                type: 'module',
+                is_active: 1,
+              },
+            },
           ],
         },
         subscription_features: [
-          { features: { code: 'INVENTORY_MODULE', name: 'Inventory', type: 'module', is_active: 1 } },
+          {
+            features: { code: 'INVENTORY_MODULE', name: 'Inventory', type: 'module', is_active: 1 },
+          },
         ],
       });
 
@@ -334,7 +353,14 @@ describe('AddonService - Tenant entitlements', () => {
         id: 'sub-4',
         plans_subscriptions_plan_idToplans: {
           plan_features: [
-            { features: { code: 'RESTAURANT_MODULE', name: 'Restaurant', type: 'module', is_active: 0 } },
+            {
+              features: {
+                code: 'RESTAURANT_MODULE',
+                name: 'Restaurant',
+                type: 'module',
+                is_active: 0,
+              },
+            },
           ],
         },
         subscription_features: [],

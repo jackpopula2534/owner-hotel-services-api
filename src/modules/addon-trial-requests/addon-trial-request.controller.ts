@@ -14,10 +14,7 @@ import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@ne
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { RolesGuard } from '@/common/guards/roles.guard';
 import { Roles } from '@/common/decorators/roles.decorator';
-import {
-  AddonTrialRequestService,
-  TrialRequestEntity,
-} from './addon-trial-request.service';
+import { AddonTrialRequestService, TrialRequestEntity } from './addon-trial-request.service';
 import { CreateTrialRequestDto } from './dto/create-trial-request.dto';
 import { AdminReviewTrialRequestDto } from './dto/admin-review.dto';
 
@@ -76,7 +73,11 @@ export class AdminAddonTrialRequestController {
    * Admin ดู request ทั้งหมด
    */
   @ApiOperation({ summary: '[Admin] ดูรายการ trial requests ทั้งหมด' })
-  @ApiQuery({ name: 'status', required: false, enum: ['pending', 'approved', 'rejected', 'expired'] })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['pending', 'approved', 'rejected', 'expired'],
+  })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiResponse({ status: 200, description: 'Paginated list' })

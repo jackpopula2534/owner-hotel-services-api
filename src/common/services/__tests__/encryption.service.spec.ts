@@ -100,11 +100,11 @@ describe('EncryptionService', () => {
 
     it('should be the inverse of encrypt for various inputs', () => {
       const testCases = [
-        'TH123456789',        // passport
-        '1234567890123',      // national id (13 digits)
-        'SCB-0012345678',     // bank account
-        '1234567-1-23-4',     // social security
-        'taxid-1234567890',   // tax id
+        'TH123456789', // passport
+        '1234567890123', // national id (13 digits)
+        'SCB-0012345678', // bank account
+        '1234567-1-23-4', // social security
+        'taxid-1234567890', // tax id
       ];
 
       for (const value of testCases) {

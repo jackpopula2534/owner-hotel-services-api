@@ -1,9 +1,4 @@
-import {
-  BadRequestException,
-  Injectable,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   CreatePaymentAccountDto,
@@ -34,11 +29,7 @@ export class PaymentAccountsService {
         propertyId,
         ...(kind ? { kind } : {}),
       },
-      orderBy: [
-        { isDefault: 'desc' },
-        { sortOrder: 'asc' },
-        { createdAt: 'asc' },
-      ],
+      orderBy: [{ isDefault: 'desc' }, { sortOrder: 'asc' }, { createdAt: 'asc' }],
     });
   }
 
@@ -62,8 +53,7 @@ export class PaymentAccountsService {
       const existingCount = await tx.paymentAccount.count({
         where: { propertyId, kind: dto.kind },
       });
-      const shouldBeDefault =
-        dto.isDefault === true || existingCount === 0;
+      const shouldBeDefault = dto.isDefault === true || existingCount === 0;
 
       // ถ้าจะตั้งเป็น default → unset อื่นใน kind เดียวกัน
       if (shouldBeDefault) {
@@ -97,15 +87,11 @@ export class PaymentAccountsService {
   }
 
   // ─── Update ──────────────────────────────────────────────────────────────
-  async update(
-    propertyId: string,
-    id: string,
-    dto: UpdatePaymentAccountDto,
-  ) {
+  async update(propertyId: string, id: string, dto: UpdatePaymentAccountDto) {
     const existing = await this.get(propertyId, id);
 
     // ถ้าเปลี่ยน kind ต้องตรวจ field ใหม่
-    const finalKind = (dto.kind ?? (existing.kind as PaymentAccountKind));
+    const finalKind = dto.kind ?? (existing.kind as PaymentAccountKind);
     if (dto.kind && dto.kind !== existing.kind) {
       this.assertChannelFields({
         ...existing,
@@ -214,9 +200,7 @@ export class PaymentAccountsService {
       }
     } else if (dto.kind === 'bank') {
       if (!dto.bankCode || !dto.accountNumber) {
-        throw new BadRequestException(
-          'bankCode and accountNumber are required for kind=bank',
-        );
+        throw new BadRequestException('bankCode and accountNumber are required for kind=bank');
       }
     }
     if (!dto.accountName?.trim()) {

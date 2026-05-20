@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StockMovementsService } from '../stock-movements.service';
 import { PrismaService } from '@/prisma/prisma.service';
+import { LotsService } from '../../lots/lots.service';
 
 /**
  * Unit tests covering the response-shape regressions surfaced on the
@@ -45,6 +46,7 @@ describe('StockMovementsService — list response shape', () => {
         StockMovementsService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        { provide: LotsService, useValue: { generateLotNumber: jest.fn() } },
       ],
     }).compile();
 

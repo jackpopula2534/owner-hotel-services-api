@@ -18,10 +18,7 @@ import {
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { QueryPurchaseOrderDto, PurchaseOrderStatus } from './dto/query-purchase-order.dto';
-import {
-  INVENTORY_EVENTS,
-  PurchaseOrderApprovedEvent,
-} from '../events/inventory.events';
+import { INVENTORY_EVENTS, PurchaseOrderApprovedEvent } from '../events/inventory.events';
 import {
   QueryPurchaseOrderTrackingDto,
   PurchaseOrderTrackingStatus,

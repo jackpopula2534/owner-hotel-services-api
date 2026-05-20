@@ -22,10 +22,7 @@ describe('DataRetentionService', () => {
     anonymizeService = buildMockAnonymizeService();
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        DataRetentionService,
-        { provide: AnonymizeService, useValue: anonymizeService },
-      ],
+      providers: [DataRetentionService, { provide: AnonymizeService, useValue: anonymizeService }],
     }).compile();
 
     service = module.get<DataRetentionService>(DataRetentionService);

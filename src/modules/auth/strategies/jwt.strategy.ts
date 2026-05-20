@@ -23,6 +23,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!payload) {
       throw new UnauthorizedException();
     }
+    let tenantStatus: string | undefined = undefined;
 
     // ── Live status check ──────────────────────────────────────────────────────
     // เฉพาะ token ที่เป็น user (ไม่ใช่ admin) และไม่ใช่ platform admin
@@ -33,8 +34,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         // as unknown: Prisma type อาจยังไม่ sync หลัง schema migration
         const user = (await this.prisma.user.findUnique({
           where: { id: payload.sub },
-          select: { id: true, status: true, expiresAt: true } as any,
-        })) as unknown as { id: string; status: string; expiresAt: Date | null } | null;
+          select: { id: true, status: true, expiresAt: true, tenantId: true } as any,
+        })) as unknown as { id: string; status: string; expiresAt: Date | null; tenantId: string | null } | null;
 
         if (!user) {
           throw new UnauthorizedException('User not found');
@@ -55,6 +56,17 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
                   : 'บัญชีของคุณไม่อยู่ในสถานะใช้งาน';
           throw new UnauthorizedException(msg);
         }
+
+        // ดึงข้อมูล status ของ tenant เพิ่มเติม เพื่อเอามาใส่ใน user.tenant_status/tenantStatus
+        if (user.tenantId) {
+          const tenant = await this.prisma.tenants.findUnique({
+            where: { id: user.tenantId },
+            select: { status: true },
+          });
+          if (tenant) {
+            tenantStatus = tenant.status;
+          }
+        }
       } catch (err) {
         if (err instanceof UnauthorizedException) throw err;
         // DB error — log แล้วปล่อย token ผ่าน (ไม่ทำให้ระบบล่มทั้งระบบ)
@@ -71,6 +83,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       email: payload.email,
       role: payload.role,
       tenantId: payload.tenantId ?? undefined,
+      tenant_id: payload.tenantId ?? undefined,
+      tenantStatus: tenantStatus,
+      tenant_status: tenantStatus,
       isPlatformAdmin: payload.isPlatformAdmin ?? false,
     };
   }

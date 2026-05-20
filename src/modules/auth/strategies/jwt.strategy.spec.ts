@@ -27,8 +27,11 @@ describe('JwtStrategy', () => {
     }),
   } as unknown as ConfigService;
 
+  const tenantsFindUnique = jest.fn();
+
   const prisma = {
     user: { findUnique: userFindUnique },
+    tenants: { findUnique: tenantsFindUnique },
   } as unknown as PrismaService;
 
   beforeEach(async () => {
@@ -41,6 +44,7 @@ describe('JwtStrategy', () => {
     }).compile();
     strategy = moduleRef.get(JwtStrategy);
     userFindUnique.mockReset();
+    tenantsFindUnique.mockReset();
   });
 
   it('should be defined', () => {
@@ -69,6 +73,9 @@ describe('JwtStrategy', () => {
         email: 'admin@example.com',
         role: 'platform_admin',
         tenantId: undefined,
+        tenant_id: undefined,
+        tenantStatus: undefined,
+        tenant_status: undefined,
         isPlatformAdmin: true,
       });
     });
@@ -78,6 +85,11 @@ describe('JwtStrategy', () => {
         id: 'user-1',
         status: 'active',
         expiresAt: null,
+        tenantId: 'tenant-1',
+      });
+      tenantsFindUnique.mockResolvedValue({
+        id: 'tenant-1',
+        status: 'active',
       });
       const payload = {
         sub: 'user-1',
@@ -90,7 +102,11 @@ describe('JwtStrategy', () => {
 
       expect(userFindUnique).toHaveBeenCalledWith({
         where: { id: 'user-1' },
-        select: expect.objectContaining({ id: true, status: true, expiresAt: true }),
+        select: expect.objectContaining({ id: true, status: true, expiresAt: true, tenantId: true }),
+      });
+      expect(tenantsFindUnique).toHaveBeenCalledWith({
+        where: { id: 'tenant-1' },
+        select: { status: true },
       });
       expect(result).toEqual({
         id: 'user-1',
@@ -98,15 +114,16 @@ describe('JwtStrategy', () => {
         email: 'staff@example.com',
         role: 'manager',
         tenantId: 'tenant-1',
+        tenant_id: 'tenant-1',
+        tenantStatus: 'active',
+        tenant_status: 'active',
         isPlatformAdmin: false,
       });
     });
 
     it('throws when user is not found in DB', async () => {
       userFindUnique.mockResolvedValue(null);
-      await expect(
-        strategy.validate({ sub: 'ghost-user' }),
-      ).rejects.toThrow(UnauthorizedException);
+      await expect(strategy.validate({ sub: 'ghost-user' })).rejects.toThrow(UnauthorizedException);
     });
 
     it.each([

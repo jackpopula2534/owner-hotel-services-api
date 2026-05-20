@@ -136,8 +136,7 @@ export function createTenantScopeMiddleware(
     // with a clear message rather than silently passing through (which would
     // bypass the tenant filter).
     if (params.action === 'findUnique' || params.action === 'findUniqueOrThrow') {
-      const alternative =
-        params.action === 'findUnique' ? 'findFirst' : 'findFirstOrThrow';
+      const alternative = params.action === 'findUnique' ? 'findFirst' : 'findFirstOrThrow';
       throw new Error(
         `[TenantScope] ${params.action}() is not allowed on tenant-scoped model "${params.model}". ` +
           `Use ${alternative}({ where: { id, ${field} } }) so the tenant filter is enforced. ` +
@@ -147,10 +146,7 @@ export function createTenantScopeMiddleware(
     }
 
     // 5. Patch args based on the operation type
-    if (
-      READ_OPS_WITH_WHERE.has(params.action) ||
-      WRITE_OPS_WITH_WHERE.has(params.action)
-    ) {
+    if (READ_OPS_WITH_WHERE.has(params.action) || WRITE_OPS_WITH_WHERE.has(params.action)) {
       params.args = {
         ...params.args,
         where: injectTenantWhere(params.args?.where, field, tenantId),
@@ -173,11 +169,7 @@ export function createTenantScopeMiddleware(
       params.args = {
         ...params.args,
         where: injectTenantWhere(params.args?.where, field, tenantId),
-        create: injectTenantCreate(
-          params.args?.create ?? {},
-          field,
-          tenantId,
-        ),
+        create: injectTenantCreate(params.args?.create ?? {}, field, tenantId),
       };
     }
     // Unknown / future operation → pass through. New Prisma ops should be

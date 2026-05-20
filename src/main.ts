@@ -11,7 +11,10 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    // Enable rawBody so LINE Messaging webhook can verify HMAC-SHA256 signature
+    rawBody: true,
+  });
 
   // Ensure uploads directory exists
   const uploadsPath = join(process.cwd(), 'uploads');
@@ -80,6 +83,8 @@ async function bootstrap() {
     defaultVersion: '1',
   });
 
+  const port = process.env.PORT || 9011;
+
   // Swagger/OpenAPI documentation — disabled on production to avoid exposing API schema
   if (process.env.NODE_ENV !== 'production') {
     const config = new DocumentBuilder()
@@ -103,7 +108,6 @@ async function bootstrap() {
     logger.log(`Swagger documentation: http://localhost:${port}/api/docs`);
   }
 
-  const port = process.env.PORT || 9011;
   await app.listen(port);
   logger.log(`Application is running on: http://localhost:${port}`);
 }

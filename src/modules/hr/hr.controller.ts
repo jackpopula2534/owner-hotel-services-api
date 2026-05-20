@@ -34,10 +34,7 @@ import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import {
-  maskEmployeePayroll,
-  maskEmployeeListPayroll,
-} from '../../common/utils/payroll-mask.util';
+import { maskEmployeePayroll, maskEmployeeListPayroll } from '../../common/utils/payroll-mask.util';
 
 @ApiTags('hr')
 @ApiBearerAuth('JWT-auth')
@@ -134,17 +131,11 @@ export class HrController {
   @ApiResponse({ status: 200, description: 'List of employees' })
   @ApiResponse({ status: 403, description: 'HR add-on not active' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
-  async findAll(
-    @Query() query: any,
-    @CurrentUser() user: { tenantId?: string; role?: string },
-  ) {
+  async findAll(@Query() query: any, @CurrentUser() user: { tenantId?: string; role?: string }) {
     const result = await this.hrService.findAll(query, user?.tenantId);
     return {
       ...result,
-      data: maskEmployeeListPayroll(
-        result.data as Record<string, unknown>[],
-        user.role,
-      ),
+      data: maskEmployeeListPayroll(result.data as Record<string, unknown>[], user.role),
     };
   }
 

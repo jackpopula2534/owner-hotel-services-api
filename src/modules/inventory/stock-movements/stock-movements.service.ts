@@ -235,8 +235,7 @@ export class StockMovementsService {
     // number + expiry date here, then pass the lotId into the transaction below.
     let autoCreatedLotId: string | undefined;
     if (dto.type === StockMovementTypeDto.GOODS_RECEIVE) {
-      const needsLot =
-        (item as any).isPerishable || (item as any).requiresLotTracking;
+      const needsLot = (item as any).isPerishable || (item as any).requiresLotTracking;
       if (needsLot && !dto.lotId) {
         // Generate lot number via sequence (outside tx to keep the tx short)
         const lotNumber = await this.lotsService.generateLotNumber(tenantId);
@@ -693,9 +692,8 @@ export class StockMovementsService {
       newQuantity = oldQuantity + quantity;
 
       // Weighted average cost: ((oldQty * oldAvgCost) + (newQty * unitCost)) / totalQty
-      newAvgCost = newQuantity > 0
-        ? (oldQuantity * oldAvgCost + quantity * unitCost) / newQuantity
-        : unitCost;
+      newAvgCost =
+        newQuantity > 0 ? (oldQuantity * oldAvgCost + quantity * unitCost) / newQuantity : unitCost;
 
       newTotalValue = newQuantity * newAvgCost;
     } else {

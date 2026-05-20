@@ -3,7 +3,7 @@ import { BadRequestException, ForbiddenException, NotFoundException } from '@nes
 import { getQueueToken } from '@nestjs/bull';
 import { DataExportService } from './data-export.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { DATA_EXPORT_QUEUE, DATA_EXPORT_JOBS } from './data-export.processor';
+import { DATA_EXPORT_QUEUE, DATA_EXPORT_JOBS } from './data-export.constants';
 
 /**
  * Unit tests — DataExportService (Bull Queue integration)
@@ -103,9 +103,9 @@ describe('DataExportService — Bull Queue integration', () => {
         status: 'processing',
       });
 
-      await expect(
-        service.request({ tenantId: 'tenant-1', kind: 'export' }),
-      ).rejects.toThrow(BadRequestException);
+      await expect(service.request({ tenantId: 'tenant-1', kind: 'export' })).rejects.toThrow(
+        BadRequestException,
+      );
 
       expect(mockQueue.add).not.toHaveBeenCalled();
     });

@@ -6,7 +6,10 @@ export class SavePaymentSettingsDto {
   @IsBoolean()
   promptpayEnabled: boolean;
 
-  @ApiPropertyOptional({ description: 'หมายเลข PromptPay (เบอร์โทรศัพท์ หรือ เลขบัตรประชาชน)', example: '0812345678' })
+  @ApiPropertyOptional({
+    description: 'หมายเลข PromptPay (เบอร์โทรศัพท์ หรือ เลขบัตรประชาชน)',
+    example: '0812345678',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(20)
@@ -26,7 +29,10 @@ export class SavePaymentSettingsDto {
   @IsBoolean()
   cashEnabled: boolean;
 
-  @ApiPropertyOptional({ description: 'คำแนะนำการชำระเงินสด', example: 'ชำระที่เคาน์เตอร์ Front Desk' })
+  @ApiPropertyOptional({
+    description: 'คำแนะนำการชำระเงินสด',
+    example: 'ชำระที่เคาน์เตอร์ Front Desk',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(500)

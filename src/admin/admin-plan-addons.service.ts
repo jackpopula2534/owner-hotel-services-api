@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-  ConflictException,
-} from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AddonService } from '../modules/addons/addon.service';
 import {
@@ -123,9 +118,7 @@ export class AdminPlanAddonsService {
     });
 
     if (existing) {
-      throw new ConflictException(
-        `Add-on "${addon.name}" is already assigned to this plan`,
-      );
+      throw new ConflictException(`Add-on "${addon.name}" is already assigned to this plan`);
     }
 
     await this.planAddonsClient.create({
@@ -145,10 +138,7 @@ export class AdminPlanAddonsService {
    * DELETE /api/v1/admin/plans/:planId/addons/:addonId
    * Remove an add-on from a plan.
    */
-  async removeAddonFromPlan(
-    planId: string,
-    addonId: string,
-  ): Promise<{ message: string }> {
+  async removeAddonFromPlan(planId: string, addonId: string): Promise<{ message: string }> {
     await this.assertPlanExists(planId);
 
     const addon = await this.addOnsClient.findUnique({ where: { id: addonId } });
@@ -161,9 +151,7 @@ export class AdminPlanAddonsService {
     });
 
     if (result.count === 0) {
-      throw new NotFoundException(
-        `Add-on "${addon.name}" is not assigned to this plan`,
-      );
+      throw new NotFoundException(`Add-on "${addon.name}" is not assigned to this plan`);
     }
 
     this.logger.log(`Removed add-on "${addon.name}" (${addon.code}) from plan ${planId}`);
@@ -180,9 +168,11 @@ export class AdminPlanAddonsService {
   // ---------------------------------------------------------------------------
 
   private async assertPlanExists(planId: string): Promise<void> {
-    const plansClient = (this.prisma as unknown as {
-      plans: { findUnique: (args: Record<string, unknown>) => Promise<any | null> };
-    }).plans;
+    const plansClient = (
+      this.prisma as unknown as {
+        plans: { findUnique: (args: Record<string, unknown>) => Promise<any | null> };
+      }
+    ).plans;
 
     const plan = await plansClient.findUnique({ where: { id: planId } });
     if (!plan) {

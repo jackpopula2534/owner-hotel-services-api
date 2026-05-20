@@ -21,7 +21,6 @@ import { DATA_EXPORT_QUEUE, DATA_EXPORT_JOBS, DataExportJobData } from './data-e
  * Job names: 'process-export' | 'process-erasure'
  */
 
-
 @Processor(DATA_EXPORT_QUEUE)
 export class DataExportProcessor {
   private readonly logger = new Logger(DataExportProcessor.name);
@@ -36,8 +35,7 @@ export class DataExportProcessor {
   onError(error: Error) {
     const now = Date.now();
     const isConnErr =
-      error.name === 'AggregateError' ||
-      (error as NodeJS.ErrnoException).code === 'ECONNREFUSED';
+      error.name === 'AggregateError' || (error as NodeJS.ErrnoException).code === 'ECONNREFUSED';
     if (isConnErr) {
       if (now - this.lastQueueErrorLog < 30_000) return;
       this.lastQueueErrorLog = now;
@@ -262,12 +260,20 @@ export class DataExportProcessor {
       await (this.prisma.guest as any).update({
         where: { id: g.id },
         data: {
-          firstName: REDACTED, lastName: REDACTED,
-          email: 'redacted@anonymized.invalid', phone: '0000000000',
-          nationalId: null, passportNumber: null,
-          dateOfBirth: null, address: null,
-          city: null, country: null, postalCode: null,
-          vehiclePlateNumber: null, specialNotes: null, vipLevel: null,
+          firstName: REDACTED,
+          lastName: REDACTED,
+          email: 'redacted@anonymized.invalid',
+          phone: '0000000000',
+          nationalId: null,
+          passportNumber: null,
+          dateOfBirth: null,
+          address: null,
+          city: null,
+          country: null,
+          postalCode: null,
+          vehiclePlateNumber: null,
+          specialNotes: null,
+          vipLevel: null,
           anonymizedAt: new Date(),
         },
       });
@@ -286,14 +292,24 @@ export class DataExportProcessor {
       await (this.prisma as any).employee.update({
         where: { id: e.id },
         data: {
-          firstName: REDACTED, lastName: REDACTED,
-          email: 'redacted@anonymized.invalid', phone: '0000000000',
-          nationalId: null, bankAccount: null, bankName: null,
-          socialSecurity: null, taxId: null,
-          dateOfBirth: null, address: null,
-          emergencyContacts: null, educations: null,
-          workExperiences: null, notes: null, nickname: null,
-          status: 'ANONYMIZED', anonymizedAt: new Date(),
+          firstName: REDACTED,
+          lastName: REDACTED,
+          email: 'redacted@anonymized.invalid',
+          phone: '0000000000',
+          nationalId: null,
+          bankAccount: null,
+          bankName: null,
+          socialSecurity: null,
+          taxId: null,
+          dateOfBirth: null,
+          address: null,
+          emergencyContacts: null,
+          educations: null,
+          workExperiences: null,
+          notes: null,
+          nickname: null,
+          status: 'ANONYMIZED',
+          anonymizedAt: new Date(),
         },
       });
     }

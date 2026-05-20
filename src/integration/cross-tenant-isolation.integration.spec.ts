@@ -103,87 +103,87 @@ describe('Cross-Tenant Isolation (integration)', () => {
     // for tenant B would itself be blocked since we'd be inside tenant A's
     // context, etc.). runUnscoped is the supported escape hatch for this.
     try {
-    await tenantContext.runUnscoped(async () => {
-      await prisma.tenants.create({
-        data: {
-          id: tenantA,
-          name: 'Integration Test Tenant A',
-          status: 'trial',
-        },
-      });
-      await prisma.tenants.create({
-        data: {
-          id: tenantB,
-          name: 'Integration Test Tenant B',
-          status: 'trial',
-        },
-      });
+      await tenantContext.runUnscoped(async () => {
+        await prisma.tenants.create({
+          data: {
+            id: tenantA,
+            name: 'Integration Test Tenant A',
+            status: 'trial',
+          },
+        });
+        await prisma.tenants.create({
+          data: {
+            id: tenantB,
+            name: 'Integration Test Tenant B',
+            status: 'trial',
+          },
+        });
 
-      await prisma.property.create({
-        data: {
-          id: propertyA,
-          tenantId: tenantA,
-          name: 'Hotel A',
-          code: `A-${Date.now()}`,
-        },
-      });
-      await prisma.property.create({
-        data: {
-          id: propertyB,
-          tenantId: tenantB,
-          name: 'Hotel B',
-          code: `B-${Date.now()}`,
-        },
-      });
+        await prisma.property.create({
+          data: {
+            id: propertyA,
+            tenantId: tenantA,
+            name: 'Hotel A',
+            code: `A-${Date.now()}`,
+          },
+        });
+        await prisma.property.create({
+          data: {
+            id: propertyB,
+            tenantId: tenantB,
+            name: 'Hotel B',
+            code: `B-${Date.now()}`,
+          },
+        });
 
-      await prisma.room.create({
-        data: {
-          id: roomA,
-          tenantId: tenantA,
-          propertyId: propertyA,
-          number: 'A-101',
-          type: 'standard',
-          price: 1500,
-        },
-      });
-      await prisma.room.create({
-        data: {
-          id: roomB,
-          tenantId: tenantB,
-          propertyId: propertyB,
-          number: 'B-101',
-          type: 'standard',
-          price: 1500,
-        },
-      });
+        await prisma.room.create({
+          data: {
+            id: roomA,
+            tenantId: tenantA,
+            propertyId: propertyA,
+            number: 'A-101',
+            type: 'standard',
+            price: 1500,
+          },
+        });
+        await prisma.room.create({
+          data: {
+            id: roomB,
+            tenantId: tenantB,
+            propertyId: propertyB,
+            number: 'B-101',
+            type: 'standard',
+            price: 1500,
+          },
+        });
 
-      await prisma.booking.create({
-        data: {
-          id: bookingA,
-          tenantId: tenantA,
-          propertyId: propertyA,
-          roomId: roomA,
-          guestFirstName: 'Alice',
-          guestLastName: 'TenantA',
-          checkIn: new Date('2026-06-01'),
-          checkOut: new Date('2026-06-03'),
-          totalPrice: 3000,
-        },
+        await prisma.booking.create({
+          data: {
+            id: bookingA,
+            tenantId: tenantA,
+            propertyId: propertyA,
+            roomId: roomA,
+            guestFirstName: 'Alice',
+            guestLastName: 'TenantA',
+            checkIn: new Date('2026-06-01'),
+            checkOut: new Date('2026-06-03'),
+            totalPrice: 3000,
+          },
+        });
+        await prisma.booking.create({
+          data: {
+            id: bookingB,
+            tenantId: tenantB,
+            propertyId: propertyB,
+            roomId: roomB,
+            guestFirstName: 'Bob',
+            guestLastName: 'TenantB',
+            checkIn: new Date('2026-06-01'),
+            checkOut: new Date('2026-06-03'),
+            totalPrice: 3000,
+          },
+        });
       });
-      await prisma.booking.create({
-        data: {
-          id: bookingB,
-          tenantId: tenantB,
-          propertyId: propertyB,
-          roomId: roomB,
-          guestFirstName: 'Bob',
-          guestLastName: 'TenantB',
-          checkIn: new Date('2026-06-01'),
-          checkOut: new Date('2026-06-03'),
-          totalPrice: 3000,
-        },
-      });
-    });
     } catch (err) {
       skipReason = `Seed failed: ${(err as Error).message.split('\n')[0]}`;
     }
@@ -208,9 +208,8 @@ describe('Cross-Tenant Isolation (integration)', () => {
       // classic IDOR (insecure direct object reference) vulnerability. With
       // the middleware, the injected `tenantId = tenantA` makes the row
       // invisible because the where becomes `id = bookingB AND tenantId = A`.
-      const result = await tenantContext.run(
-        { tenantId: tenantA, skipScope: false },
-        async () => prisma.booking.findFirst({ where: { id: bookingB } }),
+      const result = await tenantContext.run({ tenantId: tenantA, skipScope: false }, async () =>
+        prisma.booking.findFirst({ where: { id: bookingB } }),
       );
       expect(result).toBeNull();
     });
@@ -218,9 +217,8 @@ describe('Cross-Tenant Isolation (integration)', () => {
     it("tenant A's findFirst({where:{id:bookingA}}) returns the row", async () => {
       if (bail("tenant A's findFirst({where:{id:bookingA}}) returns the row")) return;
       // Sanity check — the middleware shouldn't break legitimate same-tenant access
-      const result = await tenantContext.run(
-        { tenantId: tenantA, skipScope: false },
-        async () => prisma.booking.findFirst({ where: { id: bookingA } }),
+      const result = await tenantContext.run({ tenantId: tenantA, skipScope: false }, async () =>
+        prisma.booking.findFirst({ where: { id: bookingA } }),
       );
       expect(result).not.toBeNull();
       expect(result?.id).toBe(bookingA);
@@ -229,16 +227,14 @@ describe('Cross-Tenant Isolation (integration)', () => {
 
     it('findMany returns ONLY same-tenant rows', async () => {
       if (bail('findMany returns ONLY same-tenant rows')) return;
-      const aResults = await tenantContext.run(
-        { tenantId: tenantA, skipScope: false },
-        async () => prisma.booking.findMany({ where: { id: { in: [bookingA, bookingB] } } }),
+      const aResults = await tenantContext.run({ tenantId: tenantA, skipScope: false }, async () =>
+        prisma.booking.findMany({ where: { id: { in: [bookingA, bookingB] } } }),
       );
       expect(aResults).toHaveLength(1);
       expect(aResults[0].id).toBe(bookingA);
 
-      const bResults = await tenantContext.run(
-        { tenantId: tenantB, skipScope: false },
-        async () => prisma.booking.findMany({ where: { id: { in: [bookingA, bookingB] } } }),
+      const bResults = await tenantContext.run({ tenantId: tenantB, skipScope: false }, async () =>
+        prisma.booking.findMany({ where: { id: { in: [bookingA, bookingB] } } }),
       );
       expect(bResults).toHaveLength(1);
       expect(bResults[0].id).toBe(bookingB);
@@ -246,9 +242,8 @@ describe('Cross-Tenant Isolation (integration)', () => {
 
     it('count excludes other tenants', async () => {
       if (bail('count excludes other tenants')) return;
-      const aCount = await tenantContext.run(
-        { tenantId: tenantA, skipScope: false },
-        async () => prisma.booking.count({ where: { id: { in: [bookingA, bookingB] } } }),
+      const aCount = await tenantContext.run({ tenantId: tenantA, skipScope: false }, async () =>
+        prisma.booking.count({ where: { id: { in: [bookingA, bookingB] } } }),
       );
       expect(aCount).toBe(1);
     });
@@ -256,9 +251,8 @@ describe('Cross-Tenant Isolation (integration)', () => {
     it('findUnique on tenant-scoped model throws (use findFirst)', async () => {
       if (bail('findUnique on tenant-scoped model throws (use findFirst)')) return;
       await expect(
-        tenantContext.run(
-          { tenantId: tenantA, skipScope: false },
-          async () => prisma.booking.findUnique({ where: { id: bookingA } }),
+        tenantContext.run({ tenantId: tenantA, skipScope: false }, async () =>
+          prisma.booking.findUnique({ where: { id: bookingA } }),
         ),
       ).rejects.toThrow(/findUnique\(\) is not allowed/);
     });
@@ -271,13 +265,11 @@ describe('Cross-Tenant Isolation (integration)', () => {
       // means MySQL finds zero matching rows → Prisma throws P2025
       // (RecordNotFound). The row in tenant B is unchanged afterwards.
       await expect(
-        tenantContext.run(
-          { tenantId: tenantA, skipScope: false },
-          async () =>
-            prisma.booking.update({
-              where: { id: bookingB },
-              data: { notes: 'HACKED' },
-            }),
+        tenantContext.run({ tenantId: tenantA, skipScope: false }, async () =>
+          prisma.booking.update({
+            where: { id: bookingB },
+            data: { notes: 'HACKED' },
+          }),
         ),
       ).rejects.toThrow();
 
@@ -290,13 +282,11 @@ describe('Cross-Tenant Isolation (integration)', () => {
 
     it('updateMany cross-tenant affects 0 rows', async () => {
       if (bail('updateMany cross-tenant affects 0 rows')) return;
-      const result = await tenantContext.run(
-        { tenantId: tenantA, skipScope: false },
-        async () =>
-          prisma.booking.updateMany({
-            where: { id: bookingB },
-            data: { notes: 'BULK-HACK' },
-          }),
+      const result = await tenantContext.run({ tenantId: tenantA, skipScope: false }, async () =>
+        prisma.booking.updateMany({
+          where: { id: bookingB },
+          data: { notes: 'BULK-HACK' },
+        }),
       );
       expect(result.count).toBe(0);
 
@@ -308,12 +298,10 @@ describe('Cross-Tenant Isolation (integration)', () => {
 
     it('deleteMany cross-tenant affects 0 rows', async () => {
       if (bail('deleteMany cross-tenant affects 0 rows')) return;
-      const result = await tenantContext.run(
-        { tenantId: tenantA, skipScope: false },
-        async () =>
-          prisma.booking.deleteMany({
-            where: { id: bookingB },
-          }),
+      const result = await tenantContext.run({ tenantId: tenantA, skipScope: false }, async () =>
+        prisma.booking.deleteMany({
+          where: { id: bookingB },
+        }),
       );
       expect(result.count).toBe(0);
 
@@ -328,22 +316,20 @@ describe('Cross-Tenant Isolation (integration)', () => {
       if (bail('create auto-stamps the current tenantId')) return;
       const newBookingId = randomUUID();
       try {
-        await tenantContext.run(
-          { tenantId: tenantA, skipScope: false },
-          async () =>
-            prisma.booking.create({
-              data: {
-                id: newBookingId,
-                // NOTE: no tenantId here — middleware should add it
-                propertyId: propertyA,
-                roomId: roomA,
-                guestFirstName: 'Charlie',
-                guestLastName: 'AutoStamp',
-                checkIn: new Date('2026-07-01'),
-                checkOut: new Date('2026-07-02'),
-                totalPrice: 1500,
-              } as never,
-            }),
+        await tenantContext.run({ tenantId: tenantA, skipScope: false }, async () =>
+          prisma.booking.create({
+            data: {
+              id: newBookingId,
+              // NOTE: no tenantId here — middleware should add it
+              propertyId: propertyA,
+              roomId: roomA,
+              guestFirstName: 'Charlie',
+              guestLastName: 'AutoStamp',
+              checkIn: new Date('2026-07-01'),
+              checkOut: new Date('2026-07-02'),
+              totalPrice: 1500,
+            } as never,
+          }),
         );
 
         const created = await tenantContext.runUnscoped(async () =>
@@ -383,10 +369,8 @@ describe('Cross-Tenant Isolation (integration)', () => {
 
     it('manual skipScope flag also disables filtering', async () => {
       if (bail('manual skipScope flag also disables filtering')) return;
-      const all = await tenantContext.run(
-        { tenantId: tenantA, skipScope: true },
-        async () =>
-          prisma.booking.findMany({ where: { id: { in: [bookingA, bookingB] } } }),
+      const all = await tenantContext.run({ tenantId: tenantA, skipScope: true }, async () =>
+        prisma.booking.findMany({ where: { id: { in: [bookingA, bookingB] } } }),
       );
       expect(all).toHaveLength(2);
     });

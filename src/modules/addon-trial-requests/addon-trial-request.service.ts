@@ -51,10 +51,7 @@ export class AddonTrialRequestService {
    * Tenant ขอทดลองใช้ add-on
    * - ไม่อนุญาตถ้ามี pending หรือ approved (ยัง active) อยู่แล้ว
    */
-  async createRequest(
-    tenantId: string,
-    dto: CreateTrialRequestDto,
-  ): Promise<TrialRequestEntity> {
+  async createRequest(tenantId: string, dto: CreateTrialRequestDto): Promise<TrialRequestEntity> {
     // ตรวจสอบว่า addon code นี้มีอยู่จริง
     const catalog = await this.addonService.listActive();
     const addonInfo = catalog.find((a) => a.code === dto.addonCode);
@@ -114,11 +111,10 @@ export class AddonTrialRequestService {
   // ─── Admin endpoints ────────────────────────────────────────────────────────
 
   /** Admin ดู request ทั้งหมด พร้อม filter */
-  async findAll(query: {
-    status?: TrialRequestStatus;
-    page?: number;
-    limit?: number;
-  }): Promise<{ items: TrialRequestEntity[]; meta: { page: number; limit: number; total: number } }> {
+  async findAll(query: { status?: TrialRequestStatus; page?: number; limit?: number }): Promise<{
+    items: TrialRequestEntity[];
+    meta: { page: number; limit: number; total: number };
+  }> {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const where: any = {};
@@ -242,7 +238,9 @@ export class AddonTrialRequestService {
         where: { code: addonCode, is_active: 1 },
       });
       if (!feature) {
-        this.logger.warn(`Feature code "${addonCode}" not found in features table — skipping activation`);
+        this.logger.warn(
+          `Feature code "${addonCode}" not found in features table — skipping activation`,
+        );
         return;
       }
 
@@ -275,7 +273,9 @@ export class AddonTrialRequestService {
         },
       });
 
-      this.logger.log(`Addon ${addonCode} activated for tenant ${tenantId} until ${expiresAt.toISOString()}`);
+      this.logger.log(
+        `Addon ${addonCode} activated for tenant ${tenantId} until ${expiresAt.toISOString()}`,
+      );
     } catch (error) {
       this.logger.error(`Failed to activate addon ${addonCode} for tenant ${tenantId}:`, error);
     }

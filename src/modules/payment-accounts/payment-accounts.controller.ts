@@ -13,13 +13,7 @@ import {
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
-import {
-  ApiBearerAuth,
-  ApiOperation,
-  ApiQuery,
-  ApiResponse,
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -152,10 +146,7 @@ export class PaymentAccountsController {
    *   3. Fallback: property แรกของ tenant
    * ทุก path ตรวจสอบว่า property เป็นของ user.tenantId เพื่อ tenant isolation
    */
-  private async resolvePropertyId(
-    user: JwtUser,
-    propertyIdQuery?: string,
-  ): Promise<string> {
+  private async resolvePropertyId(user: JwtUser, propertyIdQuery?: string): Promise<string> {
     if (!user.tenantId) {
       throw new UnauthorizedException('Tenant not found in token');
     }

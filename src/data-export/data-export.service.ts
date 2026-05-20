@@ -59,9 +59,7 @@ export class DataExportService {
 
     // ── Enqueue Bull job สำหรับ actual processing ──────────────
     const jobName =
-      kind === 'erasure'
-        ? DATA_EXPORT_JOBS.PROCESS_ERASURE
-        : DATA_EXPORT_JOBS.PROCESS_EXPORT;
+      kind === 'erasure' ? DATA_EXPORT_JOBS.PROCESS_ERASURE : DATA_EXPORT_JOBS.PROCESS_EXPORT;
 
     await this.exportQueue.add(
       jobName,
@@ -79,9 +77,7 @@ export class DataExportService {
       },
     );
 
-    this.logger.log(
-      `Data ${kind} queued: tenant=${input.tenantId} request=${exportRequest.id}`,
-    );
+    this.logger.log(`Data ${kind} queued: tenant=${input.tenantId} request=${exportRequest.id}`);
 
     return { id: exportRequest.id, status: exportRequest.status };
   }

@@ -297,27 +297,15 @@ export class AllExceptionsFilter implements ExceptionFilter {
           : typeof rawTarget === 'string'
             ? rawTarget
             : 'field';
-        const base = this.t(
-          'errors.prisma.P2002',
-          language,
-          'This record already exists',
-        );
+        const base = this.t('errors.prisma.P2002', language, 'This record already exists');
         return `${base} (${target})`;
       }
       case 'P2025':
         return this.t('errors.prisma.P2025', language, 'Record not found');
       case 'P2003':
-        return this.t(
-          'errors.prisma.P2003',
-          language,
-          'Foreign key constraint failed',
-        );
+        return this.t('errors.prisma.P2003', language, 'Foreign key constraint failed');
       default:
-        return this.t(
-          'errors.generic',
-          language,
-          `Database error (${exception.code})`,
-        );
+        return this.t('errors.generic', language, `Database error (${exception.code})`);
     }
   }
 

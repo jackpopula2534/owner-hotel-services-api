@@ -40,7 +40,13 @@ describe('AuthService — password reset', () => {
       findUnique: jest.fn(),
       delete: jest.fn(),
     },
-    refreshToken: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), updateMany: jest.fn(), delete: jest.fn() },
+    refreshToken: {
+      findUnique: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+      updateMany: jest.fn(),
+      delete: jest.fn(),
+    },
     userTenant: { findFirst: jest.fn().mockResolvedValue(null) },
     admin: { findUnique: jest.fn() },
   };
@@ -171,9 +177,7 @@ describe('AuthService — password reset', () => {
         email: 'user@example.com',
         expiresAt: new Date(Date.now() - 60_000),
       });
-      await expect(service.resetPassword('expired', 'pw')).rejects.toThrow(
-        /invalid or expired/i,
-      );
+      await expect(service.resetPassword('expired', 'pw')).rejects.toThrow(/invalid or expired/i);
       expect(mockPrisma.user.update).not.toHaveBeenCalled();
       expect(mockPrisma.password_resets.delete).not.toHaveBeenCalled();
     });

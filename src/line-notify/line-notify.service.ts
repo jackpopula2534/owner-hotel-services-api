@@ -48,10 +48,7 @@ export class LineNotifyService {
     return res.json() as Promise<T>;
   }
 
-  private async fetchGet<T = unknown>(
-    url: string,
-    headers: Record<string, string>,
-  ): Promise<T> {
+  private async fetchGet<T = unknown>(url: string, headers: Record<string, string>): Promise<T> {
     if (!url.startsWith('https://')) {
       throw new Error(`HTTPS required — blocked non-HTTPS URL: ${url}`);
     }
@@ -92,11 +89,9 @@ export class LineNotifyService {
         client_secret: this.clientSecret,
       });
 
-      return await this.fetchPost<LineNotifyTokenResponseDto>(
-        this.tokenUrl,
-        params.toString(),
-        { 'Content-Type': 'application/x-www-form-urlencoded' },
-      );
+      return await this.fetchPost<LineNotifyTokenResponseDto>(this.tokenUrl, params.toString(), {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      });
     } catch (error) {
       this.logger.error(`Failed to exchange code for token: ${error.message}`);
       throw new BadRequestException('Failed to connect Line Notify');
@@ -224,11 +219,7 @@ export class LineNotifyService {
     if (token) {
       // Revoke token on Line side
       try {
-        await this.fetchPost(
-          this.revokeUrl,
-          '',
-          { Authorization: `Bearer ${token.accessToken}` },
-        );
+        await this.fetchPost(this.revokeUrl, '', { Authorization: `Bearer ${token.accessToken}` });
       } catch (error) {
         this.logger.warn(`Failed to revoke Line Notify token: ${error.message}`);
       }

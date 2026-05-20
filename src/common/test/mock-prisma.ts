@@ -68,11 +68,7 @@ function makeModelMock(): Record<string, jest.Mock> {
       acc[method] = jest.fn().mockResolvedValue([]);
     } else if (method === 'count') {
       acc[method] = jest.fn().mockResolvedValue(0);
-    } else if (
-      method === 'aggregate' ||
-      method === 'updateMany' ||
-      method === 'deleteMany'
-    ) {
+    } else if (method === 'aggregate' || method === 'updateMany' || method === 'deleteMany') {
       acc[method] = jest.fn().mockResolvedValue({ count: 0 });
     } else {
       // findFirst/findUnique/etc default to null (no row found)
