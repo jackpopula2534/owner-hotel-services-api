@@ -292,6 +292,65 @@ export class AuthController {
     return { success: true, message: 'Logged out from Hotel Management Terminal' };
   }
 
+  // ─── Accounting Sub-System ──────────────────────────────────────────────────
+
+  @Post('accounting/login')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Login to Accounting Terminal',
+    description:
+      'Creates a session tagged systemContext="accounting". ' +
+      'Tokens issued here are scoped to the accounting sub-system only. ' +
+      'Logging out from this terminal will NOT affect the main dashboard session.',
+  })
+  @ApiResponse({ status: 200, description: 'Accounting login successful' })
+  async accountingLogin(@Body() loginDto: LoginDto, @Req() req: Request) {
+    return this.authService.login(
+      loginDto,
+      {
+        ipAddress: req.ip ?? req.socket?.remoteAddress,
+        userAgent: req.headers['user-agent'],
+      },
+      'accounting',
+    );
+  }
+
+  @Post('accounting/logout')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 50, ttl: 60 } })
+  @ApiBearerAuth('JWT-auth')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Logout from Accounting Terminal only',
+    description:
+      'Revokes only accounting session tokens. ' +
+      'The main hotel management dashboard session stays active.',
+  })
+  @ApiResponse({ status: 200, description: 'Accounting session ended' })
+  async accountingLogout(@CurrentUser() user: any, @Body() body?: { refreshToken?: string }) {
+    await this.authService.logout(user.userId, body?.refreshToken, 'accounting');
+    return { success: true, message: 'Logged out from Accounting system' };
+  }
+
+  @Post('accounting-launch')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 30, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Generate a short-lived deep-link token to open Accounting terminal pre-authenticated',
+    description: 'Returns a 5-minute JWT. User is logged in as accounting_manager.',
+  })
+  @ApiResponse({ status: 200, description: 'Accounting launch token generated' })
+  async accountingLaunch(@CurrentUser() caller: any, @Req() req: Request) {
+    return this.authService.generateAccountingLaunchToken(
+      { userId: caller.userId, email: caller.email, role: caller.role, tenantId: caller.tenantId },
+      req.ip ?? req.socket?.remoteAddress,
+    );
+  }
+
   @Post('forgot-password')
   @Public()
   @HttpCode(HttpStatus.OK)

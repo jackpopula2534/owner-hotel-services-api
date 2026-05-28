@@ -81,6 +81,7 @@ import { PaymentAccountsModule } from './modules/payment-accounts/payment-accoun
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { ProcurementUsersModule } from './modules/procurement-users/procurement-users.module';
 import { WarehouseUsersModule } from './modules/warehouse-users/warehouse-users.module';
+import { AccountingUsersModule } from './modules/accounting-users/accounting-users.module';
 import { HotelTerminalUsersModule } from './modules/hotel-terminal-users/hotel-terminal-users.module';
 import { CostAccountingModule } from './modules/cost-accounting/cost-accounting.module';
 import { DocumentSettingsModule } from './modules/document-settings/document-settings.module';
@@ -188,6 +189,7 @@ import { TenantGuard } from './common/guards/tenant.guard';
     InventoryModule,
     ProcurementUsersModule,
     WarehouseUsersModule,
+    AccountingUsersModule,
     HotelTerminalUsersModule,
     CostAccountingModule,
     DocumentSettingsModule,
