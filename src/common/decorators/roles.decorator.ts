@@ -35,6 +35,16 @@ export type UserRole =
   | 'procurement_manager'
   | 'buyer'
   | 'approver'
-  | 'receiver';
+  | 'receiver'
+  | 'warehouse_manager'
+  | 'hotel_manager'
+  | 'accounting_manager'
+  | 'crm_manager'
+  | 'crm_agent'
+  | 'sales_rep'
+  | 'owner'
+  | 'super_admin'
+  | 'cashier'
+  | 'system';
 
 export const Roles = (...roles: UserRole[]) => SetMetadata(ROLES_KEY, roles);

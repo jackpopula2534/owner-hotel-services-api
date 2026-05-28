@@ -54,6 +54,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { ContactModule } from './contact/contact.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { LoyaltyModule } from './loyalty/loyalty.module';
+import { CrmModule } from './modules/crm/crm.module';
 import { PromotionsModule } from './promotions/promotions.module';
 import { EmailModule } from './email/email.module';
 import { PromptPayModule } from './promptpay/promptpay.module';
@@ -162,6 +163,7 @@ import { TenantGuard } from './common/guards/tenant.guard';
     ContactModule,
     AnalyticsModule,
     LoyaltyModule,
+    CrmModule,
     PromotionsModule,
     EmailModule,
     PromptPayModule,

@@ -1,6 +1,12 @@
 import { SetMetadata } from '@nestjs/common';
 
-export type SystemContext = 'main' | 'pos';
+export type SystemContext =
+  | 'main'
+  | 'pos'
+  | 'procurement'
+  | 'warehouse'
+  | 'hotel-terminal'
+  | 'accounting';
 
 export const REQUIRE_SYSTEM_KEY = 'require_system';
 

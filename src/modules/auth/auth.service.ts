@@ -524,7 +524,8 @@ export class AuthService {
         | 'pos'
         | 'procurement'
         | 'warehouse'
-        | 'hotel-terminal') ?? 'main';
+        | 'hotel-terminal'
+        | 'accounting') ?? 'main';
 
     // Generate new tokens
     const tokens = await this.generateTokens(
@@ -567,7 +568,13 @@ export class AuthService {
   async logout(
     userIdOrAdminId: string,
     refreshToken?: string,
-    systemContext?: 'main' | 'pos' | 'procurement' | 'warehouse' | 'hotel-terminal',
+    systemContext?:
+      | 'main'
+      | 'pos'
+      | 'procurement'
+      | 'warehouse'
+      | 'hotel-terminal'
+      | 'accounting',
   ) {
     if (refreshToken) {
       // Revoke the specific refresh token

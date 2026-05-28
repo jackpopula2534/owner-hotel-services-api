@@ -131,6 +131,7 @@ model Guest {
   arInvoices         ArInvoice[]
   arReceipts         ArReceipt[]
   guestFolios        GuestFolio[]
+  conversations      Conversation[]
 
   @@index([tenantId])
   @@map("guests")
@@ -4066,14 +4067,17 @@ model Conversation {
   displayName  String?
   pictureUrl   String?             @db.Text
   isActive     Boolean             @default(true)
+  guestId      String?
   lastMessageAt DateTime?
   createdAt    DateTime            @default(now())
   updatedAt    DateTime            @updatedAt
 
+  guest        Guest?              @relation(fields: [guestId], references: [id])
   messages     Message[]
   @@unique([tenantId, channel, externalId])
   @@index([tenantId, channel])
   @@index([tenantId, lastMessageAt])
+  @@index([guestId])
   @@map("conversations")
 }
 
@@ -5810,4 +5814,334 @@ model OpMarketingCampaign {
   @@index([startDate, endDate])
   @@index([channel])
   @@map("opcost_marketing_campaigns")
+}
+
+// ============================================================
+// CRM MODULE — Phase 1 MVP
+// Plug-in models for CRM Terminal sub-system
+// See docs/CRM_PLAN.md for full architecture
+// ============================================================
+
+/// Unified customer record (extends Guest with CRM context).
+/// One CrmContact per Guest per tenant, plus optional B2B/corporate contacts
+/// not yet linked to a Guest record.
+model CrmContact {
+  id            String    @id @default(uuid()) @db.VarChar(36)
+  tenantId      String    @db.VarChar(36)
+  guestId       String?   @db.VarChar(36)
+  companyName   String?   @db.VarChar(200)
+  contactType   String    @default("individual") @db.VarChar(30) // individual, corporate, agent
+  segment       String?   @db.VarChar(50)                          // vip, regular, churn_risk, new
+  rfmRecency    Int?                                                // 1-5
+  rfmFrequency  Int?
+  rfmMonetary   Int?
+  lifetimeValue Decimal   @default(0) @db.Decimal(14, 2)
+  totalStays    Int       @default(0)
+  lastStayAt    DateTime?
+  preferredChannel String? @db.VarChar(20)                         // email, line, sms, push
+  tags          String?   @db.Text                                 // JSON array
+  notes         String?   @db.Text
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  tickets       CrmTicket[]
+  loyaltyTransactions LoyaltyTransaction[]
+
+  @@unique([tenantId, guestId])
+  @@index([tenantId, segment])
+  @@index([tenantId, contactType])
+  @@index([guestId])
+  @@map("crm_contacts")
+}
+
+/// Service-desk ticket — created manually or by event listeners
+/// (low review score, LINE/Messenger complaint, low CSAT).
+model CrmTicket {
+  id           String    @id @default(uuid()) @db.VarChar(36)
+  tenantId     String    @db.VarChar(36)
+  contactId    String?   @db.VarChar(36)
+  guestId      String?   @db.VarChar(36)
+  bookingId    String?   @db.VarChar(36)
+  subject      String    @db.VarChar(255)
+  description  String?   @db.Text
+  channel      String    @default("manual") @db.VarChar(20)         // line, email, phone, walk_in, manual, review
+  category     String?   @db.VarChar(50)                            // maintenance, billing, service, other
+  priority     String    @default("normal") @db.VarChar(20)         // low, normal, high, urgent
+  status       String    @default("open") @db.VarChar(20)           // open, in_progress, waiting, resolved, closed
+  assignedToId String?   @db.VarChar(36)
+  slaDueAt     DateTime?
+  resolvedAt   DateTime?
+  closedAt     DateTime?
+  csatScore    Int?                                                  // 1-5 collected after closure
+  metadata     String?   @db.Text                                    // JSON for source/event info
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  contact      CrmContact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status])
+  @@index([tenantId, priority, status])
+  @@index([guestId])
+  @@index([bookingId])
+  @@index([assignedToId])
+  @@map("crm_tickets")
+}
+
+/// Append-only audit trail of loyalty point movements.
+/// Complements existing LoyaltyPoint balance model.
+model LoyaltyTransaction {
+  id          String    @id @default(uuid()) @db.VarChar(36)
+  tenantId    String    @db.VarChar(36)
+  guestId     String    @db.VarChar(36)
+  contactId   String?   @db.VarChar(36)
+  type        String    @db.VarChar(20)                              // earn, redeem, expire, adjust
+  points      Int                                                     // positive for earn, negative for redeem/expire
+  bookingId   String?   @db.VarChar(36)
+  reason      String?   @db.VarChar(255)
+  metadata    String?   @db.Text                                      // JSON
+  balanceAfter Int?
+  tierAfter   String?   @db.VarChar(20)
+  createdAt   DateTime  @default(now())
+  contact     CrmContact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, guestId, createdAt])
+  @@index([tenantId, type])
+  @@index([bookingId])
+  @@map("loyalty_transactions")
+}
+
+// ============================================================
+// CRM MODULE — Phase 2: Marketing Automation
+// Campaign builder, scheduled dispatch, multi-step journeys
+// ============================================================
+
+/// One-off or recurring campaign. Audience is resolved at dispatch time
+/// from `audienceQuery` (JSON with segmentation rules).
+model CrmCampaign {
+  id              String    @id @default(uuid()) @db.VarChar(36)
+  tenantId        String    @db.VarChar(36)
+  name            String    @db.VarChar(200)
+  description     String?   @db.Text
+  channel         String    @db.VarChar(20)                            // email, line, sms, push
+  templateKey     String?   @db.VarChar(100)                           // handlebars template name
+  subject         String?   @db.VarChar(255)                           // for email/sms
+  bodyOverride    String?   @db.Text                                   // raw content if no template
+  audienceQuery   String?   @db.Text                                   // JSON: { segment, contactType, tags, minLtv, ... }
+  status          String    @default("draft") @db.VarChar(20)          // draft, scheduled, running, completed, cancelled
+  scheduledAt     DateTime?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  totalRecipients Int       @default(0)
+  totalSent       Int       @default(0)
+  totalOpened     Int       @default(0)
+  totalClicked    Int       @default(0)
+  totalFailed     Int       @default(0)
+  createdById     String?   @db.VarChar(36)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deliveries      CrmCampaignDelivery[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, scheduledAt])
+  @@map("crm_campaigns")
+}
+
+/// Per-recipient delivery log for a campaign.
+model CrmCampaignDelivery {
+  id          String    @id @default(uuid()) @db.VarChar(36)
+  campaignId  String    @db.VarChar(36)
+  tenantId    String    @db.VarChar(36)
+  guestId     String?   @db.VarChar(36)
+  contactId   String?   @db.VarChar(36)
+  recipient   String    @db.VarChar(255)                               // email address or LINE userId
+  status      String    @default("pending") @db.VarChar(20)            // pending, sent, opened, clicked, failed
+  errorMessage String?  @db.Text
+  sentAt      DateTime?
+  openedAt    DateTime?
+  clickedAt   DateTime?
+  metadata    String?   @db.Text                                       // JSON
+  createdAt   DateTime  @default(now())
+  campaign    CrmCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId, status])
+  @@index([tenantId, status])
+  @@index([guestId])
+  @@map("crm_campaign_deliveries")
+}
+
+/// Multi-step automation flow. Steps are stored as JSON in `stepsConfig` to
+/// keep the schema simple. Each step is { type: 'wait'|'send'|'branch', ... }.
+model CrmJourney {
+  id            String    @id @default(uuid()) @db.VarChar(36)
+  tenantId      String    @db.VarChar(36)
+  name          String    @db.VarChar(200)
+  description   String?   @db.Text
+  triggerEvent  String    @db.VarChar(50)                              // booking.created, booking.checked_out, guest.birthday, manual
+  isActive      Boolean   @default(false)
+  stepsConfig   String    @db.LongText                                 // JSON array of steps
+  createdById   String?   @db.VarChar(36)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  enrollments   CrmJourneyEnrollment[]
+
+  @@index([tenantId, isActive])
+  @@index([triggerEvent])
+  @@map("crm_journeys")
+}
+
+/// A guest enrolled in a journey, with current step pointer.
+model CrmJourneyEnrollment {
+  id              String    @id @default(uuid()) @db.VarChar(36)
+  journeyId       String    @db.VarChar(36)
+  tenantId        String    @db.VarChar(36)
+  guestId         String    @db.VarChar(36)
+  contactId       String?   @db.VarChar(36)
+  bookingId       String?   @db.VarChar(36)
+  currentStepIdx  Int       @default(0)
+  status          String    @default("active") @db.VarChar(20)         // active, completed, cancelled, failed
+  nextRunAt       DateTime?
+  startedAt       DateTime  @default(now())
+  completedAt     DateTime?
+  metadata        String?   @db.Text                                   // JSON for trigger payload
+  journey         CrmJourney @relation(fields: [journeyId], references: [id], onDelete: Cascade)
+
+  @@unique([journeyId, guestId, bookingId])
+  @@index([tenantId, status])
+  @@index([status, nextRunAt])
+  @@index([guestId])
+  @@map("crm_journey_enrollments")
+}
+
+// ============================================================
+// CRM MODULE — Phase 3: Sales Pipeline
+// Corporate / group / agent sales — Lead → Deal → Booking
+// ============================================================
+
+/// Sales lead — inquiry from corporate/agent/website not yet qualified.
+/// Becomes a CrmDeal once an opportunity value can be estimated.
+model CrmLead {
+  id            String    @id @default(uuid()) @db.VarChar(36)
+  tenantId      String    @db.VarChar(36)
+  contactId     String?   @db.VarChar(36)
+  companyName   String?   @db.VarChar(200)
+  contactName   String    @db.VarChar(200)
+  email         String?   @db.VarChar(255)
+  phone         String?   @db.VarChar(50)
+  source        String    @db.VarChar(50)                              // ota, website, email, walk_in, referral, cold_call, event
+  status        String    @default("new") @db.VarChar(20)              // new, contacted, qualified, unqualified, lost, converted
+  score         Int       @default(0)                                   // 0-100 lead score
+  estValue      Decimal?  @db.Decimal(14, 2)
+  expectedCheckIn  DateTime?
+  expectedCheckOut DateTime?
+  partySize     Int?
+  notes         String?   @db.Text
+  ownerUserId   String?   @db.VarChar(36)
+  convertedDealId String? @db.VarChar(36)                              // set when status=converted
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  activities    CrmSalesActivity[] @relation("leadActivities")
+
+  @@index([tenantId, status])
+  @@index([tenantId, source])
+  @@index([ownerUserId])
+  @@map("crm_leads")
+}
+
+/// Qualified opportunity in the sales pipeline.
+/// Stage progression: discovery → quoted → negotiation → won | lost
+model CrmDeal {
+  id            String    @id @default(uuid()) @db.VarChar(36)
+  tenantId      String    @db.VarChar(36)
+  leadId        String?   @db.VarChar(36)                              // source lead if converted
+  contactId     String?   @db.VarChar(36)
+  companyName   String?   @db.VarChar(200)
+  name          String    @db.VarChar(200)                              // e.g. "Acme Q4 Conference - 50 rooms"
+  stage         String    @default("discovery") @db.VarChar(20)        // discovery, quoted, negotiation, won, lost
+  amount        Decimal   @db.Decimal(14, 2)
+  probability   Int       @default(20)                                  // 0-100 win probability
+  expectedCloseDate DateTime?
+  closedAt      DateTime?
+  lostReason    String?   @db.VarChar(255)
+  ownerUserId   String?   @db.VarChar(36)
+  bookingIds    String?   @db.Text                                      // JSON array of generated booking ids
+  partySize     Int?
+  checkInDate   DateTime?
+  checkOutDate  DateTime?
+  notes         String?   @db.Text
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  activities    CrmSalesActivity[] @relation("dealActivities")
+
+  @@index([tenantId, stage])
+  @@index([tenantId, expectedCloseDate])
+  @@index([ownerUserId])
+  @@index([leadId])
+  @@map("crm_deals")
+}
+
+/// Timeline entry attached to a Lead or Deal (note, call, email, meeting).
+model CrmSalesActivity {
+  id          String    @id @default(uuid()) @db.VarChar(36)
+  tenantId    String    @db.VarChar(36)
+  leadId      String?   @db.VarChar(36)
+  dealId      String?   @db.VarChar(36)
+  type        String    @db.VarChar(20)                                // note, call, email, meeting, task
+  subject     String    @db.VarChar(255)
+  body        String?   @db.Text
+  occurredAt  DateTime  @default(now())
+  dueAt       DateTime?                                                  // for tasks
+  completedAt DateTime?                                                  // for tasks
+  authorUserId String?  @db.VarChar(36)
+  createdAt   DateTime  @default(now())
+  lead        CrmLead?  @relation("leadActivities", fields: [leadId], references: [id], onDelete: Cascade)
+  deal        CrmDeal?  @relation("dealActivities", fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, leadId, occurredAt])
+  @@index([tenantId, dealId, occurredAt])
+  @@index([tenantId, type])
+  @@map("crm_sales_activities")
+}
+
+// ============================================================
+// CRM MODULE — Phase 4: AI Insights
+// Sentiment analysis, churn prediction, smart segmentation
+// ============================================================
+
+/// Cached sentiment analysis result for a piece of text (review, ticket, message).
+/// Source-of-truth model is referenced by (sourceType, sourceId).
+model CrmSentimentAnalysis {
+  id          String    @id @default(uuid()) @db.VarChar(36)
+  tenantId    String    @db.VarChar(36)
+  sourceType  String    @db.VarChar(20)                                // review, ticket, message
+  sourceId    String    @db.VarChar(36)
+  text        String    @db.Text
+  language    String?   @db.VarChar(10)                                // th, en, auto
+  label       String    @db.VarChar(20)                                // positive, neutral, negative
+  score       Decimal   @db.Decimal(5, 4)                              // -1.0000 to 1.0000
+  confidence  Decimal   @db.Decimal(5, 4)                              // 0.0000 to 1.0000
+  keywords    String?   @db.Text                                       // JSON array of triggered keywords
+  analyzedAt  DateTime  @default(now())
+
+  @@unique([sourceType, sourceId])
+  @@index([tenantId, label])
+  @@index([tenantId, analyzedAt])
+  @@map("crm_sentiment_analyses")
+}
+
+/// Daily churn risk snapshot per contact.
+/// Recomputed by cron — append new row only when score changes.
+model CrmChurnScore {
+  id            String    @id @default(uuid()) @db.VarChar(36)
+  tenantId      String    @db.VarChar(36)
+  guestId       String    @db.VarChar(36)
+  contactId     String?   @db.VarChar(36)
+  riskScore     Decimal   @db.Decimal(5, 4)                            // 0.0000 (loyal) to 1.0000 (high churn)
+  riskBand      String    @db.VarChar(20)                              // low, medium, high, critical
+  reasons       String?   @db.Text                                     // JSON array of contributing factors
+  daysSinceLastStay Int?
+  staysLast90d  Int?
+  staysLast365d Int?
+  computedAt    DateTime  @default(now())
+
+  @@index([tenantId, guestId, computedAt])
+  @@index([tenantId, riskBand])
+  @@map("crm_churn_scores")
 }

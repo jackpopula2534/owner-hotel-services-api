@@ -74,11 +74,31 @@ export type UserRole =
   | 'platform_admin'
   | 'tenant_admin'
   | 'admin'
+  | 'super_admin'
+  | 'owner'
   | 'manager'
+  | 'hr'
   | 'receptionist'
+  | 'chef'
+  | 'waiter'
+  | 'housekeeper'
+  | 'maintenance'
   | 'accountant'
+  | 'accounting_manager'
+  | 'security'
   | 'staff'
-  | 'user';
+  | 'user'
+  | 'procurement_manager'
+  | 'buyer'
+  | 'approver'
+  | 'receiver'
+  | 'warehouse_manager'
+  | 'hotel_manager'
+  | 'crm_manager'
+  | 'crm_agent'
+  | 'sales_rep'
+  | 'cashier'
+  | 'system';
 
 export interface RefreshTokenDto {
   refreshToken: string;

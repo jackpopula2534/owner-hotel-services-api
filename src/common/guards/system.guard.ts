@@ -53,12 +53,18 @@ export class SystemGuard implements CanActivate {
     const effectiveSystem: SystemContext = (user.posLaunch ? 'pos' : user.systemContext) ?? 'main';
 
     if (effectiveSystem !== requiredSystem) {
+      const systemNames: Record<SystemContext, string> = {
+        main: 'Hotel Management Portal',
+        pos: 'POS System',
+        procurement: 'Procurement System',
+        warehouse: 'Warehouse System',
+        'hotel-terminal': 'Hotel Management Terminal',
+        accounting: 'Accounting System',
+      };
+
       throw new ForbiddenException({
         code: 'WRONG_SYSTEM_CONTEXT',
-        message:
-          requiredSystem === 'main'
-            ? 'This endpoint requires a main-dashboard session. Please log in via the hotel management portal.'
-            : 'This endpoint requires a POS session. Please log in via the POS system.',
+        message: `This endpoint requires a session for the ${systemNames[requiredSystem]}. Please log in via the correct system.`,
         requiredSystem,
         currentSystem: effectiveSystem,
       });

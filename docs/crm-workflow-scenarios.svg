@@ -1,0 +1,338 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1700 1400" role="img" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">
+  <title>CRM Workflow Scenarios — Guest Lifecycle Integration</title>
+  <desc>End-to-end workflows showing how the CRM module participates in guest lifecycle events: booking creation, pre-stay engagement, in-stay service, post-stay review and loyalty.</desc>
+
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+    </marker>
+    <marker id="ar-evt" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8B5CF6"/>
+    </marker>
+    <marker id="ar-out" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#EC4899"/>
+    </marker>
+  </defs>
+
+  <rect width="1700" height="1400" fill="#FAFAFB"/>
+
+  <text x="850" y="42" text-anchor="middle" font-size="24" font-weight="700" fill="#0F172A">CRM Workflow Scenarios — Guest Lifecycle</text>
+  <text x="850" y="66" text-anchor="middle" font-size="13" fill="#64748B">ตัวอย่าง 4 Flow หลักที่ CRM module ทำงานร่วมกับระบบเดิม</text>
+
+  <!-- ========== SCENARIO 1: BOOKING + PRE-STAY ========== -->
+  <g transform="translate(0, 100)">
+    <rect x="20" y="0" width="1660" height="280" rx="14" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <rect x="20" y="0" width="6" height="280" fill="#10B981"/>
+    <text x="50" y="30" font-size="16" font-weight="700" fill="#0F172A">Scenario 1: Booking Created → Pre-stay Engagement</text>
+    <text x="50" y="50" font-size="11" fill="#64748B">trigger: booking.created · channel: Direct / OTA</text>
+
+    <!-- Step boxes -->
+    <g>
+      <rect x="50" y="80" width="180" height="80" rx="10" fill="#F1F5F9"/>
+      <text x="140" y="105" text-anchor="middle" font-size="11" font-weight="700" fill="#0F172A">1. Booking Created</text>
+      <text x="140" y="122" text-anchor="middle" font-size="10" fill="#64748B">Hotel Mgmt Terminal</text>
+      <text x="140" y="137" text-anchor="middle" font-size="10" fill="#64748B">scheduledCheckIn</text>
+      <text x="140" y="152" text-anchor="middle" font-size="9" font-style="italic" fill="#94A3B8">bookings module</text>
+    </g>
+
+    <g>
+      <rect x="260" y="80" width="180" height="80" rx="10" fill="#FAF5FF"/>
+      <text x="350" y="105" text-anchor="middle" font-size="11" font-weight="700" fill="#6D28D9">2. Event Emit</text>
+      <text x="350" y="122" text-anchor="middle" font-size="10" fill="#7C3AED">booking.created</text>
+      <text x="350" y="137" text-anchor="middle" font-size="10" fill="#7C3AED">{ bookingId, guestId }</text>
+      <text x="350" y="152" text-anchor="middle" font-size="9" font-style="italic" fill="#94A3B8">Event Emitter</text>
+    </g>
+
+    <g>
+      <rect x="470" y="80" width="180" height="80" rx="10" fill="#ECFDF5" stroke="#10B981"/>
+      <text x="560" y="105" text-anchor="middle" font-size="11" font-weight="700" fill="#065F46">3. CRM Listener</text>
+      <text x="560" y="122" text-anchor="middle" font-size="10" fill="#047857">Upsert CrmContact</text>
+      <text x="560" y="137" text-anchor="middle" font-size="10" fill="#047857">Score &amp; Segment</text>
+      <text x="560" y="152" text-anchor="middle" font-size="9" font-style="italic" fill="#10B981">crm/guest-360</text>
+    </g>
+
+    <g>
+      <rect x="680" y="80" width="180" height="80" rx="10" fill="#ECFDF5" stroke="#10B981"/>
+      <text x="770" y="105" text-anchor="middle" font-size="11" font-weight="700" fill="#065F46">4. Journey Trigger</text>
+      <text x="770" y="122" text-anchor="middle" font-size="10" fill="#047857">Pre-stay Flow</text>
+      <text x="770" y="137" text-anchor="middle" font-size="10" fill="#047857">T-3, T-1, T+0</text>
+      <text x="770" y="152" text-anchor="middle" font-size="9" font-style="italic" fill="#10B981">crm/automation</text>
+    </g>
+
+    <g>
+      <rect x="890" y="80" width="180" height="80" rx="10" fill="#FAF5FF"/>
+      <text x="980" y="105" text-anchor="middle" font-size="11" font-weight="700" fill="#6D28D9">5. Bull Queue Job</text>
+      <text x="980" y="122" text-anchor="middle" font-size="10" fill="#7C3AED">send-campaign</text>
+      <text x="980" y="137" text-anchor="middle" font-size="10" fill="#7C3AED">delayed jobs</text>
+      <text x="980" y="152" text-anchor="middle" font-size="9" font-style="italic" fill="#94A3B8">Redis Bull</text>
+    </g>
+
+    <g>
+      <rect x="1100" y="80" width="180" height="80" rx="10" fill="#FCE7F3"/>
+      <text x="1190" y="105" text-anchor="middle" font-size="11" font-weight="700" fill="#9D174D">6. Channel Dispatch</text>
+      <text x="1190" y="122" text-anchor="middle" font-size="10" fill="#BE185D">Email / LINE / SMS</text>
+      <text x="1190" y="137" text-anchor="middle" font-size="10" fill="#BE185D">template render</text>
+      <text x="1190" y="152" text-anchor="middle" font-size="9" font-style="italic" fill="#94A3B8">notifications</text>
+    </g>
+
+    <g>
+      <rect x="1310" y="80" width="180" height="80" rx="10" fill="#FFFFFF" stroke="#94A3B8"/>
+      <text x="1400" y="105" text-anchor="middle" font-size="11" font-weight="700" fill="#0F172A">7. Guest Receives</text>
+      <text x="1400" y="122" text-anchor="middle" font-size="10" fill="#64748B">Welcome msg</text>
+      <text x="1400" y="137" text-anchor="middle" font-size="10" fill="#64748B">+ Upsell offer</text>
+      <text x="1400" y="152" text-anchor="middle" font-size="9" font-style="italic" fill="#94A3B8">guest device</text>
+    </g>
+
+    <!-- Arrows -->
+    <g stroke="#475569" stroke-width="1.5" fill="none">
+      <line x1="230" y1="120" x2="258" y2="120" marker-end="url(#ar)"/>
+      <line x1="440" y1="120" x2="468" y2="120" marker-end="url(#ar)"/>
+      <line x1="650" y1="120" x2="678" y2="120" marker-end="url(#ar)"/>
+      <line x1="860" y1="120" x2="888" y2="120" marker-end="url(#ar)"/>
+      <line x1="1070" y1="120" x2="1098" y2="120" marker-end="url(#ar)"/>
+      <line x1="1280" y1="120" x2="1308" y2="120" marker-end="url(#ar)"/>
+    </g>
+
+    <!-- Outcome row -->
+    <rect x="50" y="195" width="1440" height="65" rx="8" fill="#F0FDF4" stroke="#A7F3D0"/>
+    <text x="70" y="220" font-size="12" font-weight="700" fill="#065F46">📊 CRM Outcomes</text>
+    <text x="70" y="240" font-size="11" fill="#0F172A">• CrmContact enriched (lifetime value, channel preference)  • Pre-stay journey logged  • Open rate / click rate tracked → feeds Analytics</text>
+    <text x="70" y="254" font-size="11" fill="#0F172A">• Loyalty: เพิ่ม "booking confirmed" points (pending check-in)  • Upsell click → ระบบจะสร้าง add-on booking ใน Hotel Mgmt</text>
+  </g>
+
+  <!-- ========== SCENARIO 2: CHECKOUT + REVIEW + LOYALTY ========== -->
+  <g transform="translate(0, 400)">
+    <rect x="20" y="0" width="1660" height="280" rx="14" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <rect x="20" y="0" width="6" height="280" fill="#F97316"/>
+    <text x="50" y="30" font-size="16" font-weight="700" fill="#0F172A">Scenario 2: Check-out → Review Request → Loyalty Award</text>
+    <text x="50" y="50" font-size="11" fill="#64748B">trigger: booking.checked_out · channel: Email + LINE</text>
+
+    <g>
+      <rect x="50" y="80" width="180" height="80" rx="10" fill="#F1F5F9"/>
+      <text x="140" y="105" text-anchor="middle" font-size="11" font-weight="700" fill="#0F172A">1. Check-out</text>
+      <text x="140" y="122" text-anchor="middle" font-size="10" fill="#64748B">Folio settled</text>
+      <text x="140" y="137" text-anchor="middle" font-size="10" fill="#64748B">Room → cleaning</text>
+      <text x="140" y="152" text-anchor="middle" font-size="9" font-style="italic" fill="#94A3B8">bookings + housekeeping</text>
+    </g>
+
+    <g>
+      <rect x="260" y="80" width="180" height="80" rx="10" fill="#FAF5FF"/>
+      <text x="350" y="105" text-anchor="middle" font-size="11" font-weight="700" fill="#6D28D9">2. Events</text>
+      <text x="350" y="122" text-anchor="middle" font-size="10" fill="#7C3AED">booking.checked_out</text>
+      <text x="350" y="137" text-anchor="middle" font-size="10" fill="#7C3AED">folio.paid</text>
+      <text x="350" y="152" text-anchor="middle" font-size="9" font-style="italic" fill="#94A3B8">Event Emitter</text>
+    </g>
+
+    <g>
+      <rect x="470" y="80" width="180" height="80" rx="10" fill="#ECFDF5" stroke="#10B981"/>
+      <text x="560" y="105" text-anchor="middle" font-size="11" font-weight="700" fill="#065F46">3. Loyalty Service</text>
+      <text x="560" y="122" text-anchor="middle" font-size="10" fill="#047857">Calculate points</text>
+      <text x="560" y="137" text-anchor="middle" font-size="10" fill="#047857">Tier upgrade check</text>
+      <text x="560" y="152" text-anchor="middle" font-size="9" font-style="italic" fill="#10B981">loyalty 🆕</text>
+    </g>
+
+    <g>
+      <rect x="680" y="80" width="180" height="80" rx="10" fill="#ECFDF5" stroke="#10B981"/>
+      <text x="770" y="105" text-anchor="middle" font-size="11" font-weight="700" fill="#065F46">4. Review Request</text>
+      <text x="770" y="122" text-anchor="middle" font-size="10" fill="#047857">Delayed 24h</text>
+      <text x="770" y="137" text-anchor="middle" font-size="10" fill="#047857">Personalized link</text>
+      <text x="770" y="152" text-anchor="middle" font-size="9" font-style="italic" fill="#10B981">crm/automation</text>
+    </g>
+
+    <g>
+      <rect x="890" y="80" width="180" height="80" rx="10" fill="#FCE7F3"/>
+      <text x="980" y="105" text-anchor="middle" font-size="11" font-weight="700" fill="#9D174D">5. Multi-channel</text>
+      <text x="980" y="122" text-anchor="middle" font-size="10" fill="#BE185D">Email thank-you</text>
+      <text x="980" y="137" text-anchor="middle" font-size="10" fill="#BE185D">LINE points alert</text>
+      <text x="980" y="152" text-anchor="middle" font-size="9" font-style="italic" fill="#94A3B8">notifications</text>
+    </g>
+
+    <g>
+      <rect x="1100" y="80" width="180" height="80" rx="10" fill="#FFFFFF" stroke="#94A3B8"/>
+      <text x="1190" y="105" text-anchor="middle" font-size="11" font-weight="700" fill="#0F172A">6. Guest Submits</text>
+      <text x="1190" y="122" text-anchor="middle" font-size="10" fill="#64748B">5-star review</text>
+      <text x="1190" y="137" text-anchor="middle" font-size="10" fill="#64748B">+ NPS score</text>
+      <text x="1190" y="152" text-anchor="middle" font-size="9" font-style="italic" fill="#94A3B8">reviews module</text>
+    </g>
+
+    <g>
+      <rect x="1310" y="80" width="180" height="80" rx="10" fill="#ECFDF5" stroke="#10B981"/>
+      <text x="1400" y="105" text-anchor="middle" font-size="11" font-weight="700" fill="#065F46">7. Sentiment + CRM</text>
+      <text x="1400" y="122" text-anchor="middle" font-size="10" fill="#047857">Low score → Ticket</text>
+      <text x="1400" y="137" text-anchor="middle" font-size="10" fill="#047857">High → Testimonial</text>
+      <text x="1400" y="152" text-anchor="middle" font-size="9" font-style="italic" fill="#10B981">crm/service-desk</text>
+    </g>
+
+    <g stroke="#475569" stroke-width="1.5" fill="none">
+      <line x1="230" y1="120" x2="258" y2="120" marker-end="url(#ar)"/>
+      <line x1="440" y1="120" x2="468" y2="120" marker-end="url(#ar)"/>
+      <line x1="650" y1="120" x2="678" y2="120" marker-end="url(#ar)"/>
+      <line x1="860" y1="120" x2="888" y2="120" marker-end="url(#ar)"/>
+      <line x1="1070" y1="120" x2="1098" y2="120" marker-end="url(#ar)"/>
+      <line x1="1280" y1="120" x2="1308" y2="120" marker-end="url(#ar)"/>
+    </g>
+
+    <rect x="50" y="195" width="1440" height="65" rx="8" fill="#FFF7ED" stroke="#FED7AA"/>
+    <text x="70" y="220" font-size="12" font-weight="700" fill="#9A3412">📊 CRM Outcomes</text>
+    <text x="70" y="240" font-size="11" fill="#0F172A">• LoyaltyTransaction created · tier recalculated · พ้น threshold → tier upgrade campaign  • Review sentiment คะแนนต่ำ → auto-create CrmTicket</text>
+    <text x="70" y="254" font-size="11" fill="#0F172A">• Analytics: NPS · CSAT · cohort retention  • Audit log สำหรับ PDPA compliance</text>
+  </g>
+
+  <!-- ========== SCENARIO 3: CORPORATE / GROUP SALES PIPELINE ========== -->
+  <g transform="translate(0, 700)">
+    <rect x="20" y="0" width="1660" height="280" rx="14" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <rect x="20" y="0" width="6" height="280" fill="#3B82F6"/>
+    <text x="50" y="30" font-size="16" font-weight="700" fill="#0F172A">Scenario 3: Corporate Lead → Group Booking</text>
+    <text x="50" y="50" font-size="11" fill="#64748B">trigger: lead.created · channel: Email inquiry · Website form · Sales call</text>
+
+    <g>
+      <rect x="50" y="80" width="180" height="80" rx="10" fill="#FFFFFF" stroke="#94A3B8"/>
+      <text x="140" y="105" text-anchor="middle" font-size="11" font-weight="700" fill="#0F172A">1. Inquiry Captured</text>
+      <text x="140" y="122" text-anchor="middle" font-size="10" fill="#64748B">Email / Form / Call</text>
+      <text x="140" y="137" text-anchor="middle" font-size="10" fill="#64748B">Company info</text>
+      <text x="140" y="152" text-anchor="middle" font-size="9" font-style="italic" fill="#94A3B8">touchpoint</text>
+    </g>
+
+    <g>
+      <rect x="260" y="80" width="180" height="80" rx="10" fill="#ECFDF5" stroke="#10B981"/>
+      <text x="350" y="105" text-anchor="middle" font-size="11" font-weight="700" fill="#065F46">2. Create CrmLead</text>
+      <text x="350" y="122" text-anchor="middle" font-size="10" fill="#047857">Sales rep assigned</text>
+      <text x="350" y="137" text-anchor="middle" font-size="10" fill="#047857">Score · Tag</text>
+      <text x="350" y="152" text-anchor="middle" font-size="9" font-style="italic" fill="#10B981">crm/sales</text>
+    </g>
+
+    <g>
+      <rect x="470" y="80" width="180" height="80" rx="10" fill="#ECFDF5" stroke="#10B981"/>
+      <text x="560" y="105" text-anchor="middle" font-size="11" font-weight="700" fill="#065F46">3. Qualify → Deal</text>
+      <text x="560" y="122" text-anchor="middle" font-size="10" fill="#047857">Pipeline stages</text>
+      <text x="560" y="137" text-anchor="middle" font-size="10" fill="#047857">Quote generation</text>
+      <text x="560" y="152" text-anchor="middle" font-size="9" font-style="italic" fill="#10B981">crm/sales</text>
+    </g>
+
+    <g>
+      <rect x="680" y="80" width="180" height="80" rx="10" fill="#F1F5F9"/>
+      <text x="770" y="105" text-anchor="middle" font-size="11" font-weight="700" fill="#0F172A">4. Check Availability</text>
+      <text x="770" y="122" text-anchor="middle" font-size="10" fill="#64748B">Room block API</text>
+      <text x="770" y="137" text-anchor="middle" font-size="10" fill="#64748B">Rate negotiation</text>
+      <text x="770" y="152" text-anchor="middle" font-size="9" font-style="italic" fill="#94A3B8">rooms + bookings</text>
+    </g>
+
+    <g>
+      <rect x="890" y="80" width="180" height="80" rx="10" fill="#FCE7F3"/>
+      <text x="980" y="105" text-anchor="middle" font-size="11" font-weight="700" fill="#9D174D">5. Send Quote</text>
+      <text x="980" y="122" text-anchor="middle" font-size="10" fill="#BE185D">PDF + Email</text>
+      <text x="980" y="137" text-anchor="middle" font-size="10" fill="#BE185D">e-Sign link</text>
+      <text x="980" y="152" text-anchor="middle" font-size="9" font-style="italic" fill="#94A3B8">notifications</text>
+    </g>
+
+    <g>
+      <rect x="1100" y="80" width="180" height="80" rx="10" fill="#ECFDF5" stroke="#10B981"/>
+      <text x="1190" y="105" text-anchor="middle" font-size="11" font-weight="700" fill="#065F46">6. Won → Convert</text>
+      <text x="1190" y="122" text-anchor="middle" font-size="10" fill="#047857">Deal closed</text>
+      <text x="1190" y="137" text-anchor="middle" font-size="10" fill="#047857">Create rooms block</text>
+      <text x="1190" y="152" text-anchor="middle" font-size="9" font-style="italic" fill="#10B981">crm/sales</text>
+    </g>
+
+    <g>
+      <rect x="1310" y="80" width="180" height="80" rx="10" fill="#F1F5F9"/>
+      <text x="1400" y="105" text-anchor="middle" font-size="11" font-weight="700" fill="#0F172A">7. Group Bookings</text>
+      <text x="1400" y="122" text-anchor="middle" font-size="10" fill="#64748B">Auto-generate</text>
+      <text x="1400" y="137" text-anchor="middle" font-size="10" fill="#64748B">Folio + Invoice</text>
+      <text x="1400" y="152" text-anchor="middle" font-size="9" font-style="italic" fill="#94A3B8">bookings + accounting</text>
+    </g>
+
+    <g stroke="#475569" stroke-width="1.5" fill="none">
+      <line x1="230" y1="120" x2="258" y2="120" marker-end="url(#ar)"/>
+      <line x1="440" y1="120" x2="468" y2="120" marker-end="url(#ar)"/>
+      <line x1="650" y1="120" x2="678" y2="120" marker-end="url(#ar)"/>
+      <line x1="860" y1="120" x2="888" y2="120" marker-end="url(#ar)"/>
+      <line x1="1070" y1="120" x2="1098" y2="120" marker-end="url(#ar)"/>
+      <line x1="1280" y1="120" x2="1308" y2="120" marker-end="url(#ar)"/>
+    </g>
+
+    <rect x="50" y="195" width="1440" height="65" rx="8" fill="#EFF6FF" stroke="#BFDBFE"/>
+    <text x="70" y="220" font-size="12" font-weight="700" fill="#1E40AF">📊 CRM Outcomes</text>
+    <text x="70" y="240" font-size="11" fill="#0F172A">• CrmDeal closed → linked group bookings  • Commission tracking ใน accounting  • Contract rate ผูกกับ Promotions module</text>
+    <text x="70" y="254" font-size="11" fill="#0F172A">• Forecasting dashboard (pipeline value · win rate)  • Account history สำหรับ repeat business</text>
+  </g>
+
+  <!-- ========== SCENARIO 4: COMPLAINT / TICKET ========== -->
+  <g transform="translate(0, 1000)">
+    <rect x="20" y="0" width="1660" height="280" rx="14" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <rect x="20" y="0" width="6" height="280" fill="#EC4899"/>
+    <text x="50" y="30" font-size="16" font-weight="700" fill="#0F172A">Scenario 4: Customer Complaint via LINE → Ticket → Resolution</text>
+    <text x="50" y="50" font-size="11" fill="#64748B">trigger: message.received (LINE/Messenger) หรือ review.low_rating</text>
+
+    <g>
+      <rect x="50" y="80" width="180" height="80" rx="10" fill="#F1F5F9"/>
+      <text x="140" y="105" text-anchor="middle" font-size="11" font-weight="700" fill="#0F172A">1. Guest Sends LINE</text>
+      <text x="140" y="122" text-anchor="middle" font-size="10" fill="#64748B">"แอร์ห้อง 305 เสีย"</text>
+      <text x="140" y="137" text-anchor="middle" font-size="10" fill="#64748B">via LINE OA</text>
+      <text x="140" y="152" text-anchor="middle" font-size="9" font-style="italic" fill="#94A3B8">messaging</text>
+    </g>
+
+    <g>
+      <rect x="260" y="80" width="180" height="80" rx="10" fill="#FAF5FF"/>
+      <text x="350" y="105" text-anchor="middle" font-size="11" font-weight="700" fill="#6D28D9">2. AI Auto-classify</text>
+      <text x="350" y="122" text-anchor="middle" font-size="10" fill="#7C3AED">Intent: complaint</text>
+      <text x="350" y="137" text-anchor="middle" font-size="10" fill="#7C3AED">Category: maintenance</text>
+      <text x="350" y="152" text-anchor="middle" font-size="9" font-style="italic" fill="#94A3B8">auto-reply.service</text>
+    </g>
+
+    <g>
+      <rect x="470" y="80" width="180" height="80" rx="10" fill="#ECFDF5" stroke="#10B981"/>
+      <text x="560" y="105" text-anchor="middle" font-size="11" font-weight="700" fill="#065F46">3. Create Ticket</text>
+      <text x="560" y="122" text-anchor="middle" font-size="10" fill="#047857">Priority: HIGH</text>
+      <text x="560" y="137" text-anchor="middle" font-size="10" fill="#047857">SLA: 30 mins</text>
+      <text x="560" y="152" text-anchor="middle" font-size="9" font-style="italic" fill="#10B981">crm/service-desk</text>
+    </g>
+
+    <g>
+      <rect x="680" y="80" width="180" height="80" rx="10" fill="#F1F5F9"/>
+      <text x="770" y="105" text-anchor="middle" font-size="11" font-weight="700" fill="#0F172A">4. Maintenance Task</text>
+      <text x="770" y="122" text-anchor="middle" font-size="10" fill="#64748B">Auto work-order</text>
+      <text x="770" y="137" text-anchor="middle" font-size="10" fill="#64748B">Assign to tech</text>
+      <text x="770" y="152" text-anchor="middle" font-size="9" font-style="italic" fill="#94A3B8">maintenance module</text>
+    </g>
+
+    <g>
+      <rect x="890" y="80" width="180" height="80" rx="10" fill="#FCE7F3"/>
+      <text x="980" y="105" text-anchor="middle" font-size="11" font-weight="700" fill="#9D174D">5. Update Guest</text>
+      <text x="980" y="122" text-anchor="middle" font-size="10" fill="#BE185D">LINE: "กำลังดำเนินการ"</text>
+      <text x="980" y="137" text-anchor="middle" font-size="10" fill="#BE185D">ETA notification</text>
+      <text x="980" y="152" text-anchor="middle" font-size="9" font-style="italic" fill="#94A3B8">notifications</text>
+    </g>
+
+    <g>
+      <rect x="1100" y="80" width="180" height="80" rx="10" fill="#F1F5F9"/>
+      <text x="1190" y="105" text-anchor="middle" font-size="11" font-weight="700" fill="#0F172A">6. Task Completed</text>
+      <text x="1190" y="122" text-anchor="middle" font-size="10" fill="#64748B">Tech marks done</text>
+      <text x="1190" y="137" text-anchor="middle" font-size="10" fill="#64748B">Photo evidence</text>
+      <text x="1190" y="152" text-anchor="middle" font-size="9" font-style="italic" fill="#94A3B8">maintenance</text>
+    </g>
+
+    <g>
+      <rect x="1310" y="80" width="180" height="80" rx="10" fill="#ECFDF5" stroke="#10B981"/>
+      <text x="1400" y="105" text-anchor="middle" font-size="11" font-weight="700" fill="#065F46">7. Resolve + CSAT</text>
+      <text x="1400" y="122" text-anchor="middle" font-size="10" fill="#047857">Ticket closed</text>
+      <text x="1400" y="137" text-anchor="middle" font-size="10" fill="#047857">CSAT survey</text>
+      <text x="1400" y="152" text-anchor="middle" font-size="9" font-style="italic" fill="#10B981">crm/service-desk</text>
+    </g>
+
+    <g stroke="#475569" stroke-width="1.5" fill="none">
+      <line x1="230" y1="120" x2="258" y2="120" marker-end="url(#ar)"/>
+      <line x1="440" y1="120" x2="468" y2="120" marker-end="url(#ar)"/>
+      <line x1="650" y1="120" x2="678" y2="120" marker-end="url(#ar)"/>
+      <line x1="860" y1="120" x2="888" y2="120" marker-end="url(#ar)"/>
+      <line x1="1070" y1="120" x2="1098" y2="120" marker-end="url(#ar)"/>
+      <line x1="1280" y1="120" x2="1308" y2="120" marker-end="url(#ar)"/>
+    </g>
+
+    <rect x="50" y="195" width="1440" height="65" rx="8" fill="#FDF2F8" stroke="#FBCFE8"/>
+    <text x="70" y="220" font-size="12" font-weight="700" fill="#9D174D">📊 CRM Outcomes</text>
+    <text x="70" y="240" font-size="11" fill="#0F172A">• Ticket history ใน Guest 360  • SLA breach alert → Manager  • Recovery offer (เช่น free breakfast) ผ่าน Loyalty/Promotions</text>
+    <text x="70" y="254" font-size="11" fill="#0F172A">• Dashboard: first response time · resolution time · CSAT trend  • Service quality KPI feeds back to staff/hr module</text>
+  </g>
+
+  <text x="850" y="1370" text-anchor="middle" font-size="11" fill="#94A3B8">StaySync CRM — End-to-end Workflows · NestJS Event-driven Architecture</text>
+</svg>
