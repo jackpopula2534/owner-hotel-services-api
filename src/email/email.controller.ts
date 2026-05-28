@@ -9,6 +9,7 @@ import {
   UseGuards,
   Request,
   Param,
+  BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -65,6 +66,36 @@ export class EmailController {
   @ApiResponse({ status: 200, description: 'Template list retrieved' })
   async getTemplates() {
     return this.emailService.getTemplateList();
+  }
+
+  @Get('templates/:name')
+  @Roles('platform_admin')
+  @ApiOperation({ summary: 'Get email template content by name' })
+  @ApiResponse({ status: 200, description: 'Template content retrieved' })
+  async getTemplateContent(
+    @Param('name') name: string,
+    @Query('language') language = 'th',
+  ) {
+    try {
+      return await this.emailService.getTemplateContent(name, language);
+    } catch {
+      throw new BadRequestException(`Template not found: ${name}`);
+    }
+  }
+
+  @Put('templates/:name')
+  @Roles('platform_admin')
+  @ApiOperation({ summary: 'Update email template content' })
+  @ApiResponse({ status: 200, description: 'Template updated successfully' })
+  async updateTemplateContent(
+    @Param('name') name: string,
+    @Body() body: { language: string; content: string },
+  ) {
+    if (!body.content) {
+      throw new BadRequestException('content is required');
+    }
+    const language = body.language || 'th';
+    return this.emailService.updateTemplateContent(name, language, body.content);
   }
 
   @Post('resend')

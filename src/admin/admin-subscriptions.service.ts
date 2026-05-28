@@ -38,6 +38,35 @@ export class AdminSubscriptionsService {
     private prismaService: PrismaService,
   ) {}
 
+  private async getPlanAddonsByPlanIds(planIds: string[]): Promise<
+    Map<string, Array<{ name: string; price: number }>>
+  > {
+    const uniquePlanIds = [...new Set(planIds.filter(Boolean))];
+    const grouped = new Map<string, Array<{ name: string; price: number }>>();
+
+    for (const planId of uniquePlanIds) {
+      const rows = await this.prismaService.$queryRaw<
+        Array<{ name: string; price: number | string | null }>
+      >`
+        SELECT a.name, a.price
+        FROM plan_addons pa
+        INNER JOIN add_ons a ON a.id = pa.addon_id
+        WHERE pa.plan_id = ${planId}
+          AND a.is_active = 1
+      `;
+
+      grouped.set(
+        planId,
+        rows.map((row) => ({
+          name: row.name,
+          price: Number(row.price || 0),
+        })),
+      );
+    }
+
+    return grouped;
+  }
+
   /**
    * GET /api/admin/subscriptions
    * Get all subscriptions with filtering, search, and pagination
@@ -68,12 +97,31 @@ export class AdminSubscriptionsService {
       });
     }
 
-    // Search by hotel name or subscription code
+    // Search by hotel name, subscription code, tenant email, or owner login email
     if (search) {
-      queryBuilder.andWhere(
-        '(tenant.name LIKE :search OR subscription.subscriptionCode LIKE :search)',
-        { search: `%${search}%` },
-      );
+      // Use Prisma to find tenantIds whose tenant_admin email matches the search term.
+      // This avoids a raw JOIN whose column names may differ between TypeORM and Prisma.
+      const matchingUsers = await this.prismaService.user.findMany({
+        where: { email: { contains: search }, role: 'tenant_admin' },
+        select: { tenantId: true },
+      });
+      const tenantIdsByEmail = [...new Set(
+        matchingUsers.map((u) => u.tenantId).filter(Boolean) as string[],
+      )];
+
+      const conditions: string[] = [
+        'tenant.name LIKE :search',
+        'subscription.subscriptionCode LIKE :search',
+        'tenant.email LIKE :search',
+      ];
+      const params: Record<string, any> = { search: `%${search}%` };
+
+      if (tenantIdsByEmail.length > 0) {
+        conditions.push('subscription.tenantId IN (:...tenantIdsByEmail)');
+        params.tenantIdsByEmail = tenantIdsByEmail;
+      }
+
+      queryBuilder.andWhere(`(${conditions.join(' OR ')})`, params);
     }
 
     // Get total count
@@ -83,15 +131,33 @@ export class AdminSubscriptionsService {
     queryBuilder.orderBy('subscription.createdAt', 'DESC').skip(skip).take(limit);
 
     const subscriptions = await queryBuilder.getMany();
+    const bundledAddonsByPlanId = await this.getPlanAddonsByPlanIds(
+      subscriptions.map((sub) => sub.planId).filter(Boolean),
+    );
+
+    // Batch-fetch owner emails for all subscriptions on this page (single Prisma query)
+    const tenantIds = [...new Set(subscriptions.map((s) => s.tenantId).filter(Boolean))] as string[];
+    const ownerUsers = tenantIds.length
+      ? await this.prismaService.user.findMany({
+          where: { tenantId: { in: tenantIds }, role: 'tenant_admin' },
+          select: { tenantId: true, email: true },
+        })
+      : [];
+    const ownerEmailMap = new Map<string, string>(
+      ownerUsers.map((u) => [u.tenantId as string, u.email]),
+    );
 
     // Transform to response format
     const data: AdminSubscriptionListItemDto[] = subscriptions.map((sub) => {
-      // Build addons array with name and price
+      const bundledAddons = bundledAddonsByPlanId.get(sub.planId) || [];
+
+      // Build add-ons array with both bundled plan_addons and purchased subscription_features.
       const subscriptionFeatures = sub.subscriptionFeatures || [];
-      const addons = subscriptionFeatures.map((sf) => ({
+      const purchasedAddons = subscriptionFeatures.map((sf) => ({
         name: sf.feature?.name || 'Unknown',
         price: Number(sf.price || 0),
       }));
+      const addons = [...bundledAddons, ...purchasedAddons];
 
       // Calculate addon total amount
       const addonAmount = addons.reduce((sum, addon) => sum + addon.price, 0);
@@ -110,6 +176,7 @@ export class AdminSubscriptionsService {
         id: sub.id,
         subscriptionCode: sub.subscriptionCode || `SUB-${sub.id.slice(0, 3).toUpperCase()}`,
         hotelName: sub.tenant?.name || 'N/A',
+        ownerEmail: ownerEmailMap.get(sub.tenantId) || undefined,
         plan: sub.plan?.name || 'No Plan',
         previousPlan: previousPlanName,
         period: {
@@ -248,11 +315,15 @@ export class AdminSubscriptionsService {
       },
     });
 
-    // Build addons list
-    const addons: SubscriptionAddonDto[] = (subscription.subscriptionFeatures || []).map((sf) => ({
+    const bundledAddonsByPlanId = await this.getPlanAddonsByPlanIds([subscription.planId]);
+    const bundledAddons = bundledAddonsByPlanId.get(subscription.planId) || [];
+
+    // Build add-ons list
+    const purchasedAddons: SubscriptionAddonDto[] = (subscription.subscriptionFeatures || []).map((sf) => ({
       name: sf.feature?.name || 'Unknown',
       price: Number(sf.price || 0),
     }));
+    const addons: SubscriptionAddonDto[] = [...bundledAddons, ...purchasedAddons];
 
     // Calculate total price
     const planPrice = Number(subscription.plan?.priceMonthly || 0);
@@ -268,6 +339,7 @@ export class AdminSubscriptionsService {
       id: subscription.id,
       subscriptionCode:
         subscription.subscriptionCode || `SUB-${subscription.id.slice(0, 3).toUpperCase()}`,
+      planId: subscription.planId || undefined,
       hotelName: subscription.tenant?.name || 'N/A',
       hotelEmail: owner?.email || 'N/A',
       plan: subscription.plan?.name || 'No Plan',

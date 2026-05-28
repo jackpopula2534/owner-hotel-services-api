@@ -79,6 +79,7 @@ export class SeederService {
       await this.seedProcurementUsersAndFlows();
       await this.seedPurchaseRequisitionData();
       await this.seedCostAccountingData();
+      await this.seedOpCostCategories();
 
       this.logger.log('✅ Database seeding completed successfully!');
     } catch (error) {
@@ -511,6 +512,22 @@ export class SeederService {
         isActive: true,
       },
 
+      // ─── ACCOUNTING ───────────────────────────────────────
+      {
+        code: 'ACCOUNTING_MODULE',
+        name: 'Accounting Module',
+        description:
+          'ระบบบัญชีโรงแรมครบวงจร: double-entry, ผังบัญชี, สมุดรายวัน, AR/AP, Night Audit, สินทรัพย์ถาวร และภาษี',
+        price: 1990,
+        billingCycle: AddonBillingCycle.MONTHLY,
+        category: 'ACCOUNTING',
+        icon: 'BookOpen',
+        displayOrder: 810,
+        minQuantity: 1,
+        maxQuantity: 1,
+        isActive: true,
+      },
+
       // ─── ADVANCED ─────────────────────────────────────────
       {
         code: 'LOYALTY_MODULE',
@@ -588,7 +605,7 @@ export class SeederService {
       );
     }
 
-    this.logger.log(`  ✅ Seeded ${addons.length} add-ons across 7 categories (modules only)`);
+    this.logger.log(`  ✅ Seeded ${addons.length} add-ons across 8 categories (modules only)`);
   }
 
   /**
@@ -6743,5 +6760,88 @@ export class SeederService {
       `  ✓ Approval flows: ${flowsCreated} created, ${flowsUpdated} updated (PR / Price Comparison / PO)`,
     );
     this.logger.log('✅ Procurement users & approval flows seeded successfully');
+  }
+
+  /**
+   * Seed default operating-cost categories (Platform-level)
+   * — ไม่ทับ category เดิมเมื่อรันซ้ำ
+   */
+  private async seedOpCostCategories(): Promise<void> {
+    this.logger.log('🌱 Seeding operating-cost categories...');
+
+    const defaults = [
+      {
+        code: 'infrastructure',
+        name: 'ค่าโครงสร้างพื้นฐาน',
+        nameEn: 'Infrastructure',
+        color: '#3b82f6',
+        icon: 'server',
+        isCogs: true,
+        sortOrder: 1,
+      },
+      {
+        code: 'third_party',
+        name: 'บริการภายนอก',
+        nameEn: 'Third-party APIs',
+        color: '#06b6d4',
+        icon: 'plug',
+        isCogs: true,
+        sortOrder: 2,
+      },
+      {
+        code: 'software',
+        name: 'ซอฟต์แวร์/ใบอนุญาต',
+        nameEn: 'Software & Tools',
+        color: '#8b5cf6',
+        icon: 'package',
+        isCogs: false,
+        sortOrder: 3,
+      },
+      {
+        code: 'marketing',
+        name: 'การตลาด',
+        nameEn: 'Marketing',
+        color: '#ec4899',
+        icon: 'megaphone',
+        isCogs: false,
+        sortOrder: 4,
+      },
+      {
+        code: 'people',
+        name: 'บุคลากร',
+        nameEn: 'People',
+        color: '#f59e0b',
+        icon: 'users',
+        isCogs: false,
+        sortOrder: 5,
+      },
+      {
+        code: 'operations',
+        name: 'ดำเนินงานอื่น ๆ',
+        nameEn: 'Operations',
+        color: '#64748b',
+        icon: 'briefcase',
+        isCogs: false,
+        sortOrder: 6,
+      },
+    ];
+
+    let created = 0;
+    let skipped = 0;
+    for (const c of defaults) {
+      const existing = await this.prisma.opCostCategory.findUnique({
+        where: { code: c.code },
+      });
+      if (existing) {
+        skipped++;
+        continue;
+      }
+      await this.prisma.opCostCategory.create({ data: c });
+      created++;
+    }
+
+    this.logger.log(
+      `  ✓ Operating-cost categories: ${created} created, ${skipped} skipped`,
+    );
   }
 }

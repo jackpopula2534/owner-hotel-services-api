@@ -17,12 +17,18 @@ export class SubscriptionController {
   @UseGuards(JwtAuthGuard)
   async getRenewalStatus(@CurrentUser() user: any) {
     const subscription = await this.subscriptionsService.findByTenantId(user.tenant_id);
+    const plan = (subscription as any)?.plans_subscriptions_plan_idToplans ?? null;
 
     return {
       status: subscription?.status || 'inactive',
       endDate: subscription?.end_date || null,
       autoRenew: (subscription as any)?.auto_renew || false,
       paymentHistory: [],
+      planId: subscription?.plan_id || null,
+      planName: plan?.name || null,
+      maxRooms: plan?.max_rooms ?? null,
+      maxUsers: plan?.max_users ?? null,
+      priceMonthly: plan?.price_monthly ?? null,
     };
   }
 

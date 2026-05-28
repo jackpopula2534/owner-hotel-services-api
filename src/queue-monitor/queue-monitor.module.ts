@@ -8,7 +8,12 @@ import { QueueMonitorController } from './queue-monitor.controller';
     // Re-register queue tokens so we can inject them here. The actual
     // workers live in their own modules; this is just the producer side
     // for stats / retry / remove.
-    BullModule.registerQueue({ name: 'email' }, { name: 'inventory' }),
+    BullModule.registerQueue(
+      { name: 'email' },
+      { name: 'inventory' },
+      { name: 'data-export' },
+      { name: 'opcost-snapshot' },
+    ),
   ],
   controllers: [QueueMonitorController],
   providers: [QueueMonitorService],

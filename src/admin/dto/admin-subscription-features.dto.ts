@@ -118,6 +118,12 @@ export class SubscriptionFeatureItemDto {
 
   @ApiProperty({ example: '2024-01-01' })
   createdAt: string;
+
+  @ApiPropertyOptional({ example: 'subscription' })
+  source?: 'subscription' | 'plan';
+
+  @ApiPropertyOptional({ example: true })
+  includedInPlan?: boolean;
 }
 
 export class SubscriptionFeaturesListDto {
@@ -138,6 +144,12 @@ export class SubscriptionFeaturesListDto {
 
   @ApiProperty({ type: [SubscriptionFeatureItemDto] })
   addons: SubscriptionFeatureItemDto[];
+
+  @ApiProperty({ type: [SubscriptionFeatureItemDto] })
+  includedFeatures: SubscriptionFeatureItemDto[];
+
+  @ApiProperty({ type: [SubscriptionFeatureItemDto] })
+  includedAddons: SubscriptionFeatureItemDto[];
 
   @ApiProperty({ example: 2480 })
   totalAddonPrice: number;

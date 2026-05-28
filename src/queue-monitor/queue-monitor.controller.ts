@@ -35,4 +35,16 @@ export class QueueMonitorController {
     await this.service.removeFailed(name, jobId);
     return { success: true };
   }
+
+  @Post(':name/failed/retry-all')
+  @ApiOperation({ summary: 'Retry all failed jobs for a queue' })
+  async retryAll(@Param('name') name: string) {
+    return this.service.retryAllFailed(name);
+  }
+
+  @Delete(':name/failed')
+  @ApiOperation({ summary: 'Clear (remove) all failed jobs for a queue' })
+  async clearAll(@Param('name') name: string) {
+    return this.service.clearAllFailed(name);
+  }
 }

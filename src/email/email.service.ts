@@ -614,6 +614,42 @@ export class EmailService implements OnModuleInit {
     }));
   }
 
+  async getTemplateContent(name: string, language = 'th'): Promise<{ name: string; language: string; content: string }> {
+    const templatesDir = path.join(__dirname, 'templates');
+    const filePath = path.join(templatesDir, `${name}.${language}.hbs`);
+    const fallbackPath = path.join(templatesDir, `${name}.hbs`);
+
+    let content = '';
+    if (fs.existsSync(filePath)) {
+      content = fs.readFileSync(filePath, 'utf-8');
+    } else if (fs.existsSync(fallbackPath)) {
+      content = fs.readFileSync(fallbackPath, 'utf-8');
+    } else {
+      throw new Error(`Template not found: ${name} (${language})`);
+    }
+
+    return { name, language, content };
+  }
+
+  async updateTemplateContent(
+    name: string,
+    language: string,
+    content: string,
+  ): Promise<{ success: boolean }> {
+    const templatesDir = path.join(__dirname, 'templates');
+    if (!fs.existsSync(templatesDir)) {
+      fs.mkdirSync(templatesDir, { recursive: true });
+    }
+    const filePath = path.join(templatesDir, `${name}.${language}.hbs`);
+    fs.writeFileSync(filePath, content, 'utf-8');
+
+    // Recompile and cache the updated template
+    this.templates.set(`${name}.${language}`, handlebars.compile(content));
+    this.logger.log(`Template updated: ${name}.${language}`);
+
+    return { success: true };
+  }
+
   async resendEmail(emailLogId: string): Promise<{ success: boolean }> {
     const emailLog = await this.prisma.emailLog.findUnique({
       where: { id: emailLogId },

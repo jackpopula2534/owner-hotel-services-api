@@ -94,6 +94,9 @@ export class AdminSubscriptionListItemDto {
   @ApiProperty({ example: 'โรงแรมสุขใจ' })
   hotelName: string;
 
+  @ApiPropertyOptional({ example: 'somchai@email.com', description: 'Owner (tenant_admin) email' })
+  ownerEmail?: string;
+
   @ApiProperty({ example: 'Professional' })
   plan: string;
 
@@ -170,6 +173,9 @@ export class AdminSubscriptionDetailDto {
 
   @ApiProperty({ example: 'SUB-001', description: 'Display subscription code' })
   subscriptionCode: string;
+
+  @ApiPropertyOptional({ example: 'plan-uuid-123', description: 'Current plan UUID' })
+  planId?: string;
 
   @ApiProperty({ example: 'โรงแรมสุขใจ' })
   hotelName: string;

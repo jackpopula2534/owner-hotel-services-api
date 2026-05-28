@@ -41,9 +41,13 @@ export class QueueMonitorService {
   constructor(
     @InjectQueue('email') private readonly emailQueue: Queue,
     @InjectQueue('inventory') private readonly inventoryQueue: Queue,
+    @InjectQueue('data-export') private readonly dataExportQueue: Queue,
+    @InjectQueue('opcost-snapshot') private readonly opcostSnapshotQueue: Queue,
   ) {
     this.queues.set('email', this.emailQueue);
     this.queues.set('inventory', this.inventoryQueue);
+    this.queues.set('data-export', this.dataExportQueue);
+    this.queues.set('opcost-snapshot', this.opcostSnapshotQueue);
   }
 
   listQueues(): string[] {
@@ -105,6 +109,20 @@ export class QueueMonitorService {
     const job = await queue.getJob(jobId);
     if (!job) throw new NotFoundException('Job not found');
     await job.remove();
+  }
+
+  async retryAllFailed(name: string): Promise<{ retried: number }> {
+    const queue = this.requireQueue(name);
+    const jobs = await queue.getFailed(0, 999);
+    await Promise.all(jobs.map((j) => j.retry().catch(() => null)));
+    return { retried: jobs.length };
+  }
+
+  async clearAllFailed(name: string): Promise<{ removed: number }> {
+    const queue = this.requireQueue(name);
+    const jobs = await queue.getFailed(0, 999);
+    await Promise.all(jobs.map((j) => j.remove().catch(() => null)));
+    return { removed: jobs.length };
   }
 
   private requireQueue(name: string): Queue {

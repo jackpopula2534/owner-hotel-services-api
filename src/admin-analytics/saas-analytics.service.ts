@@ -34,6 +34,33 @@ export interface MrrTrendPoint {
   activeCount: number;
 }
 
+export interface CohortRetentionPoint {
+  /** Months elapsed since cohort start (0 = first month) */
+  month: number;
+  /** Number of subscriptions still active */
+  active: number;
+  /** Retention percentage (0-100) */
+  retentionPct: number;
+}
+
+export interface CohortRow {
+  /** YYYY-MM format */
+  cohortMonth: string;
+  /** Short Thai label, e.g. "พ.ค. 69" */
+  cohortLabel: string;
+  /** Number of subscriptions that started in this cohort month */
+  cohortSize: number;
+  /** Retention for each month after cohort start */
+  retention: CohortRetentionPoint[];
+}
+
+export interface CohortRetentionResponse {
+  months: number;
+  /** Average retention across cohorts at each month offset */
+  averageRetention: number[];
+  cohorts: CohortRow[];
+}
+
 /**
  * Read-only SaaS analytics over the subscription/plans/invoices tables.
  * No write side-effects. Cached at the controller layer.
@@ -173,6 +200,127 @@ export class SaasAnalyticsService {
       monthlyChurnRate: Math.round(monthlyChurnRate * 10000) / 10000,
       estimatedLtv: Math.round(ltv),
       paybackMonths: 1, // placeholder until CAC model is wired
+    };
+  }
+
+  /**
+   * Cohort Retention Analysis
+   *
+   * แต่ละ cohort = ลูกค้าที่สมัครในเดือนเดียวกัน
+   * แต่ละช่อง M0, M1, M2, ... = % ลูกค้าใน cohort ที่ยังคงอยู่หลังผ่านไป N เดือน
+   *
+   * @param months จำนวน cohorts ที่จะ analyze (default 12)
+   */
+  async getCohortRetention(months: number = 12): Promise<CohortRetentionResponse> {
+    const TH_MONTHS = [
+      'ม.ค.',
+      'ก.พ.',
+      'มี.ค.',
+      'เม.ย.',
+      'พ.ค.',
+      'มิ.ย.',
+      'ก.ค.',
+      'ส.ค.',
+      'ก.ย.',
+      'ต.ค.',
+      'พ.ย.',
+      'ธ.ค.',
+    ];
+
+    const now = new Date();
+    const cohorts: CohortRow[] = [];
+    // เก็บ retention ของแต่ละ cohort เพื่อคำนวณ average
+    const retentionByOffset: number[][] = [];
+
+    for (let i = months - 1; i >= 0; i--) {
+      // คำนวณช่วงเดือนของ cohort
+      const cohortStart = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const cohortEnd = new Date(
+        cohortStart.getFullYear(),
+        cohortStart.getMonth() + 1,
+        0,
+        23,
+        59,
+        59,
+      );
+
+      // หา subscriptions ที่ "เกิดใหม่" ในเดือนนี้
+      const cohortSubs = await (this.prisma as any).subscriptions.findMany({
+        where: {
+          created_at: { gte: cohortStart, lte: cohortEnd },
+        },
+        select: { id: true, cancelled_at: true, end_date: true, start_date: true },
+      });
+
+      const cohortSize = cohortSubs.length;
+      const cohortIds: string[] = cohortSubs.map((s: any) => s.id);
+
+      // จำนวนเดือนที่นับ retention ได้ (ตั้งแต่ M0 ถึงปัจจุบัน)
+      const monthsAfter = i + 1;
+      const retention: CohortRetentionPoint[] = [];
+
+      for (let m = 0; m < monthsAfter; m++) {
+        // วันสิ้นเดือนของ "เดือนที่ m หลังจาก cohort"
+        const checkDate = new Date(
+          cohortStart.getFullYear(),
+          cohortStart.getMonth() + m + 1,
+          0,
+          23,
+          59,
+          59,
+        );
+
+        if (cohortSize === 0) {
+          retention.push({ month: m, active: 0, retentionPct: 0 });
+          continue;
+        }
+
+        // นับ subscriptions ที่ยังคงอยู่ ณ checkDate:
+        //  - start_date <= checkDate
+        //  - end_date  >  checkDate (ยังไม่ end)
+        //  - cancelled_at IS NULL OR cancelled_at > checkDate
+        const activeCount = await (this.prisma as any).subscriptions.count({
+          where: {
+            id: { in: cohortIds },
+            start_date: { lte: checkDate },
+            end_date: { gt: checkDate },
+            OR: [{ cancelled_at: null }, { cancelled_at: { gt: checkDate } }],
+          },
+        });
+
+        const pct = cohortSize > 0 ? (activeCount / cohortSize) * 100 : 0;
+        retention.push({
+          month: m,
+          active: activeCount,
+          retentionPct: Math.round(pct * 100) / 100,
+        });
+
+        // เก็บไว้คำนวณ average (เฉพาะ cohort ที่มีลูกค้า)
+        if (cohortSize > 0) {
+          if (!retentionByOffset[m]) retentionByOffset[m] = [];
+          retentionByOffset[m].push(pct);
+        }
+      }
+
+      cohorts.push({
+        cohortMonth: this.formatYearMonth(cohortStart),
+        cohortLabel: `${TH_MONTHS[cohortStart.getMonth()]} ${(cohortStart.getFullYear() + 543) % 100}`,
+        cohortSize,
+        retention,
+      });
+    }
+
+    // คำนวณ average retention ของแต่ละ month offset
+    const averageRetention = retentionByOffset.map((arr) => {
+      if (arr.length === 0) return 0;
+      const avg = arr.reduce((s, x) => s + x, 0) / arr.length;
+      return Math.round(avg * 100) / 100;
+    });
+
+    return {
+      months,
+      averageRetention,
+      cohorts,
     };
   }
 

@@ -30,6 +30,7 @@ import { CouponsModule } from './coupons/coupons.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { UsageMeteringModule } from './usage-metering/usage-metering.module';
 import { AdminAnalyticsModule } from './admin-analytics/admin-analytics.module';
+import { OperatingCostsModule } from './modules/operating-costs/operating-costs.module';
 import { ImpersonationModule } from './impersonation/impersonation.module';
 import { DataExportModule } from './data-export/data-export.module';
 import { StatusPageModule } from './status-page/status-page.module';
@@ -83,6 +84,16 @@ import { WarehouseUsersModule } from './modules/warehouse-users/warehouse-users.
 import { HotelTerminalUsersModule } from './modules/hotel-terminal-users/hotel-terminal-users.module';
 import { CostAccountingModule } from './modules/cost-accounting/cost-accounting.module';
 import { DocumentSettingsModule } from './modules/document-settings/document-settings.module';
+// ─── Accounting System ────────────────────────────────────────────────────────
+import { AccountingModule } from './modules/accounting/accounting.module';
+import { AccountsReceivableModule } from './modules/accounts-receivable/accounts-receivable.module';
+import { AccountsPayableModule } from './modules/accounts-payable/accounts-payable.module';
+import { TaxManagementModule } from './modules/tax-management/tax-management.module';
+import { NightAuditModule } from './modules/night-audit/night-audit.module';
+import { CashManagementModule } from './modules/cash-management/cash-management.module';
+import { FixedAssetsModule } from './modules/fixed-assets/fixed-assets.module';
+import { StripePaymentsModule } from './stripe/stripe.module';
+import { TrueMoneyModule } from './truemoney/truemoney.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { DataRetentionModule } from './common/data-retention.module';
 import { TenantModule } from './common/tenant/tenant.module';
@@ -126,6 +137,7 @@ import { TenantGuard } from './common/guards/tenant.guard';
     WebhooksModule,
     UsageMeteringModule,
     AdminAnalyticsModule,
+    OperatingCostsModule,
     ImpersonationModule,
     DataExportModule,
     StatusPageModule,
@@ -179,6 +191,16 @@ import { TenantGuard } from './common/guards/tenant.guard';
     HotelTerminalUsersModule,
     CostAccountingModule,
     DocumentSettingsModule,
+    // ─── Accounting System ──────────────────────────────────────────────────
+    AccountingModule,
+    AccountsReceivableModule,
+    AccountsPayableModule,
+    TaxManagementModule,
+    NightAuditModule,
+    CashManagementModule,
+    FixedAssetsModule,
+    StripePaymentsModule,
+    TrueMoneyModule,
     ThrottlerModule.forRoot([
       {
         ttl: 60, // 60 seconds window

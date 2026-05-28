@@ -49,7 +49,7 @@ export class AdminSubscriptionFeaturesService {
     // Find subscription by code or UUID
     const subscription = await this.findSubscription(subscriptionId);
 
-    // Get all features for this subscription
+    // Get add-ons purchased directly on this subscription.
     const features = await this.subscriptionFeaturesRepository.find({
       where: { subscriptionId: subscription.id, isActive: true },
       relations: ['feature'],
@@ -67,7 +67,80 @@ export class AdminSubscriptionFeaturesService {
       totalPrice: Number(sf.price) * (sf.quantity || 1),
       isActive: sf.isActive,
       createdAt: sf.createdAt?.toISOString().split('T')[0] || 'N/A',
+      source: 'subscription',
+      includedInPlan: false,
     }));
+
+    const planWithFeatures = subscription.planId
+      ? await this.dataSource.getRepository(Feature).createQueryBuilder('feature')
+          .innerJoin('feature.planFeatures', 'planFeature', 'planFeature.planId = :planId', {
+            planId: subscription.planId,
+          })
+          .where('feature.isActive = :isActive', { isActive: true })
+          .orderBy('feature.displayOrder', 'ASC')
+          .addOrderBy('feature.name', 'ASC')
+          .getMany()
+      : [];
+
+    const includedFeatures: SubscriptionFeatureItemDto[] = planWithFeatures.map((feature) => ({
+      id: `plan-${subscription.planId}-${feature.id}`,
+      featureId: feature.id,
+      featureName: feature.name || 'Unknown',
+      featureDescription: feature.description || '',
+      featureType: feature.type || 'module',
+      quantity: 1,
+      price: 0,
+      totalPrice: 0,
+      isActive: true,
+      createdAt: subscription.createdAt?.toISOString().split('T')[0] || 'N/A',
+      source: 'plan',
+      includedInPlan: true,
+    }));
+
+    const planAddonsClient = (
+      this.dataSource as unknown as {
+        manager: {
+          query: (sql: string, params?: unknown[]) => Promise<
+            Array<{
+              addon_id: string;
+              code: string;
+              name: string;
+              description: string | null;
+              price: string | number | null;
+              is_active: number | boolean | null;
+            }>
+          >;
+        };
+      }
+    ).manager;
+
+    const bundledPlanAddons =
+      subscription.planId
+        ? await planAddonsClient.query(
+            `SELECT a.id AS addon_id, a.code, a.name, a.description, a.price, a.is_active
+             FROM plan_addons pa
+             INNER JOIN add_ons a ON a.id = pa.addon_id
+             WHERE pa.plan_id = ?`,
+            [subscription.planId],
+          )
+        : [];
+
+    const includedAddons: SubscriptionFeatureItemDto[] = bundledPlanAddons
+      .filter((addon) => Number(addon.is_active) === 1)
+      .map((addon) => ({
+        id: `plan-addon-${subscription.planId}-${addon.addon_id}`,
+        featureId: addon.addon_id,
+        featureName: addon.name || 'Unknown',
+        featureDescription: addon.description || '',
+        featureType: 'module',
+        quantity: 1,
+        price: Number(addon.price || 0),
+        totalPrice: Number(addon.price || 0),
+        isActive: true,
+        createdAt: subscription.createdAt?.toISOString().split('T')[0] || 'N/A',
+        source: 'plan',
+        includedInPlan: true,
+      }));
 
     const totalAddonPrice = addons.reduce((sum, a) => sum + a.totalPrice, 0);
     const planPrice = Number(subscription.plan?.priceMonthly || 0);
@@ -80,6 +153,8 @@ export class AdminSubscriptionFeaturesService {
       planName: subscription.plan?.name || 'No Plan',
       planPrice,
       addons,
+      includedFeatures,
+      includedAddons,
       totalAddonPrice,
       totalMonthlyPrice: planPrice + totalAddonPrice,
     };

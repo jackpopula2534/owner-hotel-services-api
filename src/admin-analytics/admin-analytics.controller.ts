@@ -36,4 +36,16 @@ export class AdminAnalyticsController {
   async ltv() {
     return this.analytics.getLtvSummary();
   }
+
+  @Get('cohort-retention')
+  @ApiOperation({
+    summary: 'Cohort retention matrix',
+    description:
+      'แต่ละแถว = ลูกค้าที่สมัครเดือนเดียวกัน (cohort) ' +
+      '· แต่ละคอลัมน์ = % ที่ยังคงอยู่หลังผ่านไป N เดือน',
+  })
+  async cohortRetention(@Query('months') months?: string) {
+    const m = months ? Math.max(1, Math.min(36, Number(months) || 12)) : 12;
+    return this.analytics.getCohortRetention(m);
+  }
 }

@@ -1,0 +1,239 @@
+// ============================================================================
+// Operating Costs / ระบบติดตามต้นทุนระบบ (Schema Fragment)
+// ============================================================================
+// วัตถุประสงค์: บันทึกค่าใช้จ่ายของ platform เพื่อคำนวณ:
+//   ✓ Gross Margin   = (MRR − COGS) / MRR
+//   ✓ Operating Margin = (MRR − ค่าใช้จ่ายทั้งหมด) / MRR
+//   ✓ CAC (จริง)     = Marketing Spend / ลูกค้าใหม่
+//   ✓ LTV/CAC Ratio  ที่ใช้ได้จริง
+//   ✓ Net Profit / Burn Rate
+//   ✓ Cost per Customer
+//
+// วิธีรวมเข้า schema หลัก:
+//   1. Copy เนื้อหาในไฟล์นี้ไปวางต่อท้าย prisma/schema.prisma
+//   2. รัน: npx prisma migrate dev --name add_operating_costs
+//   3. รัน seeder สำหรับ default categories (ดูตอนท้ายไฟล์)
+// ============================================================================
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum ExpenseType {
+  RECURRING  // ค่าใช้จ่ายประจำ (เช่น subscription)
+  ONE_TIME   // ค่าใช้จ่ายครั้งเดียว (เช่น ค่าซื้อ license)
+  USAGE      // ค่าใช้จ่ายตามการใช้งาน (เช่น AWS pay-as-you-go) — record per period
+}
+
+enum BillingCycle {
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+enum CostBehavior {
+  FIXED          // คงที่ ไม่ผันตามจำนวน subscribers
+  VARIABLE       // ผันตาม subscribers/usage — สำคัญต่อ Gross Margin
+  SEMI_VARIABLE  // ผสม
+}
+
+// ─── Models ──────────────────────────────────────────────────────────────────
+
+/// หมวดต้นทุน — มี 6 หมวดมาตรฐาน (seed ตอนแรก)
+/// infrastructure | third_party | software | marketing | people | operations
+model CostCategory {
+  id          String   @id @default(uuid()) @db.VarChar(36)
+  code        String   @unique @db.VarChar(50)
+  name        String   @db.VarChar(100)    // ภาษาไทย: "ค่าโครงสร้างพื้นฐาน"
+  nameEn      String?  @db.VarChar(100)    // "Infrastructure"
+  description String?  @db.Text
+  color       String?  @db.VarChar(20)     // hex color สำหรับ chart
+  icon        String?  @db.VarChar(50)     // lucide icon name
+  /// นับเป็น COGS (Cost of Goods Sold) สำหรับการคำนวณ Gross Margin
+  /// COGS = ค่าใช้จ่ายที่ "แปรผันตามการให้บริการ" — hosting/email/SMS = COGS
+  /// ส่วน marketing/HQ rent ไม่ใช่ COGS
+  isCogs      Boolean  @default(false)
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+
+  vendors     CostVendor[]
+  expenses    OperatingExpense[]
+  budgets     CostBudget[]
+
+  @@map("cost_categories")
+}
+
+/// ผู้ให้บริการ / Vendor (AWS, SendGrid, Twilio, Sentry, etc.)
+model CostVendor {
+  id           String        @id @default(uuid()) @db.VarChar(36)
+  name         String        @db.VarChar(150)
+  website      String?       @db.VarChar(255)
+  contactName  String?       @db.VarChar(100)
+  contactEmail String?       @db.VarChar(150)
+  notes        String?       @db.Text
+
+  categoryId   String?       @db.VarChar(36)
+  category     CostCategory? @relation(fields: [categoryId], references: [id])
+
+  isActive     Boolean       @default(true)
+
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @default(now()) @updatedAt
+
+  expenses     OperatingExpense[]
+
+  @@index([categoryId])
+  @@map("cost_vendors")
+}
+
+/// รายการต้นทุนหลัก (table หลักของระบบ)
+model OperatingExpense {
+  id              String                   @id @default(uuid()) @db.VarChar(36)
+
+  // ─── Categorization ───
+  categoryId      String                   @db.VarChar(36)
+  category        CostCategory             @relation(fields: [categoryId], references: [id])
+  vendorId        String?                  @db.VarChar(36)
+  vendor          CostVendor?              @relation(fields: [vendorId], references: [id])
+
+  // ─── Identity ───
+  name            String                   @db.VarChar(200)    // "AWS EC2 Production Server"
+  description     String?                  @db.Text
+
+  // ─── Money (THB only — เก็บ currency ไว้เผื่ออนาคต) ───
+  amount          Decimal                  @db.Decimal(12, 2)
+  currency        String                   @default("THB") @db.VarChar(3)
+
+  // ─── Behavior — สำคัญสำหรับ Margin calc ───
+  type            ExpenseType
+  behavior        CostBehavior             @default(FIXED)
+  billingCycle    BillingCycle?            // ใช้กับ RECURRING
+
+  // ─── Period ───
+  startDate       DateTime                 // วันที่เริ่มมีค่าใช้จ่าย
+  endDate         DateTime?                // null = ยังคงอยู่ / cancel เมื่อใส่ค่า
+
+  // ─── Lifecycle ───
+  isActive        Boolean                  @default(true)
+
+  // ─── Metadata ───
+  tags            String?                  @db.Text          // comma-separated เช่น "production,critical"
+  reference       String?                  @db.VarChar(150)  // invoice / PO number
+  attachmentUrl   String?                  @db.VarChar(500)  // link ไป receipt/บิล
+  notes           String?                  @db.Text
+
+  // ─── Audit ───
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @default(now()) @updatedAt
+  createdBy       String?                  @db.VarChar(36)
+
+  snapshots       ExpenseMonthlySnapshot[]
+
+  @@index([categoryId])
+  @@index([vendorId])
+  @@index([type, isActive])
+  @@index([startDate, endDate])
+  @@map("operating_expenses")
+}
+
+/// Pre-computed monthly snapshots — ทำให้ report รายเดือนเร็ว
+/// สร้างโดย background job (cron) ทุกต้นเดือน + manual regenerate ได้
+///
+/// วิธีคำนวณ amountForMonth:
+///   - MONTHLY recurring   → amount เต็ม
+///   - QUARTERLY recurring → amount / 3 (ตกทุก 3 เดือน)
+///   - YEARLY recurring    → amount / 12
+///   - ONE_TIME            → amount (เฉพาะเดือนที่ expenseDate ตรง)
+///   - USAGE               → ใส่ตรงๆ ตามที่บันทึก
+model ExpenseMonthlySnapshot {
+  id              String           @id @default(uuid()) @db.VarChar(36)
+  expenseId       String           @db.VarChar(36)
+  expense         OperatingExpense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+
+  year            Int
+  month           Int              // 1-12
+
+  amountForMonth  Decimal          @db.Decimal(12, 2)
+
+  /// Snapshot ของ category/behavior ณ ตอนคำนวณ — กันการเปลี่ยน category ย้อนหลัง
+  categoryCode    String           @db.VarChar(50)
+  behavior        CostBehavior     @default(FIXED)
+  isCogs          Boolean          @default(false)
+
+  createdAt       DateTime         @default(now())
+
+  @@unique([expenseId, year, month])
+  @@index([year, month])
+  @@index([categoryCode, year, month])
+  @@map("expense_monthly_snapshots")
+}
+
+/// งบประมาณรายเดือน/รายปี — เทียบกับยอดจริง
+model CostBudget {
+  id              String         @id @default(uuid()) @db.VarChar(36)
+  categoryId      String?        @db.VarChar(36)    // null = budget รวมทุกหมวด
+  category        CostCategory?  @relation(fields: [categoryId], references: [id])
+
+  year            Int
+  month           Int?           // null = annual budget, 1-12 = monthly
+
+  budgetAmount    Decimal        @db.Decimal(12, 2)
+  notes           String?        @db.Text
+
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @default(now()) @updatedAt
+
+  @@unique([categoryId, year, month])
+  @@map("cost_budgets")
+}
+
+/// Marketing Campaigns — สำหรับคำนวณ CAC ที่แม่นยำ
+/// แต่ละ campaign ลง spend เท่าไหร่ + ดึงลูกค้ามาได้กี่ราย
+/// → CAC ของ campaign = totalSpend / attributedTenants
+/// → CAC รวม = sum(totalSpend ในช่วง) / new_subscriptions_in_period
+model MarketingCampaign {
+  id                String    @id @default(uuid()) @db.VarChar(36)
+  name              String    @db.VarChar(200)
+  channel           String    @db.VarChar(50)     // 'google_ads' | 'facebook' | 'organic' | 'referral' | 'event' | 'partnership'
+  startDate         DateTime
+  endDate           DateTime?
+  totalSpend        Decimal   @db.Decimal(12, 2) @default(0)
+  /// จำนวนลูกค้าที่ได้จาก campaign นี้ (กรอกมือหรือ auto-track)
+  attributedTenants Int       @default(0)
+  notes             String?   @db.Text
+  isActive          Boolean   @default(true)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @default(now()) @updatedAt
+
+  @@index([startDate, endDate])
+  @@index([channel])
+  @@map("marketing_campaigns")
+}
+
+// ============================================================================
+// ตัวอย่าง Default Categories (Seed Data) — เพิ่มใน seeder
+// ============================================================================
+//
+// const DEFAULT_COST_CATEGORIES = [
+//   { code: 'infrastructure', name: 'ค่าโครงสร้างพื้นฐาน',  nameEn: 'Infrastructure',     color: '#3b82f6', icon: 'server',       isCogs: true,  sortOrder: 1 },
+//   { code: 'third_party',    name: 'บริการภายนอก',         nameEn: 'Third-party APIs',    color: '#06b6d4', icon: 'plug',         isCogs: true,  sortOrder: 2 },
+//   { code: 'software',       name: 'ซอฟต์แวร์/ใบอนุญาต',   nameEn: 'Software & Tools',    color: '#8b5cf6', icon: 'package',      isCogs: false, sortOrder: 3 },
+//   { code: 'marketing',      name: 'การตลาด',              nameEn: 'Marketing',           color: '#ec4899', icon: 'megaphone',    isCogs: false, sortOrder: 4 },
+//   { code: 'people',         name: 'บุคลากร',              nameEn: 'People',              color: '#f59e0b', icon: 'users',        isCogs: false, sortOrder: 5 },
+//   { code: 'operations',     name: 'ดำเนินงานอื่น ๆ',       nameEn: 'Operations',          color: '#64748b', icon: 'briefcase',    isCogs: false, sortOrder: 6 },
+// ]
+//
+// ตัวอย่าง Expenses จริงๆ ที่ระบบนี้น่าจะมี:
+//   - AWS EC2 / RDS / S3 (infrastructure, COGS, RECURRING monthly)
+//   - SendGrid / Mailgun (third_party, COGS, RECURRING monthly)
+//   - LINE Notify API quota (third_party, COGS, USAGE)
+//   - Twilio SMS (third_party, COGS, USAGE)
+//   - Sentry / Datadog (software, RECURRING monthly)
+//   - GitHub Team (software, RECURRING monthly)
+//   - Google Ads (marketing, RECURRING monthly, ไม่ใช่ COGS)
+//   - Facebook Ads (marketing, ONE_TIME per campaign)
+//   - Developer salary (people, RECURRING monthly)
+//   - Office rent (operations, RECURRING monthly)
+//   - Domain renewal (operations, RECURRING yearly)
+//   - SSL Certificate (operations, RECURRING yearly)

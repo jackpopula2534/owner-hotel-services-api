@@ -14,18 +14,13 @@
 | **Enterprise** | `L` | 9,990 บาท | 200 | 50 |
 | **Free Trial**| `FREE`| 0 บาท | 5 | 2 |
 
-### 2️⃣ Features & Add-ons (ฟีเจอร์เสริม 11 รายการ)
-- `ota_booking` - OTA Booking Integration (990 THB)
-- `extra_analytics` - Extra Analytics (990 THB)
-- `custom_branding` - Custom Branding (1490 THB)
-- `automation` - Automation System (990 THB)
-- `api_access` - API Access (1500 THB)
-- `tax_invoice` - Tax Invoice (500 THB)
-- `extra_user` - Extra User (200 THB)
-- `advanced_report` - Advanced Report (500 THB)
-- `housekeeping` - Housekeeping Management (500 THB)
-- `basic_report` - Basic Report (FREE)
-- `HR_MODULE` - HR Module (1200 THB)
+### 2️⃣ Features & Add-ons
+- `features` = toggle/limit entitlement เช่น `basic_report`, `tax_invoice`, `advanced_report`, `api_access`
+- `add_ons` = module entitlement เช่น `HR_MODULE`, `INVENTORY_MODULE`, `POS_MODULE`, `CHANNEL_MANAGER`
+- `premium.test@email.com` ได้สิทธิ์ครบจาก 3 แหล่ง:
+  - `plan_features` ของ Plan `L`
+  - `plan_addons` ของ Plan `L`
+  - `subscription_features` เพิ่มเติม 6 รายการ
 
 ---
 
@@ -49,7 +44,7 @@
 
 | Email | Hotel Name | Plan | Features |
 |-------|------------|------|----------|
-| **`premium.test@email.com`** | **Mountain View Resort** | **Enterprise (L)** | **ครบทุก Add-on (11 ตัว)** |
+| **`premium.test@email.com`** | **Mountain View Resort** | **Enterprise (L)** | **ครบ plan features + plan add-ons + subscription features** |
 | `somchai@email.com` | โรงแรมสุขใจ (Sukjai Hotel) | Professional (M) | Analytics, Branding |
 | `seaside@email.com` | บ้านพักริมทะเล (Seaside Stay) | Starter (S) | Trial Mode |
 | `garden@email.com` | Garden Resort & Spa | Professional (M) | - |

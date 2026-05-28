@@ -128,6 +128,9 @@ model Guest {
   // ── Right to Erasure (S2-02) ─────────────────────────────
   anonymizedAt       DateTime?
   bookings           Booking[]
+  arInvoices         ArInvoice[]
+  arReceipts         ArReceipt[]
+  guestFolios        GuestFolio[]
 
   @@index([tenantId])
   @@map("guests")
@@ -277,6 +280,8 @@ model Booking {
   id                    String             @id @default(uuid())
   tenantId              String?
   propertyId            String
+  /// เลขที่การจอง
+  bookingNo             String?            @db.VarChar(30)
   guestId               String?
   roomId                String
   guestFirstName        String
@@ -320,6 +325,8 @@ model Booking {
   standardBedGuests     Int?               @default(1)
   source                String?
   addOns                BookingAddOn[]
+  arInvoices            ArInvoice[]
+  guestFolios           GuestFolio[]
   channel               Channel?           @relation(fields: [channelId], references: [id])
   guest                 Guest?             @relation(fields: [guestId], references: [id])
   property              Property           @relation(fields: [propertyId], references: [id], onDelete: Cascade)
@@ -2322,6 +2329,9 @@ model Supplier {
   rfqRecipients  RfqSupplierRecipient[]
   quoteTokens    SupplierQuoteToken[]
   supplierQuotes SupplierQuote[]
+  whtCertificates WhtCertificate[]
+  apInvoices     ApInvoice[]
+  apPayments     ApPayment[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -3747,6 +3757,8 @@ enum payments_method {
   transfer
   qr
   cash
+  stripe
+  truemoney
 }
 
 enum payment_refunds_method {
@@ -4100,4 +4112,1702 @@ model AutoReplyTemplate {
 
   @@index([tenantId, channel, isActive])
   @@map("auto_reply_templates")
+}
+
+// ─── Stripe ──────────────────────────────────────────────────────────────────
+
+model StripeCustomer {
+  id               String   @id @default(uuid())
+  tenantId         String   @unique
+  stripeCustomerId String   @unique
+  email            String?
+  name             String?
+  createdAt        DateTime @default(now()) @db.DateTime(6)
+  updatedAt        DateTime @default(now()) @updatedAt @db.DateTime(6)
+
+  paymentIntents StripePaymentIntent[]
+
+  @@index([tenantId])
+  @@map("stripe_customers")
+}
+
+model StripePaymentIntent {
+  id                    String   @id @default(uuid())
+  tenantId              String
+  invoiceId             String?
+  stripeCustomerId      String?
+  stripePaymentIntentId String   @unique
+  stripeClientSecret    String   @db.Text
+  amount                Decimal  @db.Decimal(10, 2)
+  currency              String   @default("thb") @db.VarChar(10)
+  status                String   @db.VarChar(50)  // requires_payment_method | succeeded | canceled | ...
+  paymentMethodId       String?
+  receiptUrl            String?  @db.Text
+  metadata              Json?
+  createdAt             DateTime @default(now()) @db.DateTime(6)
+  updatedAt             DateTime @default(now()) @updatedAt @db.DateTime(6)
+
+  stripeCustomer StripeCustomer? @relation(fields: [stripeCustomerId], references: [stripeCustomerId])
+
+  @@index([tenantId])
+  @@index([invoiceId])
+  @@index([stripePaymentIntentId])
+  @@map("stripe_payment_intents")
+}
+
+// ─── TrueMoney (via 2C2P) ────────────────────────────────────────────────────
+
+model TrueMoneyTransaction {
+  id              String   @id @default(uuid())
+  tenantId        String
+  invoiceId       String?
+  merchantOrderId String   @unique
+  amount          Decimal  @db.Decimal(10, 2)
+  currency        String   @default("THB") @db.VarChar(10)
+  status          String   @db.VarChar(50)  // pending | completed | failed | canceled
+  paymentToken    String?  @db.Text
+  redirectUrl     String?  @db.Text
+  callbackData    Json?
+  paidAt          DateTime?
+  errorMessage    String?  @db.Text
+  createdAt       DateTime @default(now()) @db.DateTime(6)
+  updatedAt       DateTime @default(now()) @updatedAt @db.DateTime(6)
+
+  @@index([tenantId])
+  @@index([invoiceId])
+  @@index([merchantOrderId])
+  @@map("truemoney_transactions")
+}
+// =============================================================================
+// HOTEL ACCOUNTING SYSTEM — Prisma Schema
+// =============================================================================
+// วิธีใช้: append ทั้งไฟล์นี้ต่อท้าย prisma/schema.prisma หลัก
+// แล้วรัน: npx prisma migrate dev --name add_accounting_system
+// =============================================================================
+//
+// MODULE OVERVIEW:
+//   1. accounting-core   — ผังบัญชี, สมุดรายวัน, บัญชีแยกประเภท, ปีบัญชี
+//   2. accounts-receivable — ลูกหนี้, Guest Folio, ใบเสร็จรับเงิน
+//   3. accounts-payable  — เจ้าหนี้, Supplier Invoice, การจ่ายชำระ
+//   4. tax-management    — VAT, WHT, ใบหัก ณ ที่จ่าย, การยื่นแบบ (Thai standard)
+//   5. night-audit       — Night Audit, Auto posting
+//   6. cash-management   — เงินสด, กระทบยอดธนาคาร
+//   7. fixed-assets      — สินทรัพย์ถาวร, ค่าเสื่อมราคา
+// =============================================================================
+
+// ─── ENUMS ─────────────────────────────────────────────────────────────────────
+
+// ประเภทบัญชีหลัก (5 หมวด)
+enum AccountType {
+  ASSET       // สินทรัพย์
+  LIABILITY   // หนี้สิน
+  EQUITY      // ส่วนของเจ้าของ
+  REVENUE     // รายได้
+  EXPENSE     // ค่าใช้จ่าย
+}
+
+// ด้านปกติของบัญชี
+enum NormalBalance {
+  DEBIT
+  CREDIT
+}
+
+// ระดับผังบัญชี
+enum AccountLevel {
+  CATEGORY     // หมวด เช่น "1 สินทรัพย์"
+  GROUP        // กลุ่ม เช่น "11 สินทรัพย์หมุนเวียน"
+  ACCOUNT      // บัญชี เช่น "1101 เงินสด"
+  SUB_ACCOUNT  // บัญชีย่อย เช่น "1101.01 เงินสดที่แผนกต้อนรับ"
+}
+
+// สถานะ Journal Entry
+enum JournalEntryStatus {
+  DRAFT    // รอตรวจสอบ
+  POSTED   // บันทึกแล้ว
+  REVERSED // กลับรายการแล้ว
+  VOID     // ยกเลิก
+}
+
+// ประเภทที่มาของ Journal Entry
+enum JournalSourceType {
+  MANUAL          // บันทึกด้วยมือ
+  BOOKING_PAYMENT // รับชำระจากการจอง
+  FOLIO_CHARGE    // charge ลง folio แขก
+  AR_RECEIPT      // รับชำระ AR
+  AP_PAYMENT      // จ่ายชำระ AP
+  NIGHT_AUDIT     // Night Audit auto-post
+  DEPRECIATION    // ตัดค่าเสื่อมราคา
+  PAYROLL         // จ่ายเงินเดือน (จาก HR)
+  PURCHASE_RECEIPT // รับสินค้า (จาก Inventory)
+  TAX_FILING      // บันทึกภาษี
+  CLOSING_ENTRY   // รายการปิดบัญชี
+  ADJUSTMENT      // รายการปรับปรุง
+}
+
+// สถานะ AR Invoice
+enum ArInvoiceStatus {
+  DRAFT    // ร่าง
+  ISSUED   // ออกใบแจ้งหนี้แล้ว
+  PARTIAL  // ชำระบางส่วน
+  PAID     // ชำระครบแล้ว
+  OVERDUE  // เกินกำหนดชำระ
+  VOID     // ยกเลิก
+}
+
+enum ArReceiptStatus {
+  DRAFT
+  CLEARED
+  VOID
+}
+
+// ประเภท AR Invoice
+enum ArInvoiceType {
+  GUEST_BILL       // ใบแจ้งหนี้แขก
+  CITY_LEDGER      // City Ledger (บริษัท/ตัวแทน)
+  ADVANCE_DEPOSIT  // มัดจำล่วงหน้า
+  CREDIT_NOTE      // ใบลดหนี้
+  PROFORMA         // ใบเสนอราคา (ก่อนออกจริง)
+}
+
+// ประเภท Charge ใน Folio
+enum FolioChargeType {
+  ROOM_CHARGE        // ค่าห้องพัก
+  FB_CHARGE          // ค่าอาหารและเครื่องดื่ม
+  SERVICE_CHARGE     // ค่าบริการ
+  TELEPHONE          // ค่าโทรศัพท์
+  LAUNDRY            // ค่าซักรีด
+  SPA                // ค่าสปา
+  MINIBAR            // ค่า Minibar
+  PARKING            // ค่าจอดรถ
+  TRANSPORT          // ค่าบริการรถรับส่ง
+  EXTRA_BED          // ค่าเตียงเสริม
+  EARLY_CHECKIN      // ค่า Early Check-in
+  LATE_CHECKOUT      // ค่า Late Check-out
+  DAMAGE             // ค่าเสียหาย
+  DEPOSIT_APPLIED    // หักมัดจำ
+  DISCOUNT           // ส่วนลด
+  TAX                // ภาษี
+  SERVICE_FEE        // ค่าธรรมเนียม
+  ADJUSTMENT         // ปรับปรุงรายการ
+  OTHER              // อื่นๆ
+}
+
+// สถานะ Guest Folio
+enum FolioStatus {
+  OPEN     // เปิดอยู่ (แขกยังอยู่)
+  CLOSED   // ปิดแล้ว (Check-out แล้ว)
+  VOID     // ยกเลิก
+  PENDING  // รอชำระ (Check-out แล้วแต่ยังค้างชำระ)
+}
+
+enum FolioChargeStatus {
+  POSTED
+  REVERSED
+  VOID
+}
+
+// ประเภทการชำระเงิน (สำหรับ Accounting)
+enum AccPaymentMethod {
+  CASH           // เงินสด
+  BANK_TRANSFER  // โอนธนาคาร
+  CREDIT_CARD    // บัตรเครดิต
+  DEBIT_CARD     // บัตรเดบิต
+  QR_PROMPTPAY   // QR PromptPay
+  TRUEMONEY      // TrueMoney
+  CHEQUE         // เช็ค
+  CREDIT_NOTE    // ใบลดหนี้
+  ADVANCE        // ตัดมัดจำ
+  CITY_LEDGER    // ลงบัญชีบริษัท
+  ONLINE_BOOKING // OTA (Agoda, Booking.com)
+  OTHER          // อื่นๆ
+}
+
+// สถานะ AP Invoice
+enum ApInvoiceStatus {
+  PENDING   // รอตรวจสอบ
+  APPROVED  // อนุมัติแล้ว
+  PARTIAL   // จ่ายบางส่วน
+  PAID      // จ่ายครบแล้ว
+  OVERDUE   // เกินกำหนด
+  DISPUTED  // มีข้อโต้แย้ง
+  VOID      // ยกเลิก
+}
+
+// ประเภท AP Invoice
+enum ApInvoiceType {
+  SUPPLIER_INVOICE  // ใบแจ้งหนี้จาก supplier
+  UTILITY_BILL      // ค่าสาธารณูปโภค (ไฟ/น้ำ/โทรศัพท์)
+  RENT              // ค่าเช่า
+  SERVICE_CONTRACT  // ค่าจ้างบริการ
+  CREDIT_NOTE       // ใบลดหนี้จาก supplier
+}
+
+// ประเภทภาษี
+enum TaxType {
+  VAT              // ภาษีมูลค่าเพิ่ม
+  WHT_INDIVIDUAL   // หัก ณ ที่จ่าย บุคคลธรรมดา
+  WHT_JURISTIC     // หัก ณ ที่จ่าย นิติบุคคล
+  SPECIFIC_BUSINESS // ภาษีธุรกิจเฉพาะ
+}
+
+// ประเภทเงินได้ WHT (ตามกฎหมายไทย)
+enum WhtIncomeType {
+  TYPE_40_2  // เงินได้ตามมาตรา 40(2) - ค่าจ้าง
+  TYPE_40_3  // เงินได้ตามมาตรา 40(3) - ค่าลิขสิทธิ์
+  TYPE_40_4  // เงินได้ตามมาตรา 40(4) - ดอกเบี้ย/เงินปันผล
+  TYPE_40_5  // เงินได้ตามมาตรา 40(5) - ค่าเช่า
+  TYPE_40_6  // เงินได้ตามมาตรา 40(6) - วิชาชีพ
+  TYPE_40_7  // เงินได้ตามมาตรา 40(7) - รับเหมา
+  TYPE_40_8  // เงินได้ตามมาตรา 40(8) - อื่นๆ
+}
+
+// ประเภทแบบภาษี
+enum TaxFilingType {
+  VAT_PP30     // ภ.พ.30 (ภาษีมูลค่าเพิ่มรายเดือน)
+  WHT_PND1     // ภ.ง.ด.1 (หัก ณ ที่จ่าย พนักงาน)
+  WHT_PND3     // ภ.ง.ด.3 (หัก ณ ที่จ่าย บุคคลธรรมดา)
+  WHT_PND53    // ภ.ง.ด.53 (หัก ณ ที่จ่าย นิติบุคคล)
+  CIT_PND51    // ภ.ง.ด.51 (ประมาณการภาษีเงินได้กลางปี)
+  CIT_PND50    // ภ.ง.ด.50 (ภาษีเงินได้นิติบุคคลประจำปี)
+}
+
+// สถานะการยื่นแบบ
+enum TaxFilingStatus {
+  DRAFT   // กำลังจัดทำ
+  READY   // พร้อมยื่น
+  FILED   // ยื่นแล้ว
+  PAID    // ชำระภาษีแล้ว
+  AMENDED // ยื่นแก้ไข
+}
+
+// สถานะใบหัก ณ ที่จ่าย
+enum WhtCertStatus {
+  DRAFT   // ร่าง
+  ISSUED  // ออกแล้ว
+  VOID    // ยกเลิก
+}
+
+// สถานะ Night Audit
+enum NightAuditStatus {
+  OPEN         // ยังไม่เริ่ม
+  IN_PROGRESS  // กำลังทำ
+  COMPLETED    // เสร็จแล้ว
+  CLOSED       // ปิดแล้ว (ล็อคแก้ไขไม่ได้)
+}
+
+// สถานะ Cash Drawer
+enum CashDrawerStatus {
+  OPEN    // เปิดใช้งาน
+  CLOSED  // ปิดแล้ว (สรุปยอดแล้ว)
+  PENDING // รอตรวจสอบ
+}
+
+// ประเภทรายการเงินสด
+enum CashTxnType {
+  RECEIPT    // รับเงิน
+  PAYMENT    // จ่ายเงิน
+  TRANSFER   // โอนระหว่าง Drawer
+  ADJUSTMENT // ปรับปรุงยอด
+  OPENING    // ยอดเปิด
+  CLOSING    // ยอดปิด
+}
+
+// สถานะกระทบยอดธนาคาร
+enum ReconcileStatus {
+  OPEN         // เปิด
+  IN_PROGRESS  // กำลังกระทบยอด
+  COMPLETED    // กระทบยอดแล้ว
+  APPROVED     // อนุมัติแล้ว
+}
+
+// ประเภทสินทรัพย์ถาวร
+enum FixedAssetCategory {
+  LAND              // ที่ดิน
+  BUILDING          // อาคาร
+  BUILDING_IMPROVE  // ส่วนปรับปรุงอาคาร
+  FURNITURE         // เฟอร์นิเจอร์และของตกแต่ง
+  EQUIPMENT         // เครื่องจักรและอุปกรณ์
+  IT_EQUIPMENT      // อุปกรณ์ IT
+  VEHICLE           // ยานพาหนะ
+  LINEN_UNIFORM     // ผ้า/ชุดเครื่องแบบ
+  KITCHEN_EQUIPMENT // อุปกรณ์ครัว
+  OTHER             // อื่นๆ
+}
+
+// วิธีคิดค่าเสื่อมราคา
+enum DepreciationMethod {
+  STRAIGHT_LINE      // เส้นตรง
+  DECLINING_BALANCE  // ยอดลดลง
+  UNITS_OF_ACTIVITY  // ตามการใช้งาน
+  SUM_OF_YEARS       // ผลรวมตัวเลขปี
+  NO_DEPRECIATION    // ไม่คิดค่าเสื่อม (เช่น ที่ดิน)
+}
+
+// สถานะสินทรัพย์
+enum AssetStatus {
+  ACTIVE        // ใช้งานอยู่
+  IDLE          // ไม่ได้ใช้งาน
+  UNDER_REPAIR  // อยู่ระหว่างซ่อม
+  DISPOSED      // จำหน่ายแล้ว
+  WRITTEN_OFF   // ตัดจำหน่ายแล้ว
+}
+
+// ─── MODULE 1: ACCOUNTING CORE ────────────────────────────────────────────────
+// ผังบัญชี, ปีบัญชี, สมุดรายวัน, บัญชีแยกประเภท
+
+/// ปีบัญชี (Fiscal Year)
+/// กำหนดช่วงเวลาของรอบบัญชีแต่ละปี
+model FiscalYear {
+  id          String         @id @default(uuid())
+  tenantId    String
+  propertyId  String
+  /// ปี เช่น 2024, 2025
+  year        Int
+  /// วันเริ่มต้นปีบัญชี
+  startDate   DateTime       @db.Date
+  /// วันสิ้นสุดปีบัญชี
+  endDate     DateTime       @db.Date
+  /// สถานะ: OPEN, CLOSED, LOCKED
+  status      String         @default("OPEN") @db.VarChar(20)
+  /// ปิดบัญชีโดย
+  closedBy    String?
+  closedAt    DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  journalEntries JournalEntry[]
+  periodBalances LedgerBalance[]
+
+  @@unique([tenantId, propertyId, year])
+  @@index([tenantId])
+  @@index([propertyId])
+  @@index([status])
+  @@map("fiscal_years")
+}
+
+/// ผังบัญชี (Chart of Accounts)
+/// ใช้ 4-digit code มาตรฐาน:
+///   1xxx = สินทรัพย์, 2xxx = หนี้สิน, 3xxx = ทุน
+///   4xxx = รายได้, 5xxx = ต้นทุน, 6xxx = ค่าใช้จ่าย
+model AccountChart {
+  id              String        @id @default(uuid())
+  tenantId        String
+  /// รหัสบัญชี เช่น "1101", "4101"
+  code            String        @db.VarChar(20)
+  /// ชื่อบัญชี (ภาษาไทย)
+  name            String        @db.VarChar(200)
+  /// ชื่อบัญชี (ภาษาอังกฤษ)
+  nameEn          String?       @db.VarChar(200)
+  /// ประเภทบัญชีหลัก
+  type            AccountType
+  /// ประเภทย่อย เช่น "current_asset", "fixed_asset", "current_liability"
+  subType         String?       @db.VarChar(50)
+  /// ด้านปกติของบัญชี
+  normalBalance   NormalBalance
+  /// ระดับผังบัญชี
+  level           AccountLevel  @default(ACCOUNT)
+  /// บัญชีแม่ (สำหรับ hierarchy)
+  parentId        String?
+  /// บัญชีควบคุม (Accounts ใน sub-ledger เช่น AR, AP)
+  isControl       Boolean       @default(false)
+  /// ใช้งานอยู่
+  isActive        Boolean       @default(true)
+  /// ห้ามบันทึกรายการโดยตรง (เป็นแค่ category/group)
+  isHeaderOnly    Boolean       @default(false)
+  /// รหัสงบการเงิน สำหรับ mapping งบดุล/งบกำไรขาดทุน
+  fsCode          String?       @db.VarChar(20)
+  /// หมายเหตุ
+  description     String?       @db.Text
+  /// เชื่อมกับ CostCenter (optional)
+  costCenterId    String?
+  sortOrder       Int           @default(0)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  parent          AccountChart?  @relation("AccountTree", fields: [parentId], references: [id])
+  children        AccountChart[] @relation("AccountTree")
+  journalLines    JournalLine[]
+  ledgerBalances  LedgerBalance[]
+  arInvoiceLines  ArInvoiceLine[]
+  apInvoiceLines  ApInvoiceLine[]
+  taxRates        TaxRate[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@index([type])
+  @@index([parentId])
+  @@index([isActive])
+  @@map("account_charts")
+}
+
+/// สมุดรายวัน (Journal Entry)
+/// ทุกรายการบัญชีต้องผ่านที่นี่ — double-entry เสมอ (debit = credit)
+model JournalEntry {
+  id           String             @id @default(uuid())
+  tenantId     String
+  propertyId   String
+  /// เลขที่เอกสาร เช่น "JE-2024-001234" (auto จาก DocumentSequence)
+  entryNo      String             @db.VarChar(30)
+  /// วันที่บันทึกรายการ
+  entryDate    DateTime           @db.Date
+  /// คำอธิบายรายการ
+  description  String             @db.VarChar(500)
+  /// อ้างอิงเอกสารต้นทาง
+  reference    String?            @db.VarChar(100)
+  /// แหล่งที่มา
+  sourceType   JournalSourceType  @default(MANUAL)
+  /// ID ของ source document (bookingId, arInvoiceId ฯลฯ)
+  sourceId     String?
+  /// สถานะ
+  status       JournalEntryStatus @default(DRAFT)
+  /// ปีบัญชี
+  fiscalYearId String?
+  /// งวดบัญชี (1-12)
+  fiscalPeriod Int
+  /// ปี
+  fiscalYear   Int
+  /// รวม Debit (ต้องเท่ากับ Credit เสมอ)
+  totalDebit   Decimal            @default(0.00) @db.Decimal(14, 2)
+  /// รวม Credit
+  totalCredit  Decimal            @default(0.00) @db.Decimal(14, 2)
+  /// อนุมัติโดย
+  postedBy     String?
+  postedAt     DateTime?
+  /// Journal ที่กลับรายการ (ถ้ามี)
+  reversedById String?
+  reversedAt   DateTime?
+  /// สร้างโดย
+  createdBy    String
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  fiscalYearRef FiscalYear?   @relation(fields: [fiscalYearId], references: [id])
+  lines         JournalLine[]
+  reversedBy    JournalEntry? @relation("JournalReversal", fields: [reversedById], references: [id])
+  reversals     JournalEntry[] @relation("JournalReversal")
+
+  @@unique([tenantId, entryNo])
+  @@index([tenantId])
+  @@index([propertyId])
+  @@index([entryDate])
+  @@index([fiscalYear, fiscalPeriod])
+  @@index([sourceType, sourceId])
+  @@index([status])
+  @@map("journal_entries")
+}
+
+/// รายการในสมุดรายวัน (Journal Line)
+/// แต่ละ JournalEntry ต้องมีอย่างน้อย 2 lines (1 debit + 1 credit)
+model JournalLine {
+  id             String       @id @default(uuid())
+  journalEntryId String
+  /// รหัสบัญชี
+  accountId      String
+  /// บรรทัดที่
+  lineNo         Int
+  /// คำอธิบายรายการบรรทัด
+  description    String?      @db.VarChar(300)
+  /// เดบิต (0 ถ้าเป็น credit side)
+  debit          Decimal      @default(0.00) @db.Decimal(14, 2)
+  /// เครดิต (0 ถ้าเป็น debit side)
+  credit         Decimal      @default(0.00) @db.Decimal(14, 2)
+  /// Cost Center (optional)
+  costCenterId   String?
+  /// อ้างอิงรายการย่อย
+  subRef         String?      @db.VarChar(100)
+  createdAt      DateTime     @default(now())
+
+  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  account        AccountChart @relation(fields: [accountId], references: [id])
+
+  @@index([journalEntryId])
+  @@index([accountId])
+  @@index([costCenterId])
+  @@map("journal_lines")
+}
+
+/// ยอดคงเหลือบัญชีแยกประเภท (Ledger Balance)
+/// Summary per account per period — ใช้ generate งบการเงิน
+model LedgerBalance {
+  id             String       @id @default(uuid())
+  tenantId       String
+  propertyId     String
+  accountId      String
+  fiscalYearId   String?
+  /// ปี
+  fiscalYear     Int
+  /// งวด (1-12)
+  fiscalPeriod   Int
+  /// ยอดยกมาต้นงวด
+  openingBalance Decimal      @default(0.00) @db.Decimal(14, 2)
+  /// รวม Debit ในงวด
+  periodDebit    Decimal      @default(0.00) @db.Decimal(14, 2)
+  /// รวม Credit ในงวด
+  periodCredit   Decimal      @default(0.00) @db.Decimal(14, 2)
+  /// ยอดยกไปปลายงวด
+  closingBalance Decimal      @default(0.00) @db.Decimal(14, 2)
+  /// จำนวนรายการในงวด
+  txnCount       Int          @default(0)
+  updatedAt      DateTime     @updatedAt
+
+  account        AccountChart @relation(fields: [accountId], references: [id])
+  fiscalYearRef  FiscalYear?  @relation(fields: [fiscalYearId], references: [id])
+
+  @@unique([tenantId, propertyId, accountId, fiscalYear, fiscalPeriod])
+  @@index([tenantId])
+  @@index([propertyId])
+  @@index([accountId])
+  @@index([fiscalYear, fiscalPeriod])
+  @@map("ledger_balances")
+}
+
+// ─── MODULE 2: ACCOUNTS RECEIVABLE ────────────────────────────────────────────
+// ลูกหนี้การค้า, Guest Folio, ใบเสร็จรับเงิน
+
+/// ใบแจ้งหนี้ลูกหนี้ (AR Invoice)
+/// ใช้สำหรับ: ใบเสร็จแขก, City Ledger, มัดจำ, ใบลดหนี้
+model ArInvoice {
+  id              String          @id @default(uuid())
+  tenantId        String
+  propertyId      String
+  /// เลขที่ใบแจ้งหนี้ เช่น "INV-2024-001234"
+  invoiceNo       String          @db.VarChar(30)
+  invoiceType     ArInvoiceType   @default(GUEST_BILL)
+  /// แขก (ถ้ามี)
+  guestId         String?
+  /// การจอง (ถ้ามี)
+  bookingId       String?
+  /// Folio ที่เกี่ยวข้อง
+  folioId         String?
+  /// บริษัท/ตัวแทน (City Ledger)
+  companyName     String?         @db.VarChar(200)
+  companyTaxId    String?         @db.VarChar(20)
+  companyAddress  String?         @db.Text
+  /// วันที่ออกใบแจ้งหนี้
+  issueDate       DateTime        @db.Date
+  /// กำหนดชำระ
+  dueDate         DateTime        @db.Date
+  /// ก่อน VAT
+  subtotal        Decimal         @default(0.00) @db.Decimal(12, 2)
+  /// ส่วนลด
+  discountAmount  Decimal         @default(0.00) @db.Decimal(12, 2)
+  /// ฐานภาษี VAT
+  taxableAmount   Decimal         @default(0.00) @db.Decimal(12, 2)
+  /// VAT 7%
+  vatAmount       Decimal         @default(0.00) @db.Decimal(12, 2)
+  /// หัก ณ ที่จ่าย (ถ้ามี)
+  whtAmount       Decimal         @default(0.00) @db.Decimal(12, 2)
+  /// ยอดรวมสุทธิ
+  totalAmount     Decimal         @default(0.00) @db.Decimal(12, 2)
+  /// ยอดที่ชำระแล้ว
+  paidAmount      Decimal         @default(0.00) @db.Decimal(12, 2)
+  /// ยอดค้างชำระ
+  balance         Decimal         @default(0.00) @db.Decimal(12, 2)
+  status          ArInvoiceStatus @default(DRAFT)
+  /// สกุลเงิน
+  currency        String          @default("THB") @db.VarChar(3)
+  exchangeRate    Decimal         @default(1.000000) @db.Decimal(12, 6)
+  /// หมายเหตุ
+  notes           String?         @db.Text
+  /// GL posting แล้วหรือยัง
+  isPosted        Boolean          @default(false)
+  postedAt        DateTime?
+  postedBy        String?
+  issuedBy        String?
+  issuedAt        DateTime?
+  /// ยกเลิกโดย
+  voidedBy        String?
+  voidedAt        DateTime?
+  voidReason      String?         @db.Text
+  createdBy       String
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  guest       Guest?          @relation(fields: [guestId], references: [id])
+  booking     Booking?        @relation(fields: [bookingId], references: [id])
+  folio       GuestFolio?     @relation(fields: [folioId], references: [id])
+  lines       ArInvoiceLine[]
+  receipts    ArReceiptAllocation[]
+
+  @@unique([tenantId, invoiceNo])
+  @@index([tenantId])
+  @@index([propertyId])
+  @@index([guestId])
+  @@index([bookingId])
+  @@index([folioId])
+  @@index([status])
+  @@index([issueDate])
+  @@index([dueDate])
+  @@map("ar_invoices")
+}
+
+/// รายการในใบแจ้งหนี้ AR
+model ArInvoiceLine {
+  id           String        @id @default(uuid())
+  invoiceId    String
+  lineNo       Int
+  /// คำอธิบายรายการ
+  description  String        @db.VarChar(300)
+  chargeType   FolioChargeType
+  quantity     Decimal       @default(1.00) @db.Decimal(10, 3)
+  unitPrice    Decimal       @default(0.00) @db.Decimal(12, 2)
+  discountAmt  Decimal       @default(0.00) @db.Decimal(12, 2)
+  /// ยอดก่อนภาษี
+  netAmount    Decimal       @default(0.00) @db.Decimal(12, 2)
+  vatRate      Decimal       @default(7.00) @db.Decimal(5, 2)
+  vatAmount    Decimal       @default(0.00) @db.Decimal(12, 2)
+  totalAmount  Decimal       @default(0.00) @db.Decimal(12, 2)
+  /// GL Account ที่ map รายได้ประเภทนี้
+  accountId    String?
+  costCenterId String?
+  /// อ้างอิงรายการต้นทาง (folioChargeId, orderId ฯลฯ)
+  sourceRef    String?       @db.VarChar(100)
+  createdAt    DateTime      @default(now())
+
+  invoice      ArInvoice    @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  account      AccountChart? @relation(fields: [accountId], references: [id])
+
+  @@index([invoiceId])
+  @@index([accountId])
+  @@map("ar_invoice_lines")
+}
+
+/// Guest Folio — บัญชีแขก (สะสม charge ระหว่าง Stay)
+/// เปิดตอน Check-in, ปิดตอน Check-out
+model GuestFolio {
+  id           String      @id @default(uuid())
+  tenantId     String
+  propertyId   String
+  /// เลขที่ Folio เช่น "FOLIO-2024-001234"
+  folioNo      String      @db.VarChar(30)
+  bookingId    String
+  guestId      String
+  roomId       String?
+  /// วันที่ Check-in
+  checkInDate  DateTime    @db.Date
+  /// วันที่ Check-out (อาจยังไม่มีถ้ายังอยู่)
+  checkOutDate DateTime?   @db.Date
+  /// วันที่เปิด Folio
+  openDate     DateTime    @default(now())
+  status       FolioStatus @default(OPEN)
+  /// ยอดรวม charge ทั้งหมด
+  totalCharges Decimal     @default(0.00) @db.Decimal(12, 2)
+  /// ยอดที่ชำระแล้ว
+  totalPayments Decimal    @default(0.00) @db.Decimal(12, 2)
+  /// ยอดคงเหลือ (+ = ค้างชำระ, - = เครดิต)
+  balance      Decimal     @default(0.00) @db.Decimal(12, 2)
+  /// ยอดมัดจำ
+  depositAmount Decimal    @default(0.00) @db.Decimal(12, 2)
+  /// สกุลเงิน
+  currency     String      @default("THB") @db.VarChar(3)
+  /// หมายเหตุ
+  notes        String?     @db.Text
+  closedBy     String?
+  closedAt     DateTime?
+  createdBy    String
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  charges      FolioCharge[]
+  payments     FolioPayment[]
+  booking      Booking      @relation(fields: [bookingId], references: [id])
+  guest        Guest        @relation(fields: [guestId], references: [id])
+  arInvoices   ArInvoice[]
+
+  @@unique([tenantId, folioNo])
+  @@index([tenantId])
+  @@index([propertyId])
+  @@index([bookingId])
+  @@index([guestId])
+  @@index([status])
+  @@map("guest_folios")
+}
+
+/// รายการ Charge ใน Folio (ค่าใช้จ่ายสะสมของแขก)
+model FolioCharge {
+  id            String          @id @default(uuid())
+  tenantId      String
+  propertyId    String
+  folioId       String
+  chargeDate    DateTime        @default(now())
+  chargeType    FolioChargeType
+  description   String          @db.VarChar(300)
+  quantity      Decimal         @default(1.00) @db.Decimal(10, 3)
+  unitPrice     Decimal         @default(0.00) @db.Decimal(12, 2)
+  /// ยอดก่อน VAT
+  netAmount     Decimal         @default(0.00) @db.Decimal(12, 2)
+  vatRate       Decimal         @default(7.00) @db.Decimal(5, 2)
+  vatAmount     Decimal         @default(0.00) @db.Decimal(12, 2)
+  totalAmount   Decimal         @default(0.00) @db.Decimal(12, 2)
+  /// GL Account สำหรับ posting
+  accountId     String?
+  costCenterId  String?
+  /// Night Audit ที่ post รายการนี้
+  nightAuditId  String?
+  /// อ้างอิง source (orderId, bookingId ฯลฯ)
+  sourceType    String?         @db.VarChar(50)
+  sourceId      String?
+  /// Night Audit ที่ post
+  isAutoPosted  Boolean         @default(false)
+  /// กลับรายการแล้วหรือยัง
+  isReversed    Boolean         @default(false)
+  status        FolioChargeStatus @default(POSTED)
+  reversedById  String?
+  reversedBy    String?
+  reversedAt    DateTime?
+  postedBy      String
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  folio         GuestFolio      @relation(fields: [folioId], references: [id], onDelete: Cascade)
+
+  @@index([folioId])
+  @@index([chargeDate])
+  @@index([chargeType])
+  @@index([sourceType, sourceId])
+  @@index([nightAuditId])
+  @@map("folio_charges")
+}
+
+/// รายการชำระเงินใน Folio
+model FolioPayment {
+  id            String            @id @default(uuid())
+  tenantId      String
+  propertyId    String
+  folioId       String
+  paymentDate   DateTime          @default(now())
+  method        AccPaymentMethod
+  amount        Decimal           @db.Decimal(12, 2)
+  /// อ้างอิง (เลขที่บัตร last 4, เลขที่โอน ฯลฯ)
+  reference     String?           @db.VarChar(100)
+  /// ชื่อผู้ชำระ
+  payerName     String?           @db.VarChar(200)
+  /// หมายเหตุ
+  notes         String?           @db.Text
+  status        ArReceiptStatus   @default(CLEARED)
+  isReversed    Boolean           @default(false)
+  postedBy      String
+  createdAt     DateTime          @default(now())
+
+  folio         GuestFolio        @relation(fields: [folioId], references: [id], onDelete: Cascade)
+
+  @@index([folioId])
+  @@index([paymentDate])
+  @@map("folio_payments")
+}
+
+/// ใบเสร็จรับเงิน (AR Receipt)
+model ArReceipt {
+  id           String           @id @default(uuid())
+  tenantId     String
+  propertyId   String
+  /// เลขที่ใบเสร็จ เช่น "RCV-2024-001234"
+  receiptNo    String           @db.VarChar(30)
+  /// วันที่รับชำระ
+  receiptDate  DateTime         @db.Date
+  guestId      String?
+  status       ArReceiptStatus  @default(DRAFT)
+  companyName  String?          @db.VarChar(200)
+  companyTaxId String?          @db.VarChar(20)
+  method       AccPaymentMethod
+  /// ยอดรวมที่รับ
+  totalAmount  Decimal          @db.Decimal(12, 2)
+  /// อ้างอิงการชำระ
+  reference    String?          @db.VarChar(100)
+  /// หมายเหตุ
+  notes        String?          @db.Text
+  /// GL posting แล้วหรือยัง
+  isPosted     Boolean          @default(false)
+  postedAt     DateTime?
+  voidedBy     String?
+  voidedAt     DateTime?
+  createdBy    String
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  guest        Guest?           @relation(fields: [guestId], references: [id])
+  allocations  ArReceiptAllocation[]
+
+  @@unique([tenantId, receiptNo])
+  @@index([tenantId])
+  @@index([propertyId])
+  @@index([receiptDate])
+  @@index([guestId])
+  @@map("ar_receipts")
+}
+
+/// การจัดสรรการรับชำระกับ Invoice
+model ArReceiptAllocation {
+  id          String    @id @default(uuid())
+  tenantId    String
+  receiptId   String
+  invoiceId   String
+  amount      Decimal   @db.Decimal(12, 2)
+  createdAt   DateTime  @default(now())
+
+  receipt     ArReceipt  @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  invoice     ArInvoice  @relation(fields: [invoiceId], references: [id])
+
+  @@unique([receiptId, invoiceId])
+  @@index([receiptId])
+  @@index([invoiceId])
+  @@map("ar_receipt_allocations")
+}
+
+// ─── MODULE 3: ACCOUNTS PAYABLE ────────────────────────────────────────────────
+// เจ้าหนี้การค้า, Supplier Invoice, การจ่ายชำระ
+
+/// ใบแจ้งหนี้จาก Supplier (AP Invoice)
+/// ต่อเนื่องจาก PurchaseOrder + GoodsReceive ที่มีอยู่แล้ว
+model ApInvoice {
+  id               String          @id @default(uuid())
+  tenantId         String
+  propertyId       String
+  /// เลขที่ใบแจ้งหนี้ (ภายใน) เช่น "APINV-2024-001234"
+  invoiceNo        String          @db.VarChar(30)
+  /// เลขที่ใบแจ้งหนี้ของ Supplier
+  supplierInvoiceNo String?        @db.VarChar(100)
+  invoiceType      ApInvoiceType   @default(SUPPLIER_INVOICE)
+  supplierId       String
+  /// อ้างอิง Purchase Order
+  purchaseOrderId  String?
+  /// อ้างอิง Goods Receive
+  goodsReceiveId   String?
+  invoiceDate      DateTime        @db.Date
+  dueDate          DateTime        @db.Date
+  /// ยอดก่อน VAT
+  subtotal         Decimal         @default(0.00) @db.Decimal(12, 2)
+  /// ส่วนลด
+  discountAmount   Decimal         @default(0.00) @db.Decimal(12, 2)
+  /// ฐานภาษี VAT
+  taxableAmount    Decimal         @default(0.00) @db.Decimal(12, 2)
+  /// VAT 7%
+  vatAmount        Decimal         @default(0.00) @db.Decimal(12, 2)
+  /// หัก ณ ที่จ่าย
+  whtAmount        Decimal         @default(0.00) @db.Decimal(12, 2)
+  /// ยอดรวมสุทธิที่ต้องจ่าย
+  totalAmount      Decimal         @default(0.00) @db.Decimal(12, 2)
+  /// ยอดที่หัก WHT แล้ว (Code expects this)
+  netPayable       Decimal         @default(0.00) @db.Decimal(12, 2)
+  /// ยอดที่จ่ายแล้ว
+  paidAmount       Decimal         @default(0.00) @db.Decimal(12, 2)
+  /// ยอดค้างจ่าย
+  balance          Decimal         @default(0.00) @db.Decimal(12, 2)
+  status           ApInvoiceStatus @default(PENDING)
+  currency         String          @default("THB") @db.VarChar(3)
+  exchangeRate     Decimal         @default(1.000000) @db.Decimal(12, 6)
+  paymentTerms     String?         @db.VarChar(100)
+  notes            String?         @db.Text
+  internalNotes    String?         @db.Text
+  /// GL posting แล้วหรือยัง
+  isPosted         Boolean         @default(false)
+  postedAt         DateTime?
+  approvedBy       String?
+  approvedAt       DateTime?
+  voidedBy         String?
+  voidedAt         DateTime?
+  voidReason       String?         @db.Text
+  createdBy        String
+  createdAt        DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  supplier     Supplier        @relation(fields: [supplierId], references: [id])
+  lines        ApInvoiceLine[]
+  payments     ApPaymentAllocation[]
+
+  @@unique([tenantId, invoiceNo])
+  @@index([tenantId])
+  @@index([propertyId])
+  @@index([supplierId])
+  @@index([purchaseOrderId])
+  @@index([status])
+  @@index([dueDate])
+  @@map("ap_invoices")
+}
+
+/// รายการในใบแจ้งหนี้ AP
+model ApInvoiceLine {
+  id           String        @id @default(uuid())
+  invoiceId    String
+  lineNo       Int
+  description  String        @db.VarChar(300)
+  /// อ้างอิงสินค้า/บริการ
+  itemId       String?
+  quantity     Decimal       @default(1.00) @db.Decimal(10, 3)
+  unitPrice    Decimal       @default(0.00) @db.Decimal(12, 2)
+  discountAmt  Decimal       @default(0.00) @db.Decimal(12, 2)
+  netAmount    Decimal       @default(0.00) @db.Decimal(12, 2)
+  vatRate      Decimal       @default(7.00) @db.Decimal(5, 2)
+  vatAmount    Decimal       @default(0.00) @db.Decimal(12, 2)
+  whtRate      Decimal       @default(0.00) @db.Decimal(5, 2)
+  whtAmount    Decimal       @default(0.00) @db.Decimal(12, 2)
+  totalAmount  Decimal       @default(0.00) @db.Decimal(12, 2)
+  /// GL Account ที่ map ค่าใช้จ่ายประเภทนี้
+  accountId    String?
+  costCenterId String?
+  createdAt    DateTime      @default(now())
+
+  invoice      ApInvoice     @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  account      AccountChart? @relation(fields: [accountId], references: [id])
+
+  @@index([invoiceId])
+  @@index([accountId])
+  @@map("ap_invoice_lines")
+}
+
+/// การจ่ายชำระเจ้าหนี้ (AP Payment)
+model ApPayment {
+  id            String           @id @default(uuid())
+  tenantId      String
+  propertyId    String
+  /// เลขที่ใบสำคัญจ่าย เช่น "PV-2024-001234"
+  paymentNo     String           @db.VarChar(30)
+  paymentDate   DateTime         @db.Date
+  supplierId    String
+  method        AccPaymentMethod
+  /// ยอดรวมที่จ่าย (ก่อนหัก WHT)
+  grossAmount   Decimal          @db.Decimal(12, 2)
+  /// หัก ณ ที่จ่าย
+  whtAmount     Decimal          @default(0.00) @db.Decimal(12, 2)
+  /// ยอดสุทธิที่จ่ายจริง
+  netAmount     Decimal          @db.Decimal(12, 2)
+  /// บัญชีธนาคารที่จ่าย
+  bankAccountId String?
+  /// อ้างอิง (เลขที่โอน, เช็คเลขที่ ฯลฯ)
+  reference     String?          @db.VarChar(100)
+  notes         String?          @db.Text
+  /// GL posting แล้วหรือยัง
+  isPosted      Boolean          @default(false)
+  postedAt      DateTime?
+  /// สถานะ: DRAFT, PENDING, APPROVED, PAID, VOID
+  status        String           @default("DRAFT") @db.VarChar(20)
+  approvedBy    String?
+  approvedAt    DateTime?
+  voidedBy      String?
+  voidedAt      DateTime?
+  createdBy     String
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  supplier      Supplier         @relation(fields: [supplierId], references: [id])
+  allocations   ApPaymentAllocation[]
+  whtCerts      WhtCertificate[]
+
+  @@unique([tenantId, paymentNo])
+  @@index([tenantId])
+  @@index([propertyId])
+  @@index([supplierId])
+  @@index([paymentDate])
+  @@index([status])
+  @@map("ap_payments")
+}
+
+/// การจัดสรรการจ่ายชำระกับ AP Invoice
+model ApPaymentAllocation {
+  id          String    @id @default(uuid())
+  tenantId    String
+  paymentId   String
+  invoiceId   String
+  amount      Decimal   @db.Decimal(12, 2)
+  createdAt   DateTime  @default(now())
+
+  payment     ApPayment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  invoice     ApInvoice  @relation(fields: [invoiceId], references: [id])
+
+  @@unique([paymentId, invoiceId])
+  @@index([paymentId])
+  @@index([invoiceId])
+  @@map("ap_payment_allocations")
+}
+
+// ─── MODULE 4: TAX MANAGEMENT ──────────────────────────────────────────────────
+// อัตราภาษี, ใบหัก ณ ที่จ่าย, การยื่นแบบภาษี (มาตรฐานไทย)
+
+/// อัตราภาษี (Tax Rate Configuration)
+model TaxRate {
+  id          String    @id @default(uuid())
+  tenantId    String
+  /// ชื่อ เช่น "VAT 7%", "WHT 3% (บริการ)"
+  name        String    @db.VarChar(100)
+  /// รหัส เช่น "VAT", "WHT_SERVICE_3"
+  code        String    @db.VarChar(30)
+  type        TaxType
+  /// อัตราภาษี (%)
+  rate        Decimal   @db.Decimal(5, 2)
+  /// GL Account สำหรับภาษีที่ต้องนำส่ง
+  taxPayableAccountId   String?
+  /// GL Account สำหรับภาษีซื้อ
+  taxInputAccountId     String?
+  /// ประเภทเงินได้ WHT (ถ้าเป็น WHT)
+  whtIncomeType         WhtIncomeType?
+  isDefault   Boolean   @default(false)
+  isActive    Boolean   @default(true)
+  description String?   @db.Text
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  taxPayableAccount  AccountChart? @relation(fields: [taxPayableAccountId], references: [id])
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@index([type])
+  @@map("tax_rates")
+}
+
+/// ใบหัก ณ ที่จ่าย (WHT Certificate)
+/// ออกให้ Supplier เมื่อมีการหักภาษี ณ ที่จ่าย
+model WhtCertificate {
+  id            String        @id @default(uuid())
+  tenantId      String
+  propertyId    String
+  /// เลขที่ใบหัก ณ ที่จ่าย เช่น "WHT-2024-001234"
+  certNo        String        @db.VarChar(30)
+  supplierId    String
+  /// AP Payment ที่เกี่ยวข้อง
+  apPaymentId   String?
+  /// วันที่จ่าย
+  paymentDate   DateTime      @db.Date
+  /// ประเภทเงินได้
+  incomeType    WhtIncomeType
+  /// ยอดเงินได้
+  incomeAmount  Decimal       @db.Decimal(12, 2)
+  /// อัตรา WHT (%)
+  whtRate       Decimal       @db.Decimal(5, 2)
+  /// ยอดภาษีที่หัก
+  whtAmount     Decimal       @db.Decimal(12, 2)
+  status        WhtCertStatus @default(DRAFT)
+  /// ผู้รับเงิน (ชื่อ/ที่อยู่ ณ วันที่ออก)
+  payeeName     String        @db.VarChar(200)
+  payeeTaxId    String?       @db.VarChar(20)
+  payeeAddress  String?       @db.Text
+  /// ผู้ออกใบหัก (บริษัทโรงแรม)
+  issuerName    String?       @db.VarChar(200)
+  issuerTaxId   String?       @db.VarChar(20)
+  /// สร้างโดย
+  issuedBy      String
+  createdBy     String?
+  issuedAt      DateTime?
+  voidedBy      String?
+  voidedAt      DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  apPayment     ApPayment?    @relation(fields: [apPaymentId], references: [id])
+  supplier      Supplier      @relation(fields: [supplierId], references: [id])
+
+  @@unique([tenantId, certNo])
+  @@index([tenantId])
+  @@index([propertyId])
+  @@index([supplierId])
+  @@index([paymentDate])
+  @@index([status])
+  @@map("wht_certificates")
+}
+
+/// แบบยื่นภาษี (Tax Filing)
+/// รวบรวมรายการเพื่อยื่น ภ.พ.30, ภ.ง.ด.1/3/53
+model TaxFiling {
+  id           String          @id @default(uuid())
+  tenantId     String
+  propertyId   String
+  filingType   TaxFilingType
+  /// งวดที่ยื่น เช่น "2024-01"
+  period       String          @db.VarChar(10)
+  /// ปีภาษี
+  taxYear      Int
+  /// เดือนภาษี
+  taxMonth     Int
+  /// ยอดรวมรายได้/ฐานภาษี
+  totalBase    Decimal         @default(0.00) @db.Decimal(14, 2)
+  /// ยอดภาษี
+  totalTax     Decimal         @default(0.00) @db.Decimal(14, 2)
+  /// ยอดที่ชำระ
+  paidAmount   Decimal         @default(0.00) @db.Decimal(14, 2)
+  status       TaxFilingStatus @default(DRAFT)
+  /// วันครบกำหนดยื่น
+  dueDate      DateTime        @db.Date
+  /// วันที่ยื่นจริง
+  filedAt      DateTime?
+  /// ยื่นโดย
+  filedBy      String?
+  /// วันที่ชำระ
+  paidAt       DateTime?
+  /// ชำระโดย
+  paidBy       String?
+  /// สร้างโดย
+  createdBy    String?
+  /// เลขที่อ้างอิงการยื่น
+  filingRef    String?         @db.VarChar(100)
+  notes        String?         @db.Text
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  lines        TaxFilingLine[]
+
+  @@unique([tenantId, propertyId, filingType, period])
+  @@index([tenantId])
+  @@index([propertyId])
+  @@index([filingType])
+  @@index([period])
+  @@index([status])
+  @@map("tax_filings")
+}
+
+/// รายการในแบบยื่นภาษี
+model TaxFilingLine {
+  id          String    @id @default(uuid())
+  filingId    String
+  lineNo      Int
+  description String    @db.VarChar(300)
+  /// อ้างอิงเอกสาร (WHT cert no, invoice no ฯลฯ)
+  docRef      String?   @db.VarChar(100)
+  baseAmount  Decimal   @default(0.00) @db.Decimal(12, 2)
+  taxRate     Decimal   @default(0.00) @db.Decimal(5, 2)
+  taxAmount   Decimal   @default(0.00) @db.Decimal(12, 2)
+  createdAt   DateTime  @default(now())
+
+  filing      TaxFiling @relation(fields: [filingId], references: [id], onDelete: Cascade)
+
+  @@index([filingId])
+  @@map("tax_filing_lines")
+}
+
+// ─── MODULE 5: NIGHT AUDIT ─────────────────────────────────────────────────────
+// Night Audit ประจำวัน — auto-post ค่าห้อง, reconcile รายได้
+
+/// Night Audit รายวัน
+/// ทำทุกคืนเพื่อ: post ค่าห้อง, สรุปรายได้, ปิดงวดวัน
+model NightAudit {
+  id                String           @id @default(uuid())
+  tenantId          String
+  propertyId        String
+  /// วันที่ทำ Night Audit
+  auditDate         DateTime         @db.Date
+  status            NightAuditStatus @default(OPEN)
+
+  // ── สรุปรายได้ ──
+  /// รายได้ค่าห้อง
+  roomRevenue       Decimal          @default(0.00) @db.Decimal(12, 2)
+  /// รายได้ F&B
+  fbRevenue         Decimal          @default(0.00) @db.Decimal(12, 2)
+  /// รายได้อื่นๆ
+  otherRevenue      Decimal          @default(0.00) @db.Decimal(12, 2)
+  /// รายได้รวม
+  totalRevenue      Decimal          @default(0.00) @db.Decimal(12, 2)
+
+  // ── สรุป Folio ──
+  /// ยอด Charge รวม
+  totalCharges      Decimal          @default(0.00) @db.Decimal(12, 2)
+  /// ยอดรับชำระรวม
+  totalPayments     Decimal          @default(0.00) @db.Decimal(12, 2)
+  /// ยอดคงเหลือ
+  totalBalance      Decimal          @default(0.00) @db.Decimal(12, 2)
+
+  // ── สถิติห้องพัก ──
+  totalRooms        Int              @default(0)
+  occupiedRooms     Int              @default(0)
+  /// เปอร์เซ็นต์ Occupancy
+  occupancyRate     Decimal          @default(0.00) @db.Decimal(5, 2)
+  /// Average Daily Rate
+  adr               Decimal          @default(0.00) @db.Decimal(10, 2)
+  /// Revenue Per Available Room
+  revPAR            Decimal          @default(0.00) @db.Decimal(10, 2)
+  /// จำนวนแขก check-in วันนี้
+  checkInsCount     Int              @default(0)
+  /// จำนวนแขก check-out วันนี้
+  checkOutsCount    Int              @default(0)
+
+  startedBy         String?
+  startedAt         DateTime?
+  completedBy       String?
+  completedAt       DateTime?
+  /// Journal Entry ที่สร้างจาก Night Audit
+  journalEntryId    String?
+  notes             String?          @db.Text
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  charges           NightAuditCharge[]
+
+  @@unique([tenantId, propertyId, auditDate])
+  @@index([tenantId])
+  @@index([propertyId])
+  @@index([auditDate])
+  @@index([status])
+  @@map("night_audits")
+}
+
+/// รายการ Charge ที่ Night Audit สร้าง (ส่วนใหญ่คือค่าห้องพัก)
+model NightAuditCharge {
+  id            String    @id @default(uuid())
+  nightAuditId  String
+  folioId       String
+  bookingId     String
+  roomId        String?
+  chargeType    FolioChargeType
+  description   String    @db.VarChar(300)
+  amount        Decimal   @db.Decimal(12, 2)
+  vatAmount     Decimal   @default(0.00) @db.Decimal(12, 2)
+  totalAmount   Decimal   @db.Decimal(12, 2)
+  /// post ลง folio สำเร็จหรือยัง
+  isPosted      Boolean   @default(false)
+  postedAt      DateTime?
+  createdAt     DateTime  @default(now())
+
+  nightAudit    NightAudit @relation(fields: [nightAuditId], references: [id], onDelete: Cascade)
+
+  @@index([nightAuditId])
+  @@index([folioId])
+  @@index([bookingId])
+  @@map("night_audit_charges")
+}
+
+// ─── MODULE 6: CASH MANAGEMENT ─────────────────────────────────────────────────
+// เงินสด, ลิ้นชัก, กระทบยอดธนาคาร
+
+/// ลิ้นชักเงินสด (Cash Drawer)
+/// แต่ละแผนก/กะมีลิ้นชักของตัวเอง
+model CashDrawer {
+  id              String           @id @default(uuid())
+  tenantId        String
+  propertyId      String
+  /// ชื่อ เช่น "แผนกต้อนรับ - กะเช้า"
+  name            String           @db.VarChar(100)
+  /// รหัสลิ้นชัก
+  code            String           @db.VarChar(20)
+  /// ยอดเงินเปิดกะ
+  openingBalance  Decimal          @default(0.00) @db.Decimal(12, 2)
+  /// ยอดเงินปัจจุบัน
+  currentBalance  Decimal          @default(0.00) @db.Decimal(12, 2)
+  status          CashDrawerStatus @default(OPEN)
+  /// เปิดกะโดย
+  openedBy        String?
+  openedAt        DateTime?
+  /// ปิดกะโดย
+  closedBy        String?
+  closedAt        DateTime?
+  /// ยอดเงินที่นับได้จริงตอนปิดกะ
+  countedAmount   Decimal?         @db.Decimal(12, 2)
+  /// ผลต่าง (นับได้ - ระบบ)
+  variance        Decimal?         @db.Decimal(12, 2)
+  notes           String?          @db.Text
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  transactions    CashTransaction[]
+
+  @@unique([tenantId, propertyId, code])
+  @@index([tenantId])
+  @@index([propertyId])
+  @@index([status])
+  @@map("cash_drawers")
+}
+
+/// รายการเงินสด (Cash Transaction)
+model CashTransaction {
+  id          String       @id @default(uuid())
+  drawerId    String
+  tenantId    String
+  propertyId  String
+  txnDate     DateTime     @default(now())
+  txnType     CashTxnType
+  description String       @db.VarChar(300)
+  amount      Decimal      @db.Decimal(12, 2)
+  /// ยอดหลังรายการ
+  balance     Decimal      @db.Decimal(12, 2)
+  /// ลิ้นชักปลายทาง (กรณี TRANSFER)
+  toDrawerId  String?
+  /// อ้างอิงเอกสาร (folioId, invoiceNo ฯลฯ)
+  sourceType  String?      @db.VarChar(50)
+  sourceId    String?
+  reference   String?      @db.VarChar(100)
+  createdBy   String
+  createdAt   DateTime     @default(now())
+
+  drawer      CashDrawer   @relation(fields: [drawerId], references: [id])
+
+  @@index([drawerId])
+  @@index([tenantId])
+  @@index([txnDate])
+  @@index([sourceType, sourceId])
+  @@map("cash_transactions")
+}
+
+/// กระทบยอดธนาคาร (Bank Reconciliation)
+/// กระทบยอด Statement จากธนาคาร vs ยอดในระบบ
+model BankReconciliation {
+  id                String          @id @default(uuid())
+  tenantId          String
+  propertyId        String
+  /// บัญชีธนาคาร (FK ไปหา BankAccount ที่มีอยู่แล้ว)
+  bankAccountId     String
+  /// งวด เช่น "2024-01"
+  period            String          @db.VarChar(10)
+  /// วันที่ Statement
+  statementDate     DateTime        @db.Date
+  /// ยอด Statement จากธนาคาร
+  statementBalance  Decimal         @db.Decimal(14, 2)
+  /// ยอดในสมุดบัญชี
+  bookBalance       Decimal         @db.Decimal(14, 2)
+  /// ผลต่าง
+  variance          Decimal         @default(0.00) @db.Decimal(14, 2)
+  status            ReconcileStatus @default(OPEN)
+  approvedBy        String?
+  approvedAt        DateTime?
+  notes             String?         @db.Text
+  createdBy         String
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  lines             BankReconLine[]
+
+  @@unique([tenantId, propertyId, bankAccountId, period])
+  @@index([tenantId])
+  @@index([propertyId])
+  @@index([bankAccountId])
+  @@index([status])
+  @@map("bank_reconciliations")
+}
+
+/// รายการกระทบยอดธนาคาร
+model BankReconLine {
+  id              String             @id @default(uuid())
+  reconId         String
+  /// ประเภท: DEPOSIT (ฝาก), WITHDRAWAL (ถอน), TRANSFER
+  txnType         String             @db.VarChar(20)
+  /// วันที่รายการ
+  txnDate         DateTime           @db.Date
+  description     String             @db.VarChar(300)
+  /// ยอดจาก Statement
+  statementAmount Decimal            @default(0.00) @db.Decimal(12, 2)
+  /// ยอดในสมุดบัญชี
+  bookAmount      Decimal            @default(0.00) @db.Decimal(12, 2)
+  /// กระทบยอดแล้ว
+  isMatched       Boolean            @default(false)
+  matchedAt       DateTime?
+  /// อ้างอิงรายการในระบบ (JournalEntryId, PaymentId ฯลฯ)
+  bookRef         String?            @db.VarChar(100)
+  /// อ้างอิง Statement (เลขที่รายการจากธนาคาร)
+  statementRef    String?            @db.VarChar(100)
+  notes           String?            @db.Text
+  createdAt       DateTime           @default(now())
+
+  reconciliation  BankReconciliation @relation(fields: [reconId], references: [id], onDelete: Cascade)
+
+  @@index([reconId])
+  @@index([txnDate])
+  @@index([isMatched])
+  @@map("bank_recon_lines")
+}
+
+// ─── MODULE 7: FIXED ASSETS ────────────────────────────────────────────────────
+// สินทรัพย์ถาวร, ค่าเสื่อมราคา
+
+/// สินทรัพย์ถาวร (Fixed Asset Register)
+model FixedAsset {
+  id                  String              @id @default(uuid())
+  tenantId            String
+  propertyId          String
+  /// รหัสสินทรัพย์ เช่น "FA-2024-001234"
+  assetCode           String              @db.VarChar(30)
+  name                String              @db.VarChar(200)
+  description         String?             @db.Text
+  category            FixedAssetCategory
+  /// แผนก/Cost Center ที่ใช้สินทรัพย์
+  costCenterId        String?
+  /// GL Account สินทรัพย์
+  assetAccountId      String?
+  /// GL Account ค่าเสื่อมสะสม
+  accumDeprecAccountId String?
+  /// GL Account ค่าเสื่อมราคา (Expense)
+  deprecExpenseAccountId String?
+  /// วันที่ซื้อ
+  purchaseDate        DateTime            @db.Date
+  /// ราคาซื้อ
+  purchaseCost        Decimal             @db.Decimal(14, 2)
+  /// ค่าใช้จ่ายในการได้มาเพิ่มเติม
+  acquisitionCost     Decimal             @default(0.00) @db.Decimal(14, 2)
+  /// มูลค่าซาก (Residual Value)
+  residualValue       Decimal             @default(0.00) @db.Decimal(14, 2)
+  /// อายุการใช้งาน (ปี)
+  usefulLifeYears     Int
+  depreciationMethod  DepreciationMethod  @default(STRAIGHT_LINE)
+  /// อัตราค่าเสื่อม (%) สำหรับ Declining Balance
+  depreciationRate    Decimal?            @db.Decimal(5, 2)
+  /// มูลค่าสะสมค่าเสื่อม
+  accumulatedDepreciation Decimal         @default(0.00) @db.Decimal(14, 2)
+  /// มูลค่าตามบัญชี (Book Value)
+  bookValue           Decimal             @db.Decimal(14, 2)
+  status              AssetStatus         @default(ACTIVE)
+  /// ที่ตั้ง/ห้อง
+  location            String?             @db.VarChar(200)
+  /// Serial Number / ทะเบียน
+  serialNo            String?             @db.VarChar(100)
+  /// ผู้ดูแล
+  responsiblePerson   String?
+  /// อ้างอิง PO ที่ซื้อ
+  purchaseOrderId     String?
+  /// วันที่จำหน่าย
+  disposalDate        DateTime?           @db.Date
+  disposalAmount      Decimal?            @db.Decimal(14, 2)
+  disposedBy          String?
+  disposalReason      String?             @db.Text
+  notes               String?             @db.Text
+  createdBy           String
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  depreciations       AssetDepreciation[]
+
+  @@unique([tenantId, assetCode])
+  @@index([tenantId])
+  @@index([propertyId])
+  @@index([category])
+  @@index([status])
+  @@index([costCenterId])
+  @@map("fixed_assets")
+}
+
+/// ค่าเสื่อมราคา (Asset Depreciation Schedule)
+/// บันทึกค่าเสื่อมทุกงวด (รายเดือน)
+model AssetDepreciation {
+  id                    String     @id @default(uuid())
+  assetId               String
+  tenantId              String
+  /// งวด เช่น "2024-01"
+  period                String     @db.VarChar(10)
+  fiscalYear            Int
+  fiscalPeriod          Int
+  /// วันที่บันทึกค่าเสื่อม
+  depreciationDate      DateTime   @db.Date
+  /// ค่าเสื่อมงวดนี้
+  depreciationAmount    Decimal    @db.Decimal(14, 2)
+  /// ค่าเสื่อมสะสมหลังงวดนี้
+  accumulatedAmount     Decimal    @db.Decimal(14, 2)
+  /// มูลค่าตามบัญชีหลังงวดนี้
+  bookValue             Decimal    @db.Decimal(14, 2)
+  /// Journal Entry ที่บันทึก
+  journalEntryId        String?
+  /// บันทึกแล้วหรือยัง
+  isPosted              Boolean    @default(false)
+  postedAt              DateTime?
+  postedBy              String?
+  createdAt             DateTime   @default(now())
+
+  asset                 FixedAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([assetId, period])
+  @@index([assetId])
+  @@index([tenantId])
+  @@index([period])
+  @@index([isPosted])
+  @@map("asset_depreciations")
+}
+
+// =============================================================================
+// END OF ACCOUNTING SCHEMA
+// =============================================================================
+// สรุป models ที่เพิ่ม:
+//
+// accounting-core (4 models):
+//   FiscalYear, AccountChart, JournalEntry, JournalLine, LedgerBalance
+//
+// accounts-receivable (6 models):
+//   ArInvoice, ArInvoiceLine, GuestFolio, FolioCharge, FolioPayment,
+//   ArReceipt, ArReceiptAllocation
+//
+// accounts-payable (4 models):
+//   ApInvoice, ApInvoiceLine, ApPayment, ApPaymentAllocation
+//
+// tax-management (4 models):
+//   TaxRate, WhtCertificate, TaxFiling, TaxFilingLine
+//
+// night-audit (2 models):
+//   NightAudit, NightAuditCharge
+//
+// cash-management (4 models):
+//   CashDrawer, CashTransaction, BankReconciliation, BankReconLine
+//
+// fixed-assets (2 models):
+//   FixedAsset, AssetDepreciation
+//
+// enums ที่เพิ่ม (20 enums):
+//   AccountType, NormalBalance, AccountLevel, JournalEntryStatus,
+//   JournalSourceType, ArInvoiceStatus, ArInvoiceType, FolioChargeType,
+//   FolioStatus, AccPaymentMethod, ApInvoiceStatus, ApInvoiceType,
+//   TaxType, WhtIncomeType, TaxFilingType, TaxFilingStatus, WhtCertStatus,
+//   NightAuditStatus, CashDrawerStatus, CashTxnType, ReconcileStatus,
+//   FixedAssetCategory, DepreciationMethod, AssetStatus
+// =============================================================================
+
+
+// =============================================================================
+// Operating Costs / ระบบติดตามต้นทุนระบบ (Platform-level)
+// =============================================================================
+// วัตถุประสงค์: บันทึกค่าใช้จ่ายของ platform เพื่อคำนวณ Gross Margin,
+// Operating Margin, CAC จริง, LTV/CAC, Net Profit / Burn Rate, Cost per Customer
+//
+// หมายเหตุ: ใช้ prefix "Op" เพื่อไม่ชนกับ F&B Cost system (CostCenter,
+// CostType, CostBudget เดิม ซึ่งเป็นต้นทุนของโรงแรม ไม่ใช่ของ platform)
+// =============================================================================
+
+enum OpExpenseType {
+  RECURRING
+  ONE_TIME
+  USAGE
+}
+
+enum OpBillingCycle {
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+enum OpCostBehavior {
+  FIXED
+  VARIABLE
+  SEMI_VARIABLE
+}
+
+model OpCostCategory {
+  id          String   @id @default(uuid()) @db.VarChar(36)
+  code        String   @unique @db.VarChar(50)
+  name        String   @db.VarChar(100)
+  nameEn      String?  @db.VarChar(100)
+  description String?  @db.Text
+  color       String?  @db.VarChar(20)
+  icon        String?  @db.VarChar(50)
+  isCogs      Boolean  @default(false)
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  vendors  OpCostVendor[]
+  expenses OpOperatingExpense[]
+  budgets  OpCostBudget[]
+
+  @@map("opcost_categories")
+}
+
+model OpCostVendor {
+  id           String  @id @default(uuid()) @db.VarChar(36)
+  name         String  @db.VarChar(150)
+  website      String? @db.VarChar(255)
+  contactName  String? @db.VarChar(100)
+  contactEmail String? @db.VarChar(150)
+  notes        String? @db.Text
+
+  categoryId String?         @db.VarChar(36)
+  category   OpCostCategory? @relation(fields: [categoryId], references: [id])
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  expenses OpOperatingExpense[]
+
+  @@index([categoryId])
+  @@map("opcost_vendors")
+}
+
+model OpOperatingExpense {
+  id String @id @default(uuid()) @db.VarChar(36)
+
+  categoryId String         @db.VarChar(36)
+  category   OpCostCategory @relation(fields: [categoryId], references: [id])
+  vendorId   String?        @db.VarChar(36)
+  vendor     OpCostVendor?  @relation(fields: [vendorId], references: [id])
+
+  name        String  @db.VarChar(200)
+  description String? @db.Text
+
+  amount   Decimal @db.Decimal(12, 2)
+  currency String  @default("THB") @db.VarChar(3)
+
+  type         OpExpenseType
+  behavior     OpCostBehavior  @default(FIXED)
+  billingCycle OpBillingCycle?
+
+  startDate DateTime
+  endDate   DateTime?
+
+  isActive Boolean @default(true)
+
+  tags          String? @db.Text
+  reference     String? @db.VarChar(150)
+  attachmentUrl String? @db.VarChar(500)
+  notes         String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+  createdBy String?  @db.VarChar(36)
+
+  snapshots OpExpenseMonthlySnapshot[]
+
+  @@index([categoryId])
+  @@index([vendorId])
+  @@index([type, isActive])
+  @@index([startDate, endDate])
+  @@map("opcost_expenses")
+}
+
+model OpExpenseMonthlySnapshot {
+  id        String             @id @default(uuid()) @db.VarChar(36)
+  expenseId String             @db.VarChar(36)
+  expense   OpOperatingExpense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+
+  year  Int
+  month Int
+
+  amountForMonth Decimal @db.Decimal(12, 2)
+
+  categoryCode String         @db.VarChar(50)
+  behavior     OpCostBehavior @default(FIXED)
+  isCogs       Boolean        @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@unique([expenseId, year, month])
+  @@index([year, month])
+  @@index([categoryCode, year, month])
+  @@map("opcost_monthly_snapshots")
+}
+
+model OpCostBudget {
+  id         String          @id @default(uuid()) @db.VarChar(36)
+  categoryId String?         @db.VarChar(36)
+  category   OpCostCategory? @relation(fields: [categoryId], references: [id])
+
+  year  Int
+  month Int?
+
+  budgetAmount Decimal @db.Decimal(12, 2)
+  notes        String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@unique([categoryId, year, month])
+  @@map("opcost_budgets")
+}
+
+model OpMarketingCampaign {
+  id                String    @id @default(uuid()) @db.VarChar(36)
+  name              String    @db.VarChar(200)
+  channel           String    @db.VarChar(50)
+  startDate         DateTime
+  endDate           DateTime?
+  totalSpend        Decimal   @default(0) @db.Decimal(12, 2)
+  attributedTenants Int       @default(0)
+  notes             String?   @db.Text
+  isActive          Boolean   @default(true)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @default(now()) @updatedAt
+
+  @@index([startDate, endDate])
+  @@index([channel])
+  @@map("opcost_marketing_campaigns")
 }
