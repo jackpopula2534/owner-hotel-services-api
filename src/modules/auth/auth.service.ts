@@ -243,6 +243,9 @@ export class AuthService {
         lastName: admin.lastName,
         role: admin.role,
         isPlatformAdmin: true,
+        // null/empty array => admin can access every menu
+        menuAccess:
+          ((admin as { menuAccess?: unknown }).menuAccess as string[] | null) ?? null,
       },
     };
   }

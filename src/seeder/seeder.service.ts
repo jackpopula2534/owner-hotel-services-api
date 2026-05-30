@@ -787,44 +787,76 @@ export class SeederService {
   private async seedAdmins(): Promise<void> {
     this.logger.log('👤 Seeding Admins...');
 
+    // menuAccess = รายการ href ของเมนูใน Admin Panel ที่ admin คนนั้นเข้าถึงได้
+    // ต้องตรงกับ href ใน frontend: lib/constants/adminMenu.ts
+    // ค่า [] (ว่าง) = เข้าถึงได้ทุกเมนู (full access)
+    const FINANCE_MENUS = [
+      '/admin',
+      '/admin/analytics',
+      '/admin/subscriptions',
+      '/admin/invoices',
+      '/admin/invoice-settings',
+      '/admin/payment-approvals',
+      '/admin/refunds',
+      '/admin/dunning',
+      '/admin/coupons',
+      '/admin/bank-accounts',
+      '/admin/operating-costs',
+      '/admin/operating-costs/budgets',
+      '/admin/operating-costs/categories',
+      '/admin/operating-costs/vendors',
+      '/admin/operating-costs/campaigns',
+    ];
+    const SUPPORT_MENUS = [
+      '/admin',
+      '/admin/hotels',
+      '/admin/users',
+      '/admin/audit-logs',
+      '/admin/email-templates',
+    ];
+
     const admins = [
       {
-        id: uuidv4(),
         firstName: 'Super',
         lastName: 'Admin',
         email: 'admin@hotelservices.com',
         role: 'platform_admin',
         password: 'Admin@123',
+        menuAccess: [] as string[], // full access
       },
       {
-        id: uuidv4(),
         firstName: 'Finance',
         lastName: 'Admin',
         email: 'finance@hotelservices.com',
         role: 'platform_admin',
         password: 'Finance@123',
+        menuAccess: FINANCE_MENUS,
       },
       {
-        id: uuidv4(),
         firstName: 'Support',
         lastName: 'Admin',
         email: 'support@hotelservices.com',
         role: 'platform_admin',
         password: 'Support@123',
+        menuAccess: SUPPORT_MENUS,
       },
     ];
 
     for (const adminData of admins) {
+      // create()/update() ของ AdminsService จะ hash password ให้เอง → ส่ง plaintext
       const existing = await this.adminsService.findByEmail(adminData.email);
+      const accessLabel =
+        adminData.menuAccess.length === 0
+          ? 'full access'
+          : `${adminData.menuAccess.length} menus`;
+
       if (!existing) {
-        const hashedPassword = await bcrypt.hash(adminData.password, 10);
-        await this.adminsService.create({
-          ...adminData,
-          password: hashedPassword,
-        });
-        this.logger.log(`  ✓ Created admin: ${adminData.email} (${adminData.role})`);
+        await this.adminsService.create(adminData);
+        this.logger.log(`  ✓ Created admin: ${adminData.email} (${accessLabel})`);
       } else {
-        this.logger.log(`  ⊙ Admin already exists: ${adminData.email}`);
+        // อัพเดทฟิลด์ต่างๆ ของ admin เดิม (ชื่อ, role, menuAccess) + reset password
+        await this.adminsService.update(existing.id, adminData);
+        this.logger.log(`  ↻ Updated admin: ${adminData.email} (${accessLabel})`);
       }
     }
   }

@@ -53,6 +53,7 @@ model Admin {
   password      String
   role          String         @default("platform_admin")
   status        String         @default("active")
+  menuAccess    Json?          // Admin menu hrefs this admin can access; null/empty = full access
   lastLoginAt   DateTime?      @db.DateTime(0)
   lastLoginIp   String?
   createdAt     DateTime       @default(now()) @db.DateTime(6)
