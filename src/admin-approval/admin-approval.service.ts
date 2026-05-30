@@ -4,7 +4,6 @@ import { InvoicesService } from '../invoices/invoices.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { AdminsService } from '../admins/admins.service';
 import { InvoiceStatus } from '../invoices/entities/invoice.entity';
-import { SubscriptionStatus } from '../subscriptions/entities/subscription.entity';
 
 @Injectable()
 export class AdminApprovalService {
@@ -54,31 +53,18 @@ export class AdminApprovalService {
       status: InvoiceStatus.PAID,
     });
 
-    // 5. Activate subscription
+    // 5. Subscription activation + period extension is handled inside
+    //    paymentsService.approvePayment (step 2), which respects the
+    //    subscription's billing_cycle (monthly | yearly). We just re-read
+    //    the now-activated subscription to return it in the response.
     if (invoice.subscription_id) {
       const subscription = await this.subscriptionsService.findOne(invoice.subscription_id);
 
       if (subscription) {
-        // คำนวณวันใช้งานจาก approve จริง
-        const today = new Date();
-        const endDate = new Date(today);
-        endDate.setMonth(endDate.getMonth() + 1); // รายเดือน
-
-        await this.subscriptionsService.update(subscription.id, {
-          status: SubscriptionStatus.ACTIVE,
-          startDate: today,
-          endDate: endDate,
-        });
-
         return {
           payment,
           invoice: { ...invoice, status: InvoiceStatus.PAID },
-          subscription: {
-            ...subscription,
-            status: SubscriptionStatus.ACTIVE,
-            startDate: today,
-            endDate: endDate,
-          },
+          subscription,
           message: 'Payment approved and subscription activated successfully',
         };
       }

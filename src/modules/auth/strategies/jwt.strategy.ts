@@ -78,6 +78,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     // ──────────────────────────────────────────────────────────────────────────
 
     return {
+      // `sub` is the original JWT subject (user id). Several controllers read
+      // `req.user.sub` directly (e.g. two-factor-auth, accounting modules), so it
+      // must be present here alongside the `id`/`userId` aliases. Without it those
+      // controllers pass `undefined` downstream — which surfaces as a Prisma
+      // validation error when used in a `where` clause (e.g. 2FA findUnique).
+      sub: payload.sub,
       id: payload.sub,
       userId: payload.sub,
       email: payload.email,

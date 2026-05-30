@@ -6,6 +6,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { TenantContextService } from '../common/tenant/tenant-context.service';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { CreateCompanyDto } from './dto/create-company.dto';
@@ -38,7 +39,10 @@ export interface TenantWithUserRole {
 export class TenantsService {
   private readonly logger = new Logger(TenantsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly tenantContext: TenantContextService,
+  ) {}
 
   create(createTenantDto: CreateTenantDto & { trialEndsAt?: Date }) {
     const data: any = {
@@ -115,75 +119,88 @@ export class TenantsService {
    * Each tenant must have its own subscription
    */
   async createAdditionalTenant(userId: string, createCompanyDto: CreateCompanyDto) {
-    // Verify user exists
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-    });
-
-    if (!user) {
-      throw new NotFoundException('User not found');
+    if (!userId) {
+      throw new BadRequestException('User ID is required to create a company');
     }
 
-    const data: any = {
-      name: createCompanyDto.name,
-      status: 'trial',
-      name_en: createCompanyDto.nameEn,
-      property_type: createCompanyDto.propertyType,
-      location: createCompanyDto.location,
-      website: createCompanyDto.website,
-      description: createCompanyDto.description,
-      customer_name: createCompanyDto.customerName,
-      tax_id: createCompanyDto.taxId,
-      email: createCompanyDto.email,
-      phone: createCompanyDto.phone,
-      address: createCompanyDto.address,
-      district: createCompanyDto.district,
-      province: createCompanyDto.province,
-      postal_code: createCompanyDto.postalCode,
-    };
+    // Creating a brand-new tenant is inherently a cross-tenant operation:
+    //   • the user lookup is keyed by global user id (User is tenant-scoped, so
+    //     findUnique() is rejected by the TenantScope middleware)
+    //   • the new tenants/userTenant/property rows must be written under the
+    //     NEW tenant's id, not the caller's currently-active tenant.
+    // We therefore run the whole flow unscoped and take responsibility for
+    // setting tenantId explicitly on every write below.
+    return this.tenantContext.runUnscoped(async () => {
+      // Verify user exists (findFirst — findUnique is blocked on scoped models)
+      const user = await this.prisma.user.findFirst({
+        where: { id: userId },
+      });
 
-    // Clean up undefined properties
-    Object.keys(data).forEach((key) => {
-      if (data[key] === undefined) {
-        delete data[key];
+      if (!user) {
+        throw new NotFoundException('User not found');
       }
-    });
 
-    const newTenant = await this.prisma.tenants.create({
-      data,
-    });
-
-    // Create UserTenant junction record with owner role
-    await this.prisma.userTenant.create({
-      data: {
-        userId,
-        tenantId: newTenant.id,
-        role: 'owner',
-        isDefault: false,
-      },
-    });
-
-    // Create default property for this tenant so rooms/bookings can work
-    const propertyCode =
-      createCompanyDto.name
-        .substring(0, 3)
-        .toUpperCase()
-        .replace(/[^A-Z]/g, 'X') + String(Math.floor(Math.random() * 9000) + 1000);
-
-    const defaultProperty = await this.prisma.property.create({
-      data: {
-        tenantId: newTenant.id,
+      const data: any = {
         name: createCompanyDto.name,
-        code: propertyCode,
-        location: createCompanyDto.location ?? null,
-        phone: createCompanyDto.phone ?? null,
-        email: createCompanyDto.email ?? null,
-        isDefault: true,
-        status: 'active',
-      },
-    });
+        status: 'trial',
+        name_en: createCompanyDto.nameEn,
+        property_type: createCompanyDto.propertyType,
+        location: createCompanyDto.location,
+        website: createCompanyDto.website,
+        description: createCompanyDto.description,
+        customer_name: createCompanyDto.customerName,
+        tax_id: createCompanyDto.taxId,
+        email: createCompanyDto.email,
+        phone: createCompanyDto.phone,
+        address: createCompanyDto.address,
+        district: createCompanyDto.district,
+        province: createCompanyDto.province,
+        postal_code: createCompanyDto.postalCode,
+      };
 
-    return { ...newTenant, property: defaultProperty };
+      // Clean up undefined properties
+      Object.keys(data).forEach((key) => {
+        if (data[key] === undefined) {
+          delete data[key];
+        }
+      });
+
+      const newTenant = await this.prisma.tenants.create({
+        data,
+      });
+
+      // Create UserTenant junction record with owner role
+      await this.prisma.userTenant.create({
+        data: {
+          userId,
+          tenantId: newTenant.id,
+          role: 'owner',
+          isDefault: false,
+        },
+      });
+
+      // Create default property for this tenant so rooms/bookings can work
+      const propertyCode =
+        createCompanyDto.name
+          .substring(0, 3)
+          .toUpperCase()
+          .replace(/[^A-Z]/g, 'X') + String(Math.floor(Math.random() * 9000) + 1000);
+
+      const defaultProperty = await this.prisma.property.create({
+        data: {
+          tenantId: newTenant.id,
+          name: createCompanyDto.name,
+          code: propertyCode,
+          location: createCompanyDto.location ?? null,
+          phone: createCompanyDto.phone ?? null,
+          email: createCompanyDto.email ?? null,
+          isDefault: true,
+          status: 'active',
+        },
+      });
+
+      return { ...newTenant, property: defaultProperty };
+    });
   }
 
   /**

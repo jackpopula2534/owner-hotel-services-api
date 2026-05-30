@@ -45,6 +45,10 @@ describe('AuthService', () => {
     property: {
       findFirst: jest.fn().mockResolvedValue(null),
     },
+    user2FASettings: {
+      // Default: no 2FA configured, so login proceeds to full token issuance.
+      findUnique: jest.fn().mockResolvedValue(null),
+    },
   };
 
   const mockJwtService = {
@@ -255,7 +259,8 @@ describe('AuthService', () => {
         token: 'refresh-token',
       });
 
-      const result = await service.login(loginDto);
+      // No 2FA configured (default mock) → full login response with tokens + user.
+      const result = (await service.login(loginDto)) as any;
 
       expect(result).toHaveProperty('accessToken');
       expect(result).toHaveProperty('refreshToken');

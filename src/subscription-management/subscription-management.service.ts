@@ -27,11 +27,14 @@ export class SubscriptionManagementService {
   async upgradePlan(
     subscriptionId: string,
     newPlanId: string,
+    options: { createInvoice?: boolean } = {},
   ): Promise<{
     subscription: any;
     proratedAmount: number;
     invoice: any;
   }> {
+    const { createInvoice = true } = options;
+
     const subscription = await this.subscriptionsService.findOne(subscriptionId);
     if (!subscription) {
       throw new Error('Subscription not found');
@@ -50,15 +53,20 @@ export class SubscriptionManagementService {
       subscription.end_date,
     );
 
-    // สร้าง invoice สำหรับ upgrade
-    const invoice = await this.invoicesService.create({
-      tenantId: subscription.tenant_id,
-      subscriptionId: subscription.id,
-      invoiceNo: `UPG-${Date.now()}`,
-      amount: proratedAmount,
-      status: InvoiceStatus.PENDING,
-      dueDate: new Date(),
-    });
+    // สร้าง invoice สำหรับ upgrade (prorate)
+    // ข้ามได้เมื่อ caller ออกใบแจ้งหนี้เองอยู่แล้ว — เช่น flow checkout
+    // (trial → paid) ที่ออกใบเต็มเดือน (ราคาแผน + VAT) เอง การสร้างใบ prorate
+    // ที่นี่ซ้ำอีกใบทำให้เกิดใบแจ้งหนี้ซ้ำ (UPG-… ฿prorate คู่กับ INV-… เต็มเดือน)
+    const invoice = createInvoice
+      ? await this.invoicesService.create({
+          tenantId: subscription.tenant_id,
+          subscriptionId: subscription.id,
+          invoiceNo: `UPG-${Date.now()}`,
+          amount: proratedAmount,
+          status: InvoiceStatus.PENDING,
+          dueDate: new Date().toISOString(),
+        })
+      : null;
 
     // Update subscription (จะ activate เมื่อ approve payment)
     await this.subscriptionsService.update(subscriptionId, {
@@ -106,7 +114,7 @@ export class SubscriptionManagementService {
       invoiceNo: `FEAT-${Date.now()}`,
       amount: Number(feature.price_monthly),
       status: InvoiceStatus.PENDING,
-      dueDate: new Date(),
+      dueDate: new Date().toISOString(),
     });
 
     return {

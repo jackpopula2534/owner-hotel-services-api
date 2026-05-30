@@ -213,6 +213,7 @@ describe('SelfServicePlanService', () => {
         const tx = {
           subscriptions: { update: jest.fn().mockResolvedValue({}) },
           invoices: {
+            findFirst: jest.fn().mockResolvedValue(null),
             create: jest.fn().mockResolvedValue({ id: 'inv-1', invoice_no: 'X' }),
           },
           billing_history: { create: jest.fn().mockResolvedValue({}) },
@@ -231,7 +232,52 @@ describe('SelfServicePlanService', () => {
       expect(result.invoiceId).toBe('inv-1');
       expect(result.intent).toBe('upgrade');
       expect(txCalls[0].subscriptions.update).toHaveBeenCalled();
+      expect(txCalls[0].invoices.create).toHaveBeenCalled();
       expect(txCalls[0].billing_history.create).toHaveBeenCalled();
+    });
+
+    it('reuses an existing pending invoice instead of creating a duplicate (idempotent)', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-04-16'));
+      mockSubscriptionFindFirst.mockResolvedValue(subBase);
+      mockPlansFindUnique.mockImplementation(({ where: { id } }: any) =>
+        Promise.resolve({
+          id,
+          name: id === 'plan-current' ? 'Standard' : 'Premium',
+          price_monthly: id === 'plan-current' ? 3000 : 6000,
+          is_active: 1,
+          max_rooms: 100,
+          max_users: 100,
+          max_properties: 100,
+        }),
+      );
+
+      const txCalls: any[] = [];
+      mockTransaction.mockImplementation(async (fn: any) => {
+        const tx = {
+          subscriptions: { update: jest.fn().mockResolvedValue({}) },
+          invoices: {
+            // Simulate a pre-existing unpaid plan-change invoice for the same
+            // subscription + amount (e.g. the confirm was submitted twice).
+            findFirst: jest.fn().mockResolvedValue({ id: 'inv-existing' }),
+            create: jest.fn().mockResolvedValue({ id: 'inv-new' }),
+          },
+          billing_history: { create: jest.fn().mockResolvedValue({}) },
+        };
+        const r = await fn(tx);
+        txCalls.push(tx);
+        return r;
+      });
+
+      const result = await service.confirm({
+        tenantId: 'tenant-1',
+        newPlanId: 'plan-premium',
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.invoiceId).toBe('inv-existing');
+      expect(txCalls[0].invoices.findFirst).toHaveBeenCalled();
+      // No duplicate created.
+      expect(txCalls[0].invoices.create).not.toHaveBeenCalled();
     });
   });
 });

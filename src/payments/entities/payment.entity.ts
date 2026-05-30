@@ -5,6 +5,7 @@ import {
   ManyToOne,
   JoinColumn,
   CreateDateColumn,
+  Index,
 } from 'typeorm';
 import { Invoice } from '../../invoices/entities/invoice.entity';
 
@@ -32,6 +33,10 @@ export class Payment {
 
   @Column({ name: 'invoice_id' })
   invoiceId: string;
+
+  @Index('payments_tenant_id_idx')
+  @Column({ name: 'tenant_id', length: 255, nullable: true })
+  tenantId: string;
 
   @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
   amount: number;

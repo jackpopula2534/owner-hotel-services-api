@@ -42,7 +42,20 @@ export class PaymentsService {
     const where = tenantId ? { tenant_id: tenantId } : {};
     return this.prisma.payments.findMany({
       where,
-      include: { invoices: true },
+      include: {
+        invoices: {
+          include: {
+            tenants: { select: { id: true, name: true } },
+            subscriptions: {
+              include: {
+                plans_subscriptions_plan_idToplans: {
+                  select: { id: true, name: true, price_monthly: true, price_yearly: true },
+                },
+              },
+            },
+          },
+        },
+      },
       orderBy: { created_at: 'desc' },
     });
   }
@@ -111,6 +124,15 @@ export class PaymentsService {
       });
     }
 
+    // Activate + extend the subscription tied to this invoice.
+    // วันใช้งานคำนวณจากเวลาที่ admin approve จริง (ไม่ใช่ตอนสร้าง invoice)
+    // และต่ออายุตาม billing_cycle ของ subscription (monthly | yearly).
+    if (payment.invoice_id) {
+      await this.activateSubscriptionForInvoice(payment.invoice_id).catch((err) => {
+        this.logger.error(`Failed to activate subscription: ${err.message}`);
+      });
+    }
+
     // Update related booking status to confirmed
     if (payment.invoice_id) {
       await this.updateBookingStatusToConfirmed(payment.invoice_id).catch((err) => {
@@ -168,6 +190,66 @@ export class PaymentsService {
       this.logger.error(`Failed to update invoice ${invoiceId} status: ${error.message}`);
       throw error;
     }
+  }
+
+  /**
+   * Activate and extend the subscription linked to an approved invoice.
+   *
+   * - status: trial → active
+   * - start_date: วันที่ approve จริง (now)
+   * - end_date: start + 1 รอบบิล (monthly = +1 month, yearly = +1 year)
+   * - next_billing_date: เท่ากับ end_date (รอบบิลถัดไป)
+   *
+   * ถ้า subscription ยัง active อยู่แล้ว (ต่ออายุ) จะต่อจาก end_date เดิม
+   * เมื่อ end_date เดิมยังไม่หมดอายุ เพื่อไม่ให้ลูกค้าเสียวันที่เหลือ
+   */
+  private async activateSubscriptionForInvoice(invoiceId: string): Promise<void> {
+    const invoice = await this.prisma.invoices.findUnique({
+      where: { id: invoiceId },
+      select: { subscription_id: true },
+    });
+
+    if (!invoice?.subscription_id) {
+      this.logger.log(`Invoice ${invoiceId} has no subscription — skipping activation`);
+      return;
+    }
+
+    const subscription = await this.prisma.subscriptions.findUnique({
+      where: { id: invoice.subscription_id },
+      select: { id: true, billing_cycle: true, end_date: true, status: true },
+    });
+
+    if (!subscription) {
+      this.logger.warn(`Subscription ${invoice.subscription_id} not found — skipping activation`);
+      return;
+    }
+
+    const now = new Date();
+
+    // ต่ออายุจาก end_date เดิมถ้ายังไม่หมด (กันลูกค้าเสียวันที่เหลือ), ไม่งั้นเริ่มนับจากวันนี้
+    const extendFrom =
+      subscription.end_date && subscription.end_date > now ? new Date(subscription.end_date) : now;
+
+    const endDate = new Date(extendFrom);
+    if (subscription.billing_cycle === 'yearly') {
+      endDate.setFullYear(endDate.getFullYear() + 1);
+    } else {
+      endDate.setMonth(endDate.getMonth() + 1);
+    }
+
+    await this.prisma.subscriptions.update({
+      where: { id: subscription.id },
+      data: {
+        status: 'active',
+        start_date: now,
+        end_date: endDate,
+        next_billing_date: endDate,
+      },
+    });
+
+    this.logger.log(
+      `Subscription ${subscription.id} activated (${subscription.billing_cycle}) — ends ${endDate.toISOString().slice(0, 10)}`,
+    );
   }
 
   /**

@@ -19,6 +19,15 @@ export class AdminHotelsQueryDto {
   @IsString()
   search?: string;
 
+  @ApiPropertyOptional({
+    description:
+      'Filter by plan name (e.g. "Professional"). Use "No Plan" for tenants without an active plan.',
+    example: 'Professional',
+  })
+  @IsOptional()
+  @IsString()
+  plan?: string;
+
   @ApiPropertyOptional({ description: 'Page number', default: 1 })
   @IsOptional()
   @Type(() => Number)
@@ -111,6 +120,14 @@ export class AdminHotelsListResponseDto {
   data: AdminHotelListItemDto[];
 }
 
+export class HotelsPlanBreakdownDto {
+  @ApiProperty({ example: 'Professional' })
+  plan: string;
+
+  @ApiProperty({ example: 2 })
+  count: number;
+}
+
 export class AdminHotelsSummaryDto {
   @ApiProperty({ example: 6 })
   total: number;
@@ -126,6 +143,18 @@ export class AdminHotelsSummaryDto {
 
   @ApiProperty({ example: 1 })
   suspended: number;
+
+  @ApiProperty({
+    type: [HotelsPlanBreakdownDto],
+    description: 'จำนวนโรงแรมแยกตามแพ็กเกจ (รวมทั้งระบบ)',
+    example: [
+      { plan: 'Professional', count: 2 },
+      { plan: 'Business', count: 1 },
+      { plan: 'Starter', count: 1 },
+      { plan: 'No Plan', count: 2 },
+    ],
+  })
+  byPlan: HotelsPlanBreakdownDto[];
 }
 
 export class HotelSubscriptionDto {

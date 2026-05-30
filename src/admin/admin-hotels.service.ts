@@ -20,6 +20,9 @@ import {
 export class AdminHotelsService {
   private readonly logger = new Logger(AdminHotelsService.name);
 
+  /** Fallback label for tenants without an active subscription/plan. */
+  private static readonly NO_PLAN_LABEL = 'No Plan';
+
   constructor(
     @InjectRepository(Tenant)
     private tenantsRepository: Repository<Tenant>,
@@ -33,7 +36,7 @@ export class AdminHotelsService {
    * Get all hotels with filtering, search, and pagination
    */
   async findAll(query: AdminHotelsQueryDto): Promise<AdminHotelsListResponseDto> {
-    const { status, search, page = 1, limit = 10 } = query;
+    const { status, search, plan, page = 1, limit = 10 } = query;
     const skip = (page - 1) * limit;
 
     // Build query
@@ -45,6 +48,17 @@ export class AdminHotelsService {
     // Filter by status
     if (status) {
       queryBuilder.andWhere('tenant.status = :status', { status });
+    }
+
+    // Filter by plan name. "No Plan" matches tenants without an active
+    // subscription/plan, mirroring the fallback label used in the list output
+    // and the byPlan summary breakdown.
+    if (plan) {
+      if (plan === AdminHotelsService.NO_PLAN_LABEL) {
+        queryBuilder.andWhere('plan.name IS NULL');
+      } else {
+        queryBuilder.andWhere('plan.name = :plan', { plan });
+      }
     }
 
     // Search by hotel name
@@ -85,7 +99,7 @@ export class AdminHotelsService {
           ownerName: owner
             ? `${owner.firstName || ''} ${owner.lastName || ''}`.trim() || owner.email
             : 'N/A',
-          plan: tenant.subscription?.plan?.name || 'No Plan',
+          plan: tenant.subscription?.plan?.name || AdminHotelsService.NO_PLAN_LABEL,
           rooms: roomsCount,
           users: usersCount,
           status: tenant.status,
@@ -107,15 +121,21 @@ export class AdminHotelsService {
    * Get hotels summary by status
    */
   async getSummary(): Promise<AdminHotelsSummaryDto> {
-    const [total, active, trial, expired, suspended] = await Promise.all([
-      this.tenantsRepository.count(),
-      this.tenantsRepository.count({ where: { status: TenantStatus.ACTIVE } }),
-      this.tenantsRepository.count({ where: { status: TenantStatus.TRIAL } }),
-      this.tenantsRepository.count({ where: { status: TenantStatus.EXPIRED } }),
-      this.tenantsRepository.count({
-        where: { status: TenantStatus.SUSPENDED },
-      }),
-    ]);
+    const [total, active, trial, expired, suspended, byPlan] =
+      await Promise.all([
+        this.tenantsRepository.count(),
+        this.tenantsRepository.count({
+          where: { status: TenantStatus.ACTIVE },
+        }),
+        this.tenantsRepository.count({ where: { status: TenantStatus.TRIAL } }),
+        this.tenantsRepository.count({
+          where: { status: TenantStatus.EXPIRED },
+        }),
+        this.tenantsRepository.count({
+          where: { status: TenantStatus.SUSPENDED },
+        }),
+        this.getPlanBreakdown(),
+      ]);
 
     return {
       total,
@@ -123,7 +143,33 @@ export class AdminHotelsService {
       trial,
       expired,
       suspended,
+      byPlan,
     };
+  }
+
+  /**
+   * Count hotels grouped by plan name across the whole system.
+   * Tenants with no subscription/plan are bucketed under "No Plan",
+   * matching the list endpoint's fallback label.
+   */
+  private async getPlanBreakdown(): Promise<
+    Array<{ plan: string; count: number }>
+  > {
+    const rows = await this.tenantsRepository
+      .createQueryBuilder('tenant')
+      .leftJoin('tenant.subscription', 'subscription')
+      .leftJoin('subscription.plan', 'plan')
+      .select('COALESCE(plan.name, :fallback)', 'plan')
+      .addSelect('COUNT(tenant.id)', 'count')
+      .setParameter('fallback', AdminHotelsService.NO_PLAN_LABEL)
+      .groupBy('COALESCE(plan.name, :fallback)')
+      .orderBy('count', 'DESC')
+      .getRawMany<{ plan: string; count: string }>();
+
+    return rows.map((row) => ({
+      plan: row.plan || AdminHotelsService.NO_PLAN_LABEL,
+      count: Number(row.count) || 0,
+    }));
   }
 
   /**
@@ -164,7 +210,7 @@ export class AdminHotelsService {
       createdAt: this.toDateString(tenant.createdAt),
       rooms: roomsCount,
       users: usersCount,
-      plan: tenant.subscription?.plan?.name || 'No Plan',
+      plan: tenant.subscription?.plan?.name || AdminHotelsService.NO_PLAN_LABEL,
       status: tenant.status,
       revenue,
       subscription: {

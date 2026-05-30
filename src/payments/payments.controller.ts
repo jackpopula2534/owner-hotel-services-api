@@ -155,9 +155,11 @@ export class PaymentsController {
   approve(
     @Param('id') id: string,
     @Body() approvePaymentDto: ApprovePaymentDto,
-    @CurrentUser() user: { tenantId?: string },
+    @CurrentUser() user: { id?: string; tenantId?: string },
   ) {
-    return this.paymentsService.approvePayment(id, approvePaymentDto.adminId, user?.tenantId);
+    // Fall back to the authenticated admin's id when not supplied in the body.
+    const adminId = approvePaymentDto.adminId ?? user?.id ?? 'system';
+    return this.paymentsService.approvePayment(id, adminId, user?.tenantId);
   }
 
   @Post(':id/reject')
@@ -166,9 +168,10 @@ export class PaymentsController {
   reject(
     @Param('id') id: string,
     @Body() approvePaymentDto: ApprovePaymentDto,
-    @CurrentUser() user: { tenantId?: string },
+    @CurrentUser() user: { id?: string; tenantId?: string },
   ) {
-    return this.paymentsService.rejectPayment(id, approvePaymentDto.adminId, user?.tenantId);
+    const adminId = approvePaymentDto.adminId ?? user?.id ?? 'system';
+    return this.paymentsService.rejectPayment(id, adminId, user?.tenantId);
   }
 
   @Patch(':id')

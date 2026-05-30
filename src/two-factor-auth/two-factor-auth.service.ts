@@ -34,8 +34,11 @@ export class TwoFactorAuthService {
       throw new BadRequestException('2FA is already enabled for this account');
     }
 
-    // Get user email for OTP label
-    const user = await this.prisma.user.findUnique({
+    // Get user email for OTP label.
+    // `User` is a tenant-scoped model, so findUnique is rejected by the
+    // TenantScope middleware. Use findFirst — the middleware auto-injects the
+    // current tenantId into the where clause, keeping tenant isolation enforced.
+    const user = await this.prisma.user.findFirst({
       where: { id: userId },
       select: { email: true },
     });
@@ -199,8 +202,10 @@ export class TwoFactorAuthService {
     password: string,
     code?: string,
   ): Promise<{ success: boolean; message: string }> {
-    // Verify user password
-    const user = await this.prisma.user.findUnique({
+    // Verify user password.
+    // findFirst (not findUnique): `User` is tenant-scoped, so the TenantScope
+    // middleware injects the current tenantId into the where clause.
+    const user = await this.prisma.user.findFirst({
       where: { id: userId },
     });
 

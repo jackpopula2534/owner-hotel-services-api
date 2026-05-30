@@ -80,8 +80,30 @@ export class SubscriptionAddonItemDto {
   @ApiProperty({ example: 'Extra Analytics' })
   name: string;
 
-  @ApiProperty({ example: 990 })
+  @ApiProperty({
+    example: 990,
+    description:
+      'Amount actually billed for this add-on. 0 when bundled in the plan or while subscription is not billable (e.g. trial).',
+  })
   price: number;
+
+  @ApiProperty({
+    example: 990,
+    description: 'List price of the add-on, shown struck-through when not billed',
+  })
+  originalPrice: number;
+
+  @ApiProperty({
+    example: true,
+    description: 'true = included in the current plan (รวมในแพ็กเกจ); false = purchased separately',
+  })
+  isBundled: boolean;
+
+  @ApiProperty({
+    example: false,
+    description: 'true when this add-on actually contributes to the billable amount',
+  })
+  isBilled: boolean;
 }
 
 export class AdminSubscriptionListItemDto {
@@ -108,15 +130,40 @@ export class AdminSubscriptionListItemDto {
 
   @ApiProperty({
     type: [SubscriptionAddonItemDto],
-    description: 'List of add-ons with name and price',
+    description: 'List of add-ons with billed + original price and bundled flag',
   })
   addons: SubscriptionAddonItemDto[];
 
-  @ApiProperty({ example: 2480, description: 'Total add-on amount' })
+  @ApiProperty({
+    example: 0,
+    description: 'Total add-on amount actually billed (bundled add-ons count as 0)',
+  })
   addonAmount: number;
 
-  @ApiProperty({ example: 7470 })
+  @ApiProperty({
+    example: 13080,
+    description: 'Total add-on list price regardless of billing (for struck-through display)',
+  })
+  addonOriginalAmount: number;
+
+  @ApiProperty({
+    example: 0,
+    description:
+      'Amount actually billed per month. 0 for trial/pending/expired/cancelled subscriptions.',
+  })
   pricePerMonth: number;
+
+  @ApiProperty({
+    example: 0,
+    description: 'Full list price per month (plan + all add-ons) if everything were billed',
+  })
+  originalPricePerMonth: number;
+
+  @ApiProperty({
+    example: true,
+    description: 'true when the subscription is not yet billable (trial/pending/expired/cancelled)',
+  })
+  isTrial: boolean;
 
   @ApiProperty({ example: 'Active' })
   status: string;
@@ -163,8 +210,30 @@ export class SubscriptionAddonDto {
   @ApiProperty({ example: 'Extra Analytics' })
   name: string;
 
-  @ApiProperty({ example: 990 })
+  @ApiProperty({
+    example: 990,
+    description:
+      'Amount actually billed for this add-on. 0 when bundled in the plan or while subscription is not billable (e.g. trial).',
+  })
   price: number;
+
+  @ApiProperty({
+    example: 990,
+    description: 'List price of the add-on, shown struck-through when not billed',
+  })
+  originalPrice: number;
+
+  @ApiProperty({
+    example: true,
+    description: 'true = included in the current plan (รวมในแพ็กเกจ); false = purchased separately',
+  })
+  isBundled: boolean;
+
+  @ApiProperty({
+    example: false,
+    description: 'true when this add-on actually contributes to the billable amount',
+  })
+  isBilled: boolean;
 }
 
 export class AdminSubscriptionDetailDto {
@@ -195,8 +264,24 @@ export class AdminSubscriptionDetailDto {
   @ApiProperty({ type: SubscriptionPeriodDto })
   period: SubscriptionPeriodDto;
 
-  @ApiProperty({ example: 7470 })
+  @ApiProperty({
+    example: 0,
+    description:
+      'Amount actually billed per month. 0 for trial/pending/expired/cancelled subscriptions.',
+  })
   pricePerMonth: number;
+
+  @ApiProperty({
+    example: 0,
+    description: 'Full list price per month (plan + all add-ons) if everything were billed',
+  })
+  originalPricePerMonth: number;
+
+  @ApiProperty({
+    example: true,
+    description: 'true when the subscription is not yet billable (trial/pending/expired/cancelled)',
+  })
+  isTrial: boolean;
 
   @ApiProperty({ example: 'Active' })
   status: string;

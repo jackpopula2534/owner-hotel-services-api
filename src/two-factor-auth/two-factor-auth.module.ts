@@ -4,10 +4,14 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TwoFactorAuthService } from './two-factor-auth.service';
 import { TwoFactorAuthController } from './two-factor-auth.controller';
 import { PrismaModule } from '../prisma/prisma.module';
+import { AuthModule } from '../modules/auth/auth.module';
 
 @Module({
   imports: [
     PrismaModule,
+    // AuthModule exports AuthService (used to issue session tokens after 2FA)
+    // and JwtModule (shared JWT_SECRET so temp tokens verify across modules).
+    AuthModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({

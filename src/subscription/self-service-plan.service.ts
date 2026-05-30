@@ -108,19 +108,36 @@ export class SelfServicePlanService {
 
       let invoiceId: string | undefined;
       if (preview.netAmount > 0) {
-        // Tenant owes a differential — create a top-up invoice.
-        const invoice = await tx.invoices.create({
-          data: {
-            tenant_id: input.tenantId,
+        // Idempotency guard: if an unpaid plan-change invoice already exists for
+        // this subscription with the same differential amount, reuse it instead
+        // of stacking duplicates. Protects against double-clicks, client retries
+        // and re-submitted confirms that previously created one invoice per call.
+        const existing = await tx.invoices.findFirst({
+          where: {
             subscription_id: subscription.id,
-            invoice_no: this.generateInvoiceNo(),
-            amount: preview.netAmount,
             status: 'pending',
-            due_date: this.addDays(new Date(), 7),
-            notes: `Plan change: ${preview.currentPlan.name} → ${preview.newPlan.name}`,
+            amount: preview.netAmount,
           },
+          orderBy: { created_at: 'desc' },
         });
-        invoiceId = invoice.id;
+
+        if (existing) {
+          invoiceId = existing.id;
+        } else {
+          // Tenant owes a differential — create a top-up invoice.
+          const invoice = await tx.invoices.create({
+            data: {
+              tenant_id: input.tenantId,
+              subscription_id: subscription.id,
+              invoice_no: this.generateInvoiceNo(),
+              amount: preview.netAmount,
+              status: 'pending',
+              due_date: this.addDays(new Date(), 7),
+              notes: `Plan change: ${preview.currentPlan.name} → ${preview.newPlan.name}`,
+            },
+          });
+          invoiceId = invoice.id;
+        }
       }
 
       await tx.billing_history.create({

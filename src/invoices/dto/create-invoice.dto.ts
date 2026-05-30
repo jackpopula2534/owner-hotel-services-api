@@ -50,8 +50,11 @@ export class CreateInvoiceDto {
 
   @ApiProperty({
     example: '2026-04-01T00:00:00Z',
-    description: 'Invoice due date',
+    description: 'Invoice due date (ISO 8601 string)',
   })
+  // ต้องเป็น string — ถ้าประกาศ type เป็น Date ร่วมกับ global pipe
+  // (transform:true + enableImplicitConversion:true) class-transformer จะ
+  // แปลง ISO string ให้เป็น Date object ก่อน แล้ว @IsDateString จะ fail (400)
   @IsDateString()
-  dueDate: Date;
+  dueDate: string;
 }

@@ -1189,7 +1189,7 @@ export class SeederService {
             invoiceNo,
             amount: invoiceData.amount,
             status: invoiceData.status,
-            dueDate,
+            dueDate: dueDate.toISOString(),
           });
 
           this.logger.log(

@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StaySync — แผนพัฒนาและแก้ไข (Sales & Legal Audit)</title>
+<style>
+  :root{
+    --brand:#6d28d9; --brand2:#8b5cf6; --bg:#f5f3ff; --card:#ffffff;
+    --ink:#1e1b2e; --muted:#6b6880; --line:#e7e2f5;
+    --crit:#dc2626; --crit-bg:#fef2f2; --high:#ea580c; --high-bg:#fff7ed;
+    --med:#ca8a04; --med-bg:#fefce8; --low:#64748b; --low-bg:#f1f5f9;
+    --ok:#16a34a; --ok-bg:#f0fdf4;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans Thai",Roboto,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.6;-webkit-font-smoothing:antialiased}
+  a{color:var(--brand);text-decoration:none}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 20px}
+
+  header{background:linear-gradient(135deg,var(--brand),var(--brand2));color:#fff;padding:48px 0 40px}
+  header .wrap{position:relative}
+  .kicker{font-size:13px;letter-spacing:.14em;text-transform:uppercase;opacity:.85;font-weight:600}
+  h1{margin:8px 0 6px;font-size:30px;font-weight:800;letter-spacing:-.01em}
+  .sub{opacity:.92;font-size:15px;max-width:680px}
+  .meta-row{display:flex;flex-wrap:wrap;gap:14px;margin-top:22px;font-size:13px}
+  .meta-row span{background:rgba(255,255,255,.15);padding:6px 12px;border-radius:999px;backdrop-filter:blur(4px)}
+
+  nav{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--line)}
+  nav .wrap{display:flex;gap:6px;flex-wrap:wrap;padding:10px 20px}
+  nav a{font-size:13px;font-weight:600;color:var(--muted);padding:6px 12px;border-radius:8px}
+  nav a:hover{background:var(--bg);color:var(--brand)}
+
+  section{padding:34px 0 6px}
+  h2{font-size:21px;font-weight:800;margin:0 0 4px;display:flex;align-items:center;gap:10px}
+  h2 .num{display:inline-grid;place-items:center;width:30px;height:30px;border-radius:8px;
+    background:var(--brand);color:#fff;font-size:14px}
+  .lead{color:var(--muted);margin:0 0 18px;font-size:14px}
+
+  /* summary cards */
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:24px 0 6px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;text-align:center}
+  .stat .n{font-size:34px;font-weight:800;line-height:1}
+  .stat .l{font-size:12px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-top:6px;color:var(--muted)}
+  .stat.c .n{color:var(--crit)} .stat.h .n{color:var(--high)}
+  .stat.m .n{color:var(--med)} .stat.o .n{color:var(--ok)}
+
+  /* phase */
+  .phase{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px;margin-bottom:18px;
+    box-shadow:0 1px 3px rgba(80,60,140,.05)}
+  .phase-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:4px}
+  .phase-title{font-size:17px;font-weight:800;display:flex;align-items:center;gap:10px}
+  .phase-tag{font-size:12px;font-weight:700;padding:4px 12px;border-radius:999px}
+  .phase-when{font-size:12px;color:var(--muted);font-weight:600}
+  .phase-goal{font-size:13.5px;color:var(--muted);margin:2px 0 16px}
+
+  /* finding card */
+  .find{border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px;background:#fff}
+  .find.crit{border-left:4px solid var(--crit)}
+  .find.high{border-left:4px solid var(--high)}
+  .find.med{border-left:4px solid var(--med)}
+  .find.low{border-left:4px solid var(--low)}
+  .find-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .find-title{font-size:15px;font-weight:700;margin:0}
+  .find-id{font-size:11px;font-weight:700;color:var(--muted);font-family:ui-monospace,Menlo,monospace}
+  .badge{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;
+    padding:3px 9px;border-radius:6px;white-space:nowrap}
+  .b-crit{background:var(--crit-bg);color:var(--crit)} .b-high{background:var(--high-bg);color:var(--high)}
+  .b-med{background:var(--med-bg);color:var(--med)} .b-low{background:var(--low-bg);color:var(--low)}
+  .file{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--bg);color:var(--brand);
+    padding:2px 7px;border-radius:5px;display:inline-block;margin-top:8px}
+  .find p{margin:9px 0 0;font-size:13.5px}
+  .find .lbl{font-weight:800;color:var(--ink)}
+  .find .fix{color:#15803d}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .chip{font-size:11.5px;font-weight:600;color:var(--muted);background:var(--bg);padding:4px 10px;border-radius:7px}
+  .chip b{color:var(--ink)}
+
+  /* done list */
+  .done{background:var(--ok-bg);border:1px solid #bbf7d0;border-radius:14px;padding:20px}
+  .done h3{margin:0 0 10px;color:#15803d;font-size:15px}
+  .done ul{margin:0;padding-left:18px;columns:2;column-gap:28px}
+  .done li{font-size:13px;margin-bottom:7px;break-inside:avoid}
+
+  table{width:100%;border-collapse:collapse;font-size:13px;background:#fff;border-radius:12px;overflow:hidden;
+    border:1px solid var(--line)}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line)}
+  th{background:var(--bg);font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+  tr:last-child td{border-bottom:none}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px}
+
+  footer{margin-top:30px;padding:26px 0 50px;color:var(--muted);font-size:12.5px;text-align:center}
+  .note{background:#fff;border:1px dashed var(--line);border-radius:10px;padding:12px 16px;font-size:13px;color:var(--muted);margin-top:14px}
+
+  @media(max-width:720px){
+    .stats{grid-template-columns:repeat(2,1fr)} .done ul{columns:1} h1{font-size:24px}
+  }
+  @media print{nav{display:none} body{background:#fff} .phase,.find{box-shadow:none}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <div class="kicker">StaySync · Owner Hotel Services API</div>
+    <h1>แผนพัฒนาและแก้ไข — Sales &amp; Legal Audit</h1>
+    <p class="sub">ผลตรวจสอบปัญหาด้านการขาย/การเงิน และด้านกฎหมาย (PDPA / ภาษีไทย) พร้อมแผนแก้ไขแบ่งเป็น 3 phase เรียงตามความเร่งด่วน — อ้างอิงไฟล์/บรรทัดจริงในโค้ด</p>
+    <div class="meta-row">
+      <span>📅 ตรวจเมื่อ 30 พ.ค. 2026</span>
+      <span>🗂️ NestJS + Prisma (MySQL)</span>
+      <span>🔎 ตรวจที่ source จริง (verified)</span>
+    </div>
+  </div>
+</header>
+
+<nav>
+  <div class="wrap">
+    <a href="#overview">ภาพรวม</a>
+    <a href="#p1">Phase 1 · Critical</a>
+    <a href="#p2">Phase 2 · High</a>
+    <a href="#p3">Phase 3 · Medium</a>
+    <a href="#done">ทำดีแล้ว</a>
+    <a href="#summary">ตารางสรุป</a>
+  </div>
+</nav>
+
+<section id="overview" class="wrap">
+  <h2><span class="num">0</span> ภาพรวม</h2>
+  <p class="lead">รวม 11 ประเด็นหลักที่ควรแก้ + ระบบที่ทำได้ดีอยู่แล้ว จุดที่อันตรายสุดคือ payment webhook ที่ไม่ตรวจลายเซ็น (เปิดบริการฟรีได้จริง) และ PDPA erasure ที่ลบข้อมูลไม่ครบ</p>
+  <div class="stats">
+    <div class="stat c"><div class="n">3</div><div class="l">Critical</div></div>
+    <div class="stat h"><div class="n">4</div><div class="l">High</div></div>
+    <div class="stat m"><div class="n">4</div><div class="l">Medium</div></div>
+    <div class="stat o"><div class="n">7</div><div class="l">ทำดีแล้ว</div></div>
+  </div>
+  <div class="note">💡 แนะนำลำดับการลงมือ: Phase 1 (ความปลอดภัยการเงิน + PDPA erasure) ต้องเสร็จก่อน go-live หรือ hotfix ทันที — ทั้งสามข้อเปิดช่องให้ activate subscription / mark invoice paid โดยไม่จ่ายเงิน หรือทำให้ผิด PDPA ม.33</div>
+</section>
+
+<section id="p1" class="wrap">
+  <h2><span class="num">1</span> Phase 1 — Critical (Hotfix ทันที)</h2>
+  <p class="lead">เป้าหมาย: อุดช่องโหว่ที่ทำให้เสียเงิน/ผิดกฎหมายโดยตรง</p>
+
+  <div class="phase">
+    <div class="phase-head">
+      <div class="phase-title">🔐 ความปลอดภัยการชำระเงิน + ความครบถ้วน PDPA</div>
+      <div><span class="phase-tag b-crit">CRITICAL</span> <span class="phase-when">สัปดาห์ที่ 1</span></div>
+    </div>
+    <p class="phase-goal">รวมงาน 3 ก้อน — ทำคู่กับ regression test ของ payment flow เพื่อกัน side-effect</p>
+
+    <div class="find crit">
+      <div class="find-top">
+        <div><h3 class="find-title">PromptPay webhook เปิด public + ไม่ verify signature</h3>
+        <span class="find-id">SALES-01</span></div>
+        <span class="badge b-crit">Critical</span>
+      </div>
+      <span class="file">promptpay.controller.ts:52 (@Public) · promptpay.service.ts:265 handleWebhook()</span>
+      <p><span class="lbl">ปัญหา:</span> endpoint <code>POST /promptpay/webhook</code> ติด <code>@Public()</code> และไม่ตรวจลายเซ็น — ผู้โจมตียิง <code>transactionRef</code> + <code>status:paid</code> ปลอม เพื่อ mark invoice เป็นจ่ายแล้วและเปิด subscription ฟรีได้ (กันแค่ <code>status !== 'pending'</code> ซึ่งไม่พอ)</p>
+      <p class="fix"><span class="lbl">แก้:</span> เพิ่ม HMAC-SHA256 signature verification (ดึง secret จาก ConfigService), reject ถ้า signature ไม่ผ่าน, และใช้ conditional update (<code>where:{status:'pending'}</code>) กัน race</p>
+      <div class="chips"><span class="chip">Effort: <b>M</b></span><span class="chip">เจ้าของ: <b>Backend/Payments</b></span><span class="chip">Test: replay + fake-signature spec</span></div>
+    </div>
+
+    <div class="find crit">
+      <div class="find-top">
+        <div><h3 class="find-title">TrueMoney/2C2P callback ไม่ verify hash</h3>
+        <span class="find-id">SALES-02</span></div>
+        <span class="badge b-crit">Critical</span>
+      </div>
+      <span class="file">truemoney.service.ts:109 handleCallback() · truemoney.controller.ts:32</span>
+      <p><span class="lbl">ปัญหา:</span> เชื่อ <code>dto.respCode === '0000'</code> ตรงๆ ไม่ตรวจ JWT/hash จาก gateway (คอมเมนต์บอก "ตรวจ hash" แต่โค้ดไม่ได้ทำ) + guard ของ route <code>/callback</code> ไม่สอดคล้องกับ route อื่น</p>
+      <p class="fix"><span class="lbl">แก้:</span> verify ลายเซ็น JWT/HMAC ของ callback ด้วย <code>secretKey</code> ก่อน mark paid, จัด guard ให้ชัด (public แต่ verified)</p>
+      <div class="chips"><span class="chip">Effort: <b>M</b></span><span class="chip">เจ้าของ: <b>Backend/Payments</b></span><span class="chip">Test: forged-callback rejection</span></div>
+    </div>
+
+    <div class="find crit">
+      <div class="find-top">
+        <div><h3 class="find-title">Right to Erasure ลบไม่ครบ — PII ตกค้างในตาราง Booking</h3>
+        <span class="find-id">LEGAL-01</span></div>
+        <span class="badge b-crit">Critical</span>
+      </div>
+      <span class="file">schema.prisma:288-291 (Booking) · data-export.processor.ts:252 anonymizeTenantGuests()</span>
+      <p><span class="lbl">ปัญหา:</span> ตาราง <code>Booking</code> เก็บ <code>guestFirstName/LastName/Email/Phone</code> ซ้ำ แต่ฟังก์ชัน erasure anonymize เฉพาะตาราง <code>guest</code> และ <code>employee</code> → หลังลบ ชื่อ/อีเมล/เบอร์ลูกค้ายังอยู่ใน booking (และอีกจุดที่ schema:425) <b>ผิด PDPA ม.33</b></p>
+      <p class="fix"><span class="lbl">แก้:</span> ขยาย erasure ให้ <code>updateMany</code> ฟิลด์ PII ใน booking/related models ด้วย หรือเลิก denormalize แล้ว join จาก guest ตอน query</p>
+      <div class="chips"><span class="chip">Effort: <b>M</b></span><span class="chip">เจ้าของ: <b>Backend/Compliance</b></span><span class="chip">Test: erasure แล้ว assert ไม่เหลือ PII</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="p2" class="wrap">
+  <h2><span class="num">2</span> Phase 2 — High (Sprint ถัดไป)</h2>
+  <p class="lead">เป้าหมาย: ความถูกต้องของเงิน/ภาษี และความสอดคล้องของข้อมูล</p>
+
+  <div class="phase">
+    <div class="phase-head">
+      <div class="phase-title">💳 ความถูกต้องการเงิน + ใบกำกับภาษี</div>
+      <div><span class="phase-tag b-high">HIGH</span> <span class="phase-when">สัปดาห์ที่ 2–3</span></div>
+    </div>
+    <p class="phase-goal">เน้นป้องกัน payment ซ้ำ และทำให้ใบแจ้งหนี้ถูกต้องตามภาษีไทย</p>
+
+    <div class="find high">
+      <div class="find-top">
+        <div><h3 class="find-title">Stripe webhook ไม่มี idempotency → payment ซ้ำ</h3>
+        <span class="find-id">SALES-03</span></div>
+        <span class="badge b-high">High</span>
+      </div>
+      <span class="file">stripe.service.ts:175 onPaymentIntentSucceeded() (signature ตรวจถูกต้องแล้ว ✓)</span>
+      <p><span class="lbl">ปัญหา:</span> <code>payments.create()</code> โดยไม่เช็คว่ามี payment สำเร็จอยู่แล้ว — Stripe retry webhook = payment ซ้ำ + invoice ถูก mark paid ซ้ำ</p>
+      <p class="fix"><span class="lbl">แก้:</span> ก่อน create เช็ค <code>findFirst({invoice_id, status:'approved'})</code> แล้ว return เป็น no-op ถ้ามีแล้ว (idempotent)</p>
+      <div class="chips"><span class="chip">Effort: <b>S</b></span><span class="chip">เจ้าของ: <b>Backend/Payments</b></span><span class="chip">Test: duplicate webhook → 1 payment</span></div>
+    </div>
+
+    <div class="find high">
+      <div class="find-top">
+        <div><h3 class="find-title">approvePayment ไม่กันกดซ้ำ + side-effects ไม่อยู่ใน transaction</h3>
+        <span class="find-id">SALES-04</span></div>
+        <span class="badge b-high">High</span>
+      </div>
+      <span class="file">payments.service.ts:104 approvePayment()</span>
+      <p><span class="lbl">ปัญหา:</span> ไม่เช็คว่า approve ไปแล้ว และ side-effects (invoice/subscription/booking) รันใน <code>.catch()</code> แยกกัน ไม่ห่อ <code>$transaction</code> → กด approve 2 ครั้ง = ต่ออายุ subscription ซ้ำ; พังกลางทาง = ข้อมูลไม่สอดคล้อง</p>
+      <p class="fix"><span class="lbl">แก้:</span> guard <code>if(status==='approved') throw</code>, ห่อทั้ง flow ใน <code>prisma.$transaction()</code></p>
+      <div class="chips"><span class="chip">Effort: <b>M</b></span><span class="chip">เจ้าของ: <b>Backend/Payments</b></span><span class="chip">Test: double-approve idempotent</span></div>
+    </div>
+
+    <div class="find high">
+      <div class="find-top">
+        <div><h3 class="find-title">ใบแจ้งหนี้ SaaS ไม่มี VAT (ผิดข้อกำหนดใบกำกับภาษี)</h3>
+        <span class="find-id">LEGAL-02</span></div>
+        <span class="badge b-high">High</span>
+      </div>
+      <span class="file">invoices.service.ts:10 create() · schema.prisma:1151 (มีแค่ field amount)</span>
+      <p><span class="lbl">ปัญหา:</span> ใบแจ้งหนี้ค่า subscription เก็บแค่ <code>amount</code> ไม่มี <code>subtotal/vat_rate/vat_amount</code> — ออกใบกำกับภาษีเต็มรูปไม่ได้ <i>(หมายเหตุ: ฝั่ง AR ของโรงแรมใน <code>modules/accounts-receivable</code> มี VAT แล้ว ขาดเฉพาะบิล SaaS)</i></p>
+      <p class="fix"><span class="lbl">แก้:</span> เพิ่มฟิลด์ subtotal/vat_rate/vat_amount + คำนวณ VAT 7% ตอนสร้าง, แสดงบนใบกำกับ</p>
+      <div class="chips"><span class="chip">Effort: <b>M</b></span><span class="chip">เจ้าของ: <b>Backend/Billing</b></span><span class="chip">ต้อง migration</span></div>
+    </div>
+
+    <div class="find high">
+      <div class="find-top">
+        <div><h3 class="find-title">ใบกำกับ AR: ไม่บังคับ seller/buyer tax ID + ไม่มี gap-detection เลขรัน</h3>
+        <span class="find-id">LEGAL-03</span></div>
+        <span class="badge b-high">High</span>
+      </div>
+      <span class="file">modules/accounts-receivable/ar-invoices/ar-invoices.service.ts · document-settings</span>
+      <p><span class="lbl">ปัญหา:</span> ออกใบกำกับได้โดยไม่มี seller tax ID; B2B (City Ledger) ไม่บังคับ buyer tax ID; เลขรันใบกำกับไม่มี audit ตรวจเลขขาด/ซ้ำ (กรมสรรพากรต้องเรียงต่อเนื่องไม่มีช่อง)</p>
+      <p class="fix"><span class="lbl">แก้:</span> validate <code>settings.taxId</code> ก่อน issue + denormalize ลงใบกำกับ; เพิ่ม DocumentSequenceAudit log ทุกครั้งที่เดินเลข (issue/void)</p>
+      <div class="chips"><span class="chip">Effort: <b>L</b></span><span class="chip">เจ้าของ: <b>Backend/Accounting</b></span></div>
+    </div>
+  </div>
+</section>
+
+<section id="p3" class="wrap">
+  <h2><span class="num">3</span> Phase 3 — Medium &amp; Hardening</h2>
+  <p class="lead">เป้าหมาย: ปิดช่อง race condition, เสริมหลักฐานความยินยอม และทำ audit log ให้ tamper-evident</p>
+
+  <div class="phase">
+    <div class="phase-head">
+      <div class="phase-title">🧩 Robustness &amp; Compliance Hardening</div>
+      <div><span class="phase-tag b-med">MEDIUM</span> <span class="phase-when">สัปดาห์ที่ 4+</span></div>
+    </div>
+    <p class="phase-goal">ทำหลังจาก Critical/High เสร็จ — ไม่บล็อก go-live แต่ลดความเสี่ยงระยะยาว</p>
+
+    <div class="find med">
+      <div class="find-top">
+        <div><h3 class="find-title">Coupon redeem race condition (TOCTOU)</h3>
+        <span class="find-id">SALES-05</span></div>
+        <span class="badge b-med">Medium</span>
+      </div>
+      <span class="file">coupons.service.ts:388 (เช็ค limit) vs :439 ($transaction)</span>
+      <p><span class="lbl">ปัญหา:</span> เช็ค limit ต่อ tenant อยู่<b>นอก</b> transaction → 2 request พร้อมกันผ่านได้ทั้งคู่ (มี unique constraint กันบางส่วน)</p>
+      <p class="fix"><span class="lbl">แก้:</span> ย้ายการนับ/เช็ค limit เข้าไปใน <code>$transaction</code> เดียวกับการสร้าง redemption</p>
+      <div class="chips"><span class="chip">Effort: <b>S</b></span><span class="chip">เจ้าของ: <b>Backend/Billing</b></span></div>
+    </div>
+
+    <div class="find med">
+      <div class="find-top">
+        <div><h3 class="find-title">ไม่บันทึก consent IP address</h3>
+        <span class="find-id">LEGAL-04</span></div>
+        <span class="badge b-med">Medium</span>
+      </div>
+      <span class="file">guests.service.ts:150 · create-guest.dto.ts (ไม่มี field IP)</span>
+      <p><span class="lbl">ปัญหา:</span> คอมเมนต์บอกเก็บ IP แต่เขียนจริงแค่ <code>consentGiven/consentAt/consentVersion</code> — พิสูจน์การให้ความยินยอม ณ เวลา/ที่มาไม่ได้</p>
+      <p class="fix"><span class="lbl">แก้:</span> ดึง IP จาก request (<code>req.ip</code>/X-Forwarded-For) เขียนลง <code>consentIpAddress</code>; ทำให้ employee onboarding ด้วย</p>
+      <div class="chips"><span class="chip">Effort: <b>S</b></span><span class="chip">เจ้าของ: <b>Backend/Compliance</b></span></div>
+    </div>
+
+    <div class="find med">
+      <div class="find-top">
+        <div><h3 class="find-title">Audit log ยังไม่ tamper-evident + ไม่มี cron retention</h3>
+        <span class="find-id">LEGAL-05</span></div>
+        <span class="badge b-med">Medium</span>
+      </div>
+      <span class="file">schema.prisma (AuditLog) · common/services/data-retention.service.ts</span>
+      <p><span class="lbl">ปัญหา:</span> audit log แก้ไข/ลบได้ (ไม่มี hash chain) และ retention policy ของ audit log (3 ปี) ประกาศไว้แต่ไม่มี cron ลบจริง (ลบแค่ guests/employees)</p>
+      <p class="fix"><span class="lbl">แก้:</span> เพิ่ม <code>hash</code> (SHA256 ของ record ก่อนหน้า+ปัจจุบัน) ทำ hash chain; เพิ่ม <code>@Cron</code> purge audit log ตาม policy</p>
+      <div class="chips"><span class="chip">Effort: <b>M</b></span><span class="chip">เจ้าของ: <b>Backend/Compliance</b></span></div>
+    </div>
+
+    <div class="find low">
+      <div class="find-top">
+        <div><h3 class="find-title">รายการที่ควรตรวจเพิ่ม (ยืนยันด้วย business logic)</h3>
+        <span class="find-id">REVIEW</span></div>
+        <span class="badge b-low">Low / Review</span>
+      </div>
+      <p><span class="lbl">ตรวจเพิ่ม:</span> proration คิดแบบ fix 30 วัน/เดือน (subscription-management), downgrade มีผลทันทีแทนที่จะรอรอบบิล, loyalty points อาจติดลบเมื่อ booking ติดลบ, ยังไม่บังคับ refund/cancellation policy และไม่ track การยอมรับ T&amp;C</p>
+      <p class="fix"><span class="lbl">แนวทาง:</span> เลือกทำเมื่อยืนยันกับฝั่งธุรกิจว่าพฤติกรรมที่ถูกต้องคืออะไร แล้วใส่ test ครอบ</p>
+      <div class="chips"><span class="chip">Effort: <b>S–M</b></span><span class="chip">เจ้าของ: <b>Product + Backend</b></span></div>
+    </div>
+  </div>
+</section>
+
+<section id="done" class="wrap">
+  <h2><span class="num">✓</span> ส่วนที่ทำได้ดีแล้ว (ไม่ต้องทำซ้ำ)</h2>
+  <div class="done">
+    <h3>มี foundation ที่แข็งแรงอยู่แล้ว</h3>
+    <ul>
+      <li>Encryption AES-256-GCM สำหรับ nationalId / passport / bankAccount</li>
+      <li>บังคับ ENCRYPTION_KEY ใน production (env validation)</li>
+      <li>Data export / erasure queue (Bull) — PDPA Right to Access</li>
+      <li>Data-retention service + anonymization</li>
+      <li>Payroll masking (RBAC + PDPA)</li>
+      <li>Stripe webhook signature verification ✓</li>
+      <li>Tenant isolation ผ่าน Prisma middleware</li>
+      <li>ใบกำกับ AR แก้ไม่ได้หลัง issue (immutable)</li>
+      <li>WHT certificates + sequential numbering ฝั่ง tax-management</li>
+    </ul>
+  </div>
+</section>
+
+<section id="summary" class="wrap">
+  <h2><span class="num">≡</span> ตารางสรุปทั้งหมด</h2>
+  <table>
+    <thead><tr><th>ID</th><th>ประเด็น</th><th>ฝั่ง</th><th>Severity</th><th>Phase</th><th>Effort</th></tr></thead>
+    <tbody>
+      <tr><td>SALES-01</td><td>PromptPay webhook ไม่ verify signature (public)</td><td>การขาย</td><td><span class="dot" style="background:var(--crit)"></span>Critical</td><td>1</td><td>M</td></tr>
+      <tr><td>SALES-02</td><td>TrueMoney callback ไม่ verify hash</td><td>การขาย</td><td><span class="dot" style="background:var(--crit)"></span>Critical</td><td>1</td><td>M</td></tr>
+      <tr><td>LEGAL-01</td><td>Erasure ลบไม่ครบ — PII ตกค้างใน Booking</td><td>กฎหมาย</td><td><span class="dot" style="background:var(--crit)"></span>Critical</td><td>1</td><td>M</td></tr>
+      <tr><td>SALES-03</td><td>Stripe webhook ไม่มี idempotency</td><td>การขาย</td><td><span class="dot" style="background:var(--high)"></span>High</td><td>2</td><td>S</td></tr>
+      <tr><td>SALES-04</td><td>approvePayment ไม่กันซ้ำ + ไม่มี transaction</td><td>การขาย</td><td><span class="dot" style="background:var(--high)"></span>High</td><td>2</td><td>M</td></tr>
+      <tr><td>LEGAL-02</td><td>ใบแจ้งหนี้ SaaS ไม่มี VAT</td><td>กฎหมาย</td><td><span class="dot" style="background:var(--high)"></span>High</td><td>2</td><td>M</td></tr>
+      <tr><td>LEGAL-03</td><td>AR: ไม่บังคับ tax ID + ไม่มี gap-detection</td><td>กฎหมาย</td><td><span class="dot" style="background:var(--high)"></span>High</td><td>2</td><td>L</td></tr>
+      <tr><td>SALES-05</td><td>Coupon redeem race condition</td><td>การขาย</td><td><span class="dot" style="background:var(--med)"></span>Medium</td><td>3</td><td>S</td></tr>
+      <tr><td>LEGAL-04</td><td>ไม่บันทึก consent IP</td><td>กฎหมาย</td><td><span class="dot" style="background:var(--med)"></span>Medium</td><td>3</td><td>S</td></tr>
+      <tr><td>LEGAL-05</td><td>Audit log ไม่ tamper-evident + ไม่มี cron retention</td><td>กฎหมาย</td><td><span class="dot" style="background:var(--med)"></span>Medium</td><td>3</td><td>M</td></tr>
+      <tr><td>REVIEW</td><td>Proration / downgrade / loyalty / refund policy</td><td>การขาย</td><td><span class="dot" style="background:var(--low)"></span>Low</td><td>3</td><td>S–M</td></tr>
+    </tbody>
+  </table>
+  <div class="note">Effort: <b>S</b> ≈ &lt;0.5 วัน · <b>M</b> ≈ 1–2 วัน · <b>L</b> ≈ 3–5 วัน (รวม test) — ประเมินคร่าวๆ ปรับตามทีมได้</div>
+</section>
+
+<footer>
+  <div class="wrap">StaySync — Owner Hotel Services API · Sales &amp; Legal Audit Plan · สร้างเมื่อ 30 พ.ค. 2026<br>
+  ทุกประเด็นตรวจที่ source จริงและ verify แล้ว · จัดลำดับตามความเสี่ยงด้านการเงินและกฎหมาย</div>
+</footer>
+
+</body>
+</html>

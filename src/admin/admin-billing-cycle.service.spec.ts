@@ -93,7 +93,8 @@ describe('AdminBillingCycleService.getBillingInfo - nextBillingDate', () => {
     const result = await service.getBillingInfo('sub-1');
 
     expect(result.nextBillingDate).toBe('2026-06-01');
-    expect(result.currentPeriodEnd).toBe('2026-06-01');
+    // currentPeriodEnd now carries the full expiry moment (ISO datetime).
+    expect(result.currentPeriodEnd).toBe('2026-06-01T00:00:00.000Z');
     expect(result.billingAnchorDate).toBe('2026-04-01');
   });
 

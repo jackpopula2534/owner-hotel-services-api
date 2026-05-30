@@ -65,8 +65,10 @@ export class AdminBillingCycleService {
       planPrice,
       billingCycle: subscription.billingCycle || 'monthly',
       status: subscription.status,
-      currentPeriodStart: this.formatDate(subscription.startDate),
-      currentPeriodEnd: this.formatDate(subscription.endDate),
+      // Period boundaries carry a real expiry moment -> full ISO datetime.
+      currentPeriodStart: this.formatDateTimeOrNa(subscription.startDate),
+      currentPeriodEnd: this.formatDateTimeOrNa(subscription.endDate),
+      // Billing calendar dates -> date-only is fine.
       nextBillingDate: this.formatDate(nextBilling),
       billingAnchorDate: this.formatDate(anchorDate),
       autoRenew: subscription.autoRenew,
@@ -585,6 +587,21 @@ export class AdminBillingCycleService {
         return date.split('T')[0];
       }
       return date.toISOString().split('T')[0];
+    } catch {
+      return 'N/A';
+    }
+  }
+
+  /**
+   * Like formatDate but keeps the time component (full ISO). Used for period
+   * boundaries that represent a real expiry moment so the client can display
+   * date + time. Returns 'N/A' when there is no date.
+   */
+  private formatDateTimeOrNa(date: Date | string | null | undefined): string {
+    if (!date) return 'N/A';
+    try {
+      const d = typeof date === 'string' ? new Date(date) : date;
+      return Number.isNaN(d.getTime()) ? 'N/A' : d.toISOString();
     } catch {
       return 'N/A';
     }

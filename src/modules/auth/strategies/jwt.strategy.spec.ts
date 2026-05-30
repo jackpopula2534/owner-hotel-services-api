@@ -68,6 +68,7 @@ describe('JwtStrategy', () => {
 
       expect(userFindUnique).not.toHaveBeenCalled();
       expect(result).toEqual({
+        sub: 'platform-1',
         id: 'platform-1',
         userId: 'platform-1',
         email: 'admin@example.com',
@@ -109,6 +110,7 @@ describe('JwtStrategy', () => {
         select: { status: true },
       });
       expect(result).toEqual({
+        sub: 'user-1',
         id: 'user-1',
         userId: 'user-1',
         email: 'staff@example.com',

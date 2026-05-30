@@ -333,6 +333,72 @@ export class AuthService {
       throw AuthErrors.invalidCredentials();
     }
 
+    // ── Two-Factor Authentication gate ────────────────────────────────────────
+    // If the user has 2FA enabled, do NOT issue session tokens yet. Instead
+    // return a short-lived tempToken; the client must call POST /auth/2fa/validate
+    // (or /verify-backup) with this token + a TOTP/backup code to complete login.
+    const twoFactor = await this.prisma.user2FASettings
+      .findUnique({ where: { userId: user.id } })
+      .catch(() => null);
+
+    if (twoFactor?.isEnabled) {
+      const tempToken = this.generateTempToken(user.id, user.email, systemContext);
+      this.logger.log(`Login requires 2FA for user ${user.id}`);
+      return {
+        requires2FA: true,
+        tempToken,
+        email: user.email,
+      };
+    }
+    // ──────────────────────────────────────────────────────────────────────────
+
+    return this.buildLoginResponse(user, systemContext, deviceInfo);
+  }
+
+  /**
+   * Complete a login that was gated by 2FA. Called after the TOTP / backup code
+   * has been verified. Re-loads the user, runs the same lifecycle + system-access
+   * checks as login(), then issues real session tokens.
+   */
+  async completeLoginWith2FA(
+    userId: string,
+    systemContext: 'main' | 'pos' | 'procurement' | 'warehouse' | 'hotel-terminal' | 'accounting' = 'main',
+    deviceInfo?: { ipAddress?: string; userAgent?: string },
+  ) {
+    // findFirst (not findUnique): `User` is tenant-scoped. findUnique is rejected
+    // by the TenantScope middleware when a tenant context is active; findFirst
+    // lets the middleware inject tenantId (and is a no-op when no context is set).
+    const user = await this.prisma.user.findFirst({ where: { id: userId } });
+    if (!user) {
+      throw AuthErrors.invalidCredentials();
+    }
+
+    if (user.status !== 'active') {
+      this.logger.warn(`2FA login blocked: ${user.email} status=${user.status}`);
+      switch (user.status) {
+        case 'suspended':
+          throw AuthErrors.accountSuspended();
+        case 'expired':
+          throw AuthErrors.accountExpired();
+        case 'inactive':
+          throw AuthErrors.accountInactive();
+        default:
+          throw AuthErrors.accountNotActive();
+      }
+    }
+
+    return this.buildLoginResponse(user, systemContext, deviceInfo);
+  }
+
+  /**
+   * Build the full login success payload (tokens + user object + property) for a
+   * validated user. Shared by login() and completeLoginWith2FA().
+   */
+  private async buildLoginResponse(
+    user: any,
+    systemContext: 'main' | 'pos' | 'procurement' | 'warehouse' | 'hotel-terminal' | 'accounting',
+    deviceInfo?: { ipAddress?: string; userAgent?: string },
+  ) {
     // Determine tenantId: prefer user.tenantId, fallback to default from UserTenant table
     let tenantId = user.tenantId ?? undefined;
     if (!tenantId) {
@@ -1020,6 +1086,50 @@ export class AuthService {
     if (/linux/i.test(userAgent))
       return `Linux — ${/chrome/i.test(userAgent) ? 'Chrome' : /firefox/i.test(userAgent) ? 'Firefox' : 'Browser'}`;
     return 'Unknown Device';
+  }
+
+  /**
+   * Sign a short-lived (5 min) temporary token used to bridge the gap between
+   * password verification and 2FA code verification. Carries systemContext so
+   * the completed login lands in the right system.
+   */
+  private generateTempToken(
+    userId: string,
+    email: string,
+    systemContext: 'main' | 'pos' | 'procurement' | 'warehouse' | 'hotel-terminal' | 'accounting',
+  ): string {
+    return this.jwtService.sign(
+      { sub: userId, email, type: '2fa_pending', systemContext },
+      { expiresIn: '5m' },
+    );
+  }
+
+  /**
+   * Verify a 2fa_pending temp token. Returns the embedded claims or null.
+   */
+  verifyTempToken(token: string): {
+    userId: string;
+    email: string;
+    systemContext: 'main' | 'pos' | 'procurement' | 'warehouse' | 'hotel-terminal' | 'accounting';
+  } | null {
+    try {
+      const payload = this.jwtService.verify(token) as {
+        sub: string;
+        email: string;
+        type?: string;
+        systemContext?: 'main' | 'pos' | 'procurement' | 'warehouse' | 'hotel-terminal' | 'accounting';
+      };
+      if (payload.type !== '2fa_pending') {
+        return null;
+      }
+      return {
+        userId: payload.sub,
+        email: payload.email,
+        systemContext: payload.systemContext ?? 'main',
+      };
+    } catch {
+      return null;
+    }
   }
 
   private async generateTokens(

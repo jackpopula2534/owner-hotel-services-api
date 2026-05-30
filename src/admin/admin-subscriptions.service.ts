@@ -68,6 +68,94 @@ export class AdminSubscriptionsService {
   }
 
   /**
+   * A subscription only generates revenue while it is ACTIVE. Trial, pending,
+   * expired and cancelled subscriptions have NOT been charged yet, so their
+   * billable amount must be 0 (the list price is still surfaced separately for
+   * "struck-through" display in the UI).
+   */
+  private isBillableStatus(status: SubscriptionStatus): boolean {
+    return status === SubscriptionStatus.ACTIVE;
+  }
+
+  /**
+   * Period boundaries carry a real expiry *moment* (e.g. trial ending at noon),
+   * so we send the full ISO datetime and let the client format date + time.
+   * Returns 'N/A' when there is no date.
+   */
+  private toIsoOrNa(date: Date | string | null | undefined): string {
+    if (!date) return 'N/A';
+    const d = new Date(date);
+    return Number.isNaN(d.getTime()) ? 'N/A' : d.toISOString();
+  }
+
+  /**
+   * Centralised pricing rule for a subscription.
+   *
+   * - Bundled add-ons (รวมในแพ็กเกจ) are included in the plan price, so their
+   *   billed amount is always 0 — only their list price (originalPrice) is kept
+   *   for display.
+   * - Purchased add-ons are billed at their list price, but only when the
+   *   subscription is in a billable (ACTIVE) state.
+   * - plan price is billed only when the subscription is billable.
+   */
+  private computePricing(
+    status: SubscriptionStatus,
+    planPrice: number,
+    bundledAddons: Array<{ name: string; price: number }>,
+    purchasedAddons: Array<{ name: string; price: number }>,
+  ): {
+    addons: Array<{
+      name: string;
+      price: number;
+      originalPrice: number;
+      isBundled: boolean;
+      isBilled: boolean;
+    }>;
+    addonAmount: number;
+    addonOriginalAmount: number;
+    pricePerMonth: number;
+    originalPricePerMonth: number;
+    isTrial: boolean;
+  } {
+    const billable = this.isBillableStatus(status);
+
+    const mappedBundled = bundledAddons.map((a) => ({
+      name: a.name,
+      // Bundled add-ons never add to the bill — their cost is part of the plan.
+      price: 0,
+      originalPrice: a.price,
+      isBundled: true,
+      isBilled: false,
+    }));
+
+    const mappedPurchased = purchasedAddons.map((a) => ({
+      name: a.name,
+      // Purchased add-ons are billed only when the subscription is billable.
+      price: billable ? a.price : 0,
+      originalPrice: a.price,
+      isBundled: false,
+      isBilled: billable && a.price > 0,
+    }));
+
+    const addons = [...mappedBundled, ...mappedPurchased];
+
+    const addonAmount = addons.reduce((sum, a) => sum + a.price, 0);
+    const addonOriginalAmount = addons.reduce((sum, a) => sum + a.originalPrice, 0);
+
+    const pricePerMonth = (billable ? planPrice : 0) + addonAmount;
+    const originalPricePerMonth = planPrice + addonOriginalAmount;
+
+    return {
+      addons,
+      addonAmount,
+      addonOriginalAmount,
+      pricePerMonth,
+      originalPricePerMonth,
+      isTrial: !billable,
+    };
+  }
+
+  /**
    * GET /api/admin/subscriptions
    * Get all subscriptions with filtering, search, and pagination
    */
@@ -157,14 +245,10 @@ export class AdminSubscriptionsService {
         name: sf.feature?.name || 'Unknown',
         price: Number(sf.price || 0),
       }));
-      const addons = [...bundledAddons, ...purchasedAddons];
 
-      // Calculate addon total amount
-      const addonAmount = addons.reduce((sum, addon) => sum + addon.price, 0);
-
-      // Calculate total price per month
+      // Apply status-aware pricing rules (bundled -> 0, non-active -> not billed).
       const planPrice = Number(sub.plan?.priceMonthly || 0);
-      const pricePerMonth = planPrice + addonAmount;
+      const pricing = this.computePricing(sub.status, planPrice, bundledAddons, purchasedAddons);
 
       // Format status for display
       const statusDisplay = this.formatStatus(sub.status);
@@ -180,12 +264,16 @@ export class AdminSubscriptionsService {
         plan: sub.plan?.name || 'No Plan',
         previousPlan: previousPlanName,
         period: {
-          start: sub.startDate ? new Date(sub.startDate).toISOString().split('T')[0] : 'N/A',
-          end: sub.endDate ? new Date(sub.endDate).toISOString().split('T')[0] : 'N/A',
+          // Full ISO datetime so the client can show date + time of expiry.
+          start: this.toIsoOrNa(sub.startDate),
+          end: this.toIsoOrNa(sub.endDate),
         },
-        addons,
-        addonAmount,
-        pricePerMonth,
+        addons: pricing.addons,
+        addonAmount: pricing.addonAmount,
+        addonOriginalAmount: pricing.addonOriginalAmount,
+        pricePerMonth: pricing.pricePerMonth,
+        originalPricePerMonth: pricing.originalPricePerMonth,
+        isTrial: pricing.isTrial,
         status: statusDisplay,
       };
     });
@@ -318,17 +406,22 @@ export class AdminSubscriptionsService {
     const bundledAddonsByPlanId = await this.getPlanAddonsByPlanIds([subscription.planId]);
     const bundledAddons = bundledAddonsByPlanId.get(subscription.planId) || [];
 
-    // Build add-ons list
-    const purchasedAddons: SubscriptionAddonDto[] = (subscription.subscriptionFeatures || []).map((sf) => ({
+    // Build purchased add-ons list (subscription_features)
+    const purchasedAddons = (subscription.subscriptionFeatures || []).map((sf) => ({
       name: sf.feature?.name || 'Unknown',
       price: Number(sf.price || 0),
     }));
-    const addons: SubscriptionAddonDto[] = [...bundledAddons, ...purchasedAddons];
 
-    // Calculate total price
+    // Apply status-aware pricing rules (bundled -> 0, non-active -> not billed).
     const planPrice = Number(subscription.plan?.priceMonthly || 0);
-    const addonTotal = addons.reduce((sum, a) => sum + a.price, 0);
-    const pricePerMonth = planPrice + addonTotal;
+    const pricing = this.computePricing(
+      subscription.status,
+      planPrice,
+      bundledAddons,
+      purchasedAddons,
+    );
+    const addons: SubscriptionAddonDto[] = pricing.addons;
+    const pricePerMonth = pricing.pricePerMonth;
 
     // Get latest invoice
     const latestInvoice = subscription.invoices?.sort(
@@ -346,14 +439,13 @@ export class AdminSubscriptionsService {
       previousPlan: subscription.previousPlan?.name || undefined,
       addons,
       period: {
-        start: subscription.startDate
-          ? new Date(subscription.startDate).toISOString().split('T')[0]
-          : 'N/A',
-        end: subscription.endDate
-          ? new Date(subscription.endDate).toISOString().split('T')[0]
-          : 'N/A',
+        // Full ISO datetime so the client can show date + time of expiry.
+        start: this.toIsoOrNa(subscription.startDate),
+        end: this.toIsoOrNa(subscription.endDate),
       },
       pricePerMonth,
+      originalPricePerMonth: pricing.originalPricePerMonth,
+      isTrial: pricing.isTrial,
       status: this.formatStatus(subscription.status),
       invoice: latestInvoice?.invoiceNo || undefined,
       autoRenew: subscription.autoRenew,

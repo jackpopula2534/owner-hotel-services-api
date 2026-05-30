@@ -19,6 +19,7 @@ export class SubscriptionManagementController {
     return this.subscriptionManagementService.upgradePlan(
       upgradePlanDto.subscriptionId,
       upgradePlanDto.newPlanId,
+      { createInvoice: upgradePlanDto.createInvoice },
     );
   }
 

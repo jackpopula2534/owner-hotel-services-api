@@ -1390,7 +1390,7 @@ export class BookingsService {
         invoiceNo,
         amount: Number(booking.grandTotal ?? booking.totalPrice),
         status: InvoiceStatus.PENDING,
-        dueDate,
+        dueDate: dueDate.toISOString(),
       });
 
       this.logger.log(`Invoice ${invoiceNo} auto-generated for booking ${booking.id}`);
