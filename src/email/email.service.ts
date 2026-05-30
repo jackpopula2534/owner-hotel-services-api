@@ -62,7 +62,10 @@ export class EmailService implements OnModuleInit {
         user: smtpUser,
         pass: smtpPass,
       },
-    });
+      // Force IPv4 to avoid "EHOSTUNREACH" on systems with broken IPv6 routing
+      // @ts-ignore - 'family' is passed to net.connect
+      family: 4,
+    } as any);
 
     try {
       await this.transporter.verify();
