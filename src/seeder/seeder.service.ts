@@ -1215,14 +1215,19 @@ export class SeederService {
           const dueDate = new Date(createdDate);
           dueDate.setDate(dueDate.getDate() + 15);
 
-          const invoice = await this.invoicesService.create({
-            tenantId: tenant.id,
-            subscriptionId: subscription.id,
-            invoiceNo,
-            amount: invoiceData.amount,
-            status: invoiceData.status,
-            dueDate: dueDate.toISOString(),
-          });
+          const invoice = await this.invoicesService.create(
+            {
+              tenantId: tenant.id,
+              subscriptionId: subscription.id,
+              invoiceNo,
+              amount: invoiceData.amount,
+              status: invoiceData.status,
+              dueDate: dueDate.toISOString(),
+            },
+            // Seeder intentionally creates multiple invoices per tenant for
+            // demo data — bypass the outstanding-invoice guard here only.
+            { skipOutstandingCheck: true },
+          );
 
           this.logger.log(
             `    ✓ Created invoice: ${invoiceNo} (฿${invoiceData.amount}) - ${invoiceData.status}`,

@@ -1,6 +1,12 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+  Logger,
+} from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, In, IsNull, Not } from 'typeorm';
 import { SubscriptionFeature } from '../subscription-features/entities/subscription-feature.entity';
 import {
   SubscriptionFeatureLogs,
@@ -373,6 +379,37 @@ export class AdminSubscriptionFeaturesService {
       const createInvoice = dto.createInvoice !== false; // Default to true
 
       if (createInvoice && proratedAmount > 0) {
+        // Block double-billing: no new subscription invoice while an
+        // outstanding (pending/finalized) one still exists for this tenant.
+        const outstanding = await queryRunner.manager.find(Invoice, {
+          where: {
+            tenantId: subscription.tenantId,
+            bookingId: IsNull(),
+            subscriptionId: Not(IsNull()),
+            status: In(['pending', 'finalized'] as InvoiceStatus[]),
+          },
+        });
+        if (outstanding.length > 0) {
+          const total = outstanding.reduce((sum, inv) => sum + Number(inv.amount), 0);
+          throw new ConflictException({
+            success: false,
+            error: {
+              code: 'OUTSTANDING_INVOICE_EXISTS',
+              message:
+                'มีใบแจ้งหนี้ที่ยังค้างชำระอยู่ กรุณาชำระหรือยกเลิกใบแจ้งหนี้เดิมก่อนจึงจะออกใบแจ้งหนี้ใหม่ได้',
+              outstandingCount: outstanding.length,
+              outstandingTotal: total,
+              invoices: outstanding.map((inv) => ({
+                id: inv.id,
+                invoiceNo: inv.invoiceNo,
+                amount: Number(inv.amount),
+                status: inv.status,
+                dueDate: inv.dueDate,
+              })),
+            },
+          });
+        }
+
         const invoice = await this.createAddonInvoiceWithTransaction(
           queryRunner,
           subscription,

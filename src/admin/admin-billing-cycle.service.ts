@@ -1,6 +1,12 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+  Logger,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, IsNull, Not, Repository } from 'typeorm';
 import {
   Subscription,
   SubscriptionStatus,
@@ -268,6 +274,9 @@ export class AdminBillingCycleService {
     const createInvoice = dto.createInvoice !== false;
 
     if (createInvoice) {
+      // Block double-billing: refuse to issue a new subscription invoice while
+      // the tenant still has an outstanding (unpaid) one.
+      await this.assertNoOutstandingSubscriptionInvoices(subscription.tenantId);
       const invoice = await this.createRenewalInvoice(subscription, renewalAmount, periodMonths);
       invoiceNo = invoice.invoiceNo;
     }
@@ -542,6 +551,43 @@ export class AdminBillingCycleService {
     const dailyRate = cycleAmount / totalDays;
 
     return Math.round(dailyRate * remainingDays);
+  }
+
+  /**
+   * Refuse to create a new subscription invoice while the tenant still owes on
+   * an outstanding (pending/finalized) one. Mirrors
+   * InvoicesService.assertNoOutstandingSubscriptionInvoices for the TypeORM path.
+   */
+  private async assertNoOutstandingSubscriptionInvoices(tenantId: string): Promise<void> {
+    const outstanding = await this.invoicesRepository.find({
+      where: {
+        tenantId,
+        bookingId: IsNull(),
+        subscriptionId: Not(IsNull()),
+        status: In(['pending', 'finalized'] as InvoiceStatus[]),
+      },
+      order: { createdAt: 'ASC' },
+    });
+    if (outstanding.length > 0) {
+      const total = outstanding.reduce((sum, inv) => sum + Number(inv.amount), 0);
+      throw new ConflictException({
+        success: false,
+        error: {
+          code: 'OUTSTANDING_INVOICE_EXISTS',
+          message:
+            'มีใบแจ้งหนี้ที่ยังค้างชำระอยู่ กรุณาชำระหรือยกเลิกใบแจ้งหนี้เดิมก่อนจึงจะออกใบแจ้งหนี้ใหม่ได้',
+          outstandingCount: outstanding.length,
+          outstandingTotal: total,
+          invoices: outstanding.map((inv) => ({
+            id: inv.id,
+            invoiceNo: inv.invoiceNo,
+            amount: Number(inv.amount),
+            status: inv.status,
+            dueDate: inv.dueDate,
+          })),
+        },
+      });
+    }
   }
 
   private async createRenewalInvoice(
