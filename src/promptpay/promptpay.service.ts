@@ -1,7 +1,14 @@
-import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
+import { verifyHmacSha256 } from '../webhooks/webhook-signature.util';
 import * as QRCode from 'qrcode';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -10,7 +17,6 @@ import {
   TransactionQueryDto,
   WebhookPaymentDto,
   RefundRequestDto,
-  PromptPayType,
 } from './dto/promptpay.dto';
 
 @Injectable()
@@ -26,6 +32,16 @@ export class PromptPayService {
     this.promptpayId = this.configService.get<string>('PROMPTPAY_ID', '');
     if (!this.promptpayId) {
       this.logger.warn('PROMPTPAY_ID not configured');
+    }
+
+    // M3: surface a misconfiguration at startup rather than only failing closed
+    // at runtime. Without the secret, production webhooks are rejected (401) and
+    // payments silently stop reconciling — make that loud at boot.
+    const isProduction = this.configService.get<string>('NODE_ENV', 'development') === 'production';
+    if (isProduction && !this.configService.get<string>('PROMPTPAY_WEBHOOK_SECRET', '')) {
+      this.logger.error(
+        'PROMPTPAY_WEBHOOK_SECRET is not set in production — all PromptPay webhooks will be REJECTED. Set it before going live.',
+      );
     }
   }
 
@@ -64,7 +80,7 @@ export class PromptPayService {
     });
 
     // Save transaction to database
-    const transaction = await this.prisma.promptPayTransaction.create({
+    await this.prisma.promptPayTransaction.create({
       data: {
         transactionRef,
         tenantId: dto.tenantId,
@@ -262,8 +278,18 @@ export class PromptPayService {
   /**
    * Handle payment webhook from bank/payment provider
    */
-  async handleWebhook(dto: WebhookPaymentDto): Promise<{ success: boolean; message: string }> {
+  async handleWebhook(
+    dto: WebhookPaymentDto,
+    rawBody?: Buffer | string,
+    signature?: string,
+  ): Promise<{ success: boolean; message: string }> {
     this.logger.log(`Received webhook for transaction: ${dto.transactionRef}`);
+
+    // SALES-01: verify the gateway's HMAC-SHA256 signature BEFORE trusting
+    // anything in the payload. Without this, anyone could POST a forged
+    // {transactionRef,status:paid} and mark invoices paid / activate a
+    // subscription for free.
+    this.assertValidWebhookSignature(rawBody, signature);
 
     if (!dto.transactionRef) {
       this.logger.warn('Webhook received without transaction reference');
@@ -284,15 +310,26 @@ export class PromptPayService {
       return { success: false, message: 'Transaction already processed' };
     }
 
-    // Update transaction status
-    const updatedTransaction = await this.prisma.promptPayTransaction.update({
-      where: { id: transaction.id },
+    // Atomically "claim" the transaction: only one concurrent webhook can flip
+    // pending → paid. updateMany with a status guard prevents the race where
+    // two callbacks both pass the check above and both run side-effects.
+    const claim = await this.prisma.promptPayTransaction.updateMany({
+      where: { id: transaction.id, status: 'pending' },
       data: {
         status: 'paid',
         paidAt: dto.paidAt ? new Date(dto.paidAt) : new Date(),
         verificationRef: dto.bankRef,
         webhookData: dto.rawData ? JSON.parse(JSON.stringify(dto.rawData)) : null,
       },
+    });
+
+    if (claim.count === 0) {
+      this.logger.warn(`Transaction already processed (race): ${dto.transactionRef}`);
+      return { success: false, message: 'Transaction already processed' };
+    }
+
+    const updatedTransaction = await this.prisma.promptPayTransaction.findUniqueOrThrow({
+      where: { id: transaction.id },
     });
 
     // Update related booking/invoice status
@@ -309,6 +346,40 @@ export class PromptPayService {
 
     this.logger.log(`Transaction ${dto.transactionRef} marked as paid`);
     return { success: true, message: 'Payment processed successfully' };
+  }
+
+  /**
+   * Verify the inbound webhook HMAC signature. Fail-closed:
+   *   • secret configured  → signature MUST match the raw body, else 401
+   *   • secret missing in production → reject (never trust unsigned money events)
+   *   • secret missing in dev/test  → warn and allow (local testing convenience)
+   */
+  private assertValidWebhookSignature(
+    rawBody: Buffer | string | undefined,
+    signature: string | undefined,
+  ): void {
+    const secret = this.configService.get<string>('PROMPTPAY_WEBHOOK_SECRET', '');
+    const isProduction = this.configService.get<string>('NODE_ENV', 'development') === 'production';
+
+    if (!secret) {
+      if (isProduction) {
+        this.logger.error('PROMPTPAY_WEBHOOK_SECRET not configured — rejecting webhook');
+        throw new UnauthorizedException('Webhook verification not configured');
+      }
+      this.logger.warn(
+        'PROMPTPAY_WEBHOOK_SECRET not set — skipping signature check (non-production only)',
+      );
+      return;
+    }
+
+    if (rawBody === undefined) {
+      throw new UnauthorizedException('Webhook raw body unavailable for verification');
+    }
+
+    if (!verifyHmacSha256(rawBody, signature, secret)) {
+      this.logger.warn('PromptPay webhook signature verification failed');
+      throw new UnauthorizedException('Invalid webhook signature');
+    }
   }
 
   /**
@@ -520,7 +591,9 @@ export class PromptPayService {
 
     // Create refund record in payment_refunds table
     // This is a placeholder - actual implementation depends on payment gateway
-    this.logger.log(`Processing refund for ${dto.transactionRef}, amount: ${refundAmount}`);
+    this.logger.log(
+      `Processing refund for ${dto.transactionRef}, amount: ${refundAmount} (by admin ${adminId})`,
+    );
 
     await this.prisma.promptPayTransaction.update({
       where: { id: transaction.id },

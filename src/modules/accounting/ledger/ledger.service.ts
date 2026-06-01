@@ -57,11 +57,13 @@ export class LedgerService {
         accountName: b.account.name,
         accountType: b.account.type,
         openingDebit: isDebitNormal && Number(b.openingBalance) >= 0 ? Number(b.openingBalance) : 0,
-        openingCredit: !isDebitNormal && Number(b.openingBalance) >= 0 ? Number(b.openingBalance) : 0,
+        openingCredit:
+          !isDebitNormal && Number(b.openingBalance) >= 0 ? Number(b.openingBalance) : 0,
         periodDebit: Number(b.periodDebit),
         periodCredit: Number(b.periodCredit),
-        closingDebit: closing > 0 && isDebitNormal ? closing : (closing < 0 ? Math.abs(closing) : 0),
-        closingCredit: closing > 0 && !isDebitNormal ? closing : (closing < 0 ? Math.abs(closing) : 0),
+        closingDebit: closing > 0 && isDebitNormal ? closing : closing < 0 ? Math.abs(closing) : 0,
+        closingCredit:
+          closing > 0 && !isDebitNormal ? closing : closing < 0 ? Math.abs(closing) : 0,
       };
     });
 
@@ -142,7 +144,12 @@ export class LedgerService {
     };
   }
 
-  async getProfitAndLoss(tenantId: string, propertyId: string, fiscalYear: number, fiscalPeriod?: number) {
+  async getProfitAndLoss(
+    tenantId: string,
+    propertyId: string,
+    fiscalYear: number,
+    fiscalPeriod?: number,
+  ) {
     const where: Record<string, unknown> = { tenantId, propertyId, fiscalYear };
     if (fiscalPeriod) where.fiscalPeriod = { lte: fiscalPeriod };
 
@@ -156,8 +163,14 @@ export class LedgerService {
     const revenue = balances.filter((b) => b.account.type === 'REVENUE');
     const expenses = balances.filter((b) => b.account.type === 'EXPENSE');
 
-    const totalRevenue = revenue.reduce((s, b) => s + Number(b.periodCredit) - Number(b.periodDebit), 0);
-    const totalExpenses = expenses.reduce((s, b) => s + Number(b.periodDebit) - Number(b.periodCredit), 0);
+    const totalRevenue = revenue.reduce(
+      (s, b) => s + Number(b.periodCredit) - Number(b.periodDebit),
+      0,
+    );
+    const totalExpenses = expenses.reduce(
+      (s, b) => s + Number(b.periodDebit) - Number(b.periodCredit),
+      0,
+    );
     const netIncome = totalRevenue - totalExpenses;
 
     return {
@@ -180,7 +193,12 @@ export class LedgerService {
     };
   }
 
-  async getBalanceSheet(tenantId: string, propertyId: string, fiscalYear: number, fiscalPeriod?: number) {
+  async getBalanceSheet(
+    tenantId: string,
+    propertyId: string,
+    fiscalYear: number,
+    fiscalPeriod?: number,
+  ) {
     const where: Record<string, unknown> = { tenantId, propertyId, fiscalYear };
     if (fiscalPeriod) where.fiscalPeriod = { lte: fiscalPeriod };
 
@@ -196,15 +214,30 @@ export class LedgerService {
     const equity = balances.filter((b) => b.account.type === 'EQUITY');
 
     const totalAssets = assets.reduce((s, b) => s + Number(b.closingBalance), 0);
-    const totalLiabilities = liabilities.reduce((s, b) => s + Math.abs(Number(b.closingBalance)), 0);
+    const totalLiabilities = liabilities.reduce(
+      (s, b) => s + Math.abs(Number(b.closingBalance)),
+      0,
+    );
     const totalEquity = equity.reduce((s, b) => s + Math.abs(Number(b.closingBalance)), 0);
 
     return {
       propertyId,
       fiscalYear,
-      assets: assets.map((b) => ({ code: b.account.code, name: b.account.name, amount: Number(b.closingBalance) })),
-      liabilities: liabilities.map((b) => ({ code: b.account.code, name: b.account.name, amount: Math.abs(Number(b.closingBalance)) })),
-      equity: equity.map((b) => ({ code: b.account.code, name: b.account.name, amount: Math.abs(Number(b.closingBalance)) })),
+      assets: assets.map((b) => ({
+        code: b.account.code,
+        name: b.account.name,
+        amount: Number(b.closingBalance),
+      })),
+      liabilities: liabilities.map((b) => ({
+        code: b.account.code,
+        name: b.account.name,
+        amount: Math.abs(Number(b.closingBalance)),
+      })),
+      equity: equity.map((b) => ({
+        code: b.account.code,
+        name: b.account.name,
+        amount: Math.abs(Number(b.closingBalance)),
+      })),
       totalAssets,
       totalLiabilities,
       totalEquity,

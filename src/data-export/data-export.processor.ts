@@ -132,10 +132,16 @@ export class DataExportProcessor {
     });
 
     try {
-      // Anonymize all guests + employees for this tenant
-      const [guestCount, employeeCount] = await Promise.all([
+      // Anonymize all guests + employees for this tenant.
+      // PDPA มาตรา 33: ต้องลบ PII ทุกที่ที่ถูก denormalize ไว้ด้วย —
+      // ตาราง Booking และ TableReservation เก็บ ชื่อ/อีเมล/เบอร์ ของแขกซ้ำ
+      // (ไม่ได้อ้างอิงผ่าน guestId อย่างเดียว) จึงต้อง redact แยกต่างหาก
+      // มิฉะนั้น PII จะตกค้างหลัง erasure.
+      const [guestCount, employeeCount, bookingCount, reservationCount] = await Promise.all([
         this.anonymizeTenantGuests(tenantId),
         this.anonymizeTenantEmployees(tenantId),
+        this.anonymizeTenantBookings(tenantId),
+        this.anonymizeTenantReservations(tenantId),
       ]);
 
       const summary = {
@@ -143,6 +149,8 @@ export class DataExportProcessor {
         tenantId,
         guestsAnonymized: guestCount,
         employeesAnonymized: employeeCount,
+        bookingsAnonymized: bookingCount,
+        reservationsAnonymized: reservationCount,
       };
 
       const json = JSON.stringify(summary, null, 2);
@@ -314,5 +322,39 @@ export class DataExportProcessor {
       });
     }
     return employees.length;
+  }
+
+  /**
+   * Redact denormalized guest PII stored directly on Booking rows.
+   * Uses updateMany for efficiency and idempotency (re-running is safe).
+   */
+  private async anonymizeTenantBookings(tenantId: string): Promise<number> {
+    const REDACTED = '[REDACTED]';
+    const result = await (this.prisma as any).booking.updateMany({
+      where: { tenantId },
+      data: {
+        guestFirstName: REDACTED,
+        guestLastName: REDACTED,
+        guestEmail: 'redacted@anonymized.invalid',
+        guestPhone: '0000000000',
+      },
+    });
+    return result.count ?? 0;
+  }
+
+  /**
+   * Redact denormalized guest PII stored on restaurant TableReservation rows.
+   */
+  private async anonymizeTenantReservations(tenantId: string): Promise<number> {
+    const REDACTED = '[REDACTED]';
+    const result = await (this.prisma as any).tableReservation.updateMany({
+      where: { tenantId },
+      data: {
+        guestName: REDACTED,
+        guestEmail: 'redacted@anonymized.invalid',
+        guestPhone: '0000000000',
+      },
+    });
+    return result.count ?? 0;
   }
 }

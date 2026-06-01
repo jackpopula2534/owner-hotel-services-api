@@ -60,6 +60,11 @@ describe('SubscriptionController', () => {
         endDate: mockSubscription.end_date,
         autoRenew: true,
         paymentHistory: [],
+        planId: null,
+        planName: null,
+        maxRooms: null,
+        maxUsers: null,
+        priceMonthly: null,
       });
     });
 
@@ -75,6 +80,11 @@ describe('SubscriptionController', () => {
         endDate: null,
         autoRenew: false,
         paymentHistory: [],
+        planId: null,
+        planName: null,
+        maxRooms: null,
+        maxUsers: null,
+        priceMonthly: null,
       });
     });
   });

@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-  BadRequestException,
-} from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@/prisma/prisma.service';
 import { CreateArReceiptDto } from './dto/create-ar-receipt.dto';
 
@@ -111,10 +106,7 @@ export class ArReceiptsService {
 
           const newPaid = Number(invoice.paidAmount) + alloc.amount;
           const newBalance = Number(invoice.totalAmount) - newPaid;
-          const newStatus =
-            newBalance <= 0.01 ? 'PAID'
-            : newPaid > 0 ? 'PARTIAL'
-            : invoice.status;
+          const newStatus = newBalance <= 0.01 ? 'PAID' : newPaid > 0 ? 'PARTIAL' : invoice.status;
 
           await tx.arInvoice.update({
             where: { id: alloc.invoiceId },
@@ -166,10 +158,7 @@ export class ArReceiptsService {
 
         const newPaid = Math.max(0, Number(invoice.paidAmount) - Number(alloc.amount));
         const newBalance = Number(invoice.totalAmount) - newPaid;
-        const newStatus =
-          invoice.status === 'VOID' ? 'VOID'
-          : newPaid <= 0 ? 'ISSUED'
-          : 'PARTIAL';
+        const newStatus = invoice.status === 'VOID' ? 'VOID' : newPaid <= 0 ? 'ISSUED' : 'PARTIAL';
 
         await tx.arInvoice.update({
           where: { id: alloc.invoiceId },

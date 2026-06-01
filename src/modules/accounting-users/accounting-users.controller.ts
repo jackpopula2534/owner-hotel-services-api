@@ -66,10 +66,7 @@ export class AccountingUsersController {
   @ApiOperation({ summary: 'Create an accounting user account' })
   @ApiResponse({ status: 201, description: 'Accounting user created' })
   @ApiResponse({ status: 409, description: 'Email already in use' })
-  async create(
-    @Body() dto: CreateAccountingUserDto,
-    @CurrentUser() caller: AuthenticatedCaller,
-  ) {
+  async create(@Body() dto: CreateAccountingUserDto, @CurrentUser() caller: AuthenticatedCaller) {
     this.assertManager(caller);
     return this.service.create(dto, this.assertTenant(caller));
   }
@@ -93,10 +90,7 @@ export class AccountingUsersController {
 
   @Get(':userId')
   @ApiOperation({ summary: 'Get an accounting user by ID' })
-  async findOne(
-    @Param('userId') userId: string,
-    @CurrentUser() caller: AuthenticatedCaller,
-  ) {
+  async findOne(@Param('userId') userId: string, @CurrentUser() caller: AuthenticatedCaller) {
     this.assertManager(caller);
     return this.service.findOne(userId, this.assertTenant(caller));
   }
@@ -116,10 +110,7 @@ export class AccountingUsersController {
   @Delete(':userId')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Disable (soft-delete) an accounting user' })
-  async remove(
-    @Param('userId') userId: string,
-    @CurrentUser() caller: AuthenticatedCaller,
-  ) {
+  async remove(@Param('userId') userId: string, @CurrentUser() caller: AuthenticatedCaller) {
     this.assertManager(caller);
     return this.service.remove(userId, this.assertTenant(caller));
   }

@@ -200,7 +200,8 @@ export class OperatingCostsService {
       data: {
         ...dto,
         startDate: dto.startDate ? new Date(dto.startDate) : undefined,
-        endDate: dto.endDate !== undefined ? (dto.endDate ? new Date(dto.endDate) : null) : undefined,
+        endDate:
+          dto.endDate !== undefined ? (dto.endDate ? new Date(dto.endDate) : null) : undefined,
       },
     });
 
@@ -234,7 +235,10 @@ export class OperatingCostsService {
     const total = snapshots.reduce((s, x) => s + Number(x.amountForMonth), 0);
 
     // by category
-    const catMap = new Map<string, { categoryId: string; code: string; name: string; total: number; count: number }>();
+    const catMap = new Map<
+      string,
+      { categoryId: string; code: string; name: string; total: number; count: number }
+    >();
     snapshots.forEach((s) => {
       const cat = s.expense.category;
       const key = cat.id;
@@ -251,7 +255,10 @@ export class OperatingCostsService {
     });
 
     // top vendors
-    const vendorMap = new Map<string, { vendorId: string; name: string; total: number; count: number }>();
+    const vendorMap = new Map<
+      string,
+      { vendorId: string; name: string; total: number; count: number }
+    >();
     snapshots.forEach((s) => {
       const v = s.expense.vendor;
       if (!v) return;
@@ -296,7 +303,12 @@ export class OperatingCostsService {
   async getTrend(q: TrendQueryDto) {
     const months = q.months || 12;
     const now = new Date();
-    const points: Array<{ year: number; month: number; total: number; byCategory: Record<string, number> }> = [];
+    const points: Array<{
+      year: number;
+      month: number;
+      total: number;
+      byCategory: Record<string, number>;
+    }> = [];
 
     for (let i = months - 1; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
@@ -339,8 +351,12 @@ export class OperatingCostsService {
       },
     });
 
-    const cogs = snapshots.filter((s) => s.isCogs).reduce((s, x) => s + Number(x.amountForMonth), 0);
-    const opex = snapshots.filter((s) => !s.isCogs).reduce((s, x) => s + Number(x.amountForMonth), 0);
+    const cogs = snapshots
+      .filter((s) => s.isCogs)
+      .reduce((s, x) => s + Number(x.amountForMonth), 0);
+    const opex = snapshots
+      .filter((s) => !s.isCogs)
+      .reduce((s, x) => s + Number(x.amountForMonth), 0);
     const marketing = snapshots
       .filter((s) => s.categoryCode === 'marketing')
       .reduce((s, x) => s + Number(x.amountForMonth), 0);
@@ -357,7 +373,11 @@ export class OperatingCostsService {
     const operatingMargin = revenue > 0 ? operatingProfit / revenue : 0;
 
     return {
-      period: { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10), months: monthsCount },
+      period: {
+        from: from.toISOString().slice(0, 10),
+        to: to.toISOString().slice(0, 10),
+        months: monthsCount,
+      },
       revenue: { mrr: round2(currentMrr), total: round2(revenue) },
       costs: {
         cogs: round2(cogs),
@@ -380,7 +400,9 @@ export class OperatingCostsService {
    */
   async getCac(from?: string, to?: string) {
     const periodEnd = to ? new Date(to) : new Date();
-    const periodStart = from ? new Date(from) : new Date(periodEnd.getFullYear(), periodEnd.getMonth() - 11, 1);
+    const periodStart = from
+      ? new Date(from)
+      : new Date(periodEnd.getFullYear(), periodEnd.getMonth() - 11, 1);
 
     // Marketing spend จาก OpMarketingCampaign + จาก expenses category=marketing
     const campaigns = await this.prisma.opMarketingCampaign.findMany({
@@ -423,7 +445,10 @@ export class OperatingCostsService {
     const paybackMonths = avgMrr > 0 ? cac / avgMrr : 0;
 
     return {
-      period: { from: periodStart.toISOString().slice(0, 10), to: periodEnd.toISOString().slice(0, 10) },
+      period: {
+        from: periodStart.toISOString().slice(0, 10),
+        to: periodEnd.toISOString().slice(0, 10),
+      },
       totalMarketingSpend: round2(totalSpend),
       breakdown: {
         campaignSpend: round2(campaignSpend),
@@ -469,7 +494,10 @@ export class OperatingCostsService {
     ]);
 
     // Map categoryId(or 'all') → budget amount สำหรับเดือนนี้
-    const budgetMap = new Map<string, { budget: number; isAnnual: boolean; notes?: string; budgetId?: string }>();
+    const budgetMap = new Map<
+      string,
+      { budget: number; isAnnual: boolean; notes?: string; budgetId?: string }
+    >();
     monthlyBudgets.forEach((b) => {
       const key = b.categoryId || 'all';
       budgetMap.set(key, {
@@ -610,7 +638,8 @@ export class OperatingCostsService {
       data: {
         ...dto,
         startDate: dto.startDate ? new Date(dto.startDate) : undefined,
-        endDate: dto.endDate !== undefined ? (dto.endDate ? new Date(dto.endDate) : null) : undefined,
+        endDate:
+          dto.endDate !== undefined ? (dto.endDate ? new Date(dto.endDate) : null) : undefined,
       },
     });
   }
@@ -705,7 +734,13 @@ export class OperatingCostsService {
 
   /** คำนวณ amount ที่ตกในเดือนนั้น ๆ ตาม billing cycle */
   private calculateMonthlyAmount(
-    exp: { amount: any; type: string; billingCycle: string | null; startDate: Date; endDate: Date | null },
+    exp: {
+      amount: any;
+      type: string;
+      billingCycle: string | null;
+      startDate: Date;
+      endDate: Date | null;
+    },
     year: number,
     month: number,
   ): number {
@@ -719,10 +754,7 @@ export class OperatingCostsService {
 
     if (exp.type === 'ONE_TIME') {
       // ตกเฉพาะเดือน startDate
-      if (
-        exp.startDate.getFullYear() === year &&
-        exp.startDate.getMonth() + 1 === month
-      ) {
+      if (exp.startDate.getFullYear() === year && exp.startDate.getMonth() + 1 === month) {
         return amount;
       }
       return 0;
@@ -738,7 +770,7 @@ export class OperatingCostsService {
     if (exp.billingCycle === 'YEARLY') return amount / 12;
     if (exp.billingCycle === 'QUARTERLY') {
       // ตกในเดือนแรกของแต่ละไตรมาส (Jan/Apr/Jul/Oct = 1,4,7,10)
-      const startQuarterMonth = ((exp.startDate.getMonth()) % 3); // ใช้เป็น offset
+      const startQuarterMonth = exp.startDate.getMonth() % 3; // ใช้เป็น offset
       const monthsSinceStart =
         (year - exp.startDate.getFullYear()) * 12 + (month - 1) - exp.startDate.getMonth();
       if (monthsSinceStart >= 0 && monthsSinceStart % 3 === 0) {

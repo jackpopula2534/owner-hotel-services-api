@@ -185,4 +185,23 @@ export class AnonymizeService {
     );
     return count;
   }
+
+  /**
+   * LEGAL-05: delete audit logs older than the retention period. Audit logs are
+   * append-only operational records (no PII subject rights apply the same way);
+   * once past retention they must be purged per the policy.
+   */
+  async purgeExpiredAuditLogs(retentionYears = 3): Promise<number> {
+    const cutoff = new Date();
+    cutoff.setFullYear(cutoff.getFullYear() - retentionYears);
+
+    const result = await this.prisma.auditLog.deleteMany({
+      where: { createdAt: { lt: cutoff } },
+    });
+
+    this.logger.log(
+      `Data retention purge: deleted ${result.count} audit logs (cutoff=${cutoff.toISOString()})`,
+    );
+    return result.count;
+  }
 }

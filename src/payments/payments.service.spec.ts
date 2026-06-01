@@ -25,10 +25,16 @@ describe('PaymentsService', () => {
     payments: {
       findFirst: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
+      findUniqueOrThrow: jest.fn(),
     },
     invoices: {
       update: jest.fn(),
       findUnique: jest.fn(),
+    },
+    subscriptions: {
+      findUnique: jest.fn(),
+      update: jest.fn(),
     },
     booking: {
       findUnique: jest.fn(),
@@ -64,30 +70,38 @@ describe('PaymentsService', () => {
   });
 
   describe('approvePayment', () => {
+    // After SALES-04 the approve flow claims the payment atomically via
+    // updateMany (status guard) + invoice update inside a $transaction, then
+    // reads the fresh row with findUniqueOrThrow. The mock-prisma $transaction
+    // runs fn(prisma) so the same model mocks apply inside the callback.
+    const arrangePending = (approved: Record<string, unknown>) => {
+      prismaMock.payments.findFirst.mockResolvedValue({
+        id: 'payment-1',
+        invoice_id: 'inv-1',
+        status: 'pending',
+      });
+      prismaMock.payments.updateMany.mockResolvedValue({ count: 1 });
+      prismaMock.payments.findUniqueOrThrow.mockResolvedValue(approved);
+      prismaMock.invoices.update.mockResolvedValue({});
+      prismaMock.invoices.findUnique.mockResolvedValue({ id: 'inv-1', booking_id: null });
+    };
+
     it('throws NotFoundException when payment is not found', async () => {
       prismaMock.payments.findFirst.mockResolvedValue(null);
       await expect(
         service.approvePayment('payment-1', 'admin-1', 'tenant-1'),
       ).rejects.toBeInstanceOf(NotFoundException);
-      expect(prismaMock.payments.update).not.toHaveBeenCalled();
+      expect(prismaMock.payments.updateMany).not.toHaveBeenCalled();
     });
 
-    it('marks payment APPROVED with adminId + timestamp', async () => {
-      prismaMock.payments.findFirst.mockResolvedValue({
-        id: 'payment-1',
-        invoice_id: 'inv-1',
-      });
-      prismaMock.payments.update.mockResolvedValue({
-        id: 'payment-1',
-        status: 'approved',
-        invoices: { id: 'inv-1' },
-      });
+    it('atomically claims the payment APPROVED with a status guard', async () => {
+      arrangePending({ id: 'payment-1', status: 'approved', invoices: { id: 'inv-1' } });
 
       await service.approvePayment('payment-1', 'admin-1', 'tenant-1');
 
-      expect(prismaMock.payments.update).toHaveBeenCalledWith(
+      expect(prismaMock.payments.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 'payment-1' },
+          where: { id: 'payment-1', status: { not: 'approved' } },
           data: expect.objectContaining({
             status: 'approved',
             approved_by: 'admin-1',
@@ -97,13 +111,39 @@ describe('PaymentsService', () => {
       );
     });
 
-    it('writes audit log and triggers receipt email on approval', async () => {
+    it('is an idempotent no-op when the payment is already approved', async () => {
       prismaMock.payments.findFirst.mockResolvedValue({
         id: 'payment-1',
         invoice_id: 'inv-1',
+        status: 'approved',
       });
+
+      const result = await service.approvePayment('payment-1', 'admin-1', 'tenant-1');
+
+      expect(result).toEqual(expect.objectContaining({ id: 'payment-1', status: 'approved' }));
+      // must NOT re-approve / re-extend / re-audit
+      expect(prismaMock.payments.updateMany).not.toHaveBeenCalled();
+      expect(auditMock.logPaymentApprove).not.toHaveBeenCalled();
+    });
+
+    it('is a no-op when the atomic claim loses the race (count=0)', async () => {
+      prismaMock.payments.findFirst.mockResolvedValue({
+        id: 'payment-1',
+        invoice_id: 'inv-1',
+        status: 'pending',
+      });
+      prismaMock.payments.updateMany.mockResolvedValue({ count: 0 });
+
+      await service.approvePayment('payment-1', 'admin-1', 'tenant-1');
+
+      // never reads back / cascades after losing the claim
+      expect(prismaMock.payments.findUniqueOrThrow).not.toHaveBeenCalled();
+      expect(prismaMock.invoices.update).not.toHaveBeenCalled();
+    });
+
+    it('writes audit log and triggers receipt email on approval', async () => {
       const approved = { id: 'payment-1', status: 'approved', invoices: { id: 'inv-1' } };
-      prismaMock.payments.update.mockResolvedValue(approved);
+      arrangePending(approved);
 
       await service.approvePayment('payment-1', 'admin-1', 'tenant-1');
 
@@ -114,8 +154,10 @@ describe('PaymentsService', () => {
       prismaMock.payments.findFirst.mockResolvedValue({
         id: 'payment-1',
         invoice_id: null,
+        status: 'pending',
       });
-      prismaMock.payments.update.mockResolvedValue({
+      prismaMock.payments.updateMany.mockResolvedValue({ count: 1 });
+      prismaMock.payments.findUniqueOrThrow.mockResolvedValue({
         id: 'payment-1',
         status: 'approved',
         invoices: null,
@@ -126,23 +168,9 @@ describe('PaymentsService', () => {
       expect(prismaMock.invoices.update).not.toHaveBeenCalled();
     });
 
-    it('cascades invoice → "paid" when invoice_id is present', async () => {
-      prismaMock.payments.findFirst.mockResolvedValue({
-        id: 'payment-1',
-        invoice_id: 'inv-1',
-      });
-      prismaMock.payments.update.mockResolvedValue({
-        id: 'payment-1',
-        status: 'approved',
-        invoices: { id: 'inv-1' },
-      });
-      prismaMock.invoices.update.mockResolvedValue({});
-      // updateBookingStatusToConfirmed will look up the invoice and skip cleanly
-      // when no booking_id — return invoice with no booking_id to take the early
-      // exit branch.
-      prismaMock.invoices.findUnique.mockResolvedValue({ id: 'inv-1', booking_id: null });
+    it('cascades invoice → "paid" inside the transaction when invoice_id is present', async () => {
+      arrangePending({ id: 'payment-1', status: 'approved', invoices: { id: 'inv-1' } });
 
-      // Wait for fire-and-forget cascades to complete by using process.nextTick.
       await service.approvePayment('payment-1', 'admin-1', 'tenant-1');
       await new Promise((resolve) => setImmediate(resolve));
 
@@ -150,6 +178,28 @@ describe('PaymentsService', () => {
         where: { id: 'inv-1' },
         data: { status: 'paid' },
       });
+    });
+
+    it('activates the subscription INSIDE the approval transaction (H2)', async () => {
+      arrangePending({ id: 'payment-1', status: 'approved', invoices: { id: 'inv-1' } });
+      // activation lookups
+      prismaMock.invoices.findUnique.mockResolvedValue({ subscription_id: 'sub-1' });
+      prismaMock.subscriptions.findUnique.mockResolvedValue({
+        id: 'sub-1',
+        billing_cycle: 'monthly',
+        end_date: null,
+        status: 'trial',
+      });
+      prismaMock.subscriptions.update.mockResolvedValue({});
+
+      await service.approvePayment('payment-1', 'admin-1', 'tenant-1');
+
+      expect(prismaMock.subscriptions.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'sub-1' },
+          data: expect.objectContaining({ status: 'active' }),
+        }),
+      );
     });
   });
 

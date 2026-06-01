@@ -1,6 +1,13 @@
 import {
-  IsNotEmpty, IsOptional, IsEnum, IsUUID, IsDateString,
-  IsNumber, IsString, Min, Max,
+  IsNotEmpty,
+  IsOptional,
+  IsEnum,
+  IsUUID,
+  IsDateString,
+  IsNumber,
+  IsString,
+  Min,
+  Max,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
@@ -52,7 +59,7 @@ export class CreateFolioChargeDto {
   @Type(() => Number)
   quantity: number;
 
-  @ApiProperty({ description: 'ราคาต่อหน่วย', example: 2500.00 })
+  @ApiProperty({ description: 'ราคาต่อหน่วย', example: 2500.0 })
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   @Type(() => Number)

@@ -138,7 +138,12 @@ export class GuestsService {
     }
   }
 
-  async create(createGuestDto: CreateGuestDto, tenantId?: string, userId?: string) {
+  async create(
+    createGuestDto: CreateGuestDto,
+    tenantId?: string,
+    userId?: string,
+    consentIp?: string,
+  ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID is required');
     }
@@ -147,12 +152,13 @@ export class GuestsService {
     // keys from leaking into Prisma when this service is called from internal
     // code that bypasses the ValidationPipe whitelist. firstName/lastName are
     // guaranteed by CreateGuestDto's @IsNotEmpty validators.
-    // PDPA: บันทึก consent timestamp และ IP (S1-02)
+    // PDPA: บันทึก consent timestamp และ IP (S1-02 / LEGAL-04)
     const consentData = createGuestDto.consentGiven
       ? {
           consentGiven: true,
           consentAt: new Date(),
           consentVersion: createGuestDto.consentVersion ?? '1.0',
+          ...(consentIp ? { consentIpAddress: consentIp } : {}),
         }
       : {};
 

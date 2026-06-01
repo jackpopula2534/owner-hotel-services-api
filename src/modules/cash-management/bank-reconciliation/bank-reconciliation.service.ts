@@ -1,5 +1,9 @@
 import {
-  Injectable, Logger, NotFoundException, ConflictException, BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  ConflictException,
+  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '@/prisma/prisma.service';
 import { CreateBankReconDto } from './dto/create-bank-recon.dto';
@@ -13,7 +17,14 @@ export class BankReconciliationService {
 
   async findAll(
     tenantId: string,
-    query: { propertyId?: string; bankAccountId?: string; period?: string; status?: string; page?: number; limit?: number },
+    query: {
+      propertyId?: string;
+      bankAccountId?: string;
+      period?: string;
+      status?: string;
+      page?: number;
+      limit?: number;
+    },
   ) {
     const { propertyId, bankAccountId, period, status, page = 1, limit = 20 } = query;
     const skip = (page - 1) * limit;
@@ -49,7 +60,12 @@ export class BankReconciliationService {
 
   async create(dto: CreateBankReconDto, tenantId: string, createdBy: string) {
     const existing = await this.prisma.bankReconciliation.findFirst({
-      where: { tenantId, propertyId: dto.propertyId, bankAccountId: dto.bankAccountId, period: dto.period },
+      where: {
+        tenantId,
+        propertyId: dto.propertyId,
+        bankAccountId: dto.bankAccountId,
+        period: dto.period,
+      },
     });
     if (existing) throw new ConflictException(`Reconciliation for ${dto.period} already exists`);
 
@@ -92,7 +108,8 @@ export class BankReconciliationService {
 
   async addLine(dto: CreateReconLineDto, tenantId: string) {
     const recon = await this.findOne(dto.reconId, tenantId);
-    if (recon.status === 'APPROVED') throw new BadRequestException('Cannot add lines to approved reconciliation');
+    if (recon.status === 'APPROVED')
+      throw new BadRequestException('Cannot add lines to approved reconciliation');
 
     const line = await this.prisma.bankReconLine.create({
       data: {
@@ -123,7 +140,8 @@ export class BankReconciliationService {
       include: { reconciliation: { select: { tenantId: true } } },
     });
     if (!line) throw new NotFoundException(`Recon line ${lineId} not found`);
-    if (line.reconciliation.tenantId !== tenantId) throw new NotFoundException(`Recon line ${lineId} not found`);
+    if (line.reconciliation.tenantId !== tenantId)
+      throw new NotFoundException(`Recon line ${lineId} not found`);
 
     return this.prisma.bankReconLine.update({
       where: { id: lineId },

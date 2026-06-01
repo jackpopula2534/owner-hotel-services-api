@@ -1,12 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsIn,
-  IsOptional,
-  IsString,
-  MinLength,
-  ArrayUnique,
-  IsArray,
-} from 'class-validator';
+import { IsIn, IsOptional, IsString, MinLength, ArrayUnique, IsArray } from 'class-validator';
 import { ACCOUNTING_ROLES } from './create-accounting-user.dto';
 
 export class UpdateAccountingUserDto {

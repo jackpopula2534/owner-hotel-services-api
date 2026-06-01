@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PurchaseOrdersService } from '../purchase-orders.service';
 import { PrismaService } from '@/prisma/prisma.service';
 import { PurchaseOrderTrackingStatus } from '../dto/query-purchase-order-tracking.dto';
@@ -90,7 +91,11 @@ describe('PurchaseOrdersService — findTracking()', () => {
     jest.clearAllMocks();
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [PurchaseOrdersService, { provide: PrismaService, useValue: mockPrismaService }],
+      providers: [
+        PurchaseOrdersService,
+        { provide: PrismaService, useValue: mockPrismaService },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+      ],
     }).compile();
 
     service = module.get<PurchaseOrdersService>(PurchaseOrdersService);

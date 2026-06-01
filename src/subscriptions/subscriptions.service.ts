@@ -99,9 +99,44 @@ export class SubscriptionsService {
   }
 
   update(id: string, updateSubscriptionDto: UpdateSubscriptionDto) {
+    // Map the camelCase DTO to the snake_case Prisma columns (same as create()).
+    // Passing the DTO straight through fails — e.g. the plan upgrade/downgrade
+    // flow sends `planId`, but the column is `plan_id` (Prisma: "Unknown
+    // argument `planId`"). Only defined fields are forwarded so partial updates
+    // don't clobber existing values.
+    const data: any = {
+      subscription_code: updateSubscriptionDto.subscriptionCode,
+      tenant_id: updateSubscriptionDto.tenantId,
+      plan_id: updateSubscriptionDto.planId,
+      previous_plan_id: updateSubscriptionDto.previousPlanId,
+      status: updateSubscriptionDto.status,
+      start_date: updateSubscriptionDto.startDate
+        ? new Date(updateSubscriptionDto.startDate)
+        : undefined,
+      end_date: updateSubscriptionDto.endDate ? new Date(updateSubscriptionDto.endDate) : undefined,
+      next_billing_date: updateSubscriptionDto.nextBillingDate
+        ? new Date(updateSubscriptionDto.nextBillingDate)
+        : undefined,
+      billing_anchor_date: updateSubscriptionDto.billingAnchorDate
+        ? new Date(updateSubscriptionDto.billingAnchorDate)
+        : undefined,
+      auto_renew:
+        updateSubscriptionDto.autoRenew !== undefined
+          ? updateSubscriptionDto.autoRenew
+            ? 1
+            : 0
+          : undefined,
+    };
+
+    Object.keys(data).forEach((key) => {
+      if (data[key] === undefined) {
+        delete data[key];
+      }
+    });
+
     return this.prisma.subscriptions.update({
       where: { id },
-      data: updateSubscriptionDto,
+      data,
       include: {
         tenants: true,
         plans_subscriptions_plan_idToplans: true,

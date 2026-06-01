@@ -72,10 +72,7 @@ export class EmailController {
   @Roles('platform_admin')
   @ApiOperation({ summary: 'Get email template content by name' })
   @ApiResponse({ status: 200, description: 'Template content retrieved' })
-  async getTemplateContent(
-    @Param('name') name: string,
-    @Query('language') language = 'th',
-  ) {
+  async getTemplateContent(@Param('name') name: string, @Query('language') language = 'th') {
     try {
       return await this.emailService.getTemplateContent(name, language);
     } catch {

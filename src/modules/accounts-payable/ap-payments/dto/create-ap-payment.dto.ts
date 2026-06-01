@@ -1,6 +1,14 @@
 import {
-  IsNotEmpty, IsOptional, IsEnum, IsUUID, IsDateString, IsNumber,
-  IsString, IsArray, ValidateNested, Min,
+  IsNotEmpty,
+  IsOptional,
+  IsEnum,
+  IsUUID,
+  IsDateString,
+  IsNumber,
+  IsString,
+  IsArray,
+  ValidateNested,
+  Min,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
@@ -26,7 +34,7 @@ export class ApPaymentAllocationDto {
   @IsUUID()
   invoiceId: string;
 
-  @ApiProperty({ description: 'จำนวนเงินที่จัดสรร', example: 5000.00 })
+  @ApiProperty({ description: 'จำนวนเงินที่จัดสรร', example: 5000.0 })
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0.01)
   @Type(() => Number)
@@ -52,7 +60,7 @@ export class CreateApPaymentDto {
   @IsEnum(AccPaymentMethod)
   method: AccPaymentMethod;
 
-  @ApiProperty({ description: 'ยอดจ่ายก่อนหัก WHT', example: 10000.00 })
+  @ApiProperty({ description: 'ยอดจ่ายก่อนหัก WHT', example: 10000.0 })
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0.01)
   @Type(() => Number)
@@ -80,7 +88,10 @@ export class CreateApPaymentDto {
   @IsString()
   notes?: string;
 
-  @ApiPropertyOptional({ description: 'รายการ Invoice ที่ต้องการ allocate', type: [ApPaymentAllocationDto] })
+  @ApiPropertyOptional({
+    description: 'รายการ Invoice ที่ต้องการ allocate',
+    type: [ApPaymentAllocationDto],
+  })
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })

@@ -62,7 +62,8 @@ export class AccountingUsersService {
     }
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
-    const permissions = dto.permissions ?? DEFAULT_ACCOUNTING_PERMISSIONS[dto.role as AccountingRole] ?? [];
+    const permissions =
+      dto.permissions ?? DEFAULT_ACCOUNTING_PERMISSIONS[dto.role as AccountingRole] ?? [];
 
     try {
       const user = await this.prisma.user.create({

@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-  BadRequestException,
-} from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@/prisma/prisma.service';
 import { CreateApInvoiceDto } from './dto/create-ap-invoice.dto';
 import { QueryApInvoiceDto } from './dto/query-ap-invoice.dto';
@@ -26,7 +21,16 @@ export class ApInvoicesService {
   }
 
   async findAll(tenantId: string, query: QueryApInvoiceDto) {
-    const { page = 1, limit = 20, propertyId, status, supplierId, dateFrom, dateTo, search } = query;
+    const {
+      page = 1,
+      limit = 20,
+      propertyId,
+      status,
+      supplierId,
+      dateFrom,
+      dateTo,
+      search,
+    } = query;
     const skip = (page - 1) * limit;
 
     const where: Record<string, unknown> = { tenantId };
@@ -40,10 +44,7 @@ export class ApInvoicesService {
       };
     }
     if (search) {
-      where.OR = [
-        { invoiceNo: { contains: search } },
-        { supplierInvoiceNo: { contains: search } },
-      ];
+      where.OR = [{ invoiceNo: { contains: search } }, { supplierInvoiceNo: { contains: search } }];
     }
 
     const [total, data] = await Promise.all([
@@ -210,16 +211,26 @@ export class ApInvoicesService {
         dueDate: inv.dueDate,
         balance,
         daysOverdue: Math.max(0, daysOverdue),
-        bucket: daysOverdue <= 0 ? 'current'
-          : daysOverdue <= 30 ? '1_30'
-          : daysOverdue <= 60 ? '31_60'
-          : daysOverdue <= 90 ? '61_90'
-          : 'over_90',
+        bucket:
+          daysOverdue <= 0
+            ? 'current'
+            : daysOverdue <= 30
+              ? '1_30'
+              : daysOverdue <= 60
+                ? '31_60'
+                : daysOverdue <= 90
+                  ? '61_90'
+                  : 'over_90',
       };
     });
 
     const summary = {
-      current: 0, '1_30': 0, '31_60': 0, '61_90': 0, over_90: 0, total: 0,
+      current: 0,
+      '1_30': 0,
+      '31_60': 0,
+      '61_90': 0,
+      over_90: 0,
+      total: 0,
     };
     for (const row of aging) {
       summary[row.bucket as keyof typeof summary] += row.balance;

@@ -5,17 +5,7 @@ import { JournalEntriesModule } from './journal-entries/journal-entries.module';
 import { LedgerModule } from './ledger/ledger.module';
 
 @Module({
-  imports: [
-    ChartOfAccountsModule,
-    FiscalYearsModule,
-    JournalEntriesModule,
-    LedgerModule,
-  ],
-  exports: [
-    ChartOfAccountsModule,
-    FiscalYearsModule,
-    JournalEntriesModule,
-    LedgerModule,
-  ],
+  imports: [ChartOfAccountsModule, FiscalYearsModule, JournalEntriesModule, LedgerModule],
+  exports: [ChartOfAccountsModule, FiscalYearsModule, JournalEntriesModule, LedgerModule],
 })
 export class AccountingModule {}

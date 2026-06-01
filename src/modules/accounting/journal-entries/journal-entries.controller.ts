@@ -1,5 +1,14 @@
 import {
-  Controller, Get, Post, Patch, Param, Body, Query, UseGuards, HttpCode, HttpStatus,
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Param,
+  Body,
+  Query,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JournalEntriesService } from './journal-entries.service';
@@ -16,7 +25,12 @@ class ReverseJournalDto {
   @ApiPropertyOptional() @IsOptional() @IsString() description?: string;
 }
 
-interface JwtPayload { sub: string; tenantId: string; email: string; role: string; }
+interface JwtPayload {
+  sub: string;
+  tenantId: string;
+  email: string;
+  role: string;
+}
 
 @ApiTags('Accounting - Journal Entries')
 @ApiBearerAuth()

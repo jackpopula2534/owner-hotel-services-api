@@ -78,7 +78,9 @@ export class AdminSubscriptionFeaturesService {
     }));
 
     const planWithFeatures = subscription.planId
-      ? await this.dataSource.getRepository(Feature).createQueryBuilder('feature')
+      ? await this.dataSource
+          .getRepository(Feature)
+          .createQueryBuilder('feature')
           .innerJoin('feature.planFeatures', 'planFeature', 'planFeature.planId = :planId', {
             planId: subscription.planId,
           })
@@ -106,7 +108,10 @@ export class AdminSubscriptionFeaturesService {
     const planAddonsClient = (
       this.dataSource as unknown as {
         manager: {
-          query: (sql: string, params?: unknown[]) => Promise<
+          query: (
+            sql: string,
+            params?: unknown[],
+          ) => Promise<
             Array<{
               addon_id: string;
               code: string;
@@ -120,16 +125,15 @@ export class AdminSubscriptionFeaturesService {
       }
     ).manager;
 
-    const bundledPlanAddons =
-      subscription.planId
-        ? await planAddonsClient.query(
-            `SELECT a.id AS addon_id, a.code, a.name, a.description, a.price, a.is_active
+    const bundledPlanAddons = subscription.planId
+      ? await planAddonsClient.query(
+          `SELECT a.id AS addon_id, a.code, a.name, a.description, a.price, a.is_active
              FROM plan_addons pa
              INNER JOIN add_ons a ON a.id = pa.addon_id
              WHERE pa.plan_id = ?`,
-            [subscription.planId],
-          )
-        : [];
+          [subscription.planId],
+        )
+      : [];
 
     const includedAddons: SubscriptionFeatureItemDto[] = bundledPlanAddons
       .filter((addon) => Number(addon.is_active) === 1)

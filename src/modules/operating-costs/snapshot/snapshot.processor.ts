@@ -29,15 +29,12 @@ export class SnapshotProcessor {
   onError(error: Error) {
     const now = Date.now();
     const isConnErr =
-      error.name === 'AggregateError' ||
-      (error as NodeJS.ErrnoException).code === 'ECONNREFUSED';
+      error.name === 'AggregateError' || (error as NodeJS.ErrnoException).code === 'ECONNREFUSED';
     if (isConnErr) {
       // Redis ไม่พร้อม — log แค่ครั้งเดียวต่อ 30s กัน spam
       if (now - this.lastQueueErrorLog < 30_000) return;
       this.lastQueueErrorLog = now;
-      this.logger.warn(
-        'OpCost snapshot queue: Redis unavailable — jobs will retry on reconnect.',
-      );
+      this.logger.warn('OpCost snapshot queue: Redis unavailable — jobs will retry on reconnect.');
       return;
     }
     this.logger.error(`Snapshot queue error: ${error.message}`, error.stack);
@@ -73,9 +70,7 @@ export class SnapshotProcessor {
       );
       return { ...result, durationMs };
     } catch (err: any) {
-      this.logger.error(
-        `✗ Snapshot regeneration failed for ${year}-${month}: ${err?.message}`,
-      );
+      this.logger.error(`✗ Snapshot regeneration failed for ${year}-${month}: ${err?.message}`);
       throw err; // let Bull retry
     }
   }

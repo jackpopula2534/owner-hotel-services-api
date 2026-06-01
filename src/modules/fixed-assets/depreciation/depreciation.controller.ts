@@ -10,14 +10,22 @@ import { ApiProperty } from '@nestjs/swagger';
 
 class RunDepreciationDto {
   @ApiProperty() @IsNotEmpty() @IsUUID() propertyId: string;
-  @ApiProperty({ description: 'งวด เช่น 2025-01', example: '2025-01' }) @IsNotEmpty() @IsString() period: string;
+  @ApiProperty({ description: 'งวด เช่น 2025-01', example: '2025-01' })
+  @IsNotEmpty()
+  @IsString()
+  period: string;
 }
 
 class PostDepreciationDto {
   @ApiProperty({ description: 'งวด เช่น 2025-01' }) @IsNotEmpty() @IsString() period: string;
 }
 
-interface JwtPayload { sub: string; tenantId: string; email: string; role: string; }
+interface JwtPayload {
+  sub: string;
+  tenantId: string;
+  email: string;
+  role: string;
+}
 
 @ApiTags('Accounting - Depreciation')
 @ApiBearerAuth()
@@ -30,7 +38,12 @@ export class DepreciationController {
   @Post('run')
   @ApiOperation({ summary: 'รันค่าเสื่อมราคาประจำเดือน (สร้าง AssetDepreciation records)' })
   async run(@CurrentUser() user: JwtPayload, @Body() dto: RunDepreciationDto) {
-    const data = await this.service.runMonthlyDepreciation(user.tenantId, dto.propertyId, dto.period, user.sub);
+    const data = await this.service.runMonthlyDepreciation(
+      user.tenantId,
+      dto.propertyId,
+      dto.period,
+      user.sub,
+    );
     return { success: true, data };
   }
 

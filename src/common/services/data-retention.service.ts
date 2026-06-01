@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
+import { Cron } from '@nestjs/schedule';
 import { AnonymizeService } from './anonymize.service';
 
 /**
@@ -25,6 +25,7 @@ export class DataRetentionService {
   // Retention periods in years (สามารถ override ผ่าน env ได้)
   private readonly GUEST_RETENTION_YEARS = Number(process.env.RETENTION_GUEST_YEARS) || 5;
   private readonly EMPLOYEE_RETENTION_YEARS = Number(process.env.RETENTION_EMPLOYEE_YEARS) || 7;
+  private readonly AUDIT_LOG_RETENTION_YEARS = Number(process.env.RETENTION_AUDIT_LOG_YEARS) || 3;
 
   constructor(private readonly anonymizeService: AnonymizeService) {}
 
@@ -70,6 +71,26 @@ export class DataRetentionService {
     }
   }
 
+  /**
+   * LEGAL-05: รันเดือนละครั้ง (วันที่ 1 เวลา 03:00) — purge audit logs เกิน retention.
+   * เดิม policy ประกาศ 3 ปีไว้แต่ไม่มี cron ลบจริง.
+   */
+  @Cron('0 3 1 * *', { name: 'audit-log-purge', timeZone: 'Asia/Bangkok' })
+  async runAuditLogPurge(): Promise<void> {
+    this.logger.log(
+      `[DataRetention] Starting audit-log purge (retention=${this.AUDIT_LOG_RETENTION_YEARS}y)`,
+    );
+    try {
+      const count = await this.anonymizeService.purgeExpiredAuditLogs(
+        this.AUDIT_LOG_RETENTION_YEARS,
+      );
+      this.logger.log(`[DataRetention] Audit-log purge complete: ${count} records deleted`);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logger.error(`[DataRetention] Audit-log purge failed: ${msg}`);
+    }
+  }
+
   // ────────────────────────────────────────────────────────────
   // Manual Trigger (สำหรับ Admin / Testing)
   // ────────────────────────────────────────────────────────────
@@ -78,19 +99,24 @@ export class DataRetentionService {
    * รัน full purge ทันที (เรียกจาก controller หรือ admin endpoint)
    * Returns summary of what was purged
    */
-  async runFullPurgeNow(): Promise<{ guestsPurged: number; employeesPurged: number }> {
+  async runFullPurgeNow(): Promise<{
+    guestsPurged: number;
+    employeesPurged: number;
+    auditLogsPurged: number;
+  }> {
     this.logger.log('[DataRetention] Manual full purge triggered');
 
-    const [guestsPurged, employeesPurged] = await Promise.all([
+    const [guestsPurged, employeesPurged, auditLogsPurged] = await Promise.all([
       this.anonymizeService.purgeExpiredGuests(this.GUEST_RETENTION_YEARS),
       this.anonymizeService.purgeExpiredEmployees(this.EMPLOYEE_RETENTION_YEARS),
+      this.anonymizeService.purgeExpiredAuditLogs(this.AUDIT_LOG_RETENTION_YEARS),
     ]);
 
     this.logger.log(
-      `[DataRetention] Manual purge done: guests=${guestsPurged} employees=${employeesPurged}`,
+      `[DataRetention] Manual purge done: guests=${guestsPurged} employees=${employeesPurged} auditLogs=${auditLogsPurged}`,
     );
 
-    return { guestsPurged, employeesPurged };
+    return { guestsPurged, employeesPurged, auditLogsPurged };
   }
 
   /**

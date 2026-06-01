@@ -3,6 +3,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
@@ -42,7 +43,9 @@ export class TrueMoneyService {
     this.frontendUrl = this.configService.get<string>('FRONTEND_URL', 'http://localhost:3000');
 
     if (!this.merchantId || !this.secretKey) {
-      this.logger.warn('TWO_C2P_MERCHANT_ID or TWO_C2P_SECRET_KEY not configured — TrueMoney payments disabled');
+      this.logger.warn(
+        'TWO_C2P_MERCHANT_ID or TWO_C2P_SECRET_KEY not configured — TrueMoney payments disabled',
+      );
     }
   }
 
@@ -107,25 +110,34 @@ export class TrueMoneyService {
 
   // ─── Handle 2C2P callback ─────────────────────────────────────────────────
   async handleCallback(dto: TrueMoneyCallbackDto): Promise<void> {
+    // SALES-02: never trust the raw callback body. 2C2P signs its backend
+    // response as a JWT (HS256) with the merchant secret. We verify it and use
+    // ONLY the verified claims. Without this, anyone could POST
+    // {respCode:'0000'} to mark an invoice paid for free.
+    const verified = this.verifyCallback(dto);
+    const merchantOrderId = verified.merchantOrderId;
+    const respCode = verified.respCode;
+    const respDesc = verified.respDesc;
+
     const transaction = await this.prisma.trueMoneyTransaction.findUnique({
-      where: { merchantOrderId: dto.merchantOrderId },
+      where: { merchantOrderId },
     });
 
     if (!transaction) {
-      this.logger.warn(`TrueMoney callback: unknown merchantOrderId ${dto.merchantOrderId}`);
+      this.logger.warn(`TrueMoney callback: unknown merchantOrderId ${merchantOrderId}`);
       return;
     }
 
-    const isSuccess = dto.respCode === '0000';
+    const isSuccess = respCode === '0000';
     const newStatus = isSuccess ? 'completed' : 'failed';
 
     await this.prisma.trueMoneyTransaction.update({
-      where: { merchantOrderId: dto.merchantOrderId },
+      where: { merchantOrderId },
       data: {
         status: newStatus,
         callbackData: dto as any,
         paidAt: isSuccess ? new Date() : null,
-        errorMessage: isSuccess ? null : `${dto.respCode}: ${dto.respDesc ?? ''}`,
+        errorMessage: isSuccess ? null : `${respCode}: ${respDesc ?? ''}`,
       },
     });
 
@@ -152,7 +164,104 @@ export class TrueMoneyService {
 
       this.logger.log(`TrueMoney payment success → invoice ${transaction.invoiceId} paid`);
     } else {
-      this.logger.warn(`TrueMoney payment failed for order ${dto.merchantOrderId}: ${dto.respDesc}`);
+      this.logger.warn(`TrueMoney payment failed for order ${merchantOrderId}: ${respDesc}`);
+    }
+  }
+
+  /**
+   * Verify a 2C2P callback and return the trusted claims.
+   *
+   * Preferred path: callback carries a signed `payload` (JWT). We recompute the
+   * HS256 signature over `header.body` with the merchant secret and compare in
+   * constant time, then decode the claims. Fail-closed:
+   *   • secret missing in production → reject
+   *   • secret missing in dev/test   → warn, fall back to unsigned fields
+   *   • signed payload present but invalid → reject (401)
+   *   • no signed payload in production    → reject (401)
+   */
+  private verifyCallback(dto: TrueMoneyCallbackDto): {
+    merchantOrderId: string;
+    respCode: string;
+    respDesc?: string;
+  } {
+    const isProduction = this.configService.get<string>('NODE_ENV', 'development') === 'production';
+
+    if (!this.secretKey) {
+      if (isProduction) {
+        this.logger.error('TWO_C2P_SECRET_KEY not configured — rejecting callback');
+        throw new UnauthorizedException('Callback verification not configured');
+      }
+      this.logger.warn(
+        'TWO_C2P_SECRET_KEY not set — skipping callback verification (non-production only)',
+      );
+      return this.requireUnsignedFields(dto);
+    }
+
+    if (dto.payload) {
+      const claims = this.verifyJwtHs256(dto.payload, this.secretKey);
+      if (!claims) {
+        this.logger.warn('TrueMoney callback: JWT signature verification failed');
+        throw new UnauthorizedException('Invalid 2C2P callback signature');
+      }
+      const merchantOrderId = String(claims.invoiceNo ?? claims.merchantOrderId ?? '');
+      const respCode = String(claims.respCode ?? claims.recurringUniqueID ?? '');
+      if (!merchantOrderId || !respCode) {
+        throw new UnauthorizedException('2C2P callback payload missing required claims');
+      }
+      return { merchantOrderId, respCode, respDesc: claims.respDesc as string | undefined };
+    }
+
+    // No signed payload. In production this is not acceptable.
+    if (isProduction) {
+      this.logger.warn('TrueMoney callback missing signed payload — rejecting');
+      throw new UnauthorizedException('2C2P callback missing signed payload');
+    }
+    return this.requireUnsignedFields(dto);
+  }
+
+  private requireUnsignedFields(dto: TrueMoneyCallbackDto): {
+    merchantOrderId: string;
+    respCode: string;
+    respDesc?: string;
+  } {
+    if (!dto.merchantOrderId || !dto.respCode) {
+      throw new BadRequestException('TrueMoney callback missing merchantOrderId/respCode');
+    }
+    return {
+      merchantOrderId: dto.merchantOrderId,
+      respCode: dto.respCode,
+      respDesc: dto.respDesc,
+    };
+  }
+
+  /**
+   * Verify an HS256 JWT and return its decoded claims, or null if the
+   * signature/structure is invalid. Constant-time comparison on the signature.
+   */
+  private verifyJwtHs256(token: string, secret: string): Record<string, unknown> | null {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+
+    const [header, body, signature] = parts;
+    const expected = crypto
+      .createHmac('sha256', secret)
+      .update(`${header}.${body}`)
+      .digest('base64url');
+
+    let matches = false;
+    try {
+      const a = Buffer.from(signature);
+      const b = Buffer.from(expected);
+      matches = a.length === b.length && crypto.timingSafeEqual(a, b);
+    } catch {
+      return null;
+    }
+    if (!matches) return null;
+
+    try {
+      return JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as Record<string, unknown>;
+    } catch {
+      return null;
     }
   }
 

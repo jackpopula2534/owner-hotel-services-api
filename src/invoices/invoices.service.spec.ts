@@ -8,11 +8,7 @@
  *   - voidInvoice(): not-found, already-paid, already-voided, happy path.
  */
 import { Test, TestingModule } from '@nestjs/testing';
-import {
-  ConflictException,
-  NotFoundException,
-  BadRequestException,
-} from '@nestjs/common';
+import { ConflictException, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InvoicesService } from './invoices.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { withPrismaFallback } from '../common/test/mock-prisma';
@@ -33,10 +29,7 @@ describe('InvoicesService — double-billing guard & void', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     const moduleRef: TestingModule = await Test.createTestingModule({
-      providers: [
-        InvoicesService,
-        { provide: PrismaService, useValue: prismaMock },
-      ],
+      providers: [InvoicesService, { provide: PrismaService, useValue: prismaMock }],
     }).compile();
     service = moduleRef.get(InvoicesService);
   });

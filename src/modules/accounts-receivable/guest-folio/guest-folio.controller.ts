@@ -1,5 +1,14 @@
 import {
-  Controller, Get, Post, Patch, Param, Body, Query, UseGuards, HttpCode, HttpStatus,
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Param,
+  Body,
+  Query,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { GuestFolioService } from './guest-folio.service';
@@ -10,7 +19,12 @@ import { AddonGuard } from '@/common/guards/addon.guard';
 import { RequireAddon } from '@/common/decorators/require-addon.decorator';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
 
-interface JwtPayload { sub: string; tenantId: string; email: string; role: string; }
+interface JwtPayload {
+  sub: string;
+  tenantId: string;
+  email: string;
+  role: string;
+}
 
 @ApiTags('Accounting - Guest Folio')
 @ApiBearerAuth()
@@ -35,10 +49,7 @@ export class GuestFolioController {
 
   @Get('booking/:bookingId')
   @ApiOperation({ summary: 'หา Folio จาก Booking ID' })
-  async findByBooking(
-    @CurrentUser() user: JwtPayload,
-    @Param('bookingId') bookingId: string,
-  ) {
+  async findByBooking(@CurrentUser() user: JwtPayload, @Param('bookingId') bookingId: string) {
     const data = await this.service.findByBooking(bookingId, user.tenantId);
     return { success: true, data };
   }

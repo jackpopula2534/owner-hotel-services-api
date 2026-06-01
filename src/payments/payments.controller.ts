@@ -51,9 +51,19 @@ const slipStorage = diskStorage({
   },
 });
 
-const slipFileFilter = (_req: any, file: { mimetype: string }, cb: (err: any, accept: boolean) => void) => {
-  if (!file.mimetype.match(/^image\/(jpeg|jpg|png|webp|gif)$/) && file.mimetype !== 'application/pdf') {
-    return cb(new BadRequestException('อนุญาตเฉพาะไฟล์ภาพ (JPG, PNG, WebP) หรือ PDF เท่านั้น'), false);
+const slipFileFilter = (
+  _req: any,
+  file: { mimetype: string },
+  cb: (err: any, accept: boolean) => void,
+) => {
+  if (
+    !file.mimetype.match(/^image\/(jpeg|jpg|png|webp|gif)$/) &&
+    file.mimetype !== 'application/pdf'
+  ) {
+    return cb(
+      new BadRequestException('อนุญาตเฉพาะไฟล์ภาพ (JPG, PNG, WebP) หรือ PDF เท่านั้น'),
+      false,
+    );
   }
   cb(null, true);
 };

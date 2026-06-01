@@ -79,3 +79,44 @@ describe('SubscriptionsService.create - billing date defaults', () => {
     expect(data.auto_renew).toBe(1);
   });
 });
+
+describe('SubscriptionsService.update - camelCase → snake_case mapping', () => {
+  let service: SubscriptionsService;
+  let prismaUpdate: jest.Mock;
+
+  beforeEach(async () => {
+    prismaUpdate = jest.fn().mockResolvedValue({});
+    const mockPrisma = {
+      subscriptions: {
+        create: jest.fn(),
+        findMany: jest.fn(),
+        findUnique: jest.fn(),
+        findFirst: jest.fn(),
+        update: prismaUpdate,
+        delete: jest.fn(),
+      },
+    };
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [SubscriptionsService, { provide: PrismaService, useValue: mockPrisma }],
+    }).compile();
+    service = module.get(SubscriptionsService);
+  });
+
+  it('maps planId → plan_id so a plan change does not throw "Unknown argument planId"', async () => {
+    await service.update('sub-1', { planId: 'plan-2' } as any);
+
+    const data = prismaUpdate.mock.calls[0][0].data;
+    expect(data.plan_id).toBe('plan-2');
+    // the raw camelCase key must NOT be forwarded to Prisma
+    expect('planId' in data).toBe(false);
+  });
+
+  it('forwards only defined fields (partial update does not clobber others)', async () => {
+    await service.update('sub-1', { status: SubscriptionStatus.ACTIVE } as any);
+
+    const data = prismaUpdate.mock.calls[0][0].data;
+    expect(data.status).toBe(SubscriptionStatus.ACTIVE);
+    expect('plan_id' in data).toBe(false);
+    expect('tenant_id' in data).toBe(false);
+  });
+});

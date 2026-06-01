@@ -1,6 +1,16 @@
 import {
-  IsNotEmpty, IsOptional, IsEnum, IsUUID, IsDateString, IsNumber,
-  IsString, IsArray, ValidateNested, IsInt, Min, Max,
+  IsNotEmpty,
+  IsOptional,
+  IsEnum,
+  IsUUID,
+  IsDateString,
+  IsNumber,
+  IsString,
+  IsArray,
+  ValidateNested,
+  IsInt,
+  Min,
+  Max,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
@@ -25,7 +35,7 @@ export class TaxFilingLineDto {
   @IsString()
   docRef?: string;
 
-  @ApiProperty({ description: 'ฐานภาษี', example: 100000.00 })
+  @ApiProperty({ description: 'ฐานภาษี', example: 100000.0 })
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   @Type(() => Number)
@@ -38,7 +48,7 @@ export class TaxFilingLineDto {
   @Type(() => Number)
   taxRate: number;
 
-  @ApiProperty({ description: 'ยอดภาษี', example: 7000.00 })
+  @ApiProperty({ description: 'ยอดภาษี', example: 7000.0 })
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   @Type(() => Number)

@@ -22,11 +22,17 @@ describe('CouponsService', () => {
       aggregate: jest.fn(),
     };
     mockTransaction = jest.fn().mockImplementation(async (fn: any) => {
+      // redeem() re-validates the caps INSIDE the transaction (SALES-05), so the
+      // tx client must expose the same reads as the base client. Delegate
+      // findUnique/count to the shared mocks so per-test setup applies in-tx too.
       const tx = {
         subscription_coupons: {
+          findUnique: mockCoupons.findUnique,
           update: jest.fn().mockResolvedValue({}),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         },
         subscription_coupon_redemptions: {
+          count: mockRedemptions.count,
           create: jest.fn().mockResolvedValue({}),
         },
       };

@@ -1,5 +1,13 @@
 import {
-  IsNotEmpty, IsOptional, IsEnum, IsUUID, IsDateString, IsNumber, IsString, Min, Max,
+  IsNotEmpty,
+  IsOptional,
+  IsEnum,
+  IsUUID,
+  IsDateString,
+  IsNumber,
+  IsString,
+  Min,
+  Max,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
@@ -29,7 +37,7 @@ export class CreateWhtCertDto {
   @IsEnum(WhtIncomeType)
   incomeType: WhtIncomeType;
 
-  @ApiProperty({ description: 'ยอดเงินได้ก่อนหัก WHT', example: 10000.00 })
+  @ApiProperty({ description: 'ยอดเงินได้ก่อนหัก WHT', example: 10000.0 })
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0.01)
   @Type(() => Number)
@@ -42,7 +50,7 @@ export class CreateWhtCertDto {
   @Type(() => Number)
   whtRate: number;
 
-  @ApiProperty({ description: 'ยอด WHT หัก ณ ที่จ่าย', example: 300.00 })
+  @ApiProperty({ description: 'ยอด WHT หัก ณ ที่จ่าย', example: 300.0 })
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   @Type(() => Number)

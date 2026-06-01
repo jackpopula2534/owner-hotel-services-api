@@ -67,7 +67,9 @@ export class CashDrawersService {
       where: { tenantId, propertyId: dto.propertyId, code: dto.code },
     });
     if (existing) {
-      throw new ConflictException(`Cash drawer with code "${dto.code}" already exists in this property`);
+      throw new ConflictException(
+        `Cash drawer with code "${dto.code}" already exists in this property`,
+      );
     }
 
     const openingBalance = dto.openingBalance ?? 0;
@@ -262,7 +264,9 @@ export class CashDrawersService {
       return txn;
     });
 
-    this.logger.log(`Cash transaction created: ${result.id} type=${dto.txnType} amount=${dto.amount}`);
+    this.logger.log(
+      `Cash transaction created: ${result.id} type=${dto.txnType} amount=${dto.amount}`,
+    );
     return result;
   }
 

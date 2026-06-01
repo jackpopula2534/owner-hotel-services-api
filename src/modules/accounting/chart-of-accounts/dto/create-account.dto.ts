@@ -62,7 +62,11 @@ export class CreateAccountDto {
   @IsEnum(NormalBalanceEnum)
   normalBalance: NormalBalanceEnum;
 
-  @ApiPropertyOptional({ description: 'ระดับผังบัญชี', enum: AccountLevelEnum, default: AccountLevelEnum.ACCOUNT })
+  @ApiPropertyOptional({
+    description: 'ระดับผังบัญชี',
+    enum: AccountLevelEnum,
+    default: AccountLevelEnum.ACCOUNT,
+  })
   @IsOptional()
   @IsEnum(AccountLevelEnum)
   level?: AccountLevelEnum;

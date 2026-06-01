@@ -79,10 +79,14 @@ export class NightAuditService {
       where: { tenantId, propertyId: dto.propertyId, auditDate },
     });
     if (existing) {
-      throw new ConflictException(`Night audit for ${auditDateStr} already exists (status: ${existing.status})`);
+      throw new ConflictException(
+        `Night audit for ${auditDateStr} already exists (status: ${existing.status})`,
+      );
     }
 
-    this.logger.log(`Running night audit for property ${dto.propertyId} date ${auditDateStr} by ${startedBy}`);
+    this.logger.log(
+      `Running night audit for property ${dto.propertyId} date ${auditDateStr} by ${startedBy}`,
+    );
 
     const result = await this.prisma.$transaction(async (tx) => {
       // 2. สร้าง NightAudit record status = IN_PROGRESS
@@ -115,7 +119,13 @@ export class NightAuditService {
       const bookings = bookingIds.length
         ? await tx.booking.findMany({
             where: { id: { in: bookingIds } },
-            select: { id: true, checkIn: true, checkOut: true, totalPrice: true, roomSubtotal: true },
+            select: {
+              id: true,
+              checkIn: true,
+              checkOut: true,
+              totalPrice: true,
+              roomSubtotal: true,
+            },
           })
         : [];
       const bookingMap = new Map(bookings.map((b) => [b.id, b]));

@@ -183,6 +183,17 @@ export class EnvironmentVariables {
   })
   @Validate(NotPlaceholderConstraint)
   ENCRYPTION_KEY?: string;
+
+  // ── Payment webhook signing secrets ───────────────────────────────────────
+  /**
+   * Shared secret used to verify the HMAC-SHA256 signature on inbound
+   * PromptPay payment webhooks (header `x-promptpay-signature`).
+   * Required in production — without it the webhook cannot be trusted and
+   * the service rejects all calls (fail-closed). Optional in dev/test.
+   */
+  @IsString()
+  @IsOptional()
+  PROMPTPAY_WEBHOOK_SECRET?: string;
 }
 
 /**

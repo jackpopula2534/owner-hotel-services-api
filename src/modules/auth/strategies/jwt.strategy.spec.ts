@@ -103,7 +103,12 @@ describe('JwtStrategy', () => {
 
       expect(userFindUnique).toHaveBeenCalledWith({
         where: { id: 'user-1' },
-        select: expect.objectContaining({ id: true, status: true, expiresAt: true, tenantId: true }),
+        select: expect.objectContaining({
+          id: true,
+          status: true,
+          expiresAt: true,
+          tenantId: true,
+        }),
       });
       expect(tenantsFindUnique).toHaveBeenCalledWith({
         where: { id: 'tenant-1' },

@@ -1,6 +1,14 @@
 import {
-  IsNotEmpty, IsString, IsOptional, IsEnum, IsUUID,
-  IsDateString, IsArray, ValidateNested, IsNumber, Min,
+  IsNotEmpty,
+  IsString,
+  IsOptional,
+  IsEnum,
+  IsUUID,
+  IsDateString,
+  IsArray,
+  ValidateNested,
+  IsNumber,
+  Min,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
@@ -36,7 +44,7 @@ export class CreateJournalLineDto {
   @IsString()
   description?: string;
 
-  @ApiProperty({ description: 'ยอด Debit (ถ้าไม่มีให้ใส่ 0)', example: 1000.00 })
+  @ApiProperty({ description: 'ยอด Debit (ถ้าไม่มีให้ใส่ 0)', example: 1000.0 })
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   @Type(() => Number)
@@ -79,7 +87,11 @@ export class CreateJournalEntryDto {
   @IsString()
   reference?: string;
 
-  @ApiPropertyOptional({ description: 'แหล่งที่มา', enum: JournalSourceTypeEnum, default: JournalSourceTypeEnum.MANUAL })
+  @ApiPropertyOptional({
+    description: 'แหล่งที่มา',
+    enum: JournalSourceTypeEnum,
+    default: JournalSourceTypeEnum.MANUAL,
+  })
   @IsOptional()
   @IsEnum(JournalSourceTypeEnum)
   sourceType?: JournalSourceTypeEnum;

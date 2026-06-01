@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-  BadRequestException,
-} from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@/prisma/prisma.service';
 import { CreateJournalEntryDto } from './dto/create-journal-entry.dto';
 import { QueryJournalEntryDto } from './dto/query-journal-entry.dto';
@@ -30,7 +25,18 @@ export class JournalEntriesService {
   }
 
   async findAll(tenantId: string, query: QueryJournalEntryDto) {
-    const { page = 1, limit = 20, propertyId, dateFrom, dateTo, status, sourceType, sourceId, search, accountId } = query;
+    const {
+      page = 1,
+      limit = 20,
+      propertyId,
+      dateFrom,
+      dateTo,
+      status,
+      sourceType,
+      sourceId,
+      search,
+      accountId,
+    } = query;
     const skip = (page - 1) * limit;
 
     const where: Record<string, unknown> = { tenantId };

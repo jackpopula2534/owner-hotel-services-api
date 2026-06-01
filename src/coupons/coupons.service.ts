@@ -436,14 +436,50 @@ export class CouponsService {
       throw new BadRequestException(validation.reason || 'Coupon invalid');
     }
 
+    const couponId = validation.coupon.id;
+
+    // SALES-05: re-check the caps INSIDE the transaction to close the TOCTOU race.
+    // validate() ran earlier and its counts can be stale; two concurrent redeems
+    // could both pass it and both increment past the limit.
     await this.prisma.$transaction(async (tx) => {
-      await (tx as any).subscription_coupons.update({
-        where: { id: validation.coupon!.id },
-        data: { redemptions_count: { increment: 1 } },
+      const coupon = await (tx as any).subscription_coupons.findUnique({
+        where: { id: couponId },
       });
+      if (!coupon || coupon.is_active !== 1) {
+        throw new BadRequestException('Coupon not found or inactive');
+      }
+
+      // Global cap FIRST — the UPDATE on the coupon row takes an exclusive InnoDB
+      // row lock that is held until commit, which SERIALIZES concurrent redeems
+      // of this coupon. That ordering makes the per-tenant count below consistent
+      // (a competing redeem blocks here until we commit, then sees our row).
+      if (coupon.max_redemptions != null) {
+        const bumped = await (tx as any).subscription_coupons.updateMany({
+          where: { id: couponId, redemptions_count: { lt: coupon.max_redemptions } },
+          data: { redemptions_count: { increment: 1 } },
+        });
+        if (bumped.count === 0) {
+          throw new BadRequestException('Coupon redemption limit reached');
+        }
+      } else {
+        await (tx as any).subscription_coupons.update({
+          where: { id: couponId },
+          data: { redemptions_count: { increment: 1 } },
+        });
+      }
+
+      // Per-tenant cap — now serialized behind the coupon row lock acquired above,
+      // so two concurrent redeems for the same tenant can't both pass.
+      const tenantUsage = await (tx as any).subscription_coupon_redemptions.count({
+        where: { coupon_id: couponId, tenant_id: input.tenantId },
+      });
+      if (tenantUsage >= coupon.max_redemptions_per_tenant) {
+        throw new BadRequestException('You have already used this coupon');
+      }
+
       await (tx as any).subscription_coupon_redemptions.create({
         data: {
-          coupon_id: validation.coupon!.id,
+          coupon_id: couponId,
           tenant_id: input.tenantId,
           invoice_id: input.invoiceId,
           subscription_id: input.subscriptionId,

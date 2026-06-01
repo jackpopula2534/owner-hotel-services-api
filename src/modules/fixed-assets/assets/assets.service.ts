@@ -1,5 +1,9 @@
 import {
-  Injectable, Logger, NotFoundException, ConflictException, BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  ConflictException,
+  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '@/prisma/prisma.service';
 import { CreateAssetDto, DepreciationMethodEnum } from './dto/create-asset.dto';
@@ -105,7 +109,9 @@ export class AssetsService {
         ...(updateFields.description !== undefined && { description: updateFields.description }),
         ...(updateFields.location !== undefined && { location: updateFields.location }),
         ...(updateFields.serialNo !== undefined && { serialNo: updateFields.serialNo }),
-        ...(updateFields.responsiblePerson !== undefined && { responsiblePerson: updateFields.responsiblePerson }),
+        ...(updateFields.responsiblePerson !== undefined && {
+          responsiblePerson: updateFields.responsiblePerson,
+        }),
         ...(updateFields.notes !== undefined && { notes: updateFields.notes }),
         ...(updateFields.costCenterId !== undefined && { costCenterId: updateFields.costCenterId }),
       },
@@ -142,7 +148,8 @@ export class AssetsService {
       return { amount: 0, message: 'No depreciation for this asset' };
     }
 
-    const depreciableBase = Number(asset.purchaseCost) + Number(asset.acquisitionCost) - Number(asset.residualValue);
+    const depreciableBase =
+      Number(asset.purchaseCost) + Number(asset.acquisitionCost) - Number(asset.residualValue);
     let monthlyAmount = 0;
 
     switch (asset.depreciationMethod) {
@@ -164,17 +171,23 @@ export class AssetsService {
       bookValue: Number(asset.bookValue),
       depreciableBase,
       monthlyAmount: Math.round(monthlyAmount * 100) / 100,
-      remainingMonths: Math.max(0, asset.usefulLifeYears * 12 - (await this.prisma.assetDepreciation.count({ where: { assetId: id } }))),
+      remainingMonths: Math.max(
+        0,
+        asset.usefulLifeYears * 12 -
+          (await this.prisma.assetDepreciation.count({ where: { assetId: id } })),
+      ),
     };
   }
 
   async getDepreciationSchedule(id: string, tenantId: string) {
     const asset = await this.findOne(id, tenantId);
     const totalMonths = asset.usefulLifeYears * 12;
-    const depreciableBase = Number(asset.purchaseCost) + Number(asset.acquisitionCost) - Number(asset.residualValue);
-    const monthlyAmount = asset.depreciationMethod !== DepreciationMethodEnum.NO_DEPRECIATION
-      ? Math.round((depreciableBase / totalMonths) * 100) / 100
-      : 0;
+    const depreciableBase =
+      Number(asset.purchaseCost) + Number(asset.acquisitionCost) - Number(asset.residualValue);
+    const monthlyAmount =
+      asset.depreciationMethod !== DepreciationMethodEnum.NO_DEPRECIATION
+        ? Math.round((depreciableBase / totalMonths) * 100) / 100
+        : 0;
 
     const purchaseDate = new Date(asset.purchaseDate);
     const schedule = [];

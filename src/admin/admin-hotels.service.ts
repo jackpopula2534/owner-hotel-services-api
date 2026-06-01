@@ -121,21 +121,20 @@ export class AdminHotelsService {
    * Get hotels summary by status
    */
   async getSummary(): Promise<AdminHotelsSummaryDto> {
-    const [total, active, trial, expired, suspended, byPlan] =
-      await Promise.all([
-        this.tenantsRepository.count(),
-        this.tenantsRepository.count({
-          where: { status: TenantStatus.ACTIVE },
-        }),
-        this.tenantsRepository.count({ where: { status: TenantStatus.TRIAL } }),
-        this.tenantsRepository.count({
-          where: { status: TenantStatus.EXPIRED },
-        }),
-        this.tenantsRepository.count({
-          where: { status: TenantStatus.SUSPENDED },
-        }),
-        this.getPlanBreakdown(),
-      ]);
+    const [total, active, trial, expired, suspended, byPlan] = await Promise.all([
+      this.tenantsRepository.count(),
+      this.tenantsRepository.count({
+        where: { status: TenantStatus.ACTIVE },
+      }),
+      this.tenantsRepository.count({ where: { status: TenantStatus.TRIAL } }),
+      this.tenantsRepository.count({
+        where: { status: TenantStatus.EXPIRED },
+      }),
+      this.tenantsRepository.count({
+        where: { status: TenantStatus.SUSPENDED },
+      }),
+      this.getPlanBreakdown(),
+    ]);
 
     return {
       total,
@@ -152,9 +151,7 @@ export class AdminHotelsService {
    * Tenants with no subscription/plan are bucketed under "No Plan",
    * matching the list endpoint's fallback label.
    */
-  private async getPlanBreakdown(): Promise<
-    Array<{ plan: string; count: number }>
-  > {
+  private async getPlanBreakdown(): Promise<Array<{ plan: string; count: number }>> {
     const rows = await this.tenantsRepository
       .createQueryBuilder('tenant')
       .leftJoin('tenant.subscription', 'subscription')

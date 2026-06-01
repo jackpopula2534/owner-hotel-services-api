@@ -13,9 +13,25 @@ export enum AssetStatusEnum {
 
 export class QueryAssetDto {
   @ApiPropertyOptional() @IsOptional() @IsUUID() propertyId?: string;
-  @ApiPropertyOptional({ enum: FixedAssetCategoryEnum }) @IsOptional() @IsEnum(FixedAssetCategoryEnum) category?: FixedAssetCategoryEnum;
-  @ApiPropertyOptional({ enum: AssetStatusEnum }) @IsOptional() @IsEnum(AssetStatusEnum) status?: AssetStatusEnum;
+  @ApiPropertyOptional({ enum: FixedAssetCategoryEnum })
+  @IsOptional()
+  @IsEnum(FixedAssetCategoryEnum)
+  category?: FixedAssetCategoryEnum;
+  @ApiPropertyOptional({ enum: AssetStatusEnum })
+  @IsOptional()
+  @IsEnum(AssetStatusEnum)
+  status?: AssetStatusEnum;
   @ApiPropertyOptional() @IsOptional() @IsString() search?: string;
-  @ApiPropertyOptional({ default: 1 }) @IsOptional() @IsInt() @Min(1) @Type(() => Number) page?: number;
-  @ApiPropertyOptional({ default: 20 }) @IsOptional() @IsInt() @Min(1) @Type(() => Number) limit?: number;
+  @ApiPropertyOptional({ default: 1 })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  page?: number;
+  @ApiPropertyOptional({ default: 20 })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  limit?: number;
 }

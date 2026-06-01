@@ -1,5 +1,14 @@
 import {
-  Controller, Get, Post, Patch, Param, Body, Query, UseGuards, HttpCode, HttpStatus,
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Param,
+  Body,
+  Query,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { IsOptional, IsString } from 'class-validator';
@@ -16,7 +25,12 @@ class VoidApInvoiceDto {
   @ApiPropertyOptional() @IsOptional() @IsString() reason?: string;
 }
 
-interface JwtPayload { sub: string; tenantId: string; email: string; role: string; }
+interface JwtPayload {
+  sub: string;
+  tenantId: string;
+  email: string;
+  role: string;
+}
 
 @ApiTags('Accounting - AP Invoices')
 @ApiBearerAuth()

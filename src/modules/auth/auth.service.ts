@@ -244,8 +244,7 @@ export class AuthService {
         role: admin.role,
         isPlatformAdmin: true,
         // null/empty array => admin can access every menu
-        menuAccess:
-          ((admin as { menuAccess?: unknown }).menuAccess as string[] | null) ?? null,
+        menuAccess: ((admin as { menuAccess?: unknown }).menuAccess as string[] | null) ?? null,
       },
     };
   }
@@ -256,7 +255,13 @@ export class AuthService {
   async login(
     loginDto: LoginDto,
     deviceInfo?: { ipAddress?: string; userAgent?: string },
-    systemContext: 'main' | 'pos' | 'procurement' | 'warehouse' | 'hotel-terminal' | 'accounting' = 'main',
+    systemContext:
+      | 'main'
+      | 'pos'
+      | 'procurement'
+      | 'warehouse'
+      | 'hotel-terminal'
+      | 'accounting' = 'main',
   ) {
     const { email, password } = loginDto;
 
@@ -365,7 +370,13 @@ export class AuthService {
    */
   async completeLoginWith2FA(
     userId: string,
-    systemContext: 'main' | 'pos' | 'procurement' | 'warehouse' | 'hotel-terminal' | 'accounting' = 'main',
+    systemContext:
+      | 'main'
+      | 'pos'
+      | 'procurement'
+      | 'warehouse'
+      | 'hotel-terminal'
+      | 'accounting' = 'main',
     deviceInfo?: { ipAddress?: string; userAgent?: string },
   ) {
     // findFirst (not findUnique): `User` is tenant-scoped. findUnique is rejected
@@ -637,13 +648,7 @@ export class AuthService {
   async logout(
     userIdOrAdminId: string,
     refreshToken?: string,
-    systemContext?:
-      | 'main'
-      | 'pos'
-      | 'procurement'
-      | 'warehouse'
-      | 'hotel-terminal'
-      | 'accounting',
+    systemContext?: 'main' | 'pos' | 'procurement' | 'warehouse' | 'hotel-terminal' | 'accounting',
   ) {
     if (refreshToken) {
       // Revoke the specific refresh token
@@ -1120,7 +1125,13 @@ export class AuthService {
         sub: string;
         email: string;
         type?: string;
-        systemContext?: 'main' | 'pos' | 'procurement' | 'warehouse' | 'hotel-terminal' | 'accounting';
+        systemContext?:
+          | 'main'
+          | 'pos'
+          | 'procurement'
+          | 'warehouse'
+          | 'hotel-terminal'
+          | 'accounting';
       };
       if (payload.type !== '2fa_pending') {
         return null;
@@ -1142,7 +1153,13 @@ export class AuthService {
     tenantId?: string,
     userType: 'admin' | 'user' = 'user',
     deviceInfo?: { ipAddress?: string; userAgent?: string },
-    systemContext: 'main' | 'pos' | 'procurement' | 'warehouse' | 'hotel-terminal' | 'accounting' = 'main',
+    systemContext:
+      | 'main'
+      | 'pos'
+      | 'procurement'
+      | 'warehouse'
+      | 'hotel-terminal'
+      | 'accounting' = 'main',
   ) {
     const payload = {
       sub: id,

@@ -1,6 +1,4 @@
-import {
-  IsNotEmpty, IsOptional, IsEnum, IsUUID, IsNumber, IsString, Min,
-} from 'class-validator';
+import { IsNotEmpty, IsOptional, IsEnum, IsUUID, IsNumber, IsString, Min } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 
@@ -29,7 +27,7 @@ export class CreateFolioPaymentDto {
   @IsEnum(AccPaymentMethod)
   method: AccPaymentMethod;
 
-  @ApiProperty({ description: 'จำนวนเงิน', example: 2675.00 })
+  @ApiProperty({ description: 'จำนวนเงิน', example: 2675.0 })
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0.01)
   @Type(() => Number)

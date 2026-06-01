@@ -153,24 +153,23 @@ describe('AdminSubscriptionsService - pricing rules', () => {
       expect(bundled.every((a) => a.price === 0 && a.isBilled === false)).toBe(true);
     });
 
-    it.each([
-      SubscriptionStatus.PENDING,
-      SubscriptionStatus.EXPIRED,
-      SubscriptionStatus.CANCELLED,
-    ])('non-active status %s bills nothing', async (status) => {
-      const sub = buildSubscription({
-        status,
-        plan: { name: 'Professional', priceMonthly: 1290 } as any,
-        subscriptionFeatures: [{ price: 990, feature: { name: 'Extra Analytics' } }] as any,
-      });
-      subscriptionsRepo.createQueryBuilder.mockReturnValue(buildQueryBuilder([sub]));
+    it.each([SubscriptionStatus.PENDING, SubscriptionStatus.EXPIRED, SubscriptionStatus.CANCELLED])(
+      'non-active status %s bills nothing',
+      async (status) => {
+        const sub = buildSubscription({
+          status,
+          plan: { name: 'Professional', priceMonthly: 1290 } as any,
+          subscriptionFeatures: [{ price: 990, feature: { name: 'Extra Analytics' } }] as any,
+        });
+        subscriptionsRepo.createQueryBuilder.mockReturnValue(buildQueryBuilder([sub]));
 
-      const item = (await service.findAll({})).data[0];
+        const item = (await service.findAll({})).data[0];
 
-      expect(item.isTrial).toBe(true);
-      expect(item.pricePerMonth).toBe(0);
-      expect(item.addonAmount).toBe(0);
-    });
+        expect(item.isTrial).toBe(true);
+        expect(item.pricePerMonth).toBe(0);
+        expect(item.addonAmount).toBe(0);
+      },
+    );
   });
 
   describe('findOne (detail)', () => {

@@ -38,9 +38,9 @@ export class AdminSubscriptionsService {
     private prismaService: PrismaService,
   ) {}
 
-  private async getPlanAddonsByPlanIds(planIds: string[]): Promise<
-    Map<string, Array<{ name: string; price: number }>>
-  > {
+  private async getPlanAddonsByPlanIds(
+    planIds: string[],
+  ): Promise<Map<string, Array<{ name: string; price: number }>>> {
     const uniquePlanIds = [...new Set(planIds.filter(Boolean))];
     const grouped = new Map<string, Array<{ name: string; price: number }>>();
 
@@ -193,9 +193,9 @@ export class AdminSubscriptionsService {
         where: { email: { contains: search }, role: 'tenant_admin' },
         select: { tenantId: true },
       });
-      const tenantIdsByEmail = [...new Set(
-        matchingUsers.map((u) => u.tenantId).filter(Boolean) as string[],
-      )];
+      const tenantIdsByEmail = [
+        ...new Set(matchingUsers.map((u) => u.tenantId).filter(Boolean) as string[]),
+      ];
 
       const conditions: string[] = [
         'tenant.name LIKE :search',
@@ -224,7 +224,9 @@ export class AdminSubscriptionsService {
     );
 
     // Batch-fetch owner emails for all subscriptions on this page (single Prisma query)
-    const tenantIds = [...new Set(subscriptions.map((s) => s.tenantId).filter(Boolean))] as string[];
+    const tenantIds = [
+      ...new Set(subscriptions.map((s) => s.tenantId).filter(Boolean)),
+    ] as string[];
     const ownerUsers = tenantIds.length
       ? await this.prismaService.user.findMany({
           where: { tenantId: { in: tenantIds }, role: 'tenant_admin' },

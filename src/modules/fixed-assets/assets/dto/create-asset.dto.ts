@@ -1,6 +1,14 @@
 import {
-  IsNotEmpty, IsString, IsOptional, IsEnum, IsUUID,
-  IsDateString, IsNumber, IsInt, Min, IsPositive,
+  IsNotEmpty,
+  IsString,
+  IsOptional,
+  IsEnum,
+  IsUUID,
+  IsDateString,
+  IsNumber,
+  IsInt,
+  Min,
+  IsPositive,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
@@ -30,15 +38,20 @@ export class CreateAssetDto {
   @ApiProperty() @IsNotEmpty() @IsUUID() propertyId: string;
 
   @ApiProperty({ description: 'รหัสสินทรัพย์ เช่น FA-001', example: 'FA-001' })
-  @IsNotEmpty() @IsString() assetCode: string;
+  @IsNotEmpty()
+  @IsString()
+  assetCode: string;
 
   @ApiProperty({ description: 'ชื่อสินทรัพย์', example: 'เครื่องปรับอากาศ Daikin 18000 BTU' })
-  @IsNotEmpty() @IsString() name: string;
+  @IsNotEmpty()
+  @IsString()
+  name: string;
 
   @ApiPropertyOptional() @IsOptional() @IsString() description?: string;
 
   @ApiProperty({ enum: FixedAssetCategoryEnum })
-  @IsEnum(FixedAssetCategoryEnum) category: FixedAssetCategoryEnum;
+  @IsEnum(FixedAssetCategoryEnum)
+  category: FixedAssetCategoryEnum;
 
   @ApiPropertyOptional() @IsOptional() @IsUUID() costCenterId?: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() assetAccountId?: string;
@@ -46,25 +59,45 @@ export class CreateAssetDto {
   @ApiPropertyOptional() @IsOptional() @IsUUID() deprecExpenseAccountId?: string;
 
   @ApiProperty({ description: 'วันที่ซื้อ', example: '2024-01-15' })
-  @IsDateString() purchaseDate: string;
+  @IsDateString()
+  purchaseDate: string;
 
   @ApiProperty({ description: 'ราคาซื้อ', example: 45000 })
-  @IsNumber({ maxDecimalPlaces: 2 }) @IsPositive() @Type(() => Number) purchaseCost: number;
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsPositive()
+  @Type(() => Number)
+  purchaseCost: number;
 
   @ApiPropertyOptional({ description: 'ค่าใช้จ่ายในการได้มาเพิ่มเติม', default: 0 })
-  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Type(() => Number) acquisitionCost?: number;
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Type(() => Number)
+  acquisitionCost?: number;
 
   @ApiPropertyOptional({ description: 'มูลค่าซาก', default: 0 })
-  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Type(() => Number) residualValue?: number;
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Type(() => Number)
+  residualValue?: number;
 
   @ApiProperty({ description: 'อายุการใช้งาน (ปี)', example: 5 })
-  @IsInt() @Min(1) @Type(() => Number) usefulLifeYears: number;
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  usefulLifeYears: number;
 
   @ApiProperty({ enum: DepreciationMethodEnum, default: DepreciationMethodEnum.STRAIGHT_LINE })
-  @IsEnum(DepreciationMethodEnum) depreciationMethod: DepreciationMethodEnum;
+  @IsEnum(DepreciationMethodEnum)
+  depreciationMethod: DepreciationMethodEnum;
 
   @ApiPropertyOptional({ description: 'อัตราค่าเสื่อม % สำหรับ Declining Balance' })
-  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Type(() => Number) depreciationRate?: number;
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Type(() => Number)
+  depreciationRate?: number;
 
   @ApiPropertyOptional() @IsOptional() @IsString() location?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() serialNo?: string;

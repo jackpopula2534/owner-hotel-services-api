@@ -846,9 +846,7 @@ export class SeederService {
       // create()/update() ของ AdminsService จะ hash password ให้เอง → ส่ง plaintext
       const existing = await this.adminsService.findByEmail(adminData.email);
       const accessLabel =
-        adminData.menuAccess.length === 0
-          ? 'full access'
-          : `${adminData.menuAccess.length} menus`;
+        adminData.menuAccess.length === 0 ? 'full access' : `${adminData.menuAccess.length} menus`;
 
       if (!existing) {
         await this.adminsService.create(adminData);
@@ -6877,8 +6875,6 @@ export class SeederService {
       created++;
     }
 
-    this.logger.log(
-      `  ✓ Operating-cost categories: ${created} created, ${skipped} skipped`,
-    );
+    this.logger.log(`  ✓ Operating-cost categories: ${created} created, ${skipped} skipped`);
   }
 }

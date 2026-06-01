@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-  BadRequestException,
-} from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@/prisma/prisma.service';
 import { CreateApPaymentDto } from './dto/create-ap-payment.dto';
 
@@ -116,10 +111,7 @@ export class ApPaymentsService {
 
           const newPaid = Number(invoice.paidAmount) + alloc.amount;
           const newBalance = Number(invoice.netPayable) - newPaid;
-          const newStatus =
-            newBalance <= 0.01 ? 'PAID'
-            : newPaid > 0 ? 'PARTIAL'
-            : invoice.status;
+          const newStatus = newBalance <= 0.01 ? 'PAID' : newPaid > 0 ? 'PARTIAL' : invoice.status;
 
           await tx.apInvoice.update({
             where: { id: alloc.invoiceId },
@@ -178,9 +170,7 @@ export class ApPaymentsService {
         const newPaid = Math.max(0, Number(invoice.paidAmount) - Number(alloc.amount));
         const newBalance = Number(invoice.netPayable) - newPaid;
         const newStatus =
-          invoice.status === 'VOID' ? 'VOID'
-          : newPaid <= 0 ? 'APPROVED'
-          : 'PARTIAL';
+          invoice.status === 'VOID' ? 'VOID' : newPaid <= 0 ? 'APPROVED' : 'PARTIAL';
 
         await tx.apInvoice.update({
           where: { id: alloc.invoiceId },

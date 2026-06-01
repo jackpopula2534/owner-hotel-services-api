@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { randomUUID, createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   CreateAuditLogDto,
@@ -20,26 +21,131 @@ export class AuditLogService {
 
   async log(dto: CreateAuditLogDto): Promise<void> {
     try {
-      // Note: category field added via migration — use type assertion until prisma generate runs
+      // Generate id + timestamp app-side so they can be folded into the
+      // tamper-evidence hash before the row is written (LEGAL-05).
+      const id = randomUUID();
+      const createdAt = new Date();
+      const record = {
+        id,
+        action: dto.action,
+        resource: dto.resource,
+        resourceId: dto.resourceId ?? null,
+        category: dto.category || AuditCategory.GENERAL,
+        oldValues: dto.oldValues ? JSON.parse(JSON.stringify(dto.oldValues)) : null,
+        newValues: dto.newValues ? JSON.parse(JSON.stringify(dto.newValues)) : null,
+        description: dto.description ?? null,
+        tenantId: dto.tenantId ?? null,
+        userId: dto.userId ?? null,
+        adminId: dto.adminId ?? null,
+        ipAddress: dto.ipAddress ?? null,
+        userAgent: dto.userAgent ?? null,
+        createdAt,
+      };
+
+      // Note: category/entryHash fields added via migration — use type assertion
+      // until prisma generate runs.
       await this.prisma.auditLog.create({
         data: {
-          action: dto.action,
-          resource: dto.resource,
-          resourceId: dto.resourceId,
-          category: dto.category || AuditCategory.GENERAL,
-          oldValues: dto.oldValues ? JSON.parse(JSON.stringify(dto.oldValues)) : null,
-          newValues: dto.newValues ? JSON.parse(JSON.stringify(dto.newValues)) : null,
-          description: dto.description,
-          tenantId: dto.tenantId,
-          userId: dto.userId,
-          adminId: dto.adminId,
-          ipAddress: dto.ipAddress,
-          userAgent: dto.userAgent,
+          ...record,
+          entryHash: AuditLogService.computeEntryHash(record),
         } as any,
       });
     } catch (error) {
       this.logger.error(`Failed to create audit log: ${error.message}`);
     }
+  }
+
+  /**
+   * LEGAL-05: deterministic SHA-256 over a row's immutable content. Object
+   * values are canonicalised (sorted keys) so the hash is stable regardless of
+   * JSON key ordering when the row is later read back for verification.
+   */
+  static computeEntryHash(row: {
+    id: string;
+    action: string;
+    resource: string;
+    resourceId: string | null;
+    category: string | null;
+    oldValues: unknown;
+    newValues: unknown;
+    description: string | null;
+    tenantId: string | null;
+    userId: string | null;
+    adminId: string | null;
+    ipAddress: string | null;
+    userAgent: string | null;
+    createdAt: Date | string;
+  }): string {
+    const canonical = [
+      row.id,
+      row.tenantId ?? '',
+      row.userId ?? '',
+      row.adminId ?? '',
+      row.action,
+      row.resource,
+      row.resourceId ?? '',
+      row.category ?? '',
+      AuditLogService.canonicalJson(row.oldValues),
+      AuditLogService.canonicalJson(row.newValues),
+      row.description ?? '',
+      row.ipAddress ?? '',
+      row.userAgent ?? '',
+      new Date(row.createdAt).toISOString(),
+    ].join('|');
+    return createHash('sha256').update(canonical).digest('hex');
+  }
+
+  /** Stable JSON serialization with recursively sorted object keys. */
+  private static canonicalJson(value: unknown): string {
+    const sort = (v: unknown): unknown => {
+      if (Array.isArray(v)) return v.map(sort);
+      if (v && typeof v === 'object') {
+        return Object.keys(v as Record<string, unknown>)
+          .sort()
+          .reduce(
+            (acc, k) => {
+              acc[k] = sort((v as Record<string, unknown>)[k]);
+              return acc;
+            },
+            {} as Record<string, unknown>,
+          );
+      }
+      return v;
+    };
+    return JSON.stringify(sort(value) ?? null);
+  }
+
+  /**
+   * LEGAL-05: recompute each stored hash and report any row whose content no
+   * longer matches its hash (tampered) or that predates hashing (no hash).
+   */
+  async verifyIntegrity(
+    opts: { tenantId?: string; limit?: number } = {},
+  ): Promise<{ checked: number; valid: number; tampered: string[]; unhashed: string[] }> {
+    const rows: any[] = await this.prisma.auditLog.findMany({
+      where: opts.tenantId ? { tenantId: opts.tenantId } : {},
+      orderBy: { createdAt: 'desc' },
+      take: opts.limit ?? 1000,
+    });
+
+    const tampered: string[] = [];
+    const unhashed: string[] = [];
+    let valid = 0;
+
+    for (const row of rows) {
+      if (!row.entryHash) {
+        unhashed.push(row.id);
+        continue;
+      }
+      const expected = AuditLogService.computeEntryHash(row);
+      if (expected === row.entryHash) {
+        valid++;
+      } else {
+        tampered.push(row.id);
+      }
+    }
+
+    return { checked: rows.length, valid, tampered, unhashed };
   }
 
   // ============================================================

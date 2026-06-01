@@ -1152,6 +1152,11 @@ model invoice_items {
 model invoices {
   id                  String                @id @default(uuid()) @db.VarChar(36)
   amount              Decimal               @db.Decimal(10, 2)
+  // LEGAL-02: Thai tax-invoice breakdown. `amount` remains the gross total
+  // (VAT-inclusive) for backward compatibility; these expose the components.
+  subtotal            Decimal?              @db.Decimal(10, 2)
+  vat_rate            Decimal?              @db.Decimal(5, 2)
+  vat_amount          Decimal?              @db.Decimal(10, 2)
   original_amount     Decimal?              @db.Decimal(10, 2)
   adjusted_amount     Decimal?              @db.Decimal(10, 2)
   status              invoices_status       @default(pending)
@@ -1904,6 +1909,8 @@ model AuditLog {
   description String?  @db.Text
   createdAt   DateTime @default(now()) @db.DateTime(6)
   category    String?  @default("general")
+  // LEGAL-05: SHA-256 content hash computed at write time for tamper-evidence.
+  entryHash   String?  @map("entry_hash") @db.VarChar(64)
 
   @@index([tenantId])
   @@index([userId])

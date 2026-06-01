@@ -60,18 +60,8 @@ export const DEFAULT_ACCOUNTING_PERMISSIONS: Record<AccountingRole, string[]> = 
     'report.view',
     'report.export',
   ],
-  ap_clerk: [
-    'ap.view',
-    'ap.manage',
-    'journal.view',
-    'report.view',
-  ],
-  ar_clerk: [
-    'ar.view',
-    'ar.manage',
-    'journal.view',
-    'report.view',
-  ],
+  ap_clerk: ['ap.view', 'ap.manage', 'journal.view', 'report.view'],
+  ar_clerk: ['ar.view', 'ar.manage', 'journal.view', 'report.view'],
   auditor: [
     'journal.view',
     'ar.view',

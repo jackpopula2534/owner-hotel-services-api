@@ -315,6 +315,7 @@ describe('GoodsReceivesService', () => {
           isPerishable: false,
           requiresLotTracking: false,
           requiresQC: id === itemRequiringQC,
+          defaultQCTemplateId: id === itemRequiringQC ? 'tpl-1' : null,
         }));
       });
 
@@ -456,6 +457,7 @@ describe('GoodsReceivesService', () => {
               item: { id: 'item-x', name: 'X', sku: 'SKU-X', unit: 'PIECE', requiresQC: true },
             },
           ],
+          qcRecords: [{ id: 'qcr-1' }],
         },
         { lotMap: new Map(), userMap: new Map() },
       );
@@ -526,6 +528,7 @@ describe('GoodsReceivesService', () => {
               item: { id: 'item-z', name: 'Z', sku: 'SKU-Z', unit: 'PIECE', requiresQC: true },
             },
           ],
+          qcRecords: [{ id: 'qcr-1' }],
         },
         { lotMap: new Map(), userMap: new Map() },
       );

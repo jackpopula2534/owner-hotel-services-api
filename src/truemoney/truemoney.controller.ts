@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/comm
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../modules/auth/guards/jwt-auth.guard';
+import { Public } from '../common/decorators/public.decorator';
 import { TrueMoneyService } from './truemoney.service';
 import { InitiateTrueMoneyDto, TrueMoneyCallbackDto } from './dto/truemoney.dto';
 
@@ -30,8 +31,10 @@ export class TrueMoneyController {
    * (2C2P จะ POST มาที่ endpoint นี้ — ไม่ต้องใช้ JWT)
    */
   @Post('callback')
-  @ApiOperation({ summary: '2C2P Payment Callback' })
+  @Public()
+  @ApiOperation({ summary: '2C2P Payment Callback (signature-verified)' })
   @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 401, description: 'Invalid or missing 2C2P signature' })
   async callback(@Body() dto: TrueMoneyCallbackDto) {
     await this.trueMoneyService.handleCallback(dto);
     return { received: true };

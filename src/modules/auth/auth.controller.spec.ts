@@ -175,7 +175,10 @@ describe('AuthController', () => {
       const result = await controller.logout(mockUser, body);
 
       expect(authService.logout).toHaveBeenCalledWith(mockUser.userId, body.refreshToken, 'main');
-      expect(result).toEqual({ success: true, message: 'Logged out from hotel management dashboard' });
+      expect(result).toEqual({
+        success: true,
+        message: 'Logged out from hotel management dashboard',
+      });
     });
   });
 });

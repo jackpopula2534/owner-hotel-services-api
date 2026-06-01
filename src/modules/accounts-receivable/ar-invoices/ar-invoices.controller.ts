@@ -1,5 +1,14 @@
 import {
-  Controller, Get, Post, Patch, Param, Body, Query, UseGuards, HttpCode, HttpStatus,
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Param,
+  Body,
+  Query,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { IsOptional, IsString } from 'class-validator';
@@ -16,7 +25,12 @@ class VoidInvoiceDto {
   @ApiPropertyOptional() @IsOptional() @IsString() reason?: string;
 }
 
-interface JwtPayload { sub: string; tenantId: string; email: string; role: string; }
+interface JwtPayload {
+  sub: string;
+  tenantId: string;
+  email: string;
+  role: string;
+}
 
 @ApiTags('Accounting - AR Invoices')
 @ApiBearerAuth()
@@ -36,6 +50,14 @@ export class ArInvoicesController {
     @Query('asOfDate') asOfDate?: string,
   ) {
     const data = await this.service.getAging(user.tenantId, propertyId, asOfDate);
+    return { success: true, data };
+  }
+
+  @Get('sequence-audit')
+  @ApiOperation({ summary: 'ตรวจเลขรันใบกำกับภาษีว่ามีเลขขาด/ซ้ำหรือไม่ (LEGAL-03)' })
+  @ApiQuery({ name: 'yearMonth', required: false, description: 'e.g. 202605' })
+  async sequenceAudit(@CurrentUser() user: JwtPayload, @Query('yearMonth') yearMonth?: string) {
+    const data = await this.service.detectSequenceGaps(user.tenantId, { yearMonth });
     return { success: true, data };
   }
 

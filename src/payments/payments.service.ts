@@ -107,33 +107,57 @@ export class PaymentsService {
       throw new NotFoundException('Payment not found');
     }
 
-    const approvedPayment = await this.prisma.payments.update({
-      where: { id },
-      data: {
-        status: PaymentStatus.APPROVED,
-        approved_by: adminId,
-        approved_at: new Date(),
-      },
-      include: { invoices: true },
+    // SALES-04: idempotency. An already-approved payment must NOT be approved
+    // again — re-running would extend the subscription a second time and
+    // re-mark the invoice paid. Fast-path no-op for the common double-click /
+    // duplicate-request case.
+    if (payment.status === PaymentStatus.APPROVED) {
+      this.logger.warn(`Payment ${id} already approved — returning existing (idempotent no-op)`);
+      return payment;
+    }
+
+    // Atomically "claim" the payment (pending → approved) and flip the invoice
+    // to paid in the SAME transaction — this is the money-critical pair. The
+    // conditional updateMany guard also closes the concurrent-approve race:
+    // only one caller can transition a non-approved payment.
+    const approvedPayment = await this.prisma.$transaction(async (tx) => {
+      const claim = await tx.payments.updateMany({
+        where: { id, status: { not: PaymentStatus.APPROVED as payments_status } },
+        data: {
+          status: PaymentStatus.APPROVED as payments_status,
+          approved_by: adminId,
+          approved_at: new Date(),
+        },
+      });
+
+      if (claim.count === 0) {
+        return null; // lost the race — another request approved it first
+      }
+
+      if (payment.invoice_id) {
+        await tx.invoices.update({
+          where: { id: payment.invoice_id },
+          data: { status: 'paid' },
+        });
+
+        // H2: activate + extend the subscription INSIDE the same transaction.
+        // If activation fails, the whole approval rolls back (payment stays
+        // un-approved) so a retry reconciles cleanly — avoiding the stuck state
+        // where a payment is approved but its subscription never activates.
+        // Atomicity also means the idempotency guard above is safe: an
+        // already-approved payment has, by construction, already been activated.
+        await this.activateSubscriptionForInvoice(payment.invoice_id, tx);
+      }
+
+      return tx.payments.findUniqueOrThrow({ where: { id }, include: { invoices: true } });
     });
 
-    // Update invoice status to paid
-    if (payment.invoice_id) {
-      await this.updateInvoiceStatusToPaid(payment.invoice_id).catch((err) => {
-        this.logger.error(`Failed to update invoice status: ${err.message}`);
-      });
+    if (!approvedPayment) {
+      this.logger.warn(`Payment ${id} approved concurrently — idempotent no-op`);
+      return this.findOne(id, tenantId);
     }
 
-    // Activate + extend the subscription tied to this invoice.
-    // วันใช้งานคำนวณจากเวลาที่ admin approve จริง (ไม่ใช่ตอนสร้าง invoice)
-    // และต่ออายุตาม billing_cycle ของ subscription (monthly | yearly).
-    if (payment.invoice_id) {
-      await this.activateSubscriptionForInvoice(payment.invoice_id).catch((err) => {
-        this.logger.error(`Failed to activate subscription: ${err.message}`);
-      });
-    }
-
-    // Update related booking status to confirmed
+    // Update related booking status to confirmed (idempotent; runs post-commit)
     if (payment.invoice_id) {
       await this.updateBookingStatusToConfirmed(payment.invoice_id).catch((err) => {
         this.logger.error(`Failed to update booking status: ${err.message}`);
@@ -177,22 +201,6 @@ export class PaymentsService {
   }
 
   /**
-   * Update invoice status to paid after payment approval
-   */
-  private async updateInvoiceStatusToPaid(invoiceId: string): Promise<void> {
-    try {
-      await this.prisma.invoices.update({
-        where: { id: invoiceId },
-        data: { status: 'paid' },
-      });
-      this.logger.log(`Invoice ${invoiceId} status updated to paid`);
-    } catch (error) {
-      this.logger.error(`Failed to update invoice ${invoiceId} status: ${error.message}`);
-      throw error;
-    }
-  }
-
-  /**
    * Activate and extend the subscription linked to an approved invoice.
    *
    * - status: trial → active
@@ -203,8 +211,13 @@ export class PaymentsService {
    * ถ้า subscription ยัง active อยู่แล้ว (ต่ออายุ) จะต่อจาก end_date เดิม
    * เมื่อ end_date เดิมยังไม่หมดอายุ เพื่อไม่ให้ลูกค้าเสียวันที่เหลือ
    */
-  private async activateSubscriptionForInvoice(invoiceId: string): Promise<void> {
-    const invoice = await this.prisma.invoices.findUnique({
+  private async activateSubscriptionForInvoice(
+    invoiceId: string,
+    // Optional transaction client so activation can run atomically with the
+    // payment approval (H2). Defaults to the base client for standalone calls.
+    db: Prisma.TransactionClient = this.prisma,
+  ): Promise<void> {
+    const invoice = await db.invoices.findUnique({
       where: { id: invoiceId },
       select: { subscription_id: true },
     });
@@ -214,7 +227,7 @@ export class PaymentsService {
       return;
     }
 
-    const subscription = await this.prisma.subscriptions.findUnique({
+    const subscription = await db.subscriptions.findUnique({
       where: { id: invoice.subscription_id },
       select: { id: true, billing_cycle: true, end_date: true, status: true },
     });
@@ -237,7 +250,7 @@ export class PaymentsService {
       endDate.setMonth(endDate.getMonth() + 1);
     }
 
-    await this.prisma.subscriptions.update({
+    await db.subscriptions.update({
       where: { id: subscription.id },
       data: {
         status: 'active',

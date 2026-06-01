@@ -47,7 +47,8 @@ export class EmailService implements OnModuleInit {
     const smtpPort = this.configService.get<number>('SMTP_PORT', 587);
     const smtpUser = this.configService.get<string>('SMTP_USER');
     const smtpPass = this.configService.get<string>('SMTP_PASS');
-    const smtpSecure = this.configService.get<boolean>('SMTP_SECURE', false);
+    const smtpSecureRaw = this.configService.get<string | boolean>('SMTP_SECURE', false);
+    const smtpSecure = smtpSecureRaw === true || smtpSecureRaw === 'true';
 
     if (!smtpHost || !smtpUser || !smtpPass) {
       this.logger.warn('SMTP configuration not complete. Email sending disabled.');
@@ -617,7 +618,10 @@ export class EmailService implements OnModuleInit {
     }));
   }
 
-  async getTemplateContent(name: string, language = 'th'): Promise<{ name: string; language: string; content: string }> {
+  async getTemplateContent(
+    name: string,
+    language = 'th',
+  ): Promise<{ name: string; language: string; content: string }> {
     const templatesDir = path.join(__dirname, 'templates');
     const filePath = path.join(templatesDir, `${name}.${language}.hbs`);
     const fallbackPath = path.join(templatesDir, `${name}.hbs`);

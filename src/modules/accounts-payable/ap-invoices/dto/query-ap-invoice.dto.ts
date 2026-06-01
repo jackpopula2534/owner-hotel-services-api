@@ -14,11 +14,24 @@ export enum ApInvoiceStatus {
 
 export class QueryApInvoiceDto {
   @ApiPropertyOptional() @IsOptional() @IsUUID() propertyId?: string;
-  @ApiPropertyOptional({ enum: ApInvoiceStatus }) @IsOptional() @IsEnum(ApInvoiceStatus) status?: ApInvoiceStatus;
+  @ApiPropertyOptional({ enum: ApInvoiceStatus })
+  @IsOptional()
+  @IsEnum(ApInvoiceStatus)
+  status?: ApInvoiceStatus;
   @ApiPropertyOptional() @IsOptional() @IsUUID() supplierId?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() dateFrom?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() dateTo?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() search?: string;
-  @ApiPropertyOptional({ default: 1 }) @IsOptional() @IsInt() @Min(1) @Type(() => Number) page?: number;
-  @ApiPropertyOptional({ default: 20 }) @IsOptional() @IsInt() @Min(1) @Type(() => Number) limit?: number;
+  @ApiPropertyOptional({ default: 1 })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  page?: number;
+  @ApiPropertyOptional({ default: 20 })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  limit?: number;
 }

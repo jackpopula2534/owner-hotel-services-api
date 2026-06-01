@@ -1,4 +1,12 @@
-import { IsNotEmpty, IsUUID, IsString, IsDateString, IsNumber, IsOptional, IsEnum } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsUUID,
+  IsString,
+  IsDateString,
+  IsNumber,
+  IsOptional,
+  IsEnum,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 
@@ -13,7 +21,8 @@ export enum ReconTxnType {
 
 export class CreateReconLineDto {
   @ApiProperty({ description: 'Reconciliation ID' })
-  @IsNotEmpty() @IsUUID()
+  @IsNotEmpty()
+  @IsUUID()
   reconId: string;
 
   @ApiProperty({ description: 'ประเภทรายการ', enum: ReconTxnType })
@@ -25,26 +34,34 @@ export class CreateReconLineDto {
   txnDate: string;
 
   @ApiProperty({ description: 'คำอธิบาย' })
-  @IsNotEmpty() @IsString()
+  @IsNotEmpty()
+  @IsString()
   description: string;
 
   @ApiPropertyOptional({ description: 'ยอดจาก Bank Statement', default: 0 })
-  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Type(() => Number)
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Type(() => Number)
   statementAmount?: number;
 
   @ApiPropertyOptional({ description: 'ยอดในสมุดบัญชี', default: 0 })
-  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Type(() => Number)
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Type(() => Number)
   bookAmount?: number;
 
   @ApiPropertyOptional({ description: 'อ้างอิงรายการในระบบ (JournalEntryId ฯลฯ)' })
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   bookRef?: string;
 
   @ApiPropertyOptional({ description: 'อ้างอิง Statement จากธนาคาร' })
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   statementRef?: string;
 
   @ApiPropertyOptional()
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   notes?: string;
 }

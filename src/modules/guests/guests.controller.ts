@@ -9,6 +9,7 @@ import {
   Param,
   Query,
   UseGuards,
+  Ip,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { GuestsService } from './guests.service';
@@ -46,8 +47,10 @@ export class GuestsController {
   async create(
     @Body() createGuestDto: CreateGuestDto,
     @CurrentUser() user: { id?: string; tenantId?: string },
+    @Ip() ip: string,
   ) {
-    return this.guestsService.create(createGuestDto, user?.tenantId, user?.id);
+    // LEGAL-04: capture the request IP as evidence of where/when consent was given.
+    return this.guestsService.create(createGuestDto, user?.tenantId, user?.id, ip);
   }
 
   @Put(':id')

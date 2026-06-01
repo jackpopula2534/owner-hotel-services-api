@@ -77,18 +77,39 @@ export class InvoicesService {
     // Guard against duplicate subscription invoices. Only applies to
     // subscription invoices (has subscriptionId, no bookingId) and can be
     // bypassed explicitly by trusted internal callers.
-    const isSubscriptionInvoice =
-      !!createInvoiceDto.subscriptionId && !createInvoiceDto.bookingId;
+    const isSubscriptionInvoice = !!createInvoiceDto.subscriptionId && !createInvoiceDto.bookingId;
     if (isSubscriptionInvoice && !options.skipOutstandingCheck) {
       await this.assertNoOutstandingSubscriptionInvoices(createInvoiceDto.tenantId);
     }
+
+    // LEGAL-02: only stamp the VAT breakdown when it is meaningful — i.e. the
+    // caller explicitly opted in (passed subtotal or vatRate) OR this is a
+    // subscription invoice (the SaaS billing case LEGAL-02 targets). Booking /
+    // folio invoices with just a gross `amount` are left untouched so we never
+    // misstate VAT on amounts that may be zero-rated or already net.
+    const optedIntoVat =
+      createInvoiceDto.subtotal !== undefined || createInvoiceDto.vatRate !== undefined;
+    const isSubscriptionInvoiceForVat =
+      !!createInvoiceDto.subscriptionId && !createInvoiceDto.bookingId;
+    const applyVat = optedIntoVat || isSubscriptionInvoiceForVat;
+
+    const vat = applyVat
+      ? this.computeVat({
+          amount: createInvoiceDto.amount,
+          subtotal: createInvoiceDto.subtotal,
+          vatRate: createInvoiceDto.vatRate,
+        })
+      : null;
 
     const data: any = {
       tenant_id: createInvoiceDto.tenantId,
       subscription_id: createInvoiceDto.subscriptionId,
       booking_id: createInvoiceDto.bookingId,
       invoice_no: createInvoiceDto.invoiceNo,
-      amount: createInvoiceDto.amount,
+      amount: vat ? vat.amount : createInvoiceDto.amount,
+      subtotal: vat ? vat.subtotal : undefined,
+      vat_rate: vat ? vat.vatRate : undefined,
+      vat_amount: vat ? vat.vatAmount : undefined,
       status: createInvoiceDto.status,
       due_date: createInvoiceDto.dueDate,
     };
@@ -104,6 +125,48 @@ export class InvoicesService {
       data,
       include: { tenants: true, subscriptions: true, invoice_items: true, payments: true },
     });
+  }
+
+  // LEGAL-02: Thai standard VAT rate (%) used when the caller omits one.
+  private static readonly DEFAULT_VAT_RATE = 7;
+
+  /**
+   * Compute the Thai tax-invoice breakdown in integer satang (1/100 THB) to
+   * avoid floating-point drift, guaranteeing `subtotal + vat === total`.
+   *
+   *  • subtotal provided  → total is derived (subtotal + VAT)
+   *  • only amount provided → treated as the gross, VAT-inclusive total and the
+   *    base is back-calculated: subtotal = total / (1 + rate/100)
+   */
+  computeVat(input: { amount: number; subtotal?: number; vatRate?: number }): {
+    amount: number;
+    subtotal: number;
+    vatRate: number;
+    vatAmount: number;
+  } {
+    const rate = input.vatRate ?? InvoicesService.DEFAULT_VAT_RATE;
+
+    if (input.subtotal !== undefined) {
+      const subtotalSatang = Math.round(input.subtotal * 100);
+      const vatSatang = Math.round((subtotalSatang * rate) / 100);
+      const totalSatang = subtotalSatang + vatSatang;
+      return {
+        amount: totalSatang / 100,
+        subtotal: subtotalSatang / 100,
+        vatRate: rate,
+        vatAmount: vatSatang / 100,
+      };
+    }
+
+    const totalSatang = Math.round(input.amount * 100);
+    const subtotalSatang = Math.round((totalSatang * 100) / (100 + rate));
+    const vatSatang = totalSatang - subtotalSatang;
+    return {
+      amount: totalSatang / 100,
+      subtotal: subtotalSatang / 100,
+      vatRate: rate,
+      vatAmount: vatSatang / 100,
+    };
   }
 
   findAll(tenantId?: string) {

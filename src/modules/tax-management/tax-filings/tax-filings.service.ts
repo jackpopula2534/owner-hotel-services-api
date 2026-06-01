@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-  BadRequestException,
-} from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@/prisma/prisma.service';
 import { CreateTaxFilingDto, TaxFilingType } from './dto/create-tax-filing.dto';
 
@@ -74,18 +69,19 @@ export class TaxFilingsService {
           totalTax,
           notes: dto.notes,
           createdBy,
-          lines: dto.lines && dto.lines.length > 0
-            ? {
-                create: dto.lines.map((line, i) => ({
-                  lineNo: i + 1,
-                  description: line.description,
-                  docRef: line.docRef,
-                  baseAmount: line.baseAmount,
-                  taxRate: line.taxRate,
-                  taxAmount: line.taxAmount,
-                })),
-              }
-            : undefined,
+          lines:
+            dto.lines && dto.lines.length > 0
+              ? {
+                  create: dto.lines.map((line, i) => ({
+                    lineNo: i + 1,
+                    description: line.description,
+                    docRef: line.docRef,
+                    baseAmount: line.baseAmount,
+                    taxRate: line.taxRate,
+                    taxAmount: line.taxAmount,
+                  })),
+                }
+              : undefined,
         },
         include: { lines: true },
       });
@@ -207,7 +203,9 @@ export class TaxFilingsService {
       });
     });
 
-    this.logger.log(`Generated VAT PP30 for ${period}, propertyId ${propertyId}: payable ${vatPayable.toFixed(2)} THB`);
+    this.logger.log(
+      `Generated VAT PP30 for ${period}, propertyId ${propertyId}: payable ${vatPayable.toFixed(2)} THB`,
+    );
     return {
       filing,
       summary: {

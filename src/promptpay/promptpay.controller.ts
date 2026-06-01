@@ -7,9 +7,13 @@ import {
   Param,
   UseGuards,
   Request,
+  Req,
+  Headers,
+  RawBodyRequest,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { Request as ExpressRequest } from 'express';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -54,8 +58,13 @@ export class PromptPayController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Webhook endpoint for payment notifications' })
   @ApiResponse({ status: 200, description: 'Webhook processed' })
-  async handleWebhook(@Body() dto: WebhookPaymentDto) {
-    return this.promptPayService.handleWebhook(dto);
+  @ApiResponse({ status: 401, description: 'Invalid or missing webhook signature' })
+  async handleWebhook(
+    @Req() req: RawBodyRequest<ExpressRequest>,
+    @Headers('x-promptpay-signature') signature: string,
+    @Body() dto: WebhookPaymentDto,
+  ) {
+    return this.promptPayService.handleWebhook(dto, req.rawBody, signature);
   }
 
   @Post('verify')

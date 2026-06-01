@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-  BadRequestException,
-} from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@/prisma/prisma.service';
 import { CreateArInvoiceDto } from './dto/create-ar-invoice.dto';
 import { QueryArInvoiceDto } from './dto/query-ar-invoice.dto';
@@ -40,10 +35,7 @@ export class ArInvoicesService {
       };
     }
     if (search) {
-      where.OR = [
-        { invoiceNo: { contains: search } },
-        { companyName: { contains: search } },
-      ];
+      where.OR = [{ invoiceNo: { contains: search } }, { companyName: { contains: search } }];
     }
 
     const [total, data] = await Promise.all([
@@ -149,6 +141,30 @@ export class ArInvoicesService {
       throw new BadRequestException(`Cannot issue invoice with status: ${invoice.status}`);
     }
 
+    // LEGAL-03: a Thai full tax invoice (ใบกำกับภาษีเต็มรูป) is invalid without the
+    // SELLER's tax ID. Block issuance until Document Settings for this property
+    // carries a Tax ID — otherwise we'd emit a non-compliant document.
+    const settings = await this.prisma.documentSettings.findUnique({
+      where: { tenantId_propertyId: { tenantId, propertyId: invoice.propertyId } },
+      select: { taxId: true },
+    });
+    if (!settings?.taxId || settings.taxId.trim() === '') {
+      throw new BadRequestException(
+        'ไม่สามารถออกใบกำกับภาษีได้: กรุณาตั้งเลขประจำตัวผู้เสียภาษี (Tax ID) ของผู้ขายใน Document Settings ของสาขานี้ก่อน',
+      );
+    }
+
+    // LEGAL-03: City Ledger (B2B) invoices must carry the BUYER's tax ID to be a
+    // valid full tax invoice for the company claiming input VAT.
+    if (invoice.invoiceType === 'CITY_LEDGER') {
+      const buyerTaxId = (invoice.companyTaxId ?? '').trim();
+      if (!buyerTaxId) {
+        throw new BadRequestException(
+          'ไม่สามารถออกใบกำกับภาษีแบบ City Ledger ได้: ต้องระบุเลขประจำตัวผู้เสียภาษีของบริษัทผู้ซื้อ (companyTaxId)',
+        );
+      }
+    }
+
     const updated = await this.prisma.arInvoice.update({
       where: { id },
       data: { status: 'ISSUED', issuedBy, issuedAt: new Date() },
@@ -156,6 +172,69 @@ export class ArInvoicesService {
 
     this.logger.log(`AR Invoice ${invoice.invoiceNo} issued by ${issuedBy}`);
     return updated;
+  }
+
+  /**
+   * LEGAL-03: detect gaps / duplicates in the sequential invoice numbering.
+   * The Thai Revenue Department requires a gapless, non-reused running number
+   * per document series. For each INV sequence we compare the consumed numbers
+   * (1..lastNumber) against the invoice numbers actually present in the DB.
+   */
+  async detectSequenceGaps(
+    tenantId: string,
+    opts: { yearMonth?: string } = {},
+  ): Promise<{
+    tenantId: string;
+    ok: boolean;
+    sequences: Array<{
+      yearMonth: string;
+      lastNumber: number;
+      invoiceCount: number;
+      missing: number[];
+      duplicates: number[];
+      hasIssues: boolean;
+    }>;
+  }> {
+    const sequences = await this.prisma.documentSequence.findMany({
+      where: {
+        tenantId,
+        docType: 'INV',
+        ...(opts.yearMonth ? { yearMonth: opts.yearMonth } : {}),
+      },
+    });
+
+    const results = [];
+    for (const seq of sequences) {
+      const invoices = await this.prisma.arInvoice.findMany({
+        where: { tenantId, invoiceNo: { startsWith: `INV-${seq.yearMonth}-` } },
+        select: { invoiceNo: true },
+      });
+
+      const counts = new Map<number, number>();
+      for (const inv of invoices) {
+        const match = inv.invoiceNo.match(/-(\d{6})$/);
+        if (!match) continue;
+        const n = parseInt(match[1], 10);
+        counts.set(n, (counts.get(n) ?? 0) + 1);
+      }
+
+      const missing: number[] = [];
+      for (let n = 1; n <= seq.lastNumber; n++) {
+        if (!counts.has(n)) missing.push(n);
+      }
+      const duplicates = [...counts.entries()].filter(([, c]) => c > 1).map(([n]) => n);
+
+      results.push({
+        yearMonth: seq.yearMonth,
+        lastNumber: seq.lastNumber,
+        invoiceCount: invoices.length,
+        missing,
+        duplicates,
+        hasIssues: missing.length > 0 || duplicates.length > 0,
+      });
+    }
+
+    return { tenantId, ok: results.every((r) => !r.hasIssues), sequences: results };
   }
 
   async void(id: string, tenantId: string, voidedBy: string, reason?: string) {
@@ -205,16 +284,26 @@ export class ArInvoicesService {
         dueDate: inv.dueDate,
         balance,
         daysOverdue: Math.max(0, daysOverdue),
-        bucket: daysOverdue <= 0 ? 'current'
-          : daysOverdue <= 30 ? '1_30'
-          : daysOverdue <= 60 ? '31_60'
-          : daysOverdue <= 90 ? '61_90'
-          : 'over_90',
+        bucket:
+          daysOverdue <= 0
+            ? 'current'
+            : daysOverdue <= 30
+              ? '1_30'
+              : daysOverdue <= 60
+                ? '31_60'
+                : daysOverdue <= 90
+                  ? '61_90'
+                  : 'over_90',
       };
     });
 
     const summary = {
-      current: 0, '1_30': 0, '31_60': 0, '61_90': 0, over_90: 0, total: 0,
+      current: 0,
+      '1_30': 0,
+      '31_60': 0,
+      '61_90': 0,
+      over_90: 0,
+      total: 0,
     };
     for (const row of aging) {
       summary[row.bucket as keyof typeof summary] += row.balance;

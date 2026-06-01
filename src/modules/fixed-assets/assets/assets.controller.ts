@@ -1,5 +1,14 @@
 import {
-  Controller, Get, Post, Patch, Param, Body, Query, UseGuards, HttpCode, HttpStatus,
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Param,
+  Body,
+  Query,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { AssetsService } from './assets.service';
@@ -19,7 +28,12 @@ class DisposeAssetDto {
   @ApiPropertyOptional() @IsOptional() @IsString() reason?: string;
 }
 
-interface JwtPayload { sub: string; tenantId: string; email: string; role: string; }
+interface JwtPayload {
+  sub: string;
+  tenantId: string;
+  email: string;
+  role: string;
+}
 
 @ApiTags('Accounting - Fixed Assets')
 @ApiBearerAuth()
@@ -53,15 +67,30 @@ export class AssetsController {
 
   @Patch(':id')
   @ApiOperation({ summary: 'แก้ไขข้อมูลสินทรัพย์' })
-  async update(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() dto: Partial<CreateAssetDto>) {
+  async update(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: Partial<CreateAssetDto>,
+  ) {
     const data = await this.service.update(id, dto, user.tenantId);
     return { success: true, data };
   }
 
   @Patch(':id/dispose')
   @ApiOperation({ summary: 'จำหน่ายสินทรัพย์' })
-  async dispose(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() dto: DisposeAssetDto) {
-    const data = await this.service.dispose(id, user.tenantId, user.sub, dto.disposalDate, dto.disposalAmount, dto.reason);
+  async dispose(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: DisposeAssetDto,
+  ) {
+    const data = await this.service.dispose(
+      id,
+      user.tenantId,
+      user.sub,
+      dto.disposalDate,
+      dto.disposalAmount,
+      dto.reason,
+    );
     return { success: true, data };
   }
 

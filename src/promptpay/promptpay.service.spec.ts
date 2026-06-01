@@ -1,12 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { createHmac } from 'crypto';
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { PromptPayService } from './promptpay.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
-import { GenerateQRCodeDto, PromptPayType } from './dto/promptpay.dto';
+import { GenerateQRCodeDto, PromptPayType, WebhookPaymentDto } from './dto/promptpay.dto';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PromptPayService — generateQRCode promptpayId precedence
@@ -21,7 +22,6 @@ import { GenerateQRCodeDto, PromptPayType } from './dto/promptpay.dto';
 describe('PromptPayService - generateQRCode', () => {
   let service: PromptPayService;
   let prisma: jest.Mocked<PrismaService>;
-  let configService: jest.Mocked<ConfigService>;
 
   const createMockPrisma = (): jest.Mocked<PrismaService> =>
     ({
@@ -64,7 +64,6 @@ describe('PromptPayService - generateQRCode', () => {
 
     service = module.get<PromptPayService>(PromptPayService);
     prisma = module.get(PrismaService);
-    configService = module.get(ConfigService);
     (prisma.promptPayTransaction.create as jest.Mock).mockImplementation(({ data }) =>
       Promise.resolve({ id: 'tx-1', ...data }),
     );
@@ -142,6 +141,122 @@ describe('PromptPayService - generateQRCode', () => {
     await expect(service.generateQRCode({ amount: 100 } as GenerateQRCodeDto)).rejects.toThrow(
       BadRequestException,
     );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PromptPayService - handleWebhook signature verification (SALES-01)
+//
+// Fail-closed model:
+//  - secret set + invalid signature → 401, no DB lookup
+//  - secret missing in production    → 401
+//  - secret set + valid signature    → atomic claim (updateMany w/ status guard)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('PromptPayService - handleWebhook signature verification', () => {
+  const SECRET = 'test-promptpay-secret';
+
+  const buildWebhookService = async (
+    configOverrides: Record<string, string> = {},
+  ): Promise<{ service: PromptPayService; prisma: any }> => {
+    const prismaMock: any = {
+      promptPayTransaction: {
+        findUnique: jest.fn(),
+        findUniqueOrThrow: jest.fn(),
+        updateMany: jest.fn(),
+      },
+    };
+    const configMock = {
+      get: jest.fn((key: string, def?: string) => {
+        const values: Record<string, string> = { ...configOverrides };
+        return values[key] ?? def ?? '';
+      }),
+    };
+    const emailMock = { sendPaymentReceipt: jest.fn() };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        PromptPayService,
+        { provide: PrismaService, useValue: prismaMock },
+        { provide: ConfigService, useValue: configMock },
+        { provide: EmailService, useValue: emailMock },
+      ],
+    }).compile();
+
+    return { service: module.get(PromptPayService), prisma: prismaMock };
+  };
+
+  const sign = (rawBody: string): string =>
+    createHmac('sha256', SECRET).update(Buffer.from(rawBody)).digest('hex');
+
+  const dto: WebhookPaymentDto = { transactionRef: 'PP-123', status: 'paid' };
+  const rawBody = JSON.stringify(dto);
+
+  it('rejects an invalid signature with 401 and never touches the DB', async () => {
+    const { service, prisma } = await buildWebhookService({
+      PROMPTPAY_WEBHOOK_SECRET: SECRET,
+    });
+
+    await expect(
+      service.handleWebhook(dto, rawBody, 'deadbeef' /* wrong sig */),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(prisma.promptPayTransaction.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('rejects when secret is missing in production', async () => {
+    const { service, prisma } = await buildWebhookService({ NODE_ENV: 'production' });
+
+    await expect(service.handleWebhook(dto, rawBody, 'anything')).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+    expect(prisma.promptPayTransaction.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('accepts a valid signature and atomically claims the transaction', async () => {
+    const { service, prisma } = await buildWebhookService({
+      PROMPTPAY_WEBHOOK_SECRET: SECRET,
+    });
+    prisma.promptPayTransaction.findUnique.mockResolvedValue({
+      id: 'tx-1',
+      status: 'pending',
+      amount: 500,
+      bookingId: null,
+      invoiceId: null,
+    });
+    prisma.promptPayTransaction.updateMany.mockResolvedValue({ count: 1 });
+    prisma.promptPayTransaction.findUniqueOrThrow.mockResolvedValue({ id: 'tx-1', status: 'paid' });
+    // avoid coupling to the email/notification internals
+    jest.spyOn(service as any, 'sendPaymentReceiptEmail').mockResolvedValue(undefined);
+
+    const result = await service.handleWebhook(dto, rawBody, sign(rawBody));
+
+    expect(result.success).toBe(true);
+    // atomic claim must include the status guard so concurrent webhooks can't double-process
+    expect(prisma.promptPayTransaction.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'tx-1', status: 'pending' },
+        data: expect.objectContaining({ status: 'paid' }),
+      }),
+    );
+  });
+
+  it('does not double-process when the atomic claim loses the race (count=0)', async () => {
+    const { service, prisma } = await buildWebhookService({
+      PROMPTPAY_WEBHOOK_SECRET: SECRET,
+    });
+    prisma.promptPayTransaction.findUnique.mockResolvedValue({
+      id: 'tx-1',
+      status: 'pending',
+      amount: 500,
+      bookingId: null,
+      invoiceId: null,
+    });
+    prisma.promptPayTransaction.updateMany.mockResolvedValue({ count: 0 });
+
+    const result = await service.handleWebhook(dto, rawBody, sign(rawBody));
+
+    expect(result.success).toBe(false);
+    expect(prisma.promptPayTransaction.findUniqueOrThrow).not.toHaveBeenCalled();
   });
 });
 

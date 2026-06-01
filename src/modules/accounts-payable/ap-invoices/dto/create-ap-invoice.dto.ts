@@ -1,6 +1,15 @@
 import {
-  IsNotEmpty, IsOptional, IsEnum, IsUUID, IsDateString, IsNumber,
-  IsString, IsArray, ValidateNested, Min, Max,
+  IsNotEmpty,
+  IsOptional,
+  IsEnum,
+  IsUUID,
+  IsDateString,
+  IsNumber,
+  IsString,
+  IsArray,
+  ValidateNested,
+  Min,
+  Max,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
@@ -30,7 +39,7 @@ export class CreateApInvoiceLineDto {
   @Type(() => Number)
   quantity: number;
 
-  @ApiProperty({ description: 'ราคาต่อหน่วย', example: 500.00 })
+  @ApiProperty({ description: 'ราคาต่อหน่วย', example: 500.0 })
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   @Type(() => Number)

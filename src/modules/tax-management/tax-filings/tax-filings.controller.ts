@@ -1,5 +1,14 @@
 import {
-  Controller, Get, Post, Patch, Param, Body, Query, UseGuards, HttpCode, HttpStatus,
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Param,
+  Body,
+  Query,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { TaxFilingsService } from './tax-filings.service';
@@ -14,11 +23,24 @@ import { Type } from 'class-transformer';
 
 class QueryTaxFilingDto {
   @ApiPropertyOptional() @IsOptional() @IsUUID() propertyId?: string;
-  @ApiPropertyOptional({ enum: TaxFilingType }) @IsOptional() @IsEnum(TaxFilingType) filingType?: TaxFilingType;
+  @ApiPropertyOptional({ enum: TaxFilingType })
+  @IsOptional()
+  @IsEnum(TaxFilingType)
+  filingType?: TaxFilingType;
   @ApiPropertyOptional() @IsOptional() @IsString() period?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() status?: string;
-  @ApiPropertyOptional({ default: 1 }) @IsOptional() @IsInt() @Min(1) @Type(() => Number) page?: number;
-  @ApiPropertyOptional({ default: 20 }) @IsOptional() @IsInt() @Min(1) @Type(() => Number) limit?: number;
+  @ApiPropertyOptional({ default: 1 })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  page?: number;
+  @ApiPropertyOptional({ default: 20 })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  limit?: number;
 }
 
 class GenerateVatPP30Dto {
@@ -26,7 +48,12 @@ class GenerateVatPP30Dto {
   @ApiPropertyOptional() @IsOptional() @IsString() period?: string;
 }
 
-interface JwtPayload { sub: string; tenantId: string; email: string; role: string; }
+interface JwtPayload {
+  sub: string;
+  tenantId: string;
+  email: string;
+  role: string;
+}
 
 @ApiTags('Accounting - Tax Filings')
 @ApiBearerAuth()

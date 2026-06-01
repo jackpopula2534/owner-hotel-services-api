@@ -1,17 +1,8 @@
-import {
-  BadRequestException,
-  Injectable,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import Stripe from 'stripe';
-import {
-  ConfirmPaymentIntentDto,
-  CreatePaymentIntentDto,
-  CreatePaymentIntentResponseDto,
-} from './dto/stripe.dto';
+import { CreatePaymentIntentDto, CreatePaymentIntentResponseDto } from './dto/stripe.dto';
 
 @Injectable()
 export class StripeService {
@@ -196,7 +187,20 @@ export class StripeService {
     if (!record.invoiceId) return;
 
     // สร้าง payment record + update invoice status
+    // SALES-03: Stripe retries webhooks (at-least-once delivery). Guard against
+    // creating a duplicate payment / re-marking the invoice paid on redelivery.
     await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.payments.findFirst({
+        where: { invoice_id: record.invoiceId!, method: 'stripe', status: 'approved' },
+        select: { id: true },
+      });
+      if (existing) {
+        this.logger.warn(
+          `Duplicate Stripe webhook for invoice ${record.invoiceId} — payment already recorded (${existing.id}), skipping`,
+        );
+        return;
+      }
+
       const paymentNo = `STR-${Date.now()}`;
       await tx.payments.create({
         data: {
