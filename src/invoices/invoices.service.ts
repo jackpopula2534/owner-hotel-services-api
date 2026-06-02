@@ -82,34 +82,58 @@ export class InvoicesService {
       await this.assertNoOutstandingSubscriptionInvoices(createInvoiceDto.tenantId);
     }
 
-    // LEGAL-02: only stamp the VAT breakdown when it is meaningful — i.e. the
-    // caller explicitly opted in (passed subtotal or vatRate) OR this is a
-    // subscription invoice (the SaaS billing case LEGAL-02 targets). Booking /
-    // folio invoices with just a gross `amount` are left untouched so we never
-    // misstate VAT on amounts that may be zero-rated or already net.
+    const items = createInvoiceDto.items ?? [];
+    const hasItems = items.length > 0;
+    const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+    // LEGAL-02: only stamp the VAT breakdown when it is meaningful — i.e. line
+    // items were supplied, OR the caller explicitly opted in (passed subtotal or
+    // vatRate), OR this is a subscription invoice (the SaaS billing case LEGAL-02
+    // targets). Booking / folio invoices with just a gross `amount` are left
+    // untouched so we never misstate VAT on amounts that may be zero-rated.
     const optedIntoVat =
       createInvoiceDto.subtotal !== undefined || createInvoiceDto.vatRate !== undefined;
     const isSubscriptionInvoiceForVat =
       !!createInvoiceDto.subscriptionId && !createInvoiceDto.bookingId;
     const applyVat = optedIntoVat || isSubscriptionInvoiceForVat;
 
-    const vat = applyVat
-      ? this.computeVat({
-          amount: createInvoiceDto.amount,
-          subtotal: createInvoiceDto.subtotal,
-          vatRate: createInvoiceDto.vatRate,
-        })
-      : null;
+    let breakdown:
+      | { amount: number; subtotal: number; vatRate: number; vatAmount: number }
+      | null = null;
+
+    if (hasItems) {
+      // Line items are NET (pre-VAT) amounts and may include negative discount
+      // rows. Treat the gross `amount` as the authoritative figure the customer
+      // pays and derive VAT as (gross − itemsSubtotal). This guarantees
+      // subtotal + VAT === total exactly AND that the printed line items
+      // reconcile with the summary — no rounding drift, discount rows included.
+      const itemsSubtotal = round2(
+        items.reduce((sum, item) => sum + Number(item.amount ?? 0), 0),
+      );
+      const gross = round2(createInvoiceDto.amount);
+      breakdown = {
+        amount: gross,
+        subtotal: itemsSubtotal,
+        vatRate: createInvoiceDto.vatRate ?? InvoicesService.DEFAULT_VAT_RATE,
+        vatAmount: round2(gross - itemsSubtotal),
+      };
+    } else if (applyVat) {
+      breakdown = this.computeVat({
+        amount: createInvoiceDto.amount,
+        subtotal: createInvoiceDto.subtotal,
+        vatRate: createInvoiceDto.vatRate,
+      });
+    }
 
     const data: any = {
       tenant_id: createInvoiceDto.tenantId,
       subscription_id: createInvoiceDto.subscriptionId,
       booking_id: createInvoiceDto.bookingId,
       invoice_no: createInvoiceDto.invoiceNo,
-      amount: vat ? vat.amount : createInvoiceDto.amount,
-      subtotal: vat ? vat.subtotal : undefined,
-      vat_rate: vat ? vat.vatRate : undefined,
-      vat_amount: vat ? vat.vatAmount : undefined,
+      amount: breakdown ? breakdown.amount : createInvoiceDto.amount,
+      subtotal: breakdown ? breakdown.subtotal : undefined,
+      vat_rate: breakdown ? breakdown.vatRate : undefined,
+      vat_amount: breakdown ? breakdown.vatAmount : undefined,
       status: createInvoiceDto.status,
       due_date: createInvoiceDto.dueDate,
     };
@@ -121,9 +145,40 @@ export class InvoicesService {
       }
     });
 
-    return this.prisma.invoices.create({
-      data,
-      include: { tenants: true, subscriptions: true, invoice_items: true, payments: true },
+    // No line items → single insert keeps the original fast path.
+    if (!hasItems) {
+      return this.prisma.invoices.create({
+        data,
+        include: { tenants: true, subscriptions: true, invoice_items: true, payments: true },
+      });
+    }
+
+    // Atomic: create the invoice AND its line items together. If any item fails
+    // the whole thing rolls back, so we never persist an invoice with a
+    // half-written or missing discount breakdown (the old flow POSTed items
+    // separately from the browser and swallowed failures, dropping the coupon).
+    return this.prisma.$transaction(async (tx) => {
+      const invoice = await tx.invoices.create({ data });
+
+      await tx.invoice_items.createMany({
+        data: items.map((item) => ({
+          invoice_id: invoice.id,
+          type: item.type,
+          description: item.description,
+          quantity: item.quantity ?? 1,
+          unit_price: round2(item.unitPrice ?? item.amount),
+          amount: round2(item.amount),
+          ref_id: item.refId,
+        })),
+      });
+
+      // Use findFirst with the tenant filter (NOT findUnique) — `invoices` is a
+      // tenant-scoped model and the TenantScope guard rejects findUnique. The
+      // tenant_id is already on `data`, so this stays within the same tenant.
+      return tx.invoices.findFirst({
+        where: { id: invoice.id, tenant_id: data.tenant_id },
+        include: { tenants: true, subscriptions: true, invoice_items: true, payments: true },
+      });
     });
   }
 
@@ -194,7 +249,7 @@ export class InvoicesService {
     });
   }
 
-  update(id: string, updateInvoiceDto: UpdateInvoiceDto) {
+  async update(id: string, updateInvoiceDto: UpdateInvoiceDto) {
     const data: any = {
       tenant_id: updateInvoiceDto.tenantId,
       subscription_id: updateInvoiceDto.subscriptionId,
@@ -210,6 +265,19 @@ export class InvoicesService {
         delete data[key];
       }
     });
+
+    // LEGAL-02: If the amount was updated, we MUST recompute the VAT breakdown
+    // to keep subtotal / vat_amount consistent, otherwise the printed tax
+    // invoice will show outdated or missing figures.
+    if (updateInvoiceDto.amount !== undefined) {
+      const breakdown = this.computeVat({
+        amount: updateInvoiceDto.amount,
+        vatRate: updateInvoiceDto.vatRate,
+      });
+      data.subtotal = breakdown.subtotal;
+      data.vat_amount = breakdown.vatAmount;
+      data.vat_rate = breakdown.vatRate;
+    }
 
     return this.prisma.invoices.update({
       where: { id },

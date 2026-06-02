@@ -489,6 +489,30 @@ export class CouponsService {
       });
     });
 
+    // COUPON-05: guarantee the discount shows on the invoice. The frontend also
+    // tries to persist line items, but that path is best-effort and has
+    // historically dropped the coupon row. Here we have the authoritative
+    // figures (invoice ↔ original_amount ↔ discount_amount), so we materialise
+    // the discount line + breakdown server-side. Idempotent (skips if a discount
+    // row already exists). Runs AFTER the redemption commits and is wrapped in
+    // its own guard so a presentational failure can never void the redemption.
+    if (input.invoiceId && validation.discountAmount > 0) {
+      try {
+        await this.reconcileInvoiceDiscount({
+          invoiceId: input.invoiceId,
+          tenantId: input.tenantId,
+          originalAmount: Number(input.invoiceAmount),
+          discountAmount: Number(validation.discountAmount),
+          couponCode: validation.coupon.code,
+        });
+      } catch (err) {
+        this.logger.warn(
+          `reconcileInvoiceDiscount failed for invoice ${input.invoiceId}: ` +
+            ((err as Error)?.message ?? String(err)),
+        );
+      }
+    }
+
     this.logger.log(
       `Coupon ${validation.coupon.code} redeemed by tenant ${input.tenantId} ` +
         `(discount=${validation.discountAmount})`,
@@ -498,6 +522,102 @@ export class CouponsService {
   }
 
   // ─────────── helpers ───────────
+
+  /**
+   * Materialise the coupon discount onto its invoice and refresh the stored
+   * VAT breakdown — using the authoritative redemption figures. Runs inside the
+   * redeem transaction so the invoice can never be left without its discount.
+   *
+   * Idempotent:
+   *  • if an adjustment (discount) line already exists, nothing is inserted;
+   *  • if the invoice has no line items at all, a base plan line is added too
+   *    so the items reconcile with the net subtotal;
+   *  • the invoice's subtotal / vat_amount are always recomputed from the
+   *    resulting line items (subtotal = Σ items, vat = gross − subtotal).
+   */
+  private async reconcileInvoiceDiscount(input: {
+    invoiceId: string;
+    tenantId: string;
+    originalAmount: number;
+    discountAmount: number;
+    couponCode: string;
+  }): Promise<void> {
+    const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+    await this.prisma.$transaction(async (tx) => {
+      // findFirst (NOT findUnique) with the tenant filter — `invoices` is
+      // tenant-scoped and the TenantScope guard rejects findUnique.
+      const invoice = await tx.invoices.findFirst({
+        where: { id: input.invoiceId, tenant_id: input.tenantId },
+        include: { invoice_items: true },
+      });
+      if (!invoice) return;
+
+      const items = invoice.invoice_items ?? [];
+      const hasDiscountLine = items.some(
+        (it) => it.type === 'adjustment' && Number(it.amount) < 0,
+      );
+
+      if (!hasDiscountLine) {
+        // Resolve pre-VAT subtotal for the plan line.
+        // If originalAmount (from caller) is close to the invoice gross + discount,
+        // it is likely inclusive of VAT and we must back-calculate to avoid
+        // overstating the subtotal and causing negative VAT.
+        let baseAmount = input.originalAmount;
+        const gross = Number(invoice.amount);
+        if (Math.abs(baseAmount - (gross + input.discountAmount)) < 1) {
+          baseAmount = baseAmount / 1.07;
+        }
+
+        // No usable breakdown yet → add the base plan line so the items sum to
+        // the net subtotal. (When the frontend already wrote a plan line we skip
+        // this and only append the missing discount row.)
+        if (items.length === 0 && baseAmount > input.discountAmount) {
+          await tx.invoice_items.create({
+            data: {
+              invoice_id: input.invoiceId,
+              type: 'plan',
+              description: 'ค่าบริการแพ็กเกจ',
+              quantity: 1,
+              unit_price: round2(baseAmount),
+              amount: round2(baseAmount),
+            },
+          });
+        }
+
+        await tx.invoice_items.create({
+          data: {
+            invoice_id: input.invoiceId,
+            type: 'adjustment',
+            description: `ส่วนลดคูปอง: ${input.couponCode}`,
+            quantity: 1,
+            unit_price: round2(-input.discountAmount),
+            amount: round2(-input.discountAmount),
+            ref_id: input.couponCode,
+          },
+        });
+      }
+
+      // Recompute the stored breakdown from the (now-complete) line items so the
+      // printed tax invoice reconciles exactly with what the customer pays.
+      const refreshed = await tx.invoice_items.findMany({
+        where: { invoice_id: input.invoiceId },
+      });
+      const subtotal = round2(
+        refreshed.reduce((sum, it) => sum + Number(it.amount), 0),
+      );
+      const gross = round2(Number(invoice.amount));
+
+      await tx.invoices.update({
+        where: { id: input.invoiceId },
+        data: {
+          subtotal,
+          vat_amount: round2(gross - subtotal),
+          vat_rate: 7,
+        },
+      });
+    });
+  }
 
   private computeDiscount(type: DiscountType, value: number, invoiceAmount: number): number {
     if (type === 'percent') {
