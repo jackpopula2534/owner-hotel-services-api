@@ -37,6 +37,18 @@ export class Invoice {
   @Column({ type: 'decimal', precision: 10, scale: 2 })
   amount: number;
 
+  // LEGAL-02: Thai tax-invoice (ใบกำกับภาษี) VAT breakdown.
+  // ต้องประกาศใน TypeORM entity ด้วย ไม่งั้น dataSource.synchronize() ใน db:refresh
+  // จะ DROP คอลัมน์เหล่านี้ที่ Prisma migration สร้างไว้ทิ้ง (ทำให้ invoices.subtotal หาย)
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  subtotal: number;
+
+  @Column({ name: 'vat_rate', type: 'decimal', precision: 5, scale: 2, nullable: true })
+  vatRate: number;
+
+  @Column({ name: 'vat_amount', type: 'decimal', precision: 10, scale: 2, nullable: true })
+  vatAmount: number;
+
   @Column({ name: 'original_amount', type: 'decimal', precision: 10, scale: 2, nullable: true })
   originalAmount: number;
 

@@ -26,14 +26,14 @@ describe('PaymentsService', () => {
       findFirst: jest.fn(),
       update: jest.fn(),
       updateMany: jest.fn(),
-      findUniqueOrThrow: jest.fn(),
+      findFirstOrThrow: jest.fn(),
     },
     invoices: {
       update: jest.fn(),
-      findUnique: jest.fn(),
+      findFirst: jest.fn(),
     },
     subscriptions: {
-      findUnique: jest.fn(),
+      findFirst: jest.fn(),
       update: jest.fn(),
     },
     booking: {
@@ -81,9 +81,9 @@ describe('PaymentsService', () => {
         status: 'pending',
       });
       prismaMock.payments.updateMany.mockResolvedValue({ count: 1 });
-      prismaMock.payments.findUniqueOrThrow.mockResolvedValue(approved);
+      prismaMock.payments.findFirstOrThrow.mockResolvedValue(approved);
       prismaMock.invoices.update.mockResolvedValue({});
-      prismaMock.invoices.findUnique.mockResolvedValue({ id: 'inv-1', booking_id: null });
+      prismaMock.invoices.findFirst.mockResolvedValue({ id: 'inv-1', booking_id: null });
     };
 
     it('throws NotFoundException when payment is not found', async () => {
@@ -137,7 +137,7 @@ describe('PaymentsService', () => {
       await service.approvePayment('payment-1', 'admin-1', 'tenant-1');
 
       // never reads back / cascades after losing the claim
-      expect(prismaMock.payments.findUniqueOrThrow).not.toHaveBeenCalled();
+      expect(prismaMock.payments.findFirstOrThrow).not.toHaveBeenCalled();
       expect(prismaMock.invoices.update).not.toHaveBeenCalled();
     });
 
@@ -157,7 +157,7 @@ describe('PaymentsService', () => {
         status: 'pending',
       });
       prismaMock.payments.updateMany.mockResolvedValue({ count: 1 });
-      prismaMock.payments.findUniqueOrThrow.mockResolvedValue({
+      prismaMock.payments.findFirstOrThrow.mockResolvedValue({
         id: 'payment-1',
         status: 'approved',
         invoices: null,
@@ -183,8 +183,8 @@ describe('PaymentsService', () => {
     it('activates the subscription INSIDE the approval transaction (H2)', async () => {
       arrangePending({ id: 'payment-1', status: 'approved', invoices: { id: 'inv-1' } });
       // activation lookups
-      prismaMock.invoices.findUnique.mockResolvedValue({ subscription_id: 'sub-1' });
-      prismaMock.subscriptions.findUnique.mockResolvedValue({
+      prismaMock.invoices.findFirst.mockResolvedValue({ subscription_id: 'sub-1' });
+      prismaMock.subscriptions.findFirst.mockResolvedValue({
         id: 'sub-1',
         billing_cycle: 'monthly',
         end_date: null,

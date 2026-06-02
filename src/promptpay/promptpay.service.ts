@@ -338,7 +338,11 @@ export class PromptPayService {
     }
 
     if (transaction.invoiceId) {
-      await this.updateInvoicePaymentStatus(transaction.invoiceId, Number(transaction.amount));
+      await this.updateInvoicePaymentStatus(
+        transaction.invoiceId,
+        Number(transaction.amount),
+        transaction.tenantId,
+      );
     }
 
     // Send payment receipt email
@@ -412,7 +416,11 @@ export class PromptPayService {
     }
 
     if (transaction.invoiceId) {
-      await this.updateInvoicePaymentStatus(transaction.invoiceId, Number(transaction.amount));
+      await this.updateInvoicePaymentStatus(
+        transaction.invoiceId,
+        Number(transaction.amount),
+        transaction.tenantId,
+      );
     }
 
     // Send receipt email
@@ -635,11 +643,17 @@ export class PromptPayService {
    * Update invoice payment status and related booking after PromptPay payment
    * Handles both subscription invoices and booking-related invoices
    */
-  private async updateInvoicePaymentStatus(invoiceId: string, amount: number): Promise<void> {
+  private async updateInvoicePaymentStatus(
+    invoiceId: string,
+    amount: number,
+    tenantId: string | null,
+  ): Promise<void> {
     try {
-      // Get invoice to check for booking_id
-      const invoice = await this.prisma.invoices.findUnique({
-        where: { id: invoiceId },
+      // Get invoice to check for booking_id.
+      // findFirst (NOT findUnique) with the tenant filter — `invoices` is
+      // tenant-scoped and the TenantScope guard rejects findUnique.
+      const invoice = await this.prisma.invoices.findFirst({
+        where: { id: invoiceId, tenant_id: tenantId },
       });
 
       if (!invoice) {

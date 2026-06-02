@@ -108,7 +108,12 @@ export class DunningService {
     level: DunningLevel,
     actorId?: string,
   ): Promise<{ id: string }> {
-    const invoice = await this.prisma.invoices.findUnique({
+    // findFirst (NOT findUnique): `invoices` is tenant-scoped and the
+    // TenantScope guard rejects findUnique. This is a platform-admin,
+    // cross-tenant route (no tenant context), so findFirst({ id }) resolves the
+    // invoice across tenants; if a tenant context is ever active the guard
+    // auto-injects the tenant_id filter, keeping the lookup correctly scoped.
+    const invoice = await this.prisma.invoices.findFirst({
       where: { id: invoiceId },
       include: { tenants: true },
     });

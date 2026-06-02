@@ -9,7 +9,7 @@ import { TenantLifecycleService } from '../tenants/tenant-lifecycle.service';
 describe('DunningService', () => {
   let service: DunningService;
   let prismaInvoiceFindMany: jest.Mock;
-  let prismaInvoiceFindUnique: jest.Mock;
+  let prismaInvoiceFindFirst: jest.Mock;
   let prismaAttemptFindFirst: jest.Mock;
   let prismaAttemptCreate: jest.Mock;
   let prismaAttemptUpdate: jest.Mock;
@@ -19,7 +19,7 @@ describe('DunningService', () => {
 
   beforeEach(async () => {
     prismaInvoiceFindMany = jest.fn().mockResolvedValue([]);
-    prismaInvoiceFindUnique = jest.fn();
+    prismaInvoiceFindFirst = jest.fn();
     prismaAttemptFindFirst = jest.fn();
     prismaAttemptCreate = jest.fn().mockResolvedValue({ id: 'att-1' });
     prismaAttemptUpdate = jest.fn().mockResolvedValue({});
@@ -35,7 +35,7 @@ describe('DunningService', () => {
           useValue: {
             invoices: {
               findMany: prismaInvoiceFindMany,
-              findUnique: prismaInvoiceFindUnique,
+              findFirst: prismaInvoiceFindFirst,
             },
             dunning_attempts: {
               findFirst: prismaAttemptFindFirst,
@@ -66,7 +66,7 @@ describe('DunningService', () => {
   });
 
   it('sendManual sends an email and creates a dunning_attempt row', async () => {
-    prismaInvoiceFindUnique.mockResolvedValue({
+    prismaInvoiceFindFirst.mockResolvedValue({
       id: 'inv-1',
       invoice_no: 'INV-001',
       tenant_id: 't1',
@@ -89,7 +89,7 @@ describe('DunningService', () => {
   });
 
   it('sendManual rejects when invoice is already paid', async () => {
-    prismaInvoiceFindUnique.mockResolvedValue({
+    prismaInvoiceFindFirst.mockResolvedValue({
       id: 'inv-1',
       status: 'paid',
       tenants: { email: 'a@b.com' },
@@ -98,12 +98,12 @@ describe('DunningService', () => {
   });
 
   it('sendManual rejects unknown invoice', async () => {
-    prismaInvoiceFindUnique.mockResolvedValue(null);
+    prismaInvoiceFindFirst.mockResolvedValue(null);
     await expect(service.sendManual('missing', 'reminder')).rejects.toThrow(NotFoundException);
   });
 
   it('sendManual escalates tenant to past_due after first_warning', async () => {
-    prismaInvoiceFindUnique.mockResolvedValue({
+    prismaInvoiceFindFirst.mockResolvedValue({
       id: 'inv-1',
       invoice_no: 'INV-001',
       tenant_id: 't1',

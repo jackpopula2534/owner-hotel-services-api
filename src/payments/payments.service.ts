@@ -146,10 +146,15 @@ export class PaymentsService {
         // where a payment is approved but its subscription never activates.
         // Atomicity also means the idempotency guard above is safe: an
         // already-approved payment has, by construction, already been activated.
-        await this.activateSubscriptionForInvoice(payment.invoice_id, tx);
+        await this.activateSubscriptionForInvoice(payment.invoice_id, payment.tenant_id, tx);
       }
 
-      return tx.payments.findUniqueOrThrow({ where: { id }, include: { invoices: true } });
+      // findFirstOrThrow (NOT findUniqueOrThrow) with the tenant filter —
+      // `payments` is tenant-scoped and the TenantScope guard rejects findUnique*.
+      return tx.payments.findFirstOrThrow({
+        where: { id, tenant_id: payment.tenant_id },
+        include: { invoices: true },
+      });
     });
 
     if (!approvedPayment) {
@@ -159,7 +164,7 @@ export class PaymentsService {
 
     // Update related booking status to confirmed (idempotent; runs post-commit)
     if (payment.invoice_id) {
-      await this.updateBookingStatusToConfirmed(payment.invoice_id).catch((err) => {
+      await this.updateBookingStatusToConfirmed(payment.invoice_id, payment.tenant_id).catch((err) => {
         this.logger.error(`Failed to update booking status: ${err.message}`);
       });
     }
@@ -213,12 +218,15 @@ export class PaymentsService {
    */
   private async activateSubscriptionForInvoice(
     invoiceId: string,
+    tenantId: string | null,
     // Optional transaction client so activation can run atomically with the
     // payment approval (H2). Defaults to the base client for standalone calls.
     db: Prisma.TransactionClient = this.prisma,
   ): Promise<void> {
-    const invoice = await db.invoices.findUnique({
-      where: { id: invoiceId },
+    // findFirst (NOT findUnique) with the tenant filter — invoices/subscriptions
+    // are tenant-scoped and the TenantScope guard rejects findUnique.
+    const invoice = await db.invoices.findFirst({
+      where: { id: invoiceId, tenant_id: tenantId },
       select: { subscription_id: true },
     });
 
@@ -227,8 +235,8 @@ export class PaymentsService {
       return;
     }
 
-    const subscription = await db.subscriptions.findUnique({
-      where: { id: invoice.subscription_id },
+    const subscription = await db.subscriptions.findFirst({
+      where: { id: invoice.subscription_id, tenant_id: tenantId },
       select: { id: true, billing_cycle: true, end_date: true, status: true },
     });
 
@@ -270,11 +278,16 @@ export class PaymentsService {
    * First tries to find booking via invoice.booking_id (direct foreign key)
    * Falls back to searching recent pending bookings if not found
    */
-  private async updateBookingStatusToConfirmed(invoiceId: string): Promise<void> {
+  private async updateBookingStatusToConfirmed(
+    invoiceId: string,
+    tenantId: string | null,
+  ): Promise<void> {
     try {
-      // Get invoice to find booking_id and tenant_id
-      const invoice = await this.prisma.invoices.findUnique({
-        where: { id: invoiceId },
+      // Get invoice to find booking_id and tenant_id.
+      // findFirst (NOT findUnique) with the tenant filter — `invoices` is
+      // tenant-scoped and the TenantScope guard rejects findUnique.
+      const invoice = await this.prisma.invoices.findFirst({
+        where: { id: invoiceId, tenant_id: tenantId },
       });
 
       if (!invoice) {
@@ -286,8 +299,9 @@ export class PaymentsService {
       let booking = null;
 
       if (invoice.booking_id) {
-        booking = await this.prisma.booking.findUnique({
-          where: { id: invoice.booking_id },
+        // `Booking` is tenant-scoped → findFirst with the invoice's tenant_id.
+        booking = await this.prisma.booking.findFirst({
+          where: { id: invoice.booking_id, tenantId: invoice.tenant_id },
         });
 
         if (booking) {
@@ -351,9 +365,11 @@ export class PaymentsService {
         return;
       }
 
-      // Get invoice details
-      const invoice = await this.prisma.invoices.findUnique({
-        where: { id: payment.invoice_id },
+      // Get invoice details.
+      // findFirst (NOT findUnique) with the tenant filter — `invoices` is
+      // tenant-scoped and the TenantScope guard rejects findUnique.
+      const invoice = await this.prisma.invoices.findFirst({
+        where: { id: payment.invoice_id, tenant_id: payment.tenant_id },
       });
 
       if (!invoice) {
