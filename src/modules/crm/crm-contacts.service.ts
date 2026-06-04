@@ -11,6 +11,14 @@ import { CreateContactDto, QueryContactsDto, UpdateContactDto } from './dto/crea
 @Injectable()
 export class CrmContactsService {
   private readonly logger = new Logger(CrmContactsService.name);
+  private readonly guestSelect = {
+    id: true,
+    firstName: true,
+    lastName: true,
+    email: true,
+    phone: true,
+    nationality: true,
+  } as const;
 
   private static readonly WRITABLE_FIELDS = [
     'guestId',
@@ -38,6 +46,29 @@ export class CrmContactsService {
     return out;
   }
 
+  private async attachGuests<T extends { guestId?: string | null }>(
+    contacts: T[],
+  ): Promise<Array<T & { guest: Record<string, unknown> | null }>> {
+    const guestIds = Array.from(
+      new Set(contacts.map((contact) => contact.guestId).filter((guestId): guestId is string => !!guestId)),
+    );
+
+    if (guestIds.length === 0) {
+      return contacts.map((contact) => ({ ...contact, guest: null }));
+    }
+
+    const guests = await this.prisma.guest.findMany({
+      where: { id: { in: guestIds } },
+      select: this.guestSelect,
+    });
+    const guestMap = new Map(guests.map((guest) => [guest.id, guest]));
+
+    return contacts.map((contact) => ({
+      ...contact,
+      guest: contact.guestId ? guestMap.get(contact.guestId) ?? null : null,
+    }));
+  }
+
   async findAll(query: QueryContactsDto, tenantId?: string) {
     if (!tenantId) {
       return { data: [], total: 0, page: 1, limit: 20 };
@@ -58,7 +89,7 @@ export class CrmContactsService {
     }
 
     try {
-      const [data, total] = await Promise.all([
+      const [contacts, total] = await Promise.all([
         this.prisma.crmContact.findMany({
           where,
           skip,
@@ -67,6 +98,7 @@ export class CrmContactsService {
         }),
         this.prisma.crmContact.count({ where }),
       ]);
+      const data = await this.attachGuests(contacts);
       return { data, total, page, limit };
     } catch (error: unknown) {
       const code = (error as { code?: string }).code;
@@ -81,7 +113,8 @@ export class CrmContactsService {
     if (!tenantId) throw new BadRequestException('Tenant ID is required');
     const contact = await this.prisma.crmContact.findFirst({ where: { id, tenantId } });
     if (!contact) throw new NotFoundException(`Contact ${id} not found`);
-    return contact;
+    const [enriched] = await this.attachGuests([contact]);
+    return enriched;
   }
 
   async getStayHistory(contactId: string, tenantId: string) {

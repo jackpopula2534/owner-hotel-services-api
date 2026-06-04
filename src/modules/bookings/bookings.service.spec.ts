@@ -1,4 +1,5 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuditLogService } from '../../audit-log/audit-log.service';
 import { EmailEventsService } from '../../email/email-events.service';
@@ -62,12 +63,16 @@ describe('BookingsService', () => {
 
   const paymentsServiceMock = {};
   const invoicesServiceMock = {};
+  const eventEmitterMock = {
+    emit: jest.fn().mockReturnValue(true),
+  };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         BookingsService,
         { provide: PrismaService, useValue: prismaMock },
+        { provide: EventEmitter2, useValue: eventEmitterMock },
         { provide: EmailEventsService, useValue: emailEventsServiceMock },
         { provide: AuditLogService, useValue: auditLogServiceMock },
         { provide: InvoicesService, useValue: invoicesServiceMock },
@@ -137,6 +142,7 @@ describe('BookingsService', () => {
       );
       expect(result.checkInDate).toEqual(new Date('2026-04-10T00:00:00.000Z'));
       expect(result.checkOutDate).toEqual(new Date('2026-04-12T00:00:00.000Z'));
+      expect(eventEmitterMock.emit).not.toHaveBeenCalled();
     });
 
     it('stores scheduled check-in/check-out using property time settings for date-only input', async () => {
@@ -186,6 +192,7 @@ describe('BookingsService', () => {
       );
       expect(result.checkInDate).toEqual(new Date('2026-04-10T00:00:00.000Z'));
       expect(result.checkOutDate).toEqual(new Date('2026-04-12T00:00:00.000Z'));
+      expect(eventEmitterMock.emit).not.toHaveBeenCalled();
     });
 
     it('throws when room already has an overlapping active booking', async () => {
@@ -241,6 +248,7 @@ describe('BookingsService', () => {
         actualCheckOut: now,
         guestFirstName: 'Jane',
         guestLastName: 'Doe',
+        totalPrice: 3000,
         room: { id: 'room-1', number: '101' },
         property: { id: 'property-1' },
       });
@@ -268,6 +276,13 @@ describe('BookingsService', () => {
         }),
         'tenant-1',
       );
+      expect(eventEmitterMock.emit).toHaveBeenCalledWith('booking.checked_out', {
+        bookingId: 'booking-1',
+        tenantId: 'tenant-1',
+        guestId: 'guest-1',
+        totalAmount: 3000,
+      });
+      expect(loyaltyServiceMock.addPointsForStay).not.toHaveBeenCalled();
       expect(result.status).toBe('checked_out');
 
       jest.useRealTimers();

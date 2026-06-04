@@ -125,7 +125,7 @@ export class DashboardService {
         where: {
           ...whereBase,
           checkOut: { gte: today, lt: tomorrow },
-          status: 'checked-in',
+          status: 'checked_in',
         },
         include: { room: true, guest: true },
         orderBy: { checkOut: 'asc' },
@@ -136,7 +136,8 @@ export class DashboardService {
         roomsToClean = await this.prisma.room.count({
           where: {
             ...whereBase,
-            status: { in: ['dirty', 'occupied_dirty'] },
+            // dirty = รอมอบหมาย, cleaning = แม่บ้านกำลังทำ, occupied_dirty = ยังพักอยู่แต่รอทำ
+            status: { in: ['dirty', 'cleaning', 'occupied_dirty'] },
           },
         });
       } catch {
@@ -241,7 +242,7 @@ export class DashboardService {
       const occupiedBookings = await this.prisma.booking.count({
         where: {
           ...whereBase,
-          status: 'checked-in',
+          status: 'checked_in',
           checkIn: { lte: tomorrow },
           checkOut: { gte: today },
         },
@@ -252,7 +253,7 @@ export class DashboardService {
       const yesterdayOccupied = await this.prisma.booking.count({
         where: {
           ...whereBase,
-          status: { in: ['checked-in', 'checked-out'] },
+          status: { in: ['checked_in', 'checked_out'] },
           checkIn: { lte: yesterday },
           checkOut: { gte: yesterday },
         },
@@ -264,28 +265,30 @@ export class DashboardService {
       const todayBookings = await this.prisma.booking.findMany({
         where: {
           ...whereBase,
-          status: { in: ['confirmed', 'checked-in', 'checked-out'] },
+          status: { in: ['confirmed', 'checked_in', 'checked_out'] },
           checkIn: { gte: today, lt: tomorrow },
         },
-        select: { totalPrice: true },
+        select: { grandTotal: true, totalPrice: true, addOns: { select: { amount: true } } },
       });
-      const todayRevenue = todayBookings.reduce(
-        (sum, b) => sum + (b.totalPrice ? Number(b.totalPrice) : 0),
-        0,
-      );
+      const todayRevenue = todayBookings.reduce((sum, b) => {
+        const base = Number(b.grandTotal ?? b.totalPrice ?? 0);
+        const addOns = b.addOns.reduce((s, a) => s + Number(a.amount ?? 0), 0);
+        return sum + base + addOns;
+      }, 0);
 
       const yesterdayBookings = await this.prisma.booking.findMany({
         where: {
           ...whereBase,
-          status: { in: ['confirmed', 'checked-in', 'checked-out'] },
+          status: { in: ['confirmed', 'checked_in', 'checked_out'] },
           checkIn: { gte: yesterday, lt: today },
         },
-        select: { totalPrice: true },
+        select: { grandTotal: true, totalPrice: true, addOns: { select: { amount: true } } },
       });
-      const yesterdayRevenue = yesterdayBookings.reduce(
-        (sum, b) => sum + (b.totalPrice ? Number(b.totalPrice) : 0),
-        0,
-      );
+      const yesterdayRevenue = yesterdayBookings.reduce((sum, b) => {
+        const base = Number(b.grandTotal ?? b.totalPrice ?? 0);
+        const addOns = b.addOns.reduce((s, a) => s + Number(a.amount ?? 0), 0);
+        return sum + base + addOns;
+      }, 0);
       const revenueTrend =
         yesterdayRevenue > 0
           ? Math.round(((todayRevenue - yesterdayRevenue) / yesterdayRevenue) * 100)
@@ -311,14 +314,14 @@ export class DashboardService {
         where: {
           ...whereBase,
           checkOut: { gte: today, lt: tomorrow },
-          status: 'checked-in',
+          status: 'checked_in',
         },
       });
 
       const guestsSum = await this.prisma.booking.aggregate({
         where: {
           ...whereBase,
-          status: 'checked-in',
+          status: 'checked_in',
           checkIn: { lte: tomorrow },
           checkOut: { gte: today },
         },
@@ -383,7 +386,7 @@ export class DashboardService {
           where: {
             ...whereBase,
             checkIn: { gte: today, lt: tomorrow },
-            status: { in: ['confirmed', 'pending', 'checked-in'] },
+            status: { in: ['confirmed', 'pending', 'checked_in'] },
           },
           include: { room: true, guest: true },
         }),
@@ -391,7 +394,7 @@ export class DashboardService {
           where: {
             ...whereBase,
             checkOut: { gte: today, lt: tomorrow },
-            status: { in: ['checked-in', 'checked-out'] },
+            status: { in: ['checked_in', 'checked_out'] },
           },
           include: { room: true, guest: true },
         }),
@@ -447,7 +450,7 @@ export class DashboardService {
         where: whereBase,
         include: {
           bookings: {
-            where: { status: 'checked-in' },
+            where: { status: 'checked_in' },
             include: { guest: true },
             take: 1,
           },
@@ -477,10 +480,14 @@ export class DashboardService {
 
       const summary = {
         vacantClean: rooms.filter((r) => r.status === 'available').length,
-        vacantDirty: rooms.filter((r) => r.status === 'dirty').length,
-        occupied: rooms.filter((r) => r.status === 'occupied' || (r.bookings?.length ?? 0) > 0)
-          .length,
-        outOfOrder: rooms.filter((r) => r.status === 'out_of_order').length,
+        // dirty = รอมอบหมายแม่บ้าน, cleaning = กำลังทำความสะอาดอยู่ — ทั้งสองยังไม่พร้อมรับแขก
+        vacantDirty: rooms.filter((r) => r.status === 'dirty' || r.status === 'cleaning').length,
+        occupied: rooms.filter(
+          (r) => r.status === 'occupied' || (r.bookings?.length ?? 0) > 0,
+        ).length,
+        outOfOrder: rooms.filter(
+          (r) => r.status === 'out_of_order' || r.status === 'maintenance',
+        ).length,
         total: rooms.length,
       };
 

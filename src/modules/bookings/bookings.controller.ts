@@ -123,6 +123,19 @@ export class BookingsController {
     return this.bookingsService.checkOut(id, user?.tenantId);
   }
 
+  @Post('admin/backfill-journal-entries')
+  @ApiOperation({ summary: 'Backfill journal entries for checked-out bookings that have no accounting entry yet' })
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager')
+  async backfillJournalEntries(
+    @CurrentUser() user: { tenantId?: string; defaultPropertyId?: string },
+    @Query('propertyId') propertyId?: string,
+  ) {
+    return this.bookingsService.backfillJournalEntries(
+      user.tenantId,
+      propertyId || user.defaultPropertyId,
+    );
+  }
+
   @Delete(':id')
   @Throttle({ default: { limit: 10, ttl: 60 } })
   @ApiOperation({ summary: 'Cancel booking' })

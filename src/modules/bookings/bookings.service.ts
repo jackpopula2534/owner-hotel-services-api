@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmailEventsService } from '../../email/email-events.service';
 import { AuditLogService } from '../../audit-log/audit-log.service';
@@ -21,6 +22,7 @@ import {
   DEFAULT_CLEANING_BUFFER_MINUTES,
   resolveTimeWithFallback,
 } from '../../common/availability/availability.util';
+import { CRM_EVENTS } from '../crm/crm.events';
 
 // ─── Activity Types ───────────────────────────────────────────────────────────
 
@@ -107,6 +109,7 @@ export class BookingsService {
 
   constructor(
     private prisma: PrismaService,
+    private eventEmitter: EventEmitter2,
     private emailEventsService: EmailEventsService,
     private auditLogService: AuditLogService,
     private invoicesService: InvoicesService,
@@ -966,6 +969,15 @@ export class BookingsService {
       this.logger.error(`Failed to track booking_created event: ${err.message}`);
     });
 
+    if (tenantId && booking.guestId) {
+      this.eventEmitter.emit(CRM_EVENTS.BOOKING_CREATED, {
+        bookingId: booking.id,
+        tenantId,
+        guestId: booking.guestId,
+        totalAmount: Number(booking.grandTotal ?? booking.totalPrice ?? 0),
+      });
+    }
+
     return this.mapBookingResponse(booking);
   }
 
@@ -1130,6 +1142,15 @@ export class BookingsService {
       this.logger.error(`Failed to send check-in confirmation email: ${err.message}`);
     });
 
+    if (tenantId && booking.guestId) {
+      this.eventEmitter.emit(CRM_EVENTS.BOOKING_CHECKED_IN, {
+        bookingId: booking.id,
+        tenantId,
+        guestId: booking.guestId,
+        totalAmount: Number(updated.grandTotal ?? updated.totalPrice ?? booking.totalPrice ?? 0),
+      });
+    }
+
     return this.mapBookingResponse(updated);
   }
 
@@ -1150,12 +1171,14 @@ export class BookingsService {
       include: { guest: true, room: true, property: true },
     });
 
-    // Update room status to cleaning
+    // Update room status to dirty (ว่างยังไม่สะอาด)
+    // dirty = checkout เสร็จแล้ว รอมอบหมายแม่บ้าน
+    // cleaning = แม่บ้านรับงานและเริ่มทำแล้ว (housekeeping service จัดการ)
     if (booking.roomId) {
       await this.prisma.room
         .update({
           where: { id: booking.roomId },
-          data: { status: 'cleaning' },
+          data: { status: 'dirty' },
         })
         .catch(() => {});
     }
@@ -1242,13 +1265,13 @@ export class BookingsService {
       this.logger.error(`Failed to send review request email: ${err.message}`);
     });
 
-    // Stage 6: Add loyalty points for the stay (async, non-blocking)
-    if (booking.guestId && booking.totalPrice) {
-      this.loyaltyService
-        .addPointsForStay(booking.guestId, tenantId, Number(booking.totalPrice))
-        .catch((err) => {
-          this.logger.error(`Failed to add loyalty points: ${err.message}`);
-        });
+    if (tenantId && booking.guestId) {
+      this.eventEmitter.emit(CRM_EVENTS.BOOKING_CHECKED_OUT, {
+        bookingId: booking.id,
+        tenantId,
+        guestId: booking.guestId,
+        totalAmount: Number(updated.grandTotal ?? updated.totalPrice ?? booking.totalPrice ?? 0),
+      });
     }
 
     return this.mapBookingResponse(updated);
@@ -1474,7 +1497,7 @@ export class BookingsService {
         return;
       }
 
-      // Calculate total from invoice items
+      // Calculate total from invoice items (add-ons / extra charges)
       const additionalCharges =
         invoice.invoice_items?.reduce((sum, item) => sum + Number(item.amount || 0), 0) || 0;
 
@@ -1496,12 +1519,290 @@ export class BookingsService {
       this.logger.log(
         `Invoice ${invoice.invoice_no} finalized on checkout: room ${roomCharge} + additional ${additionalCharges} = ${totalAmount}`,
       );
+
+      // Create accounting journal entry (non-blocking — hotel system unaffected if accounting fails)
+      this.createBookingRevenueJournal({
+        tenantId,
+        propertyId: booking?.propertyId,
+        bookingId,
+        bookingNo: booking?.bookingNo,
+        roomSubtotal: Number(booking?.roomSubtotal ?? booking?.totalPrice ?? roomCharge),
+        serviceChargeAmount: Number(booking?.serviceChargeAmount ?? 0),
+        vatAmount: Number(booking?.vatAmount ?? 0),
+        grandTotal: roomCharge,
+        additionalCharges,
+        totalAmount,
+      }).catch((err: Error) => {
+        this.logger.warn(`Accounting journal skipped for booking ${bookingId}: ${err.message}`);
+      });
     } catch (error) {
       this.logger.error(
         `Failed to finalize invoice on checkout for ${bookingId}: ${error.message}`,
       );
       throw error;
     }
+  }
+
+  /**
+   * Backfill journal entries สำหรับ booking ที่ checkout ไปแล้วแต่ยังไม่มี accounting entry
+   * เรียกใช้ครั้งเดียวหลัง seed Chart of Accounts เพื่อสร้าง JE ย้อนหลัง
+   */
+  async backfillJournalEntries(
+    tenantId?: string,
+    propertyId?: string,
+  ): Promise<{ processed: number; created: number; skipped: number; errors: number }> {
+    if (!tenantId) {
+      return { processed: 0, created: 0, skipped: 0, errors: 0 };
+    }
+
+    const where: any = { tenantId, status: 'checked_out' };
+    if (propertyId) where.propertyId = propertyId;
+
+    const bookings = await this.prisma.booking.findMany({
+      where,
+      select: {
+        id: true,
+        tenantId: true,
+        propertyId: true,
+        bookingNo: true,
+        grandTotal: true,
+        totalPrice: true,
+        roomSubtotal: true,
+        serviceChargeAmount: true,
+        vatAmount: true,
+      },
+    });
+
+    let created = 0;
+    let skipped = 0;
+    let errors = 0;
+
+    for (const booking of bookings) {
+      try {
+        // ตรวจว่ามี journal entry สำหรับ booking นี้แล้วหรือยัง
+        const existing = await this.prisma.journalEntry.findFirst({
+          where: { tenantId, sourceType: 'BOOKING_PAYMENT', sourceId: booking.id },
+          select: { id: true },
+        });
+
+        if (existing) {
+          skipped++;
+          continue;
+        }
+
+        const grandTotal = Number(booking.grandTotal ?? booking.totalPrice ?? 0);
+        if (grandTotal <= 0) {
+          skipped++;
+          continue;
+        }
+
+        await this.createBookingRevenueJournal({
+          tenantId,
+          propertyId: booking.propertyId,
+          bookingId: booking.id,
+          bookingNo: booking.bookingNo,
+          roomSubtotal: Number(booking.roomSubtotal ?? booking.totalPrice ?? grandTotal),
+          serviceChargeAmount: Number(booking.serviceChargeAmount ?? 0),
+          vatAmount: Number(booking.vatAmount ?? 0),
+          grandTotal,
+          additionalCharges: 0,
+          totalAmount: grandTotal,
+        });
+
+        created++;
+        this.logger.log(`Backfill JE created for booking ${booking.bookingNo ?? booking.id}`);
+      } catch (err: unknown) {
+        errors++;
+        this.logger.error(
+          `Backfill JE failed for booking ${booking.id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    this.logger.log(
+      `Backfill complete: ${bookings.length} processed, ${created} created, ${skipped} skipped, ${errors} errors`,
+    );
+    return { processed: bookings.length, created, skipped, errors };
+  }
+
+  /**
+   * สร้าง Journal Entry สำหรับรายได้ห้องพัก (BOOKING_PAYMENT)
+   * - DR: เงินสด 1101 = totalAmount
+   * - CR: รายได้ค่าห้องพัก 4101 = roomSubtotal
+   * - CR: รายได้ค่าธรรมเนียมบริการ 4305 = serviceChargeAmount (ถ้ามี)
+   * - CR: ภาษีขาย VAT Output 2103 = vatAmount (ถ้ามี)
+   * - CR: รายได้อื่นๆ 4300 = additionalCharges / add-ons (ถ้ามี)
+   *
+   * ถ้า Chart of Accounts ยังไม่ได้ seed → skip อย่าง graceful ไม่กระทบระบบโรงแรม
+   * ถ้าไม่มี add-ons → ไม่มีบรรทัด 4300 ในนั้น ปกติ
+   */
+  private async createBookingRevenueJournal(params: {
+    tenantId: string;
+    propertyId?: string;
+    bookingId: string;
+    bookingNo?: string | null;
+    roomSubtotal: number;
+    serviceChargeAmount: number;
+    vatAmount: number;
+    grandTotal: number;
+    additionalCharges: number;
+    totalAmount: number;
+  }): Promise<void> {
+    const {
+      tenantId,
+      propertyId,
+      bookingId,
+      bookingNo,
+      roomSubtotal,
+      serviceChargeAmount,
+      vatAmount,
+      additionalCharges,
+      totalAmount,
+    } = params;
+
+    if (!propertyId || totalAmount <= 0) return;
+
+    // Look up required accounts — skip if tenant hasn't seeded Chart of Accounts
+    const REQUIRED_CODES = ['1101', '4101'];
+    const OPTIONAL_CODES = ['2103', '4305', '4300'];
+    const allCodes = [...REQUIRED_CODES, ...OPTIONAL_CODES];
+
+    const accounts = await this.prisma.accountChart.findMany({
+      where: { tenantId, code: { in: allCodes } },
+      select: { id: true, code: true },
+    });
+
+    const accountMap = new Map(accounts.map((a) => [a.code, a.id]));
+
+    // Abort if required accounts aren't seeded
+    for (const code of REQUIRED_CODES) {
+      if (!accountMap.has(code)) {
+        this.logger.debug(
+          `Accounting journal skipped for booking ${bookingId}: account ${code} not found (Chart of Accounts not seeded)`,
+        );
+        return;
+      }
+    }
+
+    // Generate JE number
+    const now = new Date();
+    const yearMonth = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const seq = await this.prisma.documentSequence.upsert({
+      where: { tenantId_docType_yearMonth: { tenantId, docType: 'JE', yearMonth } },
+      update: { lastNumber: { increment: 1 } },
+      create: { tenantId, docType: 'JE', prefix: 'JE', yearMonth, lastNumber: 1 },
+    });
+    const entryNo = `JE-${yearMonth}-${String(seq.lastNumber).padStart(6, '0')}`;
+
+    // Build journal lines
+    const lines: Array<{
+      accountId: string;
+      lineNo: number;
+      description: string;
+      debit: number;
+      credit: number;
+    }> = [];
+
+    let lineNo = 1;
+
+    // DR: Cash
+    lines.push({
+      accountId: accountMap.get('1101')!,
+      lineNo: lineNo++,
+      description: `รับชำระห้องพัก ${bookingNo ?? bookingId.slice(0, 8)}`,
+      debit: totalAmount,
+      credit: 0,
+    });
+
+    // CR: Room Revenue — use grandTotal if no breakdown, else roomSubtotal
+    const hasBreakdown = serviceChargeAmount > 0 || vatAmount > 0;
+    const roomRevenueAmount = hasBreakdown ? roomSubtotal : params.grandTotal;
+    lines.push({
+      accountId: accountMap.get('4101')!,
+      lineNo: lineNo++,
+      description: `รายได้ค่าห้องพัก ${bookingNo ?? bookingId.slice(0, 8)}`,
+      debit: 0,
+      credit: roomRevenueAmount,
+    });
+
+    // CR: Service Charge (4305) — if applicable and account exists
+    if (serviceChargeAmount > 0 && accountMap.has('4305')) {
+      lines.push({
+        accountId: accountMap.get('4305')!,
+        lineNo: lineNo++,
+        description: `ค่าธรรมเนียมบริการ ${bookingNo ?? bookingId.slice(0, 8)}`,
+        debit: 0,
+        credit: serviceChargeAmount,
+      });
+    }
+
+    // CR: VAT Output (2103) — if applicable and account exists
+    if (vatAmount > 0 && accountMap.has('2103')) {
+      lines.push({
+        accountId: accountMap.get('2103')!,
+        lineNo: lineNo++,
+        description: `ภาษีมูลค่าเพิ่ม (VAT) ${bookingNo ?? bookingId.slice(0, 8)}`,
+        debit: 0,
+        credit: vatAmount,
+      });
+    }
+
+    // CR: Other Revenue (4300) — add-ons / extra charges only if > 0
+    if (additionalCharges > 0 && accountMap.has('4300')) {
+      lines.push({
+        accountId: accountMap.get('4300')!,
+        lineNo: lineNo++,
+        description: `รายได้บริการเพิ่มเติม (add-ons) ${bookingNo ?? bookingId.slice(0, 8)}`,
+        debit: 0,
+        credit: additionalCharges,
+      });
+    }
+
+    // Verify double-entry balances before persisting
+    const totalDebit = lines.reduce((s, l) => s + l.debit, 0);
+    const totalCredit = lines.reduce((s, l) => s + l.credit, 0);
+    if (Math.abs(totalDebit - totalCredit) > 0.01) {
+      this.logger.error(
+        `Journal entry imbalance for booking ${bookingId}: debit ${totalDebit} ≠ credit ${totalCredit}`,
+      );
+      return;
+    }
+
+    const fiscalPeriod = now.getMonth() + 1;
+    const fiscalYear = now.getFullYear();
+
+    await this.prisma.journalEntry.create({
+      data: {
+        tenantId,
+        propertyId,
+        entryNo,
+        entryDate: now,
+        description: `รับชำระห้องพัก ${bookingNo ?? bookingId.slice(0, 8)}`,
+        reference: bookingNo ?? bookingId.slice(0, 8),
+        sourceType: 'BOOKING_PAYMENT',
+        sourceId: bookingId,
+        status: 'POSTED',
+        fiscalPeriod,
+        fiscalYear,
+        totalDebit,
+        totalCredit,
+        createdBy: 'system',
+        lines: {
+          create: lines.map((l) => ({
+            accountId: l.accountId,
+            lineNo: l.lineNo,
+            description: l.description,
+            debit: l.debit,
+            credit: l.credit,
+          })),
+        },
+      },
+    });
+
+    this.logger.log(
+      `Journal entry ${entryNo} created for booking ${bookingId}: total ${totalAmount} THB` +
+        (additionalCharges > 0 ? ` (incl. add-ons ${additionalCharges})` : ''),
+    );
   }
 
   /**

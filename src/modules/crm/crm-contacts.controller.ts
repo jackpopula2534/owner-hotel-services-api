@@ -15,13 +15,16 @@ import { CrmContactsService } from './crm-contacts.service';
 import { CreateContactDto, QueryContactsDto, UpdateContactDto } from './dto/create-contact.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { AddonGuard } from '../../common/guards/addon.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { RequireAddon } from '../../common/decorators/require-addon.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @ApiTags('crm/contacts')
 @ApiBearerAuth('JWT-auth')
 @Controller({ path: 'crm/contacts' })
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, AddonGuard)
+@RequireAddon('CRM_MODULE')
 export class CrmContactsController {
   constructor(private readonly contacts: CrmContactsService) {}
 
@@ -43,7 +46,8 @@ export class CrmContactsController {
   @ApiOperation({ summary: 'Get linked booking history for a contact' })
   @Roles('admin', 'manager', 'tenant_admin', 'platform_admin', 'crm_agent', 'crm_manager')
   async stayHistory(@Param('id') id: string, @CurrentUser() user: { tenantId: string }) {
-    return this.contacts.getStayHistory(id, user.tenantId);
+    const bookings = await this.contacts.getStayHistory(id, user.tenantId);
+    return { bookings };
   }
 
   @Post()

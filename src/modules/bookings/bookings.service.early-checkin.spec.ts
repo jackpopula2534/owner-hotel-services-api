@@ -12,6 +12,7 @@
  *   - happy path: request + auto-approve (writes fee, calls auditLog)
  */
 import { BadRequestException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuditLogService } from '../../audit-log/audit-log.service';
 import { EmailEventsService } from '../../email/email-events.service';
@@ -21,7 +22,7 @@ import { NotificationsService } from '../../notifications/notifications.service'
 import { PaymentsService } from '../../payments/payments.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { HousekeepingService } from '../housekeeping/housekeeping.service';
-import { mockAuditLogService } from '../../common/test/mock-providers';
+import { mockAuditLogService, mockEventEmitter } from '../../common/test/mock-providers';
 import { withPrismaFallback } from '../../common/test/mock-prisma';
 import { BookingsService } from './bookings.service';
 
@@ -56,6 +57,7 @@ describe('BookingsService — requestEarlyCheckIn', () => {
       providers: [
         BookingsService,
         { provide: PrismaService, useValue: prismaMock },
+        { provide: EventEmitter2, useValue: mockEventEmitter() },
         { provide: AuditLogService, useValue: auditLogMock },
         {
           provide: EmailEventsService,

@@ -179,7 +179,8 @@ export class PropertiesService {
       this.prisma.room.count({
         where: { ...roomWhere, status: { in: ['maintenance', 'out_of_order'] } },
       }),
-      this.prisma.room.count({ where: { ...roomWhere, status: 'cleaning' } }),
+      // dirty = รอมอบหมายแม่บ้าน (หลัง checkout), cleaning = กำลังทำอยู่ — ทั้งสองรอทำความสะอาด
+      this.prisma.room.count({ where: { ...roomWhere, status: { in: ['cleaning', 'dirty'] } } }),
       this.prisma.booking.count({
         where: {
           tenantId,
@@ -188,17 +189,24 @@ export class PropertiesService {
           status: { not: 'cancelled' },
         },
       }),
+      // monthlyRevenue: sum grandTotal (or fallback totalPrice) + add-on amounts
       this.prisma.booking
-        .aggregate({
+        .findMany({
           where: {
             tenantId,
             propertyId: id,
             createdAt: { gte: firstDayOfMonth },
-            status: { in: ['confirmed', 'checked-in', 'checked-out'] },
+            status: { in: ['confirmed', 'checked_in', 'checked_out'] },
           },
-          _sum: { totalPrice: true },
+          select: { grandTotal: true, totalPrice: true, addOns: { select: { amount: true } } },
         })
-        .then((r) => Number(r._sum.totalPrice ?? 0))
+        .then((bookings) =>
+          bookings.reduce((sum, b) => {
+            const base = Number(b.grandTotal ?? b.totalPrice ?? 0);
+            const addOnSum = b.addOns.reduce((s, a) => s + Number(a.amount ?? 0), 0);
+            return sum + base + addOnSum;
+          }, 0),
+        )
         .catch(() => 0),
       this.prisma.booking.count({
         where: {
@@ -213,7 +221,7 @@ export class PropertiesService {
           tenantId,
           propertyId: id,
           checkOut: { gte: today, lt: tomorrow },
-          status: 'checked-in',
+          status: 'checked_in',
         },
       }),
       this.prisma.userTenant.count({ where: { tenantId } }).catch(() => 0),

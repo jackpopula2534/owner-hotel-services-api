@@ -133,6 +133,7 @@ model Guest {
   arReceipts         ArReceipt[]
   guestFolios        GuestFolio[]
   conversations      Conversation[]
+  crmContacts        CrmContact[]
 
   @@index([tenantId])
   @@map("guests")
@@ -5851,6 +5852,7 @@ model CrmContact {
   notes         String?   @db.Text
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+  guest         Guest?      @relation(fields: [guestId], references: [id], onDelete: SetNull)
   tickets       CrmTicket[]
   loyaltyTransactions LoyaltyTransaction[]
 

@@ -596,6 +596,22 @@ export class SeederService {
         maxQuantity: 1,
         isActive: true,
       },
+
+      // ─── CRM ──────────────────────────────────────────────
+      {
+        code: 'CRM_MODULE',
+        name: 'CRM & Guest 360',
+        description:
+          'ระบบ CRM ครบวงจร: Guest 360 view, RFM segmentation, LTV tracking, service-desk tickets และ loyalty integration',
+        price: 890,
+        billingCycle: AddonBillingCycle.MONTHLY,
+        category: 'CRM',
+        icon: 'Users',
+        displayOrder: 810,
+        minQuantity: 1,
+        maxQuantity: 1,
+        isActive: true,
+      },
     ];
 
     for (const addonData of addons) {
@@ -605,7 +621,7 @@ export class SeederService {
       );
     }
 
-    this.logger.log(`  ✅ Seeded ${addons.length} add-ons across 8 categories (modules only)`);
+    this.logger.log(`  ✅ Seeded ${addons.length} add-ons across 9 categories (modules only)`);
   }
 
   /**
@@ -703,6 +719,7 @@ export class SeederService {
     const costAccountingModule = await findAddon('COST_ACCOUNTING_MODULE');
     const automationModule = await findAddon('AUTOMATION_MODULE');
     const customBranding = await findAddon('CUSTOM_BRANDING');
+    const crmModule = await findAddon('CRM_MODULE');
 
     // Plan FREE — Trial: include every module so tenants can evaluate full
     // surface area for 14 days. Matches the "Full Access" trial policy.
@@ -720,6 +737,7 @@ export class SeederService {
       costAccountingModule,
       automationModule,
       customBranding,
+      crmModule,
     ]);
 
     // Plan S (Starter) — small hotel essentials
@@ -734,6 +752,7 @@ export class SeederService {
       otaIntegration,
       extraAnalytics,
       loyaltyModule,
+      crmModule,
     ]);
 
     // Plan L (Enterprise) — everything except CUSTOM_BRANDING (sold à la carte)
@@ -750,6 +769,7 @@ export class SeederService {
       inventoryModule,
       costAccountingModule,
       automationModule,
+      crmModule,
     ]);
   }
 
@@ -1824,7 +1844,7 @@ export class SeederService {
    * - ประเภทเบี้ยเลี้ยง (Allowance Types)
    * - ประเภทการหักเงิน (Deduction Types)
    */
-  private async seedHrMasterData(): Promise<void> {
+  async seedHrMasterData(): Promise<void> {
     this.logger.log('👥 Seeding HR Master Data...');
 
     const allTenants = await this.tenantsService.findAll();

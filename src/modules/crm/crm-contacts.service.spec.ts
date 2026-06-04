@@ -15,6 +15,9 @@ describe('CrmContactsService', () => {
       update: jest.fn(),
       delete: jest.fn(),
     },
+    guest: {
+      findMany: jest.fn(),
+    },
     booking: {
       findMany: jest.fn(),
     },
@@ -36,14 +39,23 @@ describe('CrmContactsService', () => {
     });
 
     it('paginates with default limit 20', async () => {
-      mockPrisma.crmContact.findMany.mockResolvedValue([{ id: 'c1' }]);
+      mockPrisma.crmContact.findMany.mockResolvedValue([{ id: 'c1', guestId: 'g1' }]);
+      mockPrisma.guest.findMany.mockResolvedValue([{ id: 'g1', firstName: 'Jane', lastName: 'Doe' }]);
       mockPrisma.crmContact.count.mockResolvedValue(1);
       const r = await service.findAll({}, 't1');
       expect(r.total).toBe(1);
       expect(r.limit).toBe(20);
       expect(mockPrisma.crmContact.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ skip: 0, take: 20, where: { tenantId: 't1' } }),
+        expect.objectContaining({
+          skip: 0,
+          take: 20,
+          where: { tenantId: 't1' },
+        }),
       );
+      expect(mockPrisma.guest.findMany).toHaveBeenCalledWith({
+        where: { id: { in: ['g1'] } },
+        select: expect.objectContaining({ firstName: true, lastName: true }),
+      });
     });
 
     it('applies segment + contactType filter', async () => {
@@ -76,9 +88,14 @@ describe('CrmContactsService', () => {
     });
 
     it('returns contact when found', async () => {
-      mockPrisma.crmContact.findFirst.mockResolvedValue({ id: 'c1', tenantId: 't1' });
+      mockPrisma.crmContact.findFirst.mockResolvedValue({ id: 'c1', tenantId: 't1', guestId: 'g1' });
+      mockPrisma.guest.findMany.mockResolvedValue([{ id: 'g1', firstName: 'Jane', lastName: 'Doe' }]);
       const r = await service.findOne('c1', 't1');
       expect(r.id).toBe('c1');
+      expect((r as any).guest?.firstName).toBe('Jane');
+      expect(mockPrisma.crmContact.findFirst).toHaveBeenCalledWith({
+        where: { id: 'c1', tenantId: 't1' },
+      });
     });
   });
 

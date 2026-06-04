@@ -19,13 +19,16 @@ import {
 } from './dto/create-ticket.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { AddonGuard } from '../../common/guards/addon.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { RequireAddon } from '../../common/decorators/require-addon.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @ApiTags('crm/tickets')
 @ApiBearerAuth('JWT-auth')
 @Controller({ path: 'crm/tickets' })
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, AddonGuard)
+@RequireAddon('CRM_MODULE')
 export class CrmTicketsController {
   constructor(private readonly tickets: CrmTicketsService) {}
 
