@@ -19,6 +19,8 @@ describe('AddonController', () => {
     minQuantity: 1,
     maxQuantity: 1,
     isActive: true,
+    isSubSystem: false,
+    subSystemMeta: null,
     createdAt: '2026-05-01T00:00:00.000Z',
     updatedAt: '2026-05-01T00:00:00.000Z',
   };

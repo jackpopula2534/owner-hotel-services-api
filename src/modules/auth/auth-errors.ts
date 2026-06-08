@@ -54,6 +54,7 @@ export const AUTH_ERROR_CODES = {
   NOT_AUTHORIZED_HOTEL_TERMINAL: 'AUTH_NOT_AUTHORIZED_HOTEL_TERMINAL',
   NOT_AUTHORIZED_MAIN: 'AUTH_NOT_AUTHORIZED_MAIN',
   NOT_AUTHORIZED_ACCOUNTING: 'AUTH_NOT_AUTHORIZED_ACCOUNTING',
+  NOT_AUTHORIZED_HR: 'AUTH_NOT_AUTHORIZED_HR',
   REFRESH_TOKEN_INVALID: 'AUTH_REFRESH_TOKEN_INVALID',
   REFRESH_TOKEN_EXPIRED: 'AUTH_REFRESH_TOKEN_EXPIRED',
   REFRESH_TOKEN_REVOKED: 'AUTH_REFRESH_TOKEN_REVOKED',
@@ -163,7 +164,7 @@ export const AuthErrors = {
   },
 
   notAuthorizedForSystem(
-    system: 'pos' | 'procurement' | 'warehouse' | 'hotel-terminal' | 'main' | 'accounting',
+    system: 'pos' | 'procurement' | 'warehouse' | 'hotel-terminal' | 'main' | 'accounting' | 'hr',
   ): HttpException {
     const map = {
       pos: {
@@ -195,6 +196,11 @@ export const AuthErrors = {
         code: AUTH_ERROR_CODES.NOT_AUTHORIZED_ACCOUNTING,
         key: 'notAuthorizedAccounting',
         en: 'This account is not authorized to access the Accounting system. Please contact your administrator.',
+      },
+      hr: {
+        code: AUTH_ERROR_CODES.NOT_AUTHORIZED_HR,
+        key: 'notAuthorizedHr',
+        en: 'This account is not authorized to access the HR system. Please contact your administrator.',
       },
     } as const;
     const entry = map[system];

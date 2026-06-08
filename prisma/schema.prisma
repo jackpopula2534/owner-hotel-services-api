@@ -1094,12 +1094,17 @@ model add_ons {
   min_quantity  Int                   @default(1)
   max_quantity  Int                   @default(1)
   is_active     Int                   @default(1) @db.TinyInt
+  // Sub-System flag: marks an add-on as a "Terminal / ระบบย่อย" shown on the Sub Systems page.
+  is_sub_system Int                   @default(0) @db.TinyInt
+  // JSON array of card metadata for the Sub Systems page (one add-on may expose several terminal cards).
+  sub_system_meta String?             @db.Text
   created_at    DateTime              @default(now()) @db.DateTime(6)
   updated_at    DateTime              @default(now()) @updatedAt @db.DateTime(6)
   plan_addons   plan_addons[]
 
   @@index([is_active], map: "IDX_add_ons_is_active")
   @@index([category], map: "IDX_add_ons_category")
+  @@index([is_sub_system], map: "IDX_add_ons_is_sub_system")
 }
 
 model plan_addons {

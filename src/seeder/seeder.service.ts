@@ -25,6 +25,8 @@ import {
   SupplierQuoteStatus,
 } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import { DEFAULT_HR_PERMISSIONS as HR_DEFAULT_PERMISSIONS } from '../modules/hr-terminal-users/dto/create-hr-terminal-user.dto';
+import { SUB_SYSTEM_ADDON_META } from '../modules/sub-systems/sub-systems.catalog';
 import { v4 as uuidv4 } from 'uuid';
 import {
   buildBangkokDateTime,
@@ -615,9 +617,18 @@ export class SeederService {
     ];
 
     for (const addonData of addons) {
+      // Flag Sub-System (Terminal) add-ons + attach their card metadata so the
+      // Sub Systems page can be rendered data-driven from the add-on catalog.
+      const subSystemMeta = SUB_SYSTEM_ADDON_META[addonData.code];
+      if (subSystemMeta) {
+        (addonData as typeof addonData & { isSubSystem?: boolean }).isSubSystem = true;
+        (addonData as typeof addonData & { subSystemMeta?: unknown }).subSystemMeta = subSystemMeta;
+      }
       await this.addonService.upsertByCode(addonData);
       this.logger.log(
-        `  ✓ Upserted add-on: ${addonData.code} [${addonData.category}] (฿${addonData.price}/${addonData.billingCycle})`,
+        `  ✓ Upserted add-on: ${addonData.code} [${addonData.category}]` +
+          (subSystemMeta ? ' [sub-system]' : '') +
+          ` (฿${addonData.price}/${addonData.billingCycle})`,
       );
     }
 
@@ -5035,6 +5046,69 @@ export class SeederService {
     this.logger.log(
       `  ✓ POS staff: ${posCreated} created, ${posUpdated} updated` +
         ` (password: pos123456, systems: waiter/chef/cashier → POS only, manager → main+POS)`,
+    );
+
+    // ── HR Terminal staff accounts ────────────────────────────────────────────
+    // Login via POST /auth/hr/login → systemContext="hr".
+    // Permissions reuse the warehousePermissions column (same as accounting-users).
+    const hrStaff = [
+      {
+        email: 'hr.manager@mountainviewresort.test',
+        firstName: 'อารยา',
+        lastName: 'บริหารคน',
+        role: 'hr_manager',
+        employeeId: 'MVR-HR001',
+        permissions: HR_DEFAULT_PERMISSIONS.hr_manager,
+      },
+      {
+        email: 'payroll@mountainviewresort.test',
+        firstName: 'เกศรา',
+        lastName: 'จ่ายตรง',
+        role: 'payroll_officer',
+        employeeId: 'MVR-HR002',
+        permissions: HR_DEFAULT_PERMISSIONS.payroll_officer,
+      },
+    ];
+
+    const hashedHrPassword = await bcrypt.hash('hr123456', 10);
+    let hrCreated = 0;
+    let hrUpdated = 0;
+
+    for (const staff of hrStaff) {
+      const existing = await this.prisma.user.findUnique({ where: { email: staff.email } });
+      if (!existing) {
+        await this.prisma.user.create({
+          data: {
+            email: staff.email,
+            password: hashedHrPassword,
+            firstName: staff.firstName,
+            lastName: staff.lastName,
+            role: staff.role,
+            employeeId: staff.employeeId,
+            tenantId,
+            status: 'active',
+            allowedSystems: '["main","hr"]',
+            warehousePermissions: JSON.stringify(staff.permissions),
+          } as any,
+        });
+        hrCreated++;
+      } else {
+        await this.prisma.user.update({
+          where: { id: existing.id },
+          data: {
+            tenantId,
+            allowedSystems: '["main","hr"]',
+            password: hashedHrPassword,
+            warehousePermissions: JSON.stringify(staff.permissions),
+          } as any,
+        });
+        hrUpdated++;
+      }
+    }
+
+    this.logger.log(
+      `  ✓ HR staff: ${hrCreated} created, ${hrUpdated} updated` +
+        ` (password: hr123456, systems: main+HR, login via /auth/hr/login)`,
     );
 
     // ── Backfill allowedSystems for existing hotel owner/admins ───────────────

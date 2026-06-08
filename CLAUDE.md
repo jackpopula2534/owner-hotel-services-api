@@ -121,3 +121,20 @@ npm run lint             # ESLint with fix
 - Validate DTOs ด้วย class-validator ทุก endpoint
 - Rate limiting ทุก public endpoint
 - Audit logging สำหรับ booking lifecycle และ housekeeping completion
+
+## AI Change Logging (บังคับทุก session)
+
+ทุกครั้งที่ทำงานเสร็จใน session ให้บันทึก log ลง Obsidian vault ที่ `hotel-services-master`:
+
+**Vault path:** `/Users/todsapornsaelow/Documents/GitHub/hotel-services-master`
+
+### ขั้นตอน
+1. สร้างไฟล์ `Logs/AI-Changes/YYYY-MM-DD-<task-slug>.md` (เช่น `2026-06-08-add-booking-api.md`)
+2. ใช้โครงสร้างตาม template `Templates/AI Log Template.md`:
+   - **AI Agent:** Claude
+   - **Project:** owner-hotel-services-api (Backend)
+   - **Changes Made:** รายการสิ่งที่เปลี่ยนแปลง
+   - **Purpose/Impact:** เป้าหมายและผลกระทบ
+   - **Files Modified:** รายการไฟล์ที่แก้ไขพร้อม path
+3. อัพเดทตารางใน `Logs/AI-Changes/Index.md` เพิ่มแถวใหม่:
+   `| YYYY-MM-DD | Claude | owner-hotel-services-api | <summary> | [[Logs/AI-Changes/YYYY-MM-DD-<slug>|View Log]] |`

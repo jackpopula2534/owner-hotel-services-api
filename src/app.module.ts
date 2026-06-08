@@ -84,6 +84,8 @@ import { ProcurementUsersModule } from './modules/procurement-users/procurement-
 import { WarehouseUsersModule } from './modules/warehouse-users/warehouse-users.module';
 import { AccountingUsersModule } from './modules/accounting-users/accounting-users.module';
 import { HotelTerminalUsersModule } from './modules/hotel-terminal-users/hotel-terminal-users.module';
+import { HrTerminalUsersModule } from './modules/hr-terminal-users/hr-terminal-users.module';
+import { SubSystemsModule } from './modules/sub-systems/sub-systems.module';
 import { CostAccountingModule } from './modules/cost-accounting/cost-accounting.module';
 import { DocumentSettingsModule } from './modules/document-settings/document-settings.module';
 // ─── Accounting System ────────────────────────────────────────────────────────
@@ -193,6 +195,8 @@ import { TenantGuard } from './common/guards/tenant.guard';
     WarehouseUsersModule,
     AccountingUsersModule,
     HotelTerminalUsersModule,
+    HrTerminalUsersModule,
+    SubSystemsModule,
     CostAccountingModule,
     DocumentSettingsModule,
     // ─── Accounting System ──────────────────────────────────────────────────

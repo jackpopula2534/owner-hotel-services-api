@@ -60,6 +60,7 @@ export class SystemGuard implements CanActivate {
         warehouse: 'Warehouse System',
         'hotel-terminal': 'Hotel Management Terminal',
         accounting: 'Accounting System',
+        hr: 'HR Terminal',
       };
 
       throw new ForbiddenException({

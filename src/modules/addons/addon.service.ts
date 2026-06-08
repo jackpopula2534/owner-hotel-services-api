@@ -2,7 +2,7 @@ import { ConflictException, Injectable, Logger, NotFoundException } from '@nestj
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
 import { CacheService } from '@/cache/cache.service';
-import { CreateAddonDto, AddonBillingCycle } from './dto/create-addon.dto';
+import { CreateAddonDto, AddonBillingCycle, SubSystemCardMeta } from './dto/create-addon.dto';
 import { UpdateAddonDto } from './dto/update-addon.dto';
 import { QueryAddonDto } from './dto/query-addon.dto';
 
@@ -53,6 +53,8 @@ export interface AddonEntity {
   minQuantity: number;
   maxQuantity: number;
   isActive: boolean;
+  isSubSystem: boolean;
+  subSystemMeta: SubSystemCardMeta[] | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -388,6 +390,8 @@ export class AddonService {
       min_quantity: dto.minQuantity ?? 1,
       max_quantity: dto.maxQuantity ?? 1,
       is_active: dto.isActive === false ? 0 : 1,
+      is_sub_system: dto.isSubSystem ? 1 : 0,
+      sub_system_meta: dto.subSystemMeta ? JSON.stringify(dto.subSystemMeta) : null,
     };
 
     const record = await this.addOnsClient().upsert({
@@ -453,9 +457,33 @@ export class AddonService {
     minQuantity: record.min_quantity,
     maxQuantity: record.max_quantity,
     isActive: record.is_active === 1,
+    isSubSystem: record.is_sub_system === 1,
+    subSystemMeta: this.parseSubSystemMeta(record.sub_system_meta),
     createdAt: record.created_at.toISOString(),
     updatedAt: record.updated_at.toISOString(),
   });
+
+  private parseSubSystemMeta(raw: string | null | undefined): SubSystemCardMeta[] | null {
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? (parsed as SubSystemCardMeta[]) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * รายการ add-on ที่เป็น Sub System (is_sub_system = 1) เรียงตาม display_order.
+   * ใช้โดย SubSystemsService เพื่อสร้างการ์ดในหน้าระบบย่อย.
+   */
+  async getSubSystemAddons(): Promise<AddonEntity[]> {
+    const records: AddonRecord[] = await this.addOnsClient().findMany({
+      where: { is_sub_system: 1 },
+      orderBy: { display_order: 'asc' },
+    });
+    return records.map((r) => this.toEntity(r));
+  }
 }
 
 interface AddonRecord {
@@ -471,6 +499,8 @@ interface AddonRecord {
   min_quantity: number;
   max_quantity: number;
   is_active: number;
+  is_sub_system: number;
+  sub_system_meta: string | null;
   created_at: Date;
   updated_at: Date;
 }

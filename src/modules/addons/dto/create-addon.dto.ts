@@ -1,4 +1,5 @@
 import {
+  IsArray,
   IsBoolean,
   IsEnum,
   IsInt,
@@ -93,4 +94,40 @@ export class CreateAddonDto {
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
+
+  @ApiPropertyOptional({
+    example: true,
+    default: false,
+    description: 'true = add-on นี้เป็น Sub System (Terminal) แสดงในหน้าระบบย่อย',
+  })
+  @IsBoolean()
+  @IsOptional()
+  isSubSystem?: boolean;
+
+  @ApiPropertyOptional({
+    type: 'array',
+    description:
+      'metadata การ์ดสำหรับหน้า Sub Systems (1 add-on แสดงได้หลายการ์ด) — ' +
+      '{ key, subtitle, tags[], color, badge?, launchPath, launchEndpoint, loginEndpoint, name?, description?, icon? }',
+  })
+  @IsArray()
+  @IsOptional()
+  subSystemMeta?: SubSystemCardMeta[];
+}
+
+/** metadata การ์ด Sub System ที่เก็บใน add_ons.sub_system_meta (JSON) */
+export interface SubSystemCardMeta {
+  key: string;
+  subtitle: string;
+  tags: string[];
+  color: string;
+  launchPath: string;
+  launchEndpoint: string;
+  loginEndpoint: string;
+  badge?: string;
+  /** override ชื่อ/คำอธิบาย/ไอคอน จาก add-on (กรณี add-on เดียวมีหลายการ์ด) */
+  name?: string;
+  description?: string;
+  icon?: string;
+  displayOrder?: number;
 }

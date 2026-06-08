@@ -351,6 +351,64 @@ export class AuthController {
     );
   }
 
+  @Post('hr/login')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Login to HR Terminal',
+    description:
+      'Creates a session tagged systemContext="hr". ' +
+      'Validates that the user has "hr" in their allowedSystems. ' +
+      'Tokens issued here are scoped to the HR sub-system only. ' +
+      'Logging out from this terminal will NOT affect the main dashboard session.',
+  })
+  @ApiResponse({ status: 200, description: 'HR login successful' })
+  async hrLogin(@Body() loginDto: LoginDto, @Req() req: Request) {
+    return this.authService.login(
+      loginDto,
+      {
+        ipAddress: req.ip ?? req.socket?.remoteAddress,
+        userAgent: req.headers['user-agent'],
+      },
+      'hr',
+    );
+  }
+
+  @Post('hr/logout')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 50, ttl: 60 } })
+  @ApiBearerAuth('JWT-auth')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Logout from HR Terminal only',
+    description:
+      'Revokes only HR session tokens. ' +
+      'The main hotel management dashboard session stays active.',
+  })
+  @ApiResponse({ status: 200, description: 'HR session ended' })
+  async hrLogout(@CurrentUser() user: any, @Body() body?: { refreshToken?: string }) {
+    await this.authService.logout(user.userId, body?.refreshToken, 'hr');
+    return { success: true, message: 'Logged out from HR system' };
+  }
+
+  @Post('hr-launch')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 30, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Generate a short-lived deep-link token to open HR terminal pre-authenticated',
+    description: 'Returns a 5-minute JWT. User is logged in as hr_manager.',
+  })
+  @ApiResponse({ status: 200, description: 'HR launch token generated' })
+  async hrLaunch(@CurrentUser() caller: any, @Req() req: Request) {
+    return this.authService.generateHrLaunchToken(
+      { userId: caller.userId, email: caller.email, role: caller.role, tenantId: caller.tenantId },
+      req.ip ?? req.socket?.remoteAddress,
+    );
+  }
+
   @Post('forgot-password')
   @Public()
   @HttpCode(HttpStatus.OK)

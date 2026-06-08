@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/todsapornsaelow/.claude/hooks/log-git-to-obsidian.sh \"owner-hotel-services-api\" \"/Users/todsapornsaelow/Documents/GitHub/owner-hotel-services-api\""
+          }
+        ]
+      }
+    ]
+  }
+}

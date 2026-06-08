@@ -6,7 +6,8 @@ export type SystemContext =
   | 'procurement'
   | 'warehouse'
   | 'hotel-terminal'
-  | 'accounting';
+  | 'accounting'
+  | 'hr';
 
 export const REQUIRE_SYSTEM_KEY = 'require_system';
 
