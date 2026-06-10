@@ -101,8 +101,11 @@ export class HrPayrollController {
   @ApiResponse({ status: 400, description: 'No employees found or invalid period' })
   @HttpCode(HttpStatus.CREATED)
   @Roles('platform_admin', 'tenant_admin', 'admin', 'hr')
-  async runPayroll(@Body() dto: RunPayrollDto, @CurrentUser() user: { tenantId?: string }) {
-    return this.payrollService.runPayroll(dto, user.tenantId!);
+  async runPayroll(
+    @Body() dto: RunPayrollDto,
+    @CurrentUser() user: { tenantId?: string; id?: string },
+  ) {
+    return this.payrollService.runPayroll(dto, user.tenantId!, user.id);
   }
 
   // ─── Workflow ─────────────────────────────────────────────────────────────
@@ -128,8 +131,8 @@ export class HrPayrollController {
   @ApiResponse({ status: 200, description: 'Payroll marked as paid' })
   @ApiResponse({ status: 400, description: 'Payroll must be approved first' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'hr')
-  async markPaid(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
-    return this.payrollService.markPaid(id, user.tenantId!);
+  async markPaid(@Param('id') id: string, @CurrentUser() user: { tenantId?: string; id?: string }) {
+    return this.payrollService.markPaid(id, user.tenantId!, user.id);
   }
 
   @Patch(':id/cancel')
@@ -138,7 +141,7 @@ export class HrPayrollController {
   @ApiResponse({ status: 200, description: 'Payroll cancelled' })
   @ApiResponse({ status: 400, description: 'Cannot cancel a paid payroll' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'hr')
-  async cancel(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
-    return this.payrollService.cancel(id, user.tenantId!);
+  async cancel(@Param('id') id: string, @CurrentUser() user: { tenantId?: string; id?: string }) {
+    return this.payrollService.cancel(id, user.tenantId!, user.id);
   }
 }

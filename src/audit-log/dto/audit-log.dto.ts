@@ -109,6 +109,34 @@ export enum AuditAction {
   PRICE_COMPARISON_SUBMITTED = 'price_comparison_submitted',
   PRICE_COMPARISON_APPROVED = 'price_comparison_approved',
   PRICE_COMPARISON_REJECTED = 'price_comparison_rejected',
+
+  // HR — Phase 1 operational flows
+  SHIFT_ASSIGN = 'shift_assign',
+  SHIFT_UPDATE = 'shift_update',
+  ATTENDANCE_EXCEPTION_SUBMIT = 'attendance_exception_submit',
+  ATTENDANCE_EXCEPTION_APPROVE = 'attendance_exception_approve',
+  ATTENDANCE_EXCEPTION_REJECT = 'attendance_exception_reject',
+  OVERTIME_REQUEST = 'overtime_request',
+  OVERTIME_APPROVE = 'overtime_approve',
+  OVERTIME_REJECT = 'overtime_reject',
+  PAYROLL_RUN = 'payroll_run',
+  PAYROLL_APPROVE = 'payroll_approve',
+  PAYROLL_PAID = 'payroll_paid',
+  PAYROLL_CANCEL = 'payroll_cancel',
+  PAYROLL_POLICY_UPDATE = 'payroll_policy_update',
+
+  // HR — Phase 2 lifecycle & compliance
+  EMPLOYEE_DOCUMENT_UPLOAD = 'employee_document_upload',
+  EMPLOYEE_DOCUMENT_DELETE = 'employee_document_delete',
+  ONBOARDING_UPDATE = 'onboarding_update',
+  PROBATION_DECISION = 'probation_decision',
+  LEAVE_APPROVE_STEP = 'leave_approve_step',
+  OFFBOARDING_INITIATE = 'offboarding_initiate',
+  OFFBOARDING_COMPLETE = 'offboarding_complete',
+  EMPLOYEE_ACCOUNT_REVOKE = 'employee_account_revoke',
+
+  // HR — Phase 3
+  TRAINING_RECORD_UPDATE = 'training_record_update',
 }
 
 export enum AuditResource {
@@ -132,6 +160,17 @@ export enum AuditResource {
   MENU = 'menu',
   STAFF = 'staff',
   PRICE_COMPARISON = 'price_comparison',
+  SHIFT_ASSIGNMENT = 'shift_assignment',
+  ATTENDANCE_EXCEPTION = 'attendance_exception',
+  OVERTIME_REQUEST = 'overtime_request',
+  PAYROLL = 'payroll',
+  PAYROLL_POLICY = 'payroll_policy',
+  EMPLOYEE_DOCUMENT = 'employee_document',
+  ONBOARDING = 'onboarding',
+  PROBATION = 'probation',
+  LEAVE_REQUEST = 'leave_request',
+  OFFBOARDING = 'offboarding',
+  TRAINING_RECORD = 'training_record',
 }
 
 /** Category tags for grouping audit logs by system area */

@@ -666,11 +666,19 @@ model Employee {
   hrDepartment      HrDepartment?    @relation(fields: [departmentId], references: [id])
   hrPosition        HrPosition?      @relation(fields: [positionId], references: [id])
   property          Property?        @relation(fields: [propertyId], references: [id])
-  attendances       HrAttendance[]
-  leaveRequests     HrLeaveRequest[]
-  payrolls          HrPayroll[]
-  performances      HrPerformance[]
-  staff             Staff?           @relation("StaffEmployee")
+  attendances          HrAttendance[]
+  leaveRequests        HrLeaveRequest[]
+  payrolls             HrPayroll[]
+  performances         HrPerformance[]
+  shiftAssignments     HrShiftAssignment[]
+  attendanceExceptions HrAttendanceException[]
+  overtimeRequests     HrOvertimeRequest[]
+  documents            HrEmployeeDocument[]
+  onboardingTasks      HrOnboardingTask[]
+  probationReviews     HrProbationReview[]
+  offboardings         HrOffboarding[]
+  trainingRecords      HrTrainingRecord[]
+  staff                Staff?                 @relation("StaffEmployee")
 
   @@unique([tenantId, propertyId, employeeCode])
   @@unique([tenantId, email])
@@ -760,6 +768,7 @@ model HrShiftType {
   sortOrder    Int      @default(0)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+  shiftAssignments HrShiftAssignment[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -816,6 +825,8 @@ model HrAttendance {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   employee        Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  exceptions      HrAttendanceException[]
+  overtimeRequests HrOvertimeRequest[]    @relation("AttendanceOvertime")
 
   @@unique([employeeId, date])
   @@index([tenantId])
@@ -840,6 +851,10 @@ model HrLeaveRequest {
   rejectedAt   DateTime?
   rejectReason String?     @db.Text
   substituteId String?
+  attachmentUrl String?    @db.Text
+  approvalChain Json?      // [{ level, role, approverId, status, at }]
+  currentLevel Int         @default(1)
+  requiredLevels Int       @default(1)
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
   employee     Employee    @relation(fields: [employeeId], references: [id], onDelete: Cascade)
@@ -869,6 +884,9 @@ model HrPayroll {
   approvedAt     DateTime?
   paidAt         DateTime?
   note           String?         @db.Text
+  policyId       String?
+  periodStart    DateTime?       @db.Date
+  periodEnd      DateTime?       @db.Date
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   items          HrPayrollItem[]
@@ -1018,6 +1036,293 @@ model HrKpiTemplateItem {
 
   @@index([templateId])
   @@map("hr_kpi_template_items")
+}
+
+// ─── Phase 1: Operational HR Foundation ──────────────────────────────────────
+// Shift roster, attendance exceptions, overtime approval, payroll policy engine.
+
+model HrShiftAssignment {
+  id           String       @id @default(uuid())
+  tenantId     String
+  employeeId   String
+  shiftTypeId  String?
+  propertyId   String?
+  departmentId String?
+  date         DateTime     @db.Date
+  startTime    String? // HH:mm override of shift type start
+  endTime      String? // HH:mm override of shift type end
+  isDayOff     Boolean      @default(false)
+  status       String       @default("scheduled") // scheduled | published | swap_requested | cancelled
+  note         String?      @db.Text
+  createdBy    String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  shiftType    HrShiftType? @relation(fields: [shiftTypeId], references: [id])
+
+  @@unique([employeeId, date])
+  @@index([tenantId])
+  @@index([employeeId])
+  @@index([propertyId])
+  @@index([departmentId])
+  @@index([shiftTypeId])
+  @@index([date])
+  @@map("hr_shift_assignments")
+}
+
+model HrWorkCalendar {
+  id            String   @id @default(uuid())
+  tenantId      String
+  propertyId    String?
+  date          DateTime @db.Date
+  name          String
+  type          String   @default("holiday") // holiday | special | company_event
+  isWorkingDay  Boolean  @default(false)
+  payMultiplier Decimal  @default(1.00) @db.Decimal(4, 2)
+  note          String?  @db.Text
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([tenantId, propertyId, date])
+  @@index([tenantId])
+  @@index([propertyId])
+  @@index([date])
+  @@map("hr_work_calendars")
+}
+
+model HrAttendanceException {
+  id                String        @id @default(uuid())
+  tenantId          String
+  employeeId        String
+  attendanceId      String?
+  date              DateTime      @db.Date
+  type              String // missed_check_in | missed_check_out | wrong_time | late_reason | absent_reason | manual_adjust
+  requestedCheckIn  DateTime?
+  requestedCheckOut DateTime?
+  reason            String        @db.Text
+  status            String        @default("pending") // pending | approved | rejected
+  reviewedBy        String?
+  reviewedAt        DateTime?
+  reviewNote        String?       @db.Text
+  createdBy         String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  employee          Employee      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  attendance        HrAttendance? @relation(fields: [attendanceId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([employeeId])
+  @@index([attendanceId])
+  @@index([status])
+  @@index([date])
+  @@map("hr_attendance_exceptions")
+}
+
+model HrOvertimeRequest {
+  id           String        @id @default(uuid())
+  tenantId     String
+  employeeId   String
+  attendanceId String?
+  date         DateTime      @db.Date
+  minutes      Int
+  multiplier   Decimal       @default(1.50) @db.Decimal(4, 2)
+  reason       String?       @db.Text
+  status       String        @default("pending") // pending | approved | rejected
+  approvedBy   String?
+  approvedAt   DateTime?
+  rejectedBy   String?
+  rejectedAt   DateTime?
+  reviewNote   String?       @db.Text
+  createdBy    String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  employee     Employee      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  attendance   HrAttendance? @relation("AttendanceOvertime", fields: [attendanceId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([employeeId])
+  @@index([attendanceId])
+  @@index([status])
+  @@index([date])
+  @@map("hr_overtime_requests")
+}
+
+model HrPayrollPolicy {
+  id                    String   @id @default(uuid())
+  tenantId              String
+  propertyId            String?
+  name                  String
+  isDefault             Boolean  @default(false)
+  isActive              Boolean  @default(true)
+  payPeriod             String   @default("monthly") // monthly | biweekly | weekly
+  cutoffDay             Int      @default(25)
+  payDay                Int      @default(30)
+  workingDaysPerMonth   Int      @default(30)
+  workingHoursPerDay    Int      @default(8)
+  otMultiplier          Decimal  @default(1.50) @db.Decimal(4, 2)
+  holidayOtMultiplier   Decimal  @default(2.00) @db.Decimal(4, 2)
+  otRequiresApproval    Boolean  @default(true)
+  paidLeaveDeducted     Boolean  @default(false)
+  unpaidLeaveRate       Decimal  @default(1.00) @db.Decimal(4, 2)
+  socialSecurityEnabled Boolean  @default(true)
+  socialSecurityRate    Decimal  @default(0.0500) @db.Decimal(6, 4)
+  socialSecurityCap     Decimal  @default(750.00) @db.Decimal(12, 2)
+  taxEnabled            Boolean  @default(false)
+  lateDeductionPerMin   Decimal  @default(0.00) @db.Decimal(8, 2)
+  note                  String?  @db.Text
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@unique([tenantId, propertyId, name])
+  @@index([tenantId])
+  @@index([propertyId])
+  @@map("hr_payroll_policies")
+}
+
+// ─── Phase 2: Employee Lifecycle & Compliance ────────────────────────────────
+// Documents, onboarding, probation, leave policy, offboarding/clearance.
+
+model HrEmployeeDocument {
+  id          String    @id @default(uuid())
+  tenantId    String
+  employeeId  String
+  type        String // id_card | contract | certificate | visa | work_permit | health | other
+  name        String
+  fileUrl     String    @db.Text
+  fileName    String?
+  mimeType    String?
+  fileSize    Int?
+  issuedAt    DateTime? @db.Date
+  expiresAt   DateTime? @db.Date
+  accessLevel String    @default("hr") // hr | manager | employee
+  note        String?   @db.Text
+  uploadedBy  String?
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  employee    Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([employeeId])
+  @@index([type])
+  @@index([expiresAt])
+  @@map("hr_employee_documents")
+}
+
+model HrOnboardingTask {
+  id          String    @id @default(uuid())
+  tenantId    String
+  employeeId  String
+  title       String
+  category    String    @default("general") // document | account | training | equipment | general
+  isComplete  Boolean   @default(false)
+  completedAt DateTime?
+  completedBy String?
+  dueDate     DateTime? @db.Date
+  sortOrder   Int       @default(0)
+  note        String?   @db.Text
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  employee    Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([employeeId])
+  @@index([isComplete])
+  @@map("hr_onboarding_tasks")
+}
+
+model HrProbationReview {
+  id           String    @id @default(uuid())
+  tenantId     String
+  employeeId   String
+  startDate    DateTime  @db.Date
+  dueDate      DateTime  @db.Date
+  reviewDate   DateTime? @db.Date
+  reviewerId   String?
+  score        Decimal?  @db.Decimal(5, 2)
+  decision     String    @default("pending") // pending | passed | extended | failed
+  strengths    String?   @db.Text
+  improvements String?   @db.Text
+  note         String?   @db.Text
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  employee     Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([employeeId])
+  @@index([decision])
+  @@map("hr_probation_reviews")
+}
+
+model HrLeavePolicy {
+  id                 String   @id @default(uuid())
+  tenantId           String
+  leaveTypeId        String?
+  name               String
+  minTenureMonths    Int      @default(0)
+  entitlementDays    Int      @default(0)
+  requiresAttachment Boolean  @default(false)
+  approvalLevels     Int      @default(1) // 1=hr | 2=manager+hr | 3=supervisor+manager+hr
+  blackoutDates      Json?
+  isActive           Boolean  @default(true)
+  note               String?  @db.Text
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([leaveTypeId])
+  @@map("hr_leave_policies")
+}
+
+model HrOffboarding {
+  id              String    @id @default(uuid())
+  tenantId        String
+  employeeId      String
+  type            String // resignation | termination
+  reason          String?   @db.Text
+  noticeDate      DateTime? @db.Date
+  lastWorkingDate DateTime? @db.Date
+  status          String    @default("initiated") // initiated | clearing | completed | cancelled
+  clearanceItems  Json? // [{ label, done, by, at }]
+  accountRevoked  Boolean   @default(false)
+  staffUnlinked   Boolean   @default(false)
+  finalPayrollId  String?
+  initiatedBy     String?
+  completedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  employee        Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([employeeId])
+  @@index([status])
+  @@map("hr_offboardings")
+}
+
+// ─── Phase 3: Employee Experience & HR Intelligence ──────────────────────────
+
+model HrTrainingRecord {
+  id             String    @id @default(uuid())
+  tenantId       String
+  employeeId     String
+  title          String
+  type           String    @default("training") // training | certification
+  provider       String?
+  status         String    @default("planned") // planned | in_progress | completed | expired
+  completedAt    DateTime? @db.Date
+  expiresAt      DateTime? @db.Date
+  score          Decimal?  @db.Decimal(5, 2)
+  certificateUrl String?   @db.Text
+  note           String?   @db.Text
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  employee       Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([employeeId])
+  @@index([type])
+  @@index([status])
+  @@map("hr_training_records")
 }
 
 model Channel {
