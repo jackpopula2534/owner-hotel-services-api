@@ -25,6 +25,7 @@ export class HrMasterDataService {
           where: { isActive: true },
           orderBy: { sortOrder: 'asc' },
         },
+        costCenter: { select: { id: true, name: true, code: true } },
         _count: { select: { employees: true } },
       },
       orderBy: { sortOrder: 'asc' },

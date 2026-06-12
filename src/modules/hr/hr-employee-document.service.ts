@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogService } from '../../audit-log/audit-log.service';
 import { AuditAction, AuditResource, AuditCategory } from '../../audit-log/dto/audit-log.dto';
+import { HrLifecycleAssignmentService } from './hr-lifecycle-assignment.service';
 import {
   CreateHrEmployeeDocumentDto,
   UpdateHrEmployeeDocumentDto,
@@ -18,6 +19,7 @@ export class HrEmployeeDocumentService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLog: AuditLogService,
+    private readonly hrLifecycleAssignmentService: HrLifecycleAssignmentService,
   ) {}
 
   private toDateOnly(value?: string): Date | null {
@@ -61,6 +63,16 @@ export class HrEmployeeDocumentService {
     });
     if (!employee) throw new NotFoundException(`Employee ${dto.employeeId} not found`);
 
+    const [configuredType, configuredTypeCount] = await Promise.all([
+      (this.prisma as any).hrDocumentType.findFirst({
+        where: { tenantId, code: dto.type, isActive: true },
+      }),
+      (this.prisma as any).hrDocumentType.count({ where: { tenantId } }),
+    ]);
+    if (configuredTypeCount > 0 && !configuredType) {
+      throw new NotFoundException(`Configured document type ${dto.type} not found`);
+    }
+
     const doc = await (this.prisma as any).hrEmployeeDocument.create({
       data: {
         tenantId,
@@ -73,7 +85,7 @@ export class HrEmployeeDocumentService {
         fileSize: dto.fileSize ?? null,
         issuedAt: this.toDateOnly(dto.issuedAt),
         expiresAt: this.toDateOnly(dto.expiresAt),
-        accessLevel: dto.accessLevel ?? 'hr',
+        accessLevel: dto.accessLevel ?? configuredType?.accessLevel ?? 'hr',
         note: dto.note ?? null,
         uploadedBy: userId ?? null,
       },
@@ -83,6 +95,9 @@ export class HrEmployeeDocumentService {
       employeeId: dto.employeeId,
       type: dto.type,
     });
+    await this.hrLifecycleAssignmentService
+      .syncRequirementForUploadedDocument(doc.id, tenantId)
+      .catch((err) => this.logger.warn(`Requirement sync failed after upload: ${err.message}`));
     return doc;
   }
 
@@ -107,6 +122,9 @@ export class HrEmployeeDocumentService {
       where: { id },
       data: { deletedAt: new Date() },
     });
+    await this.hrLifecycleAssignmentService
+      .revertRequirementForRemovedDocument(id, tenantId)
+      .catch((err) => this.logger.warn(`Requirement revert failed after delete: ${err.message}`));
     await this.audit(AuditAction.EMPLOYEE_DOCUMENT_DELETE, id, tenantId, userId, {});
     return doc;
   }

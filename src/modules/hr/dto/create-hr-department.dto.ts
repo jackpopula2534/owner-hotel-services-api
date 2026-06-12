@@ -39,4 +39,12 @@ export class CreateHrDepartmentDto {
   @IsInt()
   @Min(0)
   sortOrder?: number;
+
+  @ApiPropertyOptional({
+    description: 'Cost center ของแผนก (เจ้าของต้นทุน — ใช้โดย cost accounting integration), ส่ง null เพื่อลบ mapping',
+    nullable: true,
+  })
+  @IsOptional()
+  @IsString()
+  costCenterId?: string | null;
 }

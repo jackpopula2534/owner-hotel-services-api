@@ -137,6 +137,25 @@ export enum AuditAction {
 
   // HR — Phase 3
   TRAINING_RECORD_UPDATE = 'training_record_update',
+
+  // HR — Recruitment → Probation pipeline (2026-06-10)
+  MANPOWER_SUBMIT = 'manpower_submit',
+  MANPOWER_APPROVE_STEP = 'manpower_approve_step',
+  MANPOWER_REJECT = 'manpower_reject',
+  BUDGET_SUBMIT = 'budget_submit',
+  BUDGET_APPROVE_STEP = 'budget_approve_step',
+  BUDGET_REJECT = 'budget_reject',
+  EQUIPMENT_REQUEST_SUBMIT = 'equipment_request_submit',
+  EQUIPMENT_REQUEST_APPROVE_STEP = 'equipment_request_approve_step',
+  EQUIPMENT_REQUEST_REJECT = 'equipment_request_reject',
+  INTERVIEW_SCHEDULE = 'interview_schedule',
+  INTERVIEW_RESULT = 'interview_result',
+  OFFER_MADE = 'offer_made',
+  CANDIDATE_HIRE = 'candidate_hire',
+  EQUIPMENT_ISSUE = 'equipment_issue',
+  EQUIPMENT_ACKNOWLEDGE = 'equipment_acknowledge',
+  PROBATION_OPEN = 'probation_open',
+  PROBATION_CHECKPOINT_REVIEW = 'probation_checkpoint_review',
 }
 
 export enum AuditResource {
@@ -171,6 +190,12 @@ export enum AuditResource {
   LEAVE_REQUEST = 'leave_request',
   OFFBOARDING = 'offboarding',
   TRAINING_RECORD = 'training_record',
+  MANPOWER_REQUEST = 'manpower_request',
+  EQUIPMENT_REQUEST = 'equipment_request',
+  CANDIDATE = 'candidate',
+  INTERVIEW = 'interview',
+  HIRE_RECORD = 'hire_record',
+  EQUIPMENT_ISSUANCE = 'equipment_issuance',
 }
 
 /** Category tags for grouping audit logs by system area */

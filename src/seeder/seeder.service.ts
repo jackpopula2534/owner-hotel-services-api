@@ -81,7 +81,9 @@ export class SeederService {
       await this.seedProcurementUsersAndFlows();
       await this.seedPurchaseRequisitionData();
       await this.seedCostAccountingData();
+      await this.seedDepartmentCostCenterMapping();
       await this.seedOpCostCategories();
+      await this.seedRecruitmentPipeline();
 
       this.logger.log('✅ Database seeding completed successfully!');
     } catch (error) {
@@ -1946,6 +1948,39 @@ export class SeederService {
         sortOrder: 10,
         description: 'ผู้บริหารระดับสูง ผู้จัดการทั่วไป',
       },
+      // ─── แผนกของระบบย่อยอื่น (นอกเหนือจากงานโรงแรม) ─────────────────────
+      {
+        name: 'ฝ่ายคลังสินค้า',
+        nameEn: 'Warehouse & Inventory',
+        code: 'INV',
+        color: '#0EA5E9',
+        sortOrder: 11,
+        description: 'รับ-จ่ายสินค้า ตรวจนับสต๊อก จัดการคลังและ Lots',
+      },
+      {
+        name: 'ฝ่ายจัดซื้อ',
+        nameEn: 'Procurement',
+        code: 'PROC',
+        color: '#14B8A6',
+        sortOrder: 12,
+        description: 'จัดซื้อจัดหา ขอใบเสนอราคา ออก PO ดูแลผู้ขาย',
+      },
+      {
+        name: 'ฝ่ายต้นทุนและควบคุม',
+        nameEn: 'Cost Control',
+        code: 'COST',
+        color: '#7C3AED',
+        sortOrder: 13,
+        description: 'วิเคราะห์ต้นทุน ควบคุมงบ ต้นทุนวัตถุดิบและการดำเนินงาน',
+      },
+      {
+        name: 'ฝ่ายร้านอาหาร (POS)',
+        nameEn: 'Restaurant Operations',
+        code: 'POS',
+        color: '#F43F5E',
+        sortOrder: 14,
+        description: 'ปฏิบัติการร้านอาหาร ครัว เสิร์ฟ และระบบ POS',
+      },
     ];
 
     // ─── ข้อมูลตำแหน่งงานตามแผนก ────────────────────────────────────────────
@@ -2063,6 +2098,29 @@ export class SeederService {
           level: 8,
           sortOrder: 4,
         },
+      ],
+      // ─── ตำแหน่งของระบบย่อยอื่น ───────────────────────────────────────
+      INV: [
+        { name: 'ผู้จัดการคลังสินค้า', nameEn: 'Warehouse Manager', level: 8, sortOrder: 1 },
+        { name: 'หัวหน้าคลัง', nameEn: 'Inventory Supervisor', level: 6, sortOrder: 2 },
+        { name: 'เจ้าหน้าที่คลังสินค้า', nameEn: 'Inventory Officer', level: 4, sortOrder: 3 },
+        { name: 'พนักงานรับ-จ่ายสินค้า', nameEn: 'Stock Clerk', level: 3, sortOrder: 4 },
+      ],
+      PROC: [
+        { name: 'ผู้จัดการฝ่ายจัดซื้อ', nameEn: 'Procurement Manager', level: 8, sortOrder: 1 },
+        { name: 'หัวหน้าจัดซื้อ', nameEn: 'Purchasing Supervisor', level: 6, sortOrder: 2 },
+        { name: 'เจ้าหน้าที่จัดซื้อ', nameEn: 'Purchasing Officer', level: 4, sortOrder: 3 },
+      ],
+      COST: [
+        { name: 'ผู้จัดการต้นทุน', nameEn: 'Cost Controller', level: 8, sortOrder: 1 },
+        { name: 'นักวิเคราะห์ต้นทุน', nameEn: 'Cost Analyst', level: 5, sortOrder: 2 },
+      ],
+      POS: [
+        { name: 'ผู้จัดการร้านอาหาร', nameEn: 'Restaurant Manager', level: 8, sortOrder: 1 },
+        { name: 'หัวหน้าเชฟ', nameEn: 'Head Chef', level: 7, sortOrder: 2 },
+        { name: 'เชฟประจำสถานี', nameEn: 'Chef de Partie', level: 5, sortOrder: 3 },
+        { name: 'พนักงานเสิร์ฟ', nameEn: 'Waiter/Waitress', level: 3, sortOrder: 4 },
+        { name: 'แคชเชียร์ POS', nameEn: 'POS Cashier', level: 3, sortOrder: 5 },
       ],
     };
 
@@ -5185,6 +5243,7 @@ export class SeederService {
       { code: 'CAT-ROOM-AMEN', name: 'Amenities', parentCode: 'CAT-ROOM' },
       { code: 'CAT-CLEAN', name: 'น้ำยาทำความสะอาด', parentCode: null },
       { code: 'CAT-MAINT', name: 'อุปกรณ์ซ่อมบำรุง', parentCode: null },
+      { code: 'CAT-STAFF', name: 'อุปกรณ์พนักงาน (Staff Equipment)', parentCode: null },
     ];
 
     const categoryMap: Record<string, string> = {};
@@ -5525,6 +5584,111 @@ export class SeederService {
         supplierCode: 'SUP-BIGC',
         unitPrice: 120,
       },
+      // Staff Equipment (สำหรับทดสอบ recruitment → เบิกอุปกรณ์พนักงานใหม่)
+      {
+        sku: 'UNI-POLO-S',
+        name: 'เสื้อยูนิฟอร์มโปโล (S)',
+        catCode: 'CAT-STAFF',
+        unit: 'PIECE',
+        reorderPoint: 10,
+        reorderQty: 20,
+        minStock: 5,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-HOTEL',
+        unitPrice: 350,
+      },
+      {
+        sku: 'UNI-POLO-M',
+        name: 'เสื้อยูนิฟอร์มโปโล (M)',
+        catCode: 'CAT-STAFF',
+        unit: 'PIECE',
+        reorderPoint: 10,
+        reorderQty: 20,
+        minStock: 5,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-HOTEL',
+        unitPrice: 350,
+      },
+      {
+        sku: 'UNI-POLO-L',
+        name: 'เสื้อยูนิฟอร์มโปโล (L)',
+        catCode: 'CAT-STAFF',
+        unit: 'PIECE',
+        reorderPoint: 10,
+        reorderQty: 20,
+        minStock: 5,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-HOTEL',
+        unitPrice: 350,
+      },
+      {
+        sku: 'UNI-SUIT-FO',
+        name: 'ชุดสูทพนักงานต้อนรับ',
+        catCode: 'CAT-STAFF',
+        unit: 'SET',
+        reorderPoint: 5,
+        reorderQty: 10,
+        minStock: 2,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-HOTEL',
+        unitPrice: 1500,
+      },
+      {
+        sku: 'NAME-TAG',
+        name: 'ป้ายชื่อพนักงาน',
+        catCode: 'CAT-STAFF',
+        unit: 'PIECE',
+        reorderPoint: 15,
+        reorderQty: 30,
+        minStock: 5,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-HOTEL',
+        unitPrice: 60,
+      },
+      {
+        sku: 'APRON-STD',
+        name: 'ผ้ากันเปื้อน',
+        catCode: 'CAT-STAFF',
+        unit: 'PIECE',
+        reorderPoint: 10,
+        reorderQty: 20,
+        minStock: 3,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-HOTEL',
+        unitPrice: 120,
+      },
+      {
+        sku: 'SAFETY-SHOE',
+        name: 'รองเท้าเซฟตี้',
+        catCode: 'CAT-STAFF',
+        unit: 'PAIR',
+        reorderPoint: 5,
+        reorderQty: 10,
+        minStock: 2,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-BIGC',
+        unitPrice: 450,
+      },
+      {
+        sku: 'STAFF-CAP',
+        name: 'หมวกพนักงานครัว',
+        catCode: 'CAT-STAFF',
+        unit: 'PIECE',
+        reorderPoint: 10,
+        reorderQty: 20,
+        minStock: 3,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-HOTEL',
+        unitPrice: 80,
+      },
     ];
 
     const itemMap: Record<string, string> = {};
@@ -5602,6 +5766,15 @@ export class SeederService {
       { sku: 'BULB-E27', whCode: 'WH-MAINT', qty: 35, avgCost: 85 },
       { sku: 'FILTER-AC', whCode: 'WH-MAINT', qty: 12, avgCost: 120 },
       { sku: 'FLOOR-CLN', whCode: 'WH-MAINT', qty: 10, avgCost: 150 },
+      // Staff equipment stocks (คลังกลาง) — SAFETY-SHOE จงใจให้น้อยเพื่อทดสอบ 🔴 ต้องสั่งซื้อ + auto-PR
+      { sku: 'UNI-POLO-S', whCode: 'WH-MAIN', qty: 15, avgCost: 350 },
+      { sku: 'UNI-POLO-M', whCode: 'WH-MAIN', qty: 25, avgCost: 350 },
+      { sku: 'UNI-POLO-L', whCode: 'WH-MAIN', qty: 20, avgCost: 350 },
+      { sku: 'UNI-SUIT-FO', whCode: 'WH-MAIN', qty: 8, avgCost: 1500 },
+      { sku: 'NAME-TAG', whCode: 'WH-MAIN', qty: 40, avgCost: 60 },
+      { sku: 'APRON-STD', whCode: 'WH-MAIN', qty: 18, avgCost: 120 },
+      { sku: 'SAFETY-SHOE', whCode: 'WH-MAIN', qty: 1, avgCost: 450 },
+      { sku: 'STAFF-CAP', whCode: 'WH-MAIN', qty: 15, avgCost: 80 },
     ];
 
     let stockCount = 0;
@@ -6362,6 +6535,7 @@ export class SeederService {
       { code: 'CT-INGR', name: 'F&B Ingredients', category: 'MATERIAL', sortOrder: 2 },
       { code: 'CT-PARTS', name: 'Maintenance Parts', category: 'MATERIAL', sortOrder: 3 },
       { code: 'CT-CLEAN', name: 'Cleaning Supplies', category: 'MATERIAL', sortOrder: 4 },
+      { code: 'CT-EQUIP', name: 'Staff Equipment', category: 'MATERIAL', sortOrder: 16 },
       // Labor
       { code: 'CT-SAL', name: 'Staff Salary', category: 'LABOR', sortOrder: 5 },
       { code: 'CT-BEN', name: 'Staff Benefits', category: 'LABOR', sortOrder: 6 },
@@ -6892,6 +7066,53 @@ export class SeederService {
   }
 
   /**
+   * Map แผนก HR เดิม → cost center ที่มี (เฟส 0 recruitment-inventory-cost integration)
+   * — ตั้งเฉพาะแผนกที่ยังไม่ได้ map ไม่ทับค่าที่ตั้งเองแล้ว
+   */
+  private async seedDepartmentCostCenterMapping(): Promise<void> {
+    this.logger.log('🔗 Mapping HR departments → cost centers...');
+
+    // mapping ตาม USALI: แผนกที่ไม่เข้าหมวดใดใช้ CC-ADMIN เป็น fallback
+    const deptToCenter: Record<string, string> = {
+      FO: 'CC-ROOMS',
+      HK: 'CC-ROOMS',
+      FB: 'CC-FB',
+      POS: 'CC-FB',
+      ENG: 'CC-MAINT',
+      SM: 'CC-SM',
+    };
+    const FALLBACK_CENTER = 'CC-ADMIN';
+
+    const allTenants = await this.tenantsService.findAll();
+    let mapped = 0;
+    for (const tenant of allTenants) {
+      const costCenters = await this.prisma.costCenter.findMany({
+        where: { tenantId: tenant.id, isActive: true },
+        select: { id: true, code: true },
+      });
+      if (costCenters.length === 0) continue;
+
+      const centerByCode = new Map(costCenters.map((c) => [c.code, c.id]));
+      const departments = await this.prisma.hrDepartment.findMany({
+        where: { tenantId: tenant.id, costCenterId: null },
+        select: { id: true, code: true },
+      });
+      for (const dept of departments) {
+        const centerId =
+          centerByCode.get(deptToCenter[dept.code] ?? FALLBACK_CENTER) ??
+          centerByCode.get(FALLBACK_CENTER);
+        if (!centerId) continue;
+        await this.prisma.hrDepartment.update({
+          where: { id: dept.id },
+          data: { costCenterId: centerId },
+        });
+        mapped++;
+      }
+    }
+    this.logger.log(`  ✓ Department → cost center mapping: ${mapped} departments mapped`);
+  }
+
+  /**
    * Seed default operating-cost categories (Platform-level)
    * — ไม่ทับ category เดิมเมื่อรันซ้ำ
    */
@@ -6970,5 +7191,292 @@ export class SeederService {
     }
 
     this.logger.log(`  ✓ Operating-cost categories: ${created} created, ${skipped} skipped`);
+  }
+
+  /**
+   * 🧑‍💼 Seed a full recruitment → probation pipeline for the premium tenant
+   * (design §7.4). Creates two manpower requests:
+   *   • MPR-SEED-COMPLETE — driven all the way to a hired employee with an
+   *     active probation round + 30/60/90 checkpoints and a first-day issuance.
+   *   • MPR-SEED-RECRUITING — mid-pipeline: budget approved, recruiting, with
+   *     candidates and a scheduled interview.
+   * Idempotent: keyed on the sentinel requestNo values.
+   */
+  private async seedRecruitmentPipeline(): Promise<void> {
+    this.logger.log('🧑‍💼 Seeding recruitment → probation pipeline...');
+    const db = this.prisma as any;
+
+    const ownerUser = await this.prisma.user.findUnique({
+      where: { email: 'premium.test@email.com' },
+    });
+    if (!ownerUser?.tenantId) {
+      this.logger.warn('  ⚠️  premium.test@email.com not found, skipping recruitment seed');
+      return;
+    }
+    const tenantId = ownerUser.tenantId;
+    const userId = ownerUser.id;
+
+    const existing = await db.hrManpowerRequest.findFirst({
+      where: { tenantId, requestNo: 'MPR-SEED-COMPLETE' },
+    });
+    if (existing) {
+      this.logger.log('  ✓ Recruitment pipeline already seeded, skipping');
+      return;
+    }
+
+    const property = await this.prisma.property.findFirst({ where: { tenantId } });
+    const deptFO = await this.prisma.hrDepartment.findUnique({
+      where: { tenantId_code: { tenantId, code: 'FO' } },
+    });
+
+    // Fully-approved 3-step chain (dept_head → hr → owner).
+    const approvedChain = (decidedBy: string) =>
+      (['dept_head', 'hr', 'owner'] as const).map((role, i) => ({
+        level: i + 1,
+        role,
+        approverId: decidedBy,
+        status: 'approved',
+        decidedAt: new Date().toISOString(),
+        note: null,
+      }));
+
+    const today = new Date();
+    const daysFromNow = (d: number) => {
+      const x = new Date(today);
+      x.setDate(x.getDate() + d);
+      return x;
+    };
+
+    // ─── 1) COMPLETE pipeline → hired + probation ─────────────────────────────
+    const complete = await db.hrManpowerRequest.create({
+      data: {
+        tenantId,
+        requestNo: 'MPR-SEED-COMPLETE',
+        propertyId: property?.id ?? null,
+        departmentId: deptFO?.id ?? null,
+        positionTitle: 'พนักงานต้อนรับส่วนหน้า (Front Desk Agent)',
+        headcount: 1,
+        employmentType: 'FULLTIME',
+        reason: 'expansion — เพิ่มอัตราช่วงไฮซีซั่น',
+        jobDescription: 'ต้อนรับและเช็คอิน-เอาท์แขก ดูแล walk-in และโทรศัพท์',
+        expectedStartDate: daysFromNow(-20),
+        salaryRangeMin: 18000,
+        salaryRangeMax: 24000,
+        budgetTotal: 26000,
+        budgetNote: 'รวมค่า onboarding + ยูนิฟอร์ม',
+        budgetApprovedAt: daysFromNow(-40),
+        budgetChain: approvedChain(userId),
+        status: 'probation',
+        approvalChain: approvedChain(userId),
+        currentApprovalLevel: 3,
+        requestedBy: userId,
+      },
+    });
+
+    const equip = await db.hrEquipmentRequest.create({
+      data: {
+        tenantId,
+        manpowerRequestId: complete.id,
+        items: [
+          { name: 'ยูนิฟอร์ม', qty: 2, estimatedCost: 1200, note: 'set บน-ล่าง' },
+          { name: 'บัตรพนักงาน + สายคล้อง', qty: 1, estimatedCost: 150 },
+          { name: 'หูฟัง headset', qty: 1, estimatedCost: 900 },
+        ],
+        totalCost: 3450,
+        status: 'approved',
+        approvalChain: approvedChain(userId),
+        requestedBy: userId,
+      },
+    });
+
+    const hiredCandidate = await db.hrCandidate.create({
+      data: {
+        tenantId,
+        manpowerRequestId: complete.id,
+        firstName: 'ศิริพร',
+        lastName: 'ใจดี',
+        email: 'siriporn.jaidee@example.com',
+        phone: '081-555-2001',
+        source: 'referral',
+        expectedSalary: 21000,
+        status: 'hired',
+        note: 'แนะนำโดยพนักงานเดิม สัมภาษณ์ผ่านสองรอบ',
+      },
+    });
+
+    await db.hrInterview.createMany({
+      data: [
+        {
+          tenantId,
+          candidateId: hiredCandidate.id,
+          round: 1,
+          scheduledAt: daysFromNow(-35),
+          location: 'ห้องประชุม HR',
+          interviewerIds: [userId],
+          status: 'completed',
+          score: 82,
+          result: 'next_round',
+          feedback: 'บุคลิกดี สื่อสารชัดเจน',
+        },
+        {
+          tenantId,
+          candidateId: hiredCandidate.id,
+          round: 2,
+          scheduledAt: daysFromNow(-30),
+          location: 'ห้อง GM',
+          interviewerIds: [userId],
+          status: 'completed',
+          score: 88,
+          result: 'pass',
+          feedback: 'ผ่าน เสนอจ้างได้',
+        },
+      ],
+    });
+
+    // Hired employee (PROBATION) + hire record + issuance + probation round.
+    const employee = await this.prisma.employee.create({
+      data: {
+        tenantId,
+        firstName: hiredCandidate.firstName,
+        lastName: hiredCandidate.lastName,
+        email: hiredCandidate.email,
+        phone: hiredCandidate.phone,
+        employeeCode: 'EMP-SEED-FD01',
+        department: 'Front Office',
+        departmentId: deptFO?.id ?? null,
+        position: 'Front Desk Agent',
+        propertyId: property?.id ?? null,
+        baseSalary: 21000,
+        employmentType: 'FULLTIME',
+        status: 'PROBATION',
+        startDate: daysFromNow(-20),
+      },
+    });
+
+    const hireRecord = await db.hrHireRecord.create({
+      data: {
+        tenantId,
+        candidateId: hiredCandidate.id,
+        employeeId: employee.id,
+        offeredSalary: 21000,
+        startDate: daysFromNow(-20),
+        startTime: '08:30',
+        probationDays: 90,
+        offerStatus: 'accepted',
+        offerSentAt: daysFromNow(-28),
+        acceptedAt: daysFromNow(-26),
+      },
+    });
+
+    await db.hrEquipmentIssuance.create({
+      data: {
+        tenantId,
+        equipmentRequestId: equip.id,
+        employeeId: employee.id,
+        items: [
+          { name: 'ยูนิฟอร์ม', qty: 2, serialNo: null, issued: true },
+          { name: 'บัตรพนักงาน + สายคล้อง', qty: 1, serialNo: 'ID-2026-0001', issued: true },
+          { name: 'หูฟัง headset', qty: 1, serialNo: 'HS-2026-0001', issued: true },
+        ],
+        status: 'issued',
+        issuedBy: userId,
+        issuedAt: daysFromNow(-20),
+        acknowledgedAt: daysFromNow(-20),
+      },
+    });
+
+    const startDate = daysFromNow(-20);
+    const round = await db.hrProbationRound.create({
+      data: {
+        tenantId,
+        employeeId: employee.id,
+        hireRecordId: hireRecord.id,
+        startDate,
+        dueDate: daysFromNow(70),
+        status: 'active',
+      },
+    });
+
+    for (const days of [30, 60, 90]) {
+      const due = new Date(startDate);
+      due.setDate(due.getDate() + days);
+      await db.hrProbationCheckpoint.create({
+        data: {
+          tenantId,
+          roundId: round.id,
+          label: `${days} วัน`,
+          dueDate: due,
+          status: days === 30 ? 'done' : 'pending',
+          score: days === 30 ? 80 : null,
+          strengths: days === 30 ? 'เรียนรู้ระบบ PMS ได้เร็ว' : null,
+          improvements: days === 30 ? 'ฝึกภาษาอังกฤษเพิ่ม' : null,
+          reviewerId: days === 30 ? userId : null,
+          reviewedAt: days === 30 ? daysFromNow(10) : null,
+        },
+      });
+    }
+
+    // ─── 2) RECRUITING pipeline → candidates + scheduled interview ────────────
+    const recruiting = await db.hrManpowerRequest.create({
+      data: {
+        tenantId,
+        requestNo: 'MPR-SEED-RECRUITING',
+        propertyId: property?.id ?? null,
+        departmentId: deptFO?.id ?? null,
+        positionTitle: 'พนักงานทำความสะอาด (Room Attendant)',
+        headcount: 2,
+        employmentType: 'FULLTIME',
+        reason: 'replacement — พนักงานลาออก 2 ตำแหน่ง',
+        expectedStartDate: daysFromNow(30),
+        salaryRangeMin: 15000,
+        salaryRangeMax: 18000,
+        budgetTotal: 40000,
+        budgetApprovedAt: daysFromNow(-5),
+        budgetChain: approvedChain(userId),
+        status: 'recruiting',
+        approvalChain: approvedChain(userId),
+        currentApprovalLevel: 3,
+        requestedBy: userId,
+      },
+    });
+
+    const c1 = await db.hrCandidate.create({
+      data: {
+        tenantId,
+        manpowerRequestId: recruiting.id,
+        firstName: 'มานพ',
+        lastName: 'รักงาน',
+        phone: '082-555-3001',
+        source: 'walk_in',
+        expectedSalary: 16000,
+        status: 'interview_scheduled',
+      },
+    });
+    await db.hrCandidate.create({
+      data: {
+        tenantId,
+        manpowerRequestId: recruiting.id,
+        firstName: 'ดวงใจ',
+        lastName: 'ขยันดี',
+        phone: '083-555-3002',
+        source: 'job_board',
+        expectedSalary: 15500,
+        status: 'screening',
+      },
+    });
+
+    await db.hrInterview.create({
+      data: {
+        tenantId,
+        candidateId: c1.id,
+        round: 1,
+        scheduledAt: daysFromNow(2),
+        location: 'ห้องประชุม HK',
+        interviewerIds: [userId],
+        status: 'scheduled',
+      },
+    });
+
+    this.logger.log('  ✓ Recruitment pipeline seeded: 2 requests (complete + recruiting)');
   }
 }

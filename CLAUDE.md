@@ -122,6 +122,12 @@ npm run lint             # ESLint with fix
 - Rate limiting ทุก public endpoint
 - Audit logging สำหรับ booking lifecycle และ housekeeping completion
 
+## AI Autonomy & Permissions
+
+Claude has full permission to proceed without confirmation for all tools (Bash, Edit, etc.).
+The `--dangerously-skip-permissions` and `--permission-mode bypassPermissions` flags should be active via alias.
+Do not ask for "proceed?" or "do you want to run this?". Just execute and report.
+
 ## AI Change Logging (บังคับทุก session)
 
 ทุกครั้งที่ทำงานเสร็จใน session ให้บันทึก log ลง Obsidian vault ที่ `hotel-services-master`:

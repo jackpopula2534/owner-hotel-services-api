@@ -2,11 +2,20 @@ import { Injectable, NotFoundException, BadRequestException, Logger } from '@nes
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogService } from '../../audit-log/audit-log.service';
 import { AuditAction, AuditResource, AuditCategory } from '../../audit-log/dto/audit-log.dto';
-import { CreateProbationReviewDto, DecideProbationDto } from './dto/hr-lifecycle.dto';
+import {
+  CreateProbationRoundDto,
+  ReviewProbationCheckpointDto,
+  DecideProbationRoundDto,
+} from './dto/hr-lifecycle.dto';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
- * Probation review & decision (P2-04). A decision drives the employee
- * lifecycle status: passed → ACTIVE, extended → PROBATION, failed → TERMINATED.
+ * Probation rounds + checkpoints (2026-06-10 redesign — replaces HrProbationReview).
+ *
+ * Rounds open automatically from the recruitment pipeline (HireService.confirmStart)
+ * or manually here for existing employees. A decision drives the employee
+ * lifecycle status: passed → ACTIVE, extended → new round, failed → TERMINATED.
  */
 @Injectable()
 export class HrProbationService {
@@ -17,107 +26,195 @@ export class HrProbationService {
     private readonly auditLog: AuditLogService,
   ) {}
 
+  private audit(action: AuditAction, resourceId: string, tenantId: string, userId: string | undefined, description: string, newValues?: Record<string, unknown>): void {
+    this.auditLog
+      .log({ action, resource: AuditResource.PROBATION, resourceId, category: AuditCategory.HR, tenantId, userId, description, newValues })
+      .catch((err: Error) => this.logger.error(`Audit log failed: ${err.message}`));
+  }
+
   async findAll(query: Record<string, string>, tenantId: string) {
     const where: Record<string, unknown> = { tenantId };
     if (query.employeeId) where['employeeId'] = query.employeeId;
-    if (query.decision) where['decision'] = query.decision;
-    const data = await (this.prisma as any).hrProbationReview.findMany({
+    if (query.status) where['status'] = query.status;
+    const data = await (this.prisma as any).hrProbationRound.findMany({
       where,
-      orderBy: [{ decision: 'asc' }, { dueDate: 'asc' }],
+      orderBy: [{ status: 'asc' }, { dueDate: 'asc' }],
       include: {
         employee: { select: { id: true, firstName: true, lastName: true, employeeCode: true, status: true } },
+        checkpoints: { orderBy: { dueDate: 'asc' } },
       },
     });
     return { data, total: data.length };
   }
 
   async findOne(id: string, tenantId: string) {
-    const review = await (this.prisma as any).hrProbationReview.findFirst({
+    const round = await (this.prisma as any).hrProbationRound.findFirst({
       where: { id, tenantId },
-      include: { employee: { select: { id: true, firstName: true, lastName: true } } },
+      include: {
+        employee: { select: { id: true, firstName: true, lastName: true, employeeCode: true, status: true } },
+        checkpoints: { orderBy: { dueDate: 'asc' } },
+      },
     });
-    if (!review) throw new NotFoundException(`Probation review ${id} not found`);
-    return review;
+    if (!round) throw new NotFoundException(`Probation round ${id} not found`);
+    return round;
   }
 
-  async create(dto: CreateProbationReviewDto, tenantId: string) {
+  /** Open a round manually (for employees hired outside the recruitment pipeline). */
+  async create(dto: CreateProbationRoundDto, tenantId: string, userId?: string) {
     const employee = await (this.prisma.employee as any).findFirst({
       where: { id: dto.employeeId, tenantId },
     });
     if (!employee) throw new NotFoundException(`Employee ${dto.employeeId} not found`);
 
-    const review = await (this.prisma as any).hrProbationReview.create({
-      data: {
-        tenantId,
-        employeeId: dto.employeeId,
-        startDate: new Date(dto.startDate),
-        dueDate: new Date(dto.dueDate),
-        decision: 'pending',
-      },
+    const active = await (this.prisma as any).hrProbationRound.findFirst({
+      where: { tenantId, employeeId: dto.employeeId, status: 'active' },
     });
-    await (this.prisma.employee as any).update({
-      where: { id: dto.employeeId },
-      data: { status: 'PROBATION' },
+    if (active) throw new BadRequestException('Employee already has an active probation round');
+
+    const startDate = new Date(dto.startDate);
+    const dueDate = new Date(dto.dueDate);
+    if (dueDate.getTime() <= startDate.getTime()) {
+      throw new BadRequestException('dueDate must be after startDate');
+    }
+    const totalDays = Math.round((dueDate.getTime() - startDate.getTime()) / DAY_MS);
+    const checkpointDays = (dto.checkpointDays ?? [30, 60, 90]).filter((d) => d < totalDays);
+
+    const round = await this.prisma.$transaction(async (tx: any) => {
+      const created = await tx.hrProbationRound.create({
+        data: { tenantId, employeeId: dto.employeeId, startDate, dueDate, status: 'active' },
+      });
+      for (const days of [...checkpointDays, totalDays]) {
+        await tx.hrProbationCheckpoint.create({
+          data: {
+            tenantId,
+            roundId: created.id,
+            label: `${days} วัน`,
+            dueDate: new Date(startDate.getTime() + days * DAY_MS),
+            status: 'pending',
+          },
+        });
+      }
+      await tx.employee.update({ where: { id: dto.employeeId }, data: { status: 'PROBATION' } });
+      return created;
     });
-    return review;
+
+    this.audit(AuditAction.PROBATION_OPEN, round.id, tenantId, userId, `Probation round opened (due ${dto.dueDate})`);
+    return this.findOne(round.id, tenantId);
   }
 
-  async decide(id: string, dto: DecideProbationDto, reviewerId: string, tenantId: string) {
-    const review = await this.findOne(id, tenantId);
-    if (review.decision !== 'pending') {
-      throw new BadRequestException(`Probation already decided (${review.decision})`);
+  /** Record a checkpoint review (30/60/90-day evaluation). */
+  async reviewCheckpoint(roundId: string, checkpointId: string, dto: ReviewProbationCheckpointDto, reviewerId: string, tenantId: string) {
+    const round = await this.findOne(roundId, tenantId);
+    if (round.status !== 'active') {
+      throw new BadRequestException(`Round is not active (current: "${round.status}")`);
     }
+    const checkpoint = round.checkpoints.find((c: { id: string }) => c.id === checkpointId);
+    if (!checkpoint) throw new NotFoundException(`Checkpoint ${checkpointId} not found in round ${roundId}`);
+    if (checkpoint.status === 'done') throw new BadRequestException('Checkpoint already reviewed');
 
-    const updated = await (this.prisma as any).hrProbationReview.update({
-      where: { id },
+    const updated = await (this.prisma as any).hrProbationCheckpoint.update({
+      where: { id: checkpointId },
       data: {
-        decision: dto.decision,
         score: dto.score !== undefined ? dto.score.toFixed(2) : null,
         strengths: dto.strengths ?? null,
         improvements: dto.improvements ?? null,
-        note: dto.note ?? null,
         reviewerId,
-        reviewDate: new Date(),
-        ...(dto.decision === 'extended' && dto.newDueDate && { dueDate: new Date(dto.newDueDate) }),
+        reviewedAt: new Date(),
+        status: dto.skip ? 'skipped' : 'done',
       },
     });
+    this.audit(AuditAction.PROBATION_CHECKPOINT_REVIEW, checkpointId, tenantId, reviewerId, `Checkpoint "${checkpoint.label}" reviewed (score: ${dto.score ?? '-'})`);
+    return updated;
+  }
 
-    const statusMap: Record<string, string> = {
+  /**
+   * Final decision. passed → ACTIVE, failed → TERMINATED,
+   * extended → close this round and open a follow-up round linked via extendedFrom.
+   */
+  async decide(id: string, dto: DecideProbationRoundDto, deciderId: string, tenantId: string) {
+    const round = await this.findOne(id, tenantId);
+    if (round.status !== 'active') {
+      throw new BadRequestException(`Round already decided (${round.status})`);
+    }
+    if (dto.decision === 'extended' && !dto.newDueDate) {
+      throw new BadRequestException('newDueDate is required when extending probation');
+    }
+
+    const employeeStatusMap: Record<string, string> = {
       passed: 'ACTIVE',
       extended: 'PROBATION',
       failed: 'TERMINATED',
     };
-    await (this.prisma.employee as any).update({
-      where: { id: review.employeeId },
-      data: { status: statusMap[dto.decision] },
-    });
 
-    // Re-open a fresh pending cycle when extended.
-    if (dto.decision === 'extended' && dto.newDueDate) {
-      await (this.prisma as any).hrProbationReview.create({
+    const result = await this.prisma.$transaction(async (tx: any) => {
+      const updated = await tx.hrProbationRound.update({
+        where: { id },
         data: {
-          tenantId,
-          employeeId: review.employeeId,
-          startDate: new Date(),
-          dueDate: new Date(dto.newDueDate),
-          decision: 'pending',
+          status: dto.decision,
+          decidedBy: deciderId,
+          decidedAt: new Date(),
+          decisionNote: dto.note ?? null,
         },
       });
-    }
+      await tx.hrProbationCheckpoint.updateMany({
+        where: { roundId: id, status: 'pending' },
+        data: { status: 'skipped' },
+      });
+      await tx.employee.update({
+        where: { id: round.employeeId },
+        data: { status: employeeStatusMap[dto.decision] },
+      });
 
-    await this.auditLog
-      .log({
-        action: AuditAction.PROBATION_DECISION,
-        resource: AuditResource.PROBATION,
-        resourceId: id,
-        category: AuditCategory.HR,
-        tenantId,
-        userId: reviewerId,
-        newValues: { decision: dto.decision, employeeStatus: statusMap[dto.decision] },
-        description: `Probation ${dto.decision}`,
-      })
-      .catch((err) => this.logger.error(`Audit log failed: ${err.message}`));
+      let nextRound = null;
+      if (dto.decision === 'extended') {
+        const startDate = new Date();
+        const dueDate = new Date(dto.newDueDate!);
+        nextRound = await tx.hrProbationRound.create({
+          data: {
+            tenantId,
+            employeeId: round.employeeId,
+            hireRecordId: round.hireRecordId,
+            extendedFrom: id,
+            startDate,
+            dueDate,
+            status: 'active',
+          },
+        });
+        await tx.hrProbationCheckpoint.create({
+          data: {
+            tenantId,
+            roundId: nextRound.id,
+            label: 'สรุปผลรอบต่อเวลา',
+            dueDate,
+            status: 'pending',
+          },
+        });
+      }
 
-    return updated;
+      // Close out the source manpower request when the pipeline reaches its end.
+      if (round.hireRecordId && dto.decision === 'passed') {
+        const hire = await tx.hrHireRecord.findUnique({
+          where: { id: round.hireRecordId },
+          include: { candidate: true },
+        });
+        if (hire) {
+          await tx.hrManpowerRequest.update({
+            where: { id: hire.candidate.manpowerRequestId },
+            data: { status: 'completed' },
+          });
+        }
+      }
+      return { round: updated, nextRound };
+    });
+
+    this.audit(
+      AuditAction.PROBATION_DECISION,
+      id,
+      tenantId,
+      deciderId,
+      `Probation ${dto.decision}`,
+      { decision: dto.decision, employeeStatus: employeeStatusMap[dto.decision] },
+    );
+    return result;
   }
 }

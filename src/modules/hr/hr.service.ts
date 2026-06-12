@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmployeeCodeConfigService } from './employee-code-config.service';
+import { HrLifecycleAssignmentService } from './hr-lifecycle-assignment.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { Prisma } from '@prisma/client';
@@ -18,6 +19,7 @@ export class HrService {
   constructor(
     private prisma: PrismaService,
     private employeeCodeConfigService: EmployeeCodeConfigService,
+    private hrLifecycleAssignmentService: HrLifecycleAssignmentService,
   ) {}
 
   async findAll(query: any, tenantId?: string) {
@@ -149,7 +151,7 @@ export class HrService {
     // Auto-set consentAt when consentGiven = true (PDPA requirement)
     const consentAt = rest.consentGiven === true ? new Date() : undefined;
 
-    return (this.prisma.employee as any).create({
+    const created = await (this.prisma.employee as any).create({
       data: {
         ...rest,
         ...(startDate ? { startDate: new Date(startDate) } : {}),
@@ -161,6 +163,15 @@ export class HrService {
       },
       include: { hrDepartment: true, hrPosition: true },
     });
+
+    await this.hrLifecycleAssignmentService
+      .recomputeForEmployee(created.id, tenantId)
+      .catch((error: unknown) => {
+        const msg = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`Lifecycle assignment bootstrap failed for employee ${created.id}: ${msg}`);
+      });
+
+    return created;
   }
 
   async update(id: string, updateEmployeeDto: UpdateEmployeeDto, tenantId?: string) {
@@ -201,6 +212,24 @@ export class HrService {
         hrPosition: true,
       },
     })) as any;
+
+    const lifecycleFieldsChanged = [
+      'propertyId',
+      'hotelId',
+      'departmentId',
+      'positionId',
+      'employmentType',
+      'startDate',
+    ].some((field) => Object.prototype.hasOwnProperty.call(updateEmployeeDto, field));
+
+    if (lifecycleFieldsChanged) {
+      await this.hrLifecycleAssignmentService
+        .recomputeForEmployee(updated.id, tenantId!)
+        .catch((error: unknown) => {
+          const msg = error instanceof Error ? error.message : String(error);
+          this.logger.warn(`Lifecycle recompute failed for employee ${updated.id}: ${msg}`);
+        });
+    }
 
     // Auto-sync basic info to linked Staff record if one exists
     if (updated.staff) {

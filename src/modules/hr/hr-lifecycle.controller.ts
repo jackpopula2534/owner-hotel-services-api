@@ -18,8 +18,9 @@ import {
   SeedOnboardingDto,
   AddOnboardingTaskDto,
   UpdateOnboardingTaskDto,
-  CreateProbationReviewDto,
-  DecideProbationDto,
+  CreateProbationRoundDto,
+  ReviewProbationCheckpointDto,
+  DecideProbationRoundDto,
 } from './dto/hr-lifecycle.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
@@ -81,22 +82,22 @@ export class HrOnboardingController {
 
 @ApiTags('hr / probation')
 @ApiBearerAuth('JWT-auth')
-@Controller({ path: 'hr/probation-reviews', version: '1' })
+@Controller({ path: 'hr/probation-rounds', version: '1' })
 @UseGuards(JwtAuthGuard, HrAddonGuard, RolesGuard)
 export class HrProbationController {
   constructor(private readonly service: HrProbationService) {}
 
   @Get()
-  @ApiOperation({ summary: 'List probation reviews' })
+  @ApiOperation({ summary: 'List probation rounds (with checkpoints)' })
   @ApiQuery({ name: 'employeeId', required: false, type: String })
-  @ApiQuery({ name: 'decision', required: false, enum: ['pending', 'passed', 'extended', 'failed'] })
+  @ApiQuery({ name: 'status', required: false, enum: ['active', 'passed', 'extended', 'failed', 'cancelled'] })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
   async list(@Query() query: Record<string, string>, @CurrentUser() user: { tenantId?: string }) {
     return this.service.findAll(query, user.tenantId!);
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get a probation review by ID' })
+  @ApiOperation({ summary: 'Get a probation round by ID' })
   @ApiParam({ name: 'id' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
   async findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
@@ -104,21 +105,36 @@ export class HrProbationController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Open a probation review (sets employee → PROBATION)' })
+  @ApiOperation({ summary: 'Open a probation round manually (sets employee → PROBATION)' })
   @HttpCode(HttpStatus.CREATED)
   @Roles('platform_admin', 'tenant_admin', 'admin', 'hr')
-  async create(@Body() dto: CreateProbationReviewDto, @CurrentUser() user: { tenantId?: string }) {
-    return this.service.create(dto, user.tenantId!);
+  async create(@Body() dto: CreateProbationRoundDto, @CurrentUser() user: { tenantId?: string; id?: string }) {
+    return this.service.create(dto, user.tenantId!, user.id);
+  }
+
+  @Post(':id/checkpoints/:checkpointId/review')
+  @ApiOperation({ summary: 'Record a checkpoint review (30/60/90-day evaluation)' })
+  @ApiParam({ name: 'id' })
+  @ApiParam({ name: 'checkpointId' })
+  @HttpCode(HttpStatus.OK)
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
+  async reviewCheckpoint(
+    @Param('id') id: string,
+    @Param('checkpointId') checkpointId: string,
+    @Body() dto: ReviewProbationCheckpointDto,
+    @CurrentUser() user: { tenantId?: string; id?: string },
+  ) {
+    return this.service.reviewCheckpoint(id, checkpointId, dto, user.id ?? 'system', user.tenantId!);
   }
 
   @Post(':id/decide')
-  @ApiOperation({ summary: 'Record a probation decision (passed/extended/failed)' })
+  @ApiOperation({ summary: 'Record the final probation decision (passed/extended/failed)' })
   @ApiParam({ name: 'id' })
   @HttpCode(HttpStatus.OK)
   @Roles('platform_admin', 'tenant_admin', 'admin', 'hr')
   async decide(
     @Param('id') id: string,
-    @Body() dto: DecideProbationDto,
+    @Body() dto: DecideProbationRoundDto,
     @CurrentUser() user: { tenantId?: string; id?: string },
   ) {
     return this.service.decide(id, dto, user.id ?? 'system', user.tenantId!);

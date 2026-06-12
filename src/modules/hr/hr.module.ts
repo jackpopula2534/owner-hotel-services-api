@@ -28,6 +28,9 @@ import { HrEmployeeDocumentService } from './hr-employee-document.service';
 import { HrOnboardingController, HrProbationController } from './hr-lifecycle.controller';
 import { HrOnboardingService } from './hr-onboarding.service';
 import { HrProbationService } from './hr-probation.service';
+import { HrLifecycleSetupController } from './hr-lifecycle-setup.controller';
+import { HrLifecycleSetupService } from './hr-lifecycle-setup.service';
+import { HrLifecycleAssignmentService } from './hr-lifecycle-assignment.service';
 import { HrLeavePolicyController } from './hr-leave-policy.controller';
 import { HrLeavePolicyService } from './hr-leave-policy.service';
 import { HrOffboardingController } from './hr-offboarding.controller';
@@ -38,6 +41,10 @@ import { HrSelfServiceController, HrAnalyticsController } from './hr-experience.
 import { HrSelfServiceService } from './hr-self-service.service';
 import { HrAnalyticsService } from './hr-analytics.service';
 import { EmployeeCodeConfigService } from './employee-code-config.service';
+import { HrCompletenessService } from './hr-completeness.service';
+import { HrEquipmentIssuanceController } from './hr-equipment-issuance.controller';
+import { HrEquipmentIssuanceService } from './hr-equipment-issuance.service';
+import { RecruitmentInventoryService } from './recruitment-inventory.service';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { AddonModule } from '../addons/addon.module';
 import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
@@ -62,8 +69,10 @@ import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
     HrLeavePolicyController, // P2-05: leave policy
     HrLeaveController,
     HrEmployeeDocumentController, // P2-01: employee documents
+    HrLifecycleSetupController, // lifecycle setup + requirements foundation
     HrOnboardingController, // P2-03: onboarding checklist
-    HrProbationController, // P2-04: probation review
+    HrProbationController, // probation rounds + checkpoints (2026-06-10 redesign)
+    HrEquipmentIssuanceController, // stage 6: first-day equipment issuance
     HrOffboardingController, // P2-06/07: offboarding + clearance
     HrTrainingController, // P3-03: training/certification
     HrSelfServiceController, // P3-01/02: self-service
@@ -85,6 +94,8 @@ import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
     HrLeavePolicyService, // P2-05
     HrLeaveService,
     HrEmployeeDocumentService, // P2-01
+    HrLifecycleSetupService,
+    HrLifecycleAssignmentService,
     HrOnboardingService, // P2-03
     HrProbationService, // P2-04
     HrOffboardingService, // P2-06/07
@@ -96,7 +107,10 @@ import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
     HrPerformanceService,
     HrKpiTemplateService, // NEW
     HrEvaluationCycleService, // NEW
+    HrEquipmentIssuanceService,
+    RecruitmentInventoryService,
     EmployeeCodeConfigService,
+    HrCompletenessService,
     HrAddonGuard,
   ],
   exports: [
@@ -109,8 +123,12 @@ import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
     HrLeavePolicyService,
     HrLeaveService,
     HrEmployeeDocumentService,
+    HrLifecycleSetupService,
+    HrLifecycleAssignmentService,
     HrOnboardingService,
     HrProbationService,
+    HrEquipmentIssuanceService,
+    RecruitmentInventoryService,
     HrOffboardingService,
     HrTrainingService,
     HrSelfServiceService,

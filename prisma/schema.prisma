@@ -176,6 +176,7 @@ model Property {
   restaurants           Restaurant[]
   rooms                 Room[]
   warehouses            Warehouse[]
+  lifecycleAssignmentRules HrLifecycleAssignmentRule[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -674,8 +675,12 @@ model Employee {
   attendanceExceptions HrAttendanceException[]
   overtimeRequests     HrOvertimeRequest[]
   documents            HrEmployeeDocument[]
+  documentRequirements HrEmployeeDocumentRequirement[]
+  lifecycleAssignments HrEmployeeLifecycleAssignment[]
   onboardingTasks      HrOnboardingTask[]
-  probationReviews     HrProbationReview[]
+  probationRounds      HrProbationRound[]
+  equipmentIssuances   HrEquipmentIssuance[]
+  hireRecord           HrHireRecord?
   offboardings         HrOffboarding[]
   trainingRecords      HrTrainingRecord[]
   staff                Staff?                 @relation("StaffEmployee")
@@ -691,22 +696,26 @@ model Employee {
 }
 
 model HrDepartment {
-  id          String       @id @default(uuid())
-  tenantId    String
-  name        String
-  nameEn      String?
-  code        String
-  description String?      @db.Text
-  color       String?
-  isActive    Boolean      @default(true)
-  sortOrder   Int          @default(0)
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
-  employees   Employee[]
-  positions   HrPosition[]
+  id           String       @id @default(uuid())
+  tenantId     String
+  name         String
+  nameEn       String?
+  code         String
+  description  String?      @db.Text
+  color        String?
+  costCenterId String? // mapping แผนก ↔ cost center (ใช้โดย cost-accounting integration)
+  isActive     Boolean      @default(true)
+  sortOrder    Int          @default(0)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  employees    Employee[]
+  positions    HrPosition[]
+  assignmentRules HrLifecycleAssignmentRule[]
+  costCenter   CostCenter?  @relation(fields: [costCenterId], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, code])
   @@index([tenantId])
+  @@index([costCenterId])
   @@map("hr_departments")
 }
 
@@ -725,6 +734,7 @@ model HrPosition {
   updatedAt    DateTime     @updatedAt
   employees    Employee[]
   department   HrDepartment @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  assignmentRules HrLifecycleAssignmentRule[]
 
   @@index([tenantId])
   @@index([departmentId])
@@ -1182,6 +1192,173 @@ model HrPayrollPolicy {
 // ─── Phase 2: Employee Lifecycle & Compliance ────────────────────────────────
 // Documents, onboarding, probation, leave policy, offboarding/clearance.
 
+model HrDocumentType {
+  id                   String   @id @default(uuid())
+  tenantId             String
+  code                 String
+  name                 String
+  category             String   @default("general")
+  description          String?  @db.Text
+  requiredByDefault    Boolean  @default(false)
+  hasExpiry            Boolean  @default(false)
+  expiryPolicyDays     Int?
+  accessLevel          String   @default("hr")
+  requiresVerification Boolean  @default(false)
+  allowedFileTypes     Json?
+  sortOrder            Int      @default(0)
+  isActive             Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  packageDocuments     HrLifecyclePackageDocument[]
+  requirements         HrEmployeeDocumentRequirement[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@index([category])
+  @@map("hr_document_types")
+}
+
+model HrLifecyclePackage {
+  id                   String   @id @default(uuid())
+  tenantId             String
+  code                 String
+  name                 String
+  lifecycleType        String   @default("onboarding")
+  description          String?  @db.Text
+  isActive             Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  documents            HrLifecyclePackageDocument[]
+  tasks                HrLifecyclePackageTask[]
+  assignmentRules      HrLifecycleAssignmentRule[]
+  employeeAssignments  HrEmployeeLifecycleAssignment[]
+  documentRequirements HrEmployeeDocumentRequirement[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@index([lifecycleType])
+  @@map("hr_lifecycle_packages")
+}
+
+model HrLifecyclePackageDocument {
+  id             String             @id @default(uuid())
+  packageId      String
+  documentTypeId String
+  isRequired     Boolean            @default(true)
+  dueOffsetDays  Int?
+  ruleNote       String?            @db.Text
+  sortOrder      Int                @default(0)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  package        HrLifecyclePackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  documentType   HrDocumentType     @relation(fields: [documentTypeId], references: [id], onDelete: Cascade)
+
+  @@unique([packageId, documentTypeId])
+  @@index([documentTypeId])
+  @@map("hr_lifecycle_package_documents")
+}
+
+model HrLifecyclePackageTask {
+  id               String             @id @default(uuid())
+  packageId        String
+  title            String
+  category         String             @default("general")
+  ownerRole        String?
+  dueOffsetDays    Int?
+  sortOrder        Int                @default(0)
+  requiresApproval Boolean            @default(false)
+  note             String?            @db.Text
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  package          HrLifecyclePackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
+
+  @@index([packageId])
+  @@map("hr_lifecycle_package_tasks")
+}
+
+model HrLifecycleAssignmentRule {
+  id                  String                       @id @default(uuid())
+  tenantId            String
+  packageId           String
+  propertyId          String?
+  departmentId        String?
+  positionId          String?
+  employmentType      String?
+  priority            Int                          @default(100)
+  isActive            Boolean                      @default(true)
+  createdAt           DateTime                     @default(now())
+  updatedAt           DateTime                     @updatedAt
+  package             HrLifecyclePackage           @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  property            Property?                    @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  department          HrDepartment?                @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  position            HrPosition?                  @relation(fields: [positionId], references: [id], onDelete: SetNull)
+  employeeAssignments HrEmployeeLifecycleAssignment[]
+
+  @@index([tenantId])
+  @@index([packageId])
+  @@index([propertyId])
+  @@index([departmentId])
+  @@index([positionId])
+  @@index([employmentType])
+  @@map("hr_lifecycle_assignment_rules")
+}
+
+model HrEmployeeLifecycleAssignment {
+  id                   String                        @id @default(uuid())
+  tenantId             String
+  employeeId           String
+  packageId            String
+  sourceRuleId         String?
+  assignedAt           DateTime                      @default(now())
+  assignedBy           String?
+  status               String                        @default("active")
+  completedAt          DateTime?
+  createdAt            DateTime                      @default(now())
+  updatedAt            DateTime                      @updatedAt
+  employee             Employee                      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  package              HrLifecyclePackage            @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  sourceRule           HrLifecycleAssignmentRule?    @relation(fields: [sourceRuleId], references: [id], onDelete: SetNull)
+  documentRequirements HrEmployeeDocumentRequirement[]
+
+  @@index([tenantId])
+  @@index([employeeId])
+  @@index([packageId])
+  @@index([sourceRuleId])
+  @@index([status])
+  @@map("hr_employee_lifecycle_assignments")
+}
+
+model HrEmployeeDocumentRequirement {
+  id                 String                       @id @default(uuid())
+  tenantId           String
+  employeeId         String
+  documentTypeId     String
+  packageId          String?
+  assignmentId       String?
+  status             String                       @default("missing")
+  dueDate            DateTime?                    @db.Date
+  uploadedDocumentId String?
+  verifiedBy         String?
+  verifiedAt         DateTime?
+  waivedReason       String?                      @db.Text
+  createdAt          DateTime                     @default(now())
+  updatedAt          DateTime                     @updatedAt
+  employee           Employee                     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  documentType       HrDocumentType               @relation(fields: [documentTypeId], references: [id], onDelete: Cascade)
+  package            HrLifecyclePackage?          @relation(fields: [packageId], references: [id], onDelete: SetNull)
+  assignment         HrEmployeeLifecycleAssignment? @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
+  uploadedDocument   HrEmployeeDocument?          @relation("RequirementUploadedDocument", fields: [uploadedDocumentId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([employeeId])
+  @@index([documentTypeId])
+  @@index([packageId])
+  @@index([assignmentId])
+  @@index([status])
+  @@index([dueDate])
+  @@map("hr_employee_document_requirements")
+}
+
 model HrEmployeeDocument {
   id          String    @id @default(uuid())
   tenantId    String
@@ -1201,6 +1378,7 @@ model HrEmployeeDocument {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   employee    Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  uploadedForRequirements HrEmployeeDocumentRequirement[] @relation("RequirementUploadedDocument")
 
   @@index([tenantId])
   @@index([employeeId])
@@ -1231,27 +1409,260 @@ model HrOnboardingTask {
   @@map("hr_onboarding_tasks")
 }
 
-model HrProbationReview {
+// ─── Recruitment → Probation pipeline (redesign 2026-06-10) ───────────────
+
+// Configurable approval flow per tenant (Setup Flow).
+// One row per flowType: "manpower" | "budget" | "equipment".
+// `steps` = ordered JSON [{ role: 'dept_head'|'hr'|'owner', label?: string }]
+model HrApprovalFlow {
+  id        String   @id @default(uuid())
+  tenantId  String
+  flowType  String // manpower | budget | equipment
+  steps     Json // [{ role, label? }] — ordered approval steps
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, flowType])
+  @@index([tenantId])
+  @@map("hr_approval_flows")
+}
+
+// Stage 1+2: ขอกำลังคน + ขออนุมัติงบ
+model HrManpowerRequest {
+  id                String    @id @default(uuid())
+  tenantId          String
+  propertyId        String?
+  requestNo         String
+  departmentId      String?
+  positionId        String?
+  positionTitle     String
+  headcount         Int       @default(1)
+  employmentType    String    @default("FULLTIME")
+  reason            String    @db.Text
+  jobDescription    String?   @db.Text
+  expectedStartDate DateTime? @db.Date
+
+  // Budget (stage 2 — separate approval chain)
+  salaryRangeMin   Decimal?  @db.Decimal(12, 2)
+  salaryRangeMax   Decimal?  @db.Decimal(12, 2)
+  budgetTotal      Decimal?  @db.Decimal(12, 2)
+  budgetNote       String?   @db.Text
+  budgetChain      Json?
+  budgetApprovedAt DateTime?
+
+  // draft → pending_approval → budget_pending → budget_approved → recruiting
+  //       → interviewing → offer_made → hired → onboarding → probation → completed
+  //       | rejected | cancelled
+  status               String   @default("draft")
+  approvalChain        Json?
+  currentApprovalLevel Int      @default(0)
+  requestedBy          String
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  equipmentRequests HrEquipmentRequest[]
+  candidates        HrCandidate[]
+  jobPosting        HrJobPosting?
+
+  @@unique([tenantId, requestNo])
+  @@index([tenantId, status])
+  @@map("hr_manpower_requests")
+}
+
+// Public job posting: ลิงก์รับสมัครสาธารณะ (1:1 กับ manpower request) พร้อมช่วงเวลาเปิดรับ
+model HrJobPosting {
+  id                String    @id @default(uuid())
+  tenantId          String
+  propertyId        String?
+  manpowerRequestId String    @unique
+  publicToken       String    @unique // url-safe random token ใช้ในลิงก์ /jobs/<token>
+  title             String
+  description       String?   @db.Text
+  location          String?
+  employmentType    String?
+  salaryRangeText   String? // ข้อความแสดงช่วงเงินเดือน (optional)
+  status            String    @default("draft") // draft | published | closed
+  openAt            DateTime?
+  closeAt           DateTime?
+  publishedAt       DateTime?
+  closedAt          DateTime?
+  createdBy         String
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  manpowerRequest HrManpowerRequest @relation(fields: [manpowerRequestId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status])
+  @@map("hr_job_postings")
+}
+
+// Stage 3: ขออุปกรณ์
+model HrEquipmentRequest {
+  id                String   @id @default(uuid())
+  tenantId          String
+  manpowerRequestId String
+  items             Json // [{ name, qty, estimatedCost, note, itemId?, warehouseId? }] — itemId/warehouseId มีเมื่อผูกกับคลัง (INVENTORY_MODULE)
+  totalCost         Decimal? @db.Decimal(12, 2)
+  status            String   @default("pending") // pending|approved|rejected|procured|ready
+  approvalChain     Json?
+  purchaseRequisitionId String? // PR ที่ออกอัตโนมัติเมื่อของขาด (INVENTORY_MODULE)
+  requestedBy       String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  manpowerRequest HrManpowerRequest     @relation(fields: [manpowerRequestId], references: [id], onDelete: Cascade)
+  issuances       HrEquipmentIssuance[]
+
+  @@index([tenantId, status])
+  @@map("hr_equipment_requests")
+}
+
+// Stage 4: ผู้สมัคร + นัดสัมภาษณ์
+model HrCandidate {
+  id                String   @id @default(uuid())
+  tenantId          String
+  manpowerRequestId String
+  firstName         String
+  lastName          String
+  email             String?
+  phone             String?
+  resumeUrl         String?
+  source            String? // walk_in | referral | job_board | agency | public_form
+  expectedSalary    Decimal? @db.Decimal(12, 2)
+  // applied → screening → interview_scheduled → interviewed
+  //         → offer_made → offer_accepted → hired | rejected | withdrawn
+  status            String   @default("applied")
+  note              String?  @db.Text
+
+  // ── Public application (ข้อมูลชุดเดียวที่ใช้สร้าง Employee ได้ทันที) ──
+  jobPostingId    String? // ที่มาจากประกาศ public (null = HR เพิ่มเอง)
+  applicationData Json? // ฟอร์มเต็มชุด: nickname, nationalId, dateOfBirth, gender, address,
+  //                       educations[], workExperiences[], emergencyContacts[],
+  //                       bankName, bankAccount, taxId, socialSecurity
+  attachments     Json? // [{ kind: 'resume'|'photo'|'document', url, name }]
+  consentGiven    Boolean   @default(false) // PDPA
+  consentAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  manpowerRequest HrManpowerRequest @relation(fields: [manpowerRequestId], references: [id], onDelete: Cascade)
+  interviews      HrInterview[]
+  hireRecord      HrHireRecord?
+
+  @@index([tenantId, manpowerRequestId, status])
+  @@map("hr_candidates")
+}
+
+model HrInterview {
+  id             String   @id @default(uuid())
+  tenantId       String
+  candidateId    String
+  round          Int      @default(1)
+  scheduledAt    DateTime
+  location       String?
+  interviewerIds Json // [userId, ...]
+  status         String   @default("scheduled") // scheduled|completed|no_show|cancelled|rescheduled
+  score          Decimal? @db.Decimal(5, 2)
+  feedback       String?  @db.Text
+  result         String? // pass | fail | next_round
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  candidate HrCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, scheduledAt])
+  @@map("hr_interviews")
+}
+
+// Stage 5: จ้าง + วันเวลาเริ่มงาน
+model HrHireRecord {
+  id            String    @id @default(uuid())
+  tenantId      String
+  candidateId   String    @unique
+  employeeId    String?   @unique
+  offeredSalary Decimal   @db.Decimal(12, 2)
+  startDate     DateTime
+  startTime     String? // "08:30" — เวลารายงานตัว
+  probationDays Int       @default(90)
+  offerStatus   String    @default("offered") // offered|accepted|declined|expired|cancelled (cancelled = ไม่มารายงานตัว)
+  offerSentAt   DateTime?
+  acceptedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  candidate HrCandidate @relation(fields: [candidateId], references: [id])
+  employee  Employee?   @relation(fields: [employeeId], references: [id])
+
+  @@index([tenantId])
+  @@map("hr_hire_records")
+}
+
+// Stage 6: รับของเบิกวันแรก
+model HrEquipmentIssuance {
+  id                 String    @id @default(uuid())
+  tenantId           String
+  equipmentRequestId String
+  employeeId         String
+  items              Json // [{ name, qty, serialNo?, issued: bool, itemId?, warehouseId?, reserved? }]
+  status             String    @default("pending") // pending|reserved|partially_issued|issued|returned
+  issuedBy           String?
+  issuedAt           DateTime?
+  acknowledgedAt     DateTime?
+  signatureUrl       String?
+  note               String?   @db.Text
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  equipmentRequest HrEquipmentRequest @relation(fields: [equipmentRequestId], references: [id])
+  employee         Employee           @relation(fields: [employeeId], references: [id])
+
+  @@index([tenantId, employeeId])
+  @@map("hr_equipment_issuances")
+}
+
+// Stage 7: ทดลองงาน (แทน HrProbationReview เดิม)
+model HrProbationRound {
   id           String    @id @default(uuid())
   tenantId     String
   employeeId   String
+  hireRecordId String? // เชื่อมกลับ recruitment (null = เปิด manual)
   startDate    DateTime  @db.Date
   dueDate      DateTime  @db.Date
-  reviewDate   DateTime? @db.Date
-  reviewerId   String?
-  score        Decimal?  @db.Decimal(5, 2)
-  decision     String    @default("pending") // pending | passed | extended | failed
-  strengths    String?   @db.Text
-  improvements String?   @db.Text
-  note         String?   @db.Text
+  extendedFrom String? // probationRoundId เดิม กรณีต่อเวลา
+  status       String    @default("active") // active|passed|extended|failed|cancelled
+  decidedBy    String?
+  decidedAt    DateTime?
+  decisionNote String?   @db.Text
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
-  employee     Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
-  @@index([tenantId])
+  employee    Employee                @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  checkpoints HrProbationCheckpoint[]
+
+  @@index([tenantId, status])
   @@index([employeeId])
-  @@index([decision])
-  @@map("hr_probation_reviews")
+  @@map("hr_probation_rounds")
+}
+
+model HrProbationCheckpoint {
+  id           String    @id @default(uuid())
+  tenantId     String
+  roundId      String
+  label        String // "30 วัน", "60 วัน", "90 วัน"
+  dueDate      DateTime  @db.Date
+  score        Decimal?  @db.Decimal(5, 2)
+  strengths    String?   @db.Text
+  improvements String?   @db.Text
+  reviewerId   String?
+  reviewedAt   DateTime?
+  status       String    @default("pending") // pending|done|skipped
+
+  round HrProbationRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
+
+  @@index([roundId])
+  @@map("hr_probation_checkpoints")
 }
 
 model HrLeavePolicy {
@@ -2686,6 +3097,7 @@ model WarehouseStock {
   warehouseId   String
   itemId        String
   quantity      Int           @default(0)
+  reservedQty   Int           @default(0) // จองไว้ (เช่น อุปกรณ์พนักงานใหม่ก่อนวันเริ่มงาน) — available = quantity - reservedQty
   avgCost       Decimal       @default(0.00) @db.Decimal(10, 2)
   totalValue    Decimal       @default(0.00) @db.Decimal(12, 2)
   lastCountedAt DateTime?
@@ -3005,6 +3417,7 @@ model CostCenter {
   children       CostCenter[]    @relation("CostCenterTree")
   costEntries    CostEntry[]
   departmentPnLs DepartmentPnL[]
+  hrDepartments  HrDepartment[]
 
   @@unique([tenantId, propertyId, code])
   @@index([tenantId])

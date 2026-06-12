@@ -10,24 +10,16 @@ import {
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
-export const DOCUMENT_TYPES = [
-  'id_card',
-  'contract',
-  'certificate',
-  'visa',
-  'work_permit',
-  'health',
-  'other',
-] as const;
-
 export class CreateHrEmployeeDocumentDto {
   @ApiProperty({ description: 'Employee ID' })
   @IsString()
   @IsNotEmpty()
   employeeId: string;
 
-  @ApiProperty({ description: 'Document type', enum: DOCUMENT_TYPES })
-  @IsIn(DOCUMENT_TYPES as unknown as string[])
+  @ApiProperty({ description: 'Document type code from lifecycle document type setup', example: 'contract' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
   type: string;
 
   @ApiProperty({ description: 'Display name', example: 'สำเนาบัตรประชาชน' })
@@ -86,9 +78,10 @@ export class UpdateHrEmployeeDocumentDto {
   @MaxLength(200)
   name?: string;
 
-  @ApiPropertyOptional({ enum: DOCUMENT_TYPES })
+  @ApiPropertyOptional({ description: 'Document type code from lifecycle document type setup' })
   @IsOptional()
-  @IsIn(DOCUMENT_TYPES as unknown as string[])
+  @IsString()
+  @MaxLength(100)
   type?: string;
 
   @ApiPropertyOptional()

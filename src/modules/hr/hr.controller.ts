@@ -21,6 +21,7 @@ import {
   ApiBody,
 } from '@nestjs/swagger';
 import { HrService } from './hr.service';
+import { HrCompletenessService } from './hr-completeness.service';
 import { EmployeeCodeConfigService } from './employee-code-config.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
@@ -43,6 +44,7 @@ import { maskEmployeePayroll, maskEmployeeListPayroll } from '../../common/utils
 export class HrController {
   constructor(
     private readonly hrService: HrService,
+    private readonly hrCompletenessService: HrCompletenessService,
     private readonly employeeCodeConfigService: EmployeeCodeConfigService,
   ) {}
 
@@ -137,6 +139,46 @@ export class HrController {
       ...result,
       data: maskEmployeeListPayroll(result.data as Record<string, unknown>[], user.role),
     };
+  }
+
+  @Get('completeness/summary')
+  @ApiOperation({
+    summary: 'Bulk employee completeness summary for list views (requires HR add-on)',
+    description:
+      'Returns overall completeness percentage per employee. ' +
+      'Optionally filter with ?ids=id1,id2 (comma-separated).',
+  })
+  @ApiResponse({ status: 200, description: 'Array of { employeeId, overallPct }' })
+  @ApiResponse({ status: 403, description: 'HR add-on not active' })
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
+  async getCompletenessSummary(
+    @Query('ids') ids: string | undefined,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    const idList = ids
+      ? ids
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : undefined;
+    return this.hrCompletenessService.getCompletenessSummary(user?.tenantId, idList);
+  }
+
+  @Get(':id/completeness')
+  @ApiOperation({
+    summary: 'Get employee data completeness across HR subsystems (requires HR add-on)',
+    description:
+      'Aggregates profile sections (6 form tabs) plus subsystem readiness ' +
+      '(documents, onboarding, probation, leave policy, payroll, roster, attendance, training) ' +
+      'into a single completeness score with per-item missing details.',
+  })
+  @ApiParam({ name: 'id', description: 'Employee ID' })
+  @ApiResponse({ status: 200, description: 'Completeness summary' })
+  @ApiResponse({ status: 404, description: 'Employee not found' })
+  @ApiResponse({ status: 403, description: 'HR add-on not active' })
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
+  async getCompleteness(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
+    return this.hrCompletenessService.getEmployeeCompleteness(id, user?.tenantId);
   }
 
   @Get(':id')

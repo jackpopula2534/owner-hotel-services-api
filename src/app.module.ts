@@ -16,6 +16,7 @@ import { RoomsModule } from './modules/rooms/rooms.module';
 import { PropertiesModule } from './modules/properties/properties.module';
 import { RestaurantModule } from './modules/restaurant/restaurant.module';
 import { HrModule } from './modules/hr/hr.module';
+import { HrRecruitmentModule } from './modules/hr-recruitment/hr-recruitment.module';
 import { UsersModule } from './modules/users/users.module';
 import { ChannelsModule } from './modules/channels/channels.module';
 import { ReviewsModule } from './modules/reviews/reviews.module';
@@ -126,6 +127,7 @@ import { TenantGuard } from './common/guards/tenant.guard';
     PropertiesModule,
     RestaurantModule,
     HrModule,
+    HrRecruitmentModule,
     UsersModule,
     ChannelsModule,
     ReviewsModule,

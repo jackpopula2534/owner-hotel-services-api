@@ -91,7 +91,7 @@ export class UpdateOnboardingTaskDto {
 
 // ─── Probation ─────────────────────────────────────────────────────────────
 
-export class CreateProbationReviewDto {
+export class CreateProbationRoundDto {
   @ApiProperty({ description: 'Employee ID' })
   @IsString()
   @IsNotEmpty()
@@ -104,13 +104,15 @@ export class CreateProbationReviewDto {
   @ApiProperty({ description: 'Probation due date (YYYY-MM-DD)' })
   @IsDateString()
   dueDate: string;
+
+  @ApiPropertyOptional({ description: 'Checkpoint days, default [30, 60, 90]', type: [Number] })
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  checkpointDays?: number[];
 }
 
-export class DecideProbationDto {
-  @ApiProperty({ enum: ['passed', 'extended', 'failed'] })
-  @IsIn(['passed', 'extended', 'failed'])
-  decision: 'passed' | 'extended' | 'failed';
-
+export class ReviewProbationCheckpointDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsNumber()
@@ -129,6 +131,17 @@ export class DecideProbationDto {
   @IsString()
   @MaxLength(1000)
   improvements?: string;
+
+  @ApiPropertyOptional({ description: 'Mark checkpoint as skipped instead of done' })
+  @IsOptional()
+  @IsBoolean()
+  skip?: boolean;
+}
+
+export class DecideProbationRoundDto {
+  @ApiProperty({ enum: ['passed', 'extended', 'failed'] })
+  @IsIn(['passed', 'extended', 'failed'])
+  decision: 'passed' | 'extended' | 'failed';
 
   @ApiPropertyOptional({ description: 'New due date when decision = extended (YYYY-MM-DD)' })
   @IsOptional()
