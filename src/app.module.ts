@@ -13,6 +13,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { GuestsModule } from './modules/guests/guests.module';
 import { BookingsModule } from './modules/bookings/bookings.module';
 import { RoomsModule } from './modules/rooms/rooms.module';
+import { CampModule } from './modules/camp/camp.module';
 import { PropertiesModule } from './modules/properties/properties.module';
 import { RestaurantModule } from './modules/restaurant/restaurant.module';
 import { HrModule } from './modules/hr/hr.module';
@@ -124,6 +125,7 @@ import { TenantGuard } from './common/guards/tenant.guard';
     GuestsModule,
     BookingsModule,
     RoomsModule,
+    CampModule,
     PropertiesModule,
     RestaurantModule,
     HrModule,

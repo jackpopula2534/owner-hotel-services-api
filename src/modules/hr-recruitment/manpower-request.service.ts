@@ -108,7 +108,24 @@ export class ManpowerRequestService {
       },
     });
     if (!request) throw new NotFoundException(`Manpower request ${id} not found`);
-    return request;
+
+    // แนบชื่อแผนก/ตำแหน่งจาก id (model ไม่มี relation ตรง — ดึงเพิ่มแล้ว attach)
+    const [department, position] = await Promise.all([
+      request.departmentId
+        ? (this.prisma as any).hrDepartment.findUnique({
+            where: { id: request.departmentId },
+            select: { id: true, name: true, nameEn: true, code: true, color: true },
+          })
+        : null,
+      request.positionId
+        ? (this.prisma as any).hrPosition.findUnique({
+            where: { id: request.positionId },
+            select: { id: true, name: true, nameEn: true, code: true, level: true },
+          })
+        : null,
+    ]);
+
+    return { ...request, department, position };
   }
 
   async create(dto: CreateManpowerRequestDto, tenantId: string, userId: string) {

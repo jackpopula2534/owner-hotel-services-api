@@ -41,7 +41,8 @@ export class CandidateService {
       where: { id, tenantId },
       include: {
         interviews: { orderBy: [{ round: 'asc' }, { scheduledAt: 'asc' }] },
-        hireRecord: true,
+        // แนบสถานะพนักงานที่ถูกสร้าง (PENDING_START → PROBATION) เพื่อให้ frontend รู้ว่าเริ่มงาน/เปิดทดลองงานแล้ว
+        hireRecord: { include: { employee: { select: { id: true, status: true, startDate: true } } } },
         manpowerRequest: { select: { id: true, requestNo: true, positionTitle: true, status: true } },
       },
     });

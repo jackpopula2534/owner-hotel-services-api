@@ -1,0 +1,100 @@
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Put,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { PitchesService } from './pitches.service';
+import {
+  CreatePitchDto,
+  UpdatePitchDto,
+  UpdatePitchPositionDto,
+} from './dto/pitch.dto';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
+import type { UserRole } from '../../common/decorators/roles.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+
+const READ_ROLES: UserRole[] = ['admin', 'manager', 'tenant_admin', 'platform_admin', 'staff', 'user'];
+const WRITE_ROLES: UserRole[] = ['admin', 'manager', 'tenant_admin', 'platform_admin'];
+
+@ApiTags('camp-pitches')
+@ApiBearerAuth('JWT-auth')
+@Controller({ path: 'camp/pitches', version: '1' })
+@UseGuards(JwtAuthGuard, RolesGuard)
+export class PitchesController {
+  constructor(private readonly service: PitchesService) {}
+
+  @Get()
+  @ApiOperation({ summary: 'List pitches by campgroundId' })
+  @Roles(...READ_ROLES)
+  findAll(
+    @Query('campgroundId') campgroundId: string,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    return this.service.findAll(campgroundId, user?.tenantId);
+  }
+
+  @Get('availability')
+  @ApiOperation({ summary: 'Pitch availability for a date range (for 2D map)' })
+  @Roles(...READ_ROLES)
+  availability(
+    @Query('campgroundId') campgroundId: string,
+    @Query('checkIn') checkIn: string,
+    @Query('checkOut') checkOut: string,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    return this.service.availability(campgroundId, checkIn, checkOut, user?.tenantId);
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Get pitch by id' })
+  @Roles(...READ_ROLES)
+  findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
+    return this.service.findOne(id, user?.tenantId);
+  }
+
+  @Post()
+  @ApiOperation({ summary: 'Create pitch' })
+  @Roles(...WRITE_ROLES)
+  create(@Body() dto: CreatePitchDto, @CurrentUser() user: { tenantId?: string }) {
+    return this.service.create(dto, user?.tenantId);
+  }
+
+  @Put(':id')
+  @ApiOperation({ summary: 'Update pitch' })
+  @Roles(...WRITE_ROLES)
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdatePitchDto,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    return this.service.update(id, dto, user?.tenantId);
+  }
+
+  @Patch(':id/position')
+  @ApiOperation({ summary: 'Update pitch position on 2D map (owner drag & drop)' })
+  @Roles(...WRITE_ROLES)
+  updatePosition(
+    @Param('id') id: string,
+    @Body() dto: UpdatePitchPositionDto,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    return this.service.updatePosition(id, dto, user?.tenantId);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Delete pitch' })
+  @Roles(...WRITE_ROLES)
+  remove(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
+    return this.service.remove(id, user?.tenantId);
+  }
+}

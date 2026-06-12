@@ -6878,3 +6878,181 @@ model CrmChurnScore {
   @@index([tenantId, riskBand])
   @@map("crm_churn_scores")
 }
+
+// ============================================================
+// CAMP SUB-SYSTEM (CampSync) — ระบบจัดการลานกางแคมป์
+// แยกเป็นอีกระบบในโปรเจกต์เดียวกัน (sub-system terminal)
+// หน่วยที่ขาย: Pitch (จุดกางเต็นท์) แทน Room
+// ============================================================
+
+/// ลานกางแคมป์ (เทียบ Property ของระบบโรงแรม)
+model Campground {
+  id          String   @id @default(uuid()) @db.VarChar(36)
+  tenantId    String?  @db.VarChar(36)
+  name        String   @db.VarChar(180)
+  description String?  @db.Text
+  address     String?  @db.VarChar(255)
+  phone       String?  @db.VarChar(30)
+  latitude    Float?
+  longitude   Float?
+  /// URL รูปแปลนพื้นที่ ใช้เป็น background ของแผนผัง 2D
+  mapImageUrl String?  @db.VarChar(500)
+  /// ขนาด canvas อ้างอิงพิกัด marker (ปกติเก็บพิกัดแบบ normalized 0..1)
+  mapWidth    Int?
+  mapHeight   Int?
+  /// active | inactive
+  status      String   @default("active") @db.VarChar(20)
+  checkInTime  String? @default("14:00") @db.VarChar(10)
+  checkOutTime String? @default("12:00") @db.VarChar(10)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  zones       CampZone[]
+  pitches     CampPitch[]
+  reservations CampReservation[]
+  campAddons  CampAddon[]
+
+  @@index([tenantId])
+  @@index([status])
+  @@map("camp_grounds")
+}
+
+/// โซนภายในลาน (เทียบ Room Type) — กำหนดประเภท/ราคาฐาน/ความจุ
+model CampZone {
+  id           String   @id @default(uuid()) @db.VarChar(36)
+  tenantId     String?  @db.VarChar(36)
+  campgroundId String   @db.VarChar(36)
+  name         String   @db.VarChar(120)
+  /// mountain_view | riverside | lawn | rv | glamping
+  type         String   @default("lawn") @db.VarChar(30)
+  description  String?  @db.Text
+  basePrice    Decimal  @db.Decimal(10, 2)
+  weekendPrice Decimal? @db.Decimal(10, 2)
+  /// ราคาช่วงเทศกาล/วันหยุดยาว — JSON array [{name, start:"YYYY-MM-DD", end:"YYYY-MM-DD", price}]
+  /// priority ตอนคิดราคา: season > weekend > base
+  seasonalRates Json?
+  maxGuests    Int      @default(4)
+  maxTents     Int      @default(1)
+  allowVehicle Boolean  @default(false)
+  allowPet     Boolean  @default(false)
+  /// สีของ marker บนแผนผัง (hex หรือ token)
+  color        String?  @db.VarChar(20)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  campground   Campground @relation(fields: [campgroundId], references: [id], onDelete: Cascade)
+  pitches      CampPitch[]
+
+  @@index([tenantId])
+  @@index([campgroundId])
+  @@map("camp_zones")
+}
+
+/// จุดกางเต็นท์รายจุด (เทียบ Room) — มีพิกัดบนแผนผัง 2D
+model CampPitch {
+  id           String   @id @default(uuid()) @db.VarChar(36)
+  tenantId     String?  @db.VarChar(36)
+  campgroundId String   @db.VarChar(36)
+  zoneId       String   @db.VarChar(36)
+  code         String   @db.VarChar(30)
+  /// available | occupied | cleaning | maintenance | closed
+  status       String   @default("available") @db.VarChar(20)
+  /// พิกัด normalized บนแผนผัง (0..1) — responsive ทุกขนาดจอ
+  posX         Float    @default(0.5)
+  posY         Float    @default(0.5)
+  sizeSqm      Float?
+  notes        String?  @db.Text
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  campground   Campground @relation(fields: [campgroundId], references: [id], onDelete: Cascade)
+  zone         CampZone   @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  reservations CampReservation[]
+
+  @@unique([campgroundId, code])
+  @@index([tenantId])
+  @@index([zoneId])
+  @@index([status])
+  @@map("camp_pitches")
+}
+
+/// การจองจุดกางเต็นท์ (เทียบ Booking)
+model CampReservation {
+  id                String   @id @default(uuid()) @db.VarChar(36)
+  tenantId          String?  @db.VarChar(36)
+  campgroundId      String   @db.VarChar(36)
+  zoneId            String?  @db.VarChar(36)
+  pitchId           String   @db.VarChar(36)
+  reservationNo     String?  @db.VarChar(30)
+  guestId           String?  @db.VarChar(36)
+  guestFirstName    String   @db.VarChar(120)
+  guestLastName     String?  @db.VarChar(120)
+  guestEmail        String?  @db.VarChar(180)
+  guestPhone        String?  @db.VarChar(30)
+  checkIn           DateTime
+  checkOut          DateTime
+  scheduledCheckIn  DateTime?
+  scheduledCheckOut DateTime?
+  actualCheckIn     DateTime?
+  actualCheckOut    DateTime?
+  numGuests         Int      @default(1)
+  numTents          Int      @default(1)
+  numVehicles       Int      @default(0)
+  hasPet            Boolean  @default(false)
+  /// pending | confirmed | checked_in | checked_out | cancelled | no_show
+  status            String   @default("pending") @db.VarChar(20)
+  totalPrice        Decimal  @db.Decimal(10, 2)
+  /// รายการ add-on เช่าอุปกรณ์ (เก็บ JSON ใน phase 1) [{name, qty, price}]
+  addons            Json?
+  paymentStatus     String?  @default("pending") @db.VarChar(20)
+  paymentMethod     String?  @db.VarChar(30)
+  amountPaid        Decimal? @db.Decimal(10, 2)
+  notes             String?  @db.Text
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  campground        Campground @relation(fields: [campgroundId], references: [id], onDelete: Cascade)
+  pitch             CampPitch  @relation(fields: [pitchId], references: [id])
+  addonItems        CampReservationAddon[]
+
+  @@index([tenantId])
+  @@index([campgroundId])
+  @@index([pitchId])
+  @@index([status])
+  @@index([checkIn, checkOut])
+  @@map("camp_reservations")
+}
+
+/// อุปกรณ์ให้เช่าในลานแคมป์ (เต็นท์ ถุงนอน เตา ฟืน ฯลฯ) — catalog + stock
+model CampAddon {
+  id           String   @id @default(uuid()) @db.VarChar(36)
+  tenantId     String?  @db.VarChar(36)
+  campgroundId String   @db.VarChar(36)
+  name         String   @db.VarChar(150)
+  /// tent | sleeping | gear | cooking | firewood | electric | other
+  category     String   @default("other") @db.VarChar(20)
+  pricePerUnit Decimal  @db.Decimal(10, 2)
+  stockQty     Int      @default(0)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  campground   Campground @relation(fields: [campgroundId], references: [id], onDelete: Cascade)
+  items        CampReservationAddon[]
+
+  @@index([tenantId])
+  @@index([campgroundId])
+  @@map("camp_addons")
+}
+
+/// รายการ add-on ที่ผูกกับการจอง (snapshot ราคา ณ เวลาจอง)
+model CampReservationAddon {
+  id            String   @id @default(uuid()) @db.VarChar(36)
+  reservationId String   @db.VarChar(36)
+  addonId       String   @db.VarChar(36)
+  name          String   @db.VarChar(150)
+  qty           Int      @default(1)
+  priceSnapshot Decimal  @db.Decimal(10, 2)
+  createdAt     DateTime @default(now())
+  reservation   CampReservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  addon         CampAddon       @relation(fields: [addonId], references: [id])
+
+  @@index([reservationId])
+  @@index([addonId])
+  @@map("camp_reservation_addons")
+}
