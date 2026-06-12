@@ -49,8 +49,11 @@ export class HrController {
   ) {}
 
   // ─── Employee Code Config routes ─────────────────────────────────────────
-  // IMPORTANT: These MUST be declared BEFORE @Get(':id') to prevent NestJS
-  // from treating "employee-code-config" as an employee ID.
+  // NOTE: The employee param routes below are constrained to a UUID pattern
+  // (:id([0-9a-fA-F-]{36})), so static sub-resource paths — both these local
+  // ones AND sibling controllers under `hr/...` (manpower-requests, candidates,
+  // equipment-requests, etc.) — never get swallowed by the greedy `:id` route,
+  // regardless of module registration order.
 
   @Get('employee-code-config')
   @ApiOperation({ summary: 'Get employee code configuration for current tenant' })
@@ -164,7 +167,7 @@ export class HrController {
     return this.hrCompletenessService.getCompletenessSummary(user?.tenantId, idList);
   }
 
-  @Get(':id/completeness')
+  @Get(':id([0-9a-fA-F-]{36})/completeness')
   @ApiOperation({
     summary: 'Get employee data completeness across HR subsystems (requires HR add-on)',
     description:
@@ -181,7 +184,7 @@ export class HrController {
     return this.hrCompletenessService.getEmployeeCompleteness(id, user?.tenantId);
   }
 
-  @Get(':id')
+  @Get(':id([0-9a-fA-F-]{36})')
   @ApiOperation({ summary: 'Get employee by ID (requires HR add-on)' })
   @ApiResponse({ status: 200, description: 'Employee details' })
   @ApiResponse({ status: 404, description: 'Employee not found' })
@@ -207,7 +210,7 @@ export class HrController {
     return this.hrService.create(createEmployeeDto, user?.tenantId);
   }
 
-  @Patch(':id')
+  @Patch(':id([0-9a-fA-F-]{36})')
   @ApiOperation({ summary: 'Update employee (requires HR add-on)' })
   @ApiResponse({ status: 200, description: 'Employee updated successfully' })
   @ApiResponse({ status: 403, description: 'HR add-on not active' })
@@ -220,7 +223,7 @@ export class HrController {
     return this.hrService.update(id, updateEmployeeDto, user?.tenantId);
   }
 
-  @Delete(':id')
+  @Delete(':id([0-9a-fA-F-]{36})')
   @ApiOperation({ summary: 'Delete employee (requires HR add-on)' })
   @ApiResponse({ status: 200, description: 'Employee deleted successfully' })
   @ApiResponse({ status: 403, description: 'HR add-on not active' })
@@ -277,7 +280,7 @@ export class HrController {
    * HR Add-on bridge: create a Staff record from an existing Employee.
    * The new Staff is linked to this Employee via staffEmployee FK.
    */
-  @Post(':id/create-staff')
+  @Post(':id([0-9a-fA-F-]{36})/create-staff')
   @ApiOperation({
     summary: 'Create Staff record from Employee (requires HR add-on)',
     description:
