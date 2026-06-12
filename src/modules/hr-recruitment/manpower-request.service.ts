@@ -110,16 +110,17 @@ export class ManpowerRequestService {
     if (!request) throw new NotFoundException(`Manpower request ${id} not found`);
 
     // แนบชื่อแผนก/ตำแหน่งจาก id (model ไม่มี relation ตรง — ดึงเพิ่มแล้ว attach)
+    // ใช้ findFirst + tenantId เสมอ (model เป็น tenant-scoped, findUnique ถูกบล็อกโดย TenantScope)
     const [department, position] = await Promise.all([
       request.departmentId
-        ? (this.prisma as any).hrDepartment.findUnique({
-            where: { id: request.departmentId },
+        ? (this.prisma as any).hrDepartment.findFirst({
+            where: { id: request.departmentId, tenantId },
             select: { id: true, name: true, nameEn: true, code: true, color: true },
           })
         : null,
       request.positionId
-        ? (this.prisma as any).hrPosition.findUnique({
-            where: { id: request.positionId },
+        ? (this.prisma as any).hrPosition.findFirst({
+            where: { id: request.positionId, tenantId },
             select: { id: true, name: true, nameEn: true, code: true, level: true },
           })
         : null,

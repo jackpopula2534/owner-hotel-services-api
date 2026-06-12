@@ -23,6 +23,7 @@ function createMockPrisma() {
     hrCandidate: { findFirst: jest.fn() },
     hrHireRecord: { findFirst: jest.fn() },
     hrProbationRound: { findFirst: jest.fn() },
+    hrEquipmentIssuance: { count: jest.fn().mockResolvedValue(1) },
     $transaction: jest.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
   };
 }
@@ -103,11 +104,24 @@ describe('HireService', () => {
         where: { id: 'c1' },
         data: { status: 'hired' },
       });
+      // มีคำขอเบิกที่อนุมัติแล้ว (pre-approved) → ข้ามไปขั้นรับของ (onboarding) ได้เลย
+      expect(prisma.tx.hrManpowerRequest.update).toHaveBeenCalledWith({
+        where: { id: 'mpr1' },
+        data: { status: 'onboarding' },
+      });
+      expect(result.employee.id).toBe('emp1');
+    });
+
+    it('stays at "hired" (equipment stage) when no equipment approved yet', async () => {
+      prisma.hrCandidate.findFirst.mockResolvedValue({
+        ...baseCandidate,
+        manpowerRequest: { ...baseCandidate.manpowerRequest, equipmentRequests: [] },
+      });
+      await service.hire('c1', {}, 't1', 'u1');
       expect(prisma.tx.hrManpowerRequest.update).toHaveBeenCalledWith({
         where: { id: 'mpr1' },
         data: { status: 'hired' },
       });
-      expect(result.employee.id).toBe('emp1');
     });
 
     it('rejects when there is no pending offer', async () => {
@@ -136,6 +150,7 @@ describe('HireService', () => {
     it('sets PROBATION + opens a round with 30/60 checkpoints + final 90', async () => {
       prisma.hrHireRecord.findFirst.mockResolvedValue(acceptedHire);
       prisma.hrProbationRound.findFirst.mockResolvedValue(null);
+      prisma.hrEquipmentIssuance.count.mockResolvedValue(1);
       await service.confirmStart('h1', 't1', 'u1');
 
       expect(prisma.tx.employee.update).toHaveBeenCalledWith(
@@ -146,8 +161,9 @@ describe('HireService', () => {
       );
       // 30, 60 (< 90) + final 90
       expect(prisma.tx.hrProbationCheckpoint.create).toHaveBeenCalledTimes(3);
+      // ผ่านขั้นอุปกรณ์แล้ว (onboarding) หรือ hired+อนุมัติพร้อมกัน → ขยับไป probation
       expect(prisma.tx.hrManpowerRequest.updateMany).toHaveBeenCalledWith({
-        where: { id: 'mpr1', status: 'hired' },
+        where: { id: 'mpr1', status: { in: ['onboarding', 'hired'] } },
         data: { status: 'probation' },
       });
     });
@@ -155,6 +171,14 @@ describe('HireService', () => {
     it('rejects when offer is not accepted yet', async () => {
       prisma.hrHireRecord.findFirst.mockResolvedValue({ ...acceptedHire, offerStatus: 'offered', employeeId: null });
       await expect(service.confirmStart('h1', 't1', 'u1')).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('rejects when no equipment issuance exists (mandatory equipment step not done)', async () => {
+      prisma.hrHireRecord.findFirst.mockResolvedValue(acceptedHire);
+      prisma.hrProbationRound.findFirst.mockResolvedValue(null);
+      prisma.hrEquipmentIssuance.count.mockResolvedValue(0);
+      await expect(service.confirmStart('h1', 't1', 'u1')).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.tx.employee.update).not.toHaveBeenCalled();
     });
 
     it('rejects when an active round already exists', async () => {

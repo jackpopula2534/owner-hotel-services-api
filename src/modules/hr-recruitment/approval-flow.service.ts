@@ -89,6 +89,42 @@ export class ApprovalFlowService {
   }
 
   /**
+   * Setup — หมวดสินค้าคลัง (inventory ItemCategory ids) ที่ HR กำหนดให้ดึง item
+   * มาเลือกในโมดัล "เปิด/ขออุปกรณ์" ของ recruitment. เก็บไว้บน row flowType=equipment
+   * ([] / null = ไม่กรอง = ดึงทุกหมวด).
+   */
+  async getEquipmentCategories(tenantId: string): Promise<string[]> {
+    const row = await this.db.hrApprovalFlow.findUnique({
+      where: { tenantId_flowType: { tenantId, flowType: 'equipment' } },
+    });
+    return this.normalizeCategoryIds(row?.equipmentCategoryIds);
+  }
+
+  /** Save the configured inventory category ids (upserts the equipment flow row). */
+  async setEquipmentCategories(tenantId: string, categoryIds: unknown): Promise<string[]> {
+    const ids = this.normalizeCategoryIds(categoryIds);
+    const defaults = DEFAULT_FLOW_ROLES.equipment.map((role) => ({ role, label: null }));
+    const row = await this.db.hrApprovalFlow.upsert({
+      where: { tenantId_flowType: { tenantId, flowType: 'equipment' } },
+      create: { tenantId, flowType: 'equipment', steps: defaults, isActive: true, equipmentCategoryIds: ids },
+      update: { equipmentCategoryIds: ids },
+    });
+    return this.normalizeCategoryIds(row.equipmentCategoryIds);
+  }
+
+  private normalizeCategoryIds(value: unknown): string[] {
+    if (!Array.isArray(value)) return [];
+    return Array.from(
+      new Set(
+        value
+          .filter((v): v is string => typeof v === 'string')
+          .map((v) => v.trim())
+          .filter((v) => v.length > 0),
+      ),
+    );
+  }
+
+  /**
    * Resolve the ordered approver roles for a flow type — config first, with
    * built-in defaults as fallback. Used by services that build chains.
    */

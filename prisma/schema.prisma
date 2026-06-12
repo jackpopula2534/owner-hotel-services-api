@@ -1420,6 +1420,8 @@ model HrApprovalFlow {
   flowType  String // manpower | budget | equipment
   steps     Json // [{ role, label? }] — ordered approval steps
   isActive  Boolean  @default(true)
+  // เฉพาะ flowType=equipment: id หมวดสินค้าคลังที่ให้ดึง item มาเลือกตอนเปิดอุปกรณ์ (null/[] = ทุกหมวด)
+  equipmentCategoryIds Json? // string[] of inventory ItemCategory ids
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

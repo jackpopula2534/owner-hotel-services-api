@@ -122,8 +122,62 @@ export class EquipmentRequestService {
       }
     }
 
+    // อนุมัติครบ → ออกใบเบิก (issuance) ให้พนักงานที่จ้างแล้วซึ่งยังไม่มีใบเบิกของคำขอนี้
+    // แล้วเลื่อนคำขอสรรหาจากขั้น "ขออุปกรณ์" (hired) ไปขั้น "รับของ" (onboarding)
+    // กรณีขออุปกรณ์ "หลังจ้าง": acceptOffer ผ่านไปแล้วจึงยังไม่มี issuance — สร้างตรงนี้
+    if (fullyApproved) {
+      await this.issueToHiredEmployeesAndAdvance(existing.manpowerRequestId, existing.id, tenantId);
+    }
+
     this.audit(AuditAction.EQUIPMENT_REQUEST_APPROVE_STEP, id, tenantId, userId, fullyApproved ? 'Equipment request fully approved' : 'Equipment approval step recorded');
     return updated;
+  }
+
+  /**
+   * หลังคำขอเบิกอนุมัติครบ: ออกใบเบิกวันแรกให้พนักงานที่จ้างแล้ว (status 'hired') ของคำขอสรรหานี้
+   * ที่ยังไม่มีใบเบิกผูกกับคำขอเบิกนี้ จากนั้นเลื่อนสถานะคำขอสรรหา hired → onboarding (ขั้นรับของ)
+   */
+  private async issueToHiredEmployeesAndAdvance(manpowerRequestId: string, equipmentRequestId: string, tenantId: string): Promise<void> {
+    const manpower = await (this.prisma as any).hrManpowerRequest.findFirst({
+      where: { id: manpowerRequestId, tenantId },
+      include: { candidates: { where: { status: 'hired' }, select: { hireRecord: { select: { employeeId: true } } } } },
+    });
+    if (!manpower) return;
+    const equipment = await (this.prisma as any).hrEquipmentRequest.findFirst({
+      where: { id: equipmentRequestId, tenantId },
+      select: { items: true },
+    });
+    const employeeIds: string[] = (manpower.candidates ?? [])
+      .map((c: any) => c.hireRecord?.employeeId)
+      .filter((eid: string | null | undefined): eid is string => Boolean(eid));
+    const hasInventory = await this.recruitmentInventory.isEnabled(tenantId);
+
+    await this.prisma.$transaction(async (tx: any) => {
+      for (const employeeId of employeeIds) {
+        const already = await tx.hrEquipmentIssuance.findFirst({
+          where: { tenantId, equipmentRequestId, employeeId },
+        });
+        if (already) continue;
+        const items = Array.isArray(equipment?.items) ? equipment.items : [];
+        let issuanceItems = items.map((i: Record<string, unknown>) => ({ ...i, issued: false }));
+        let issuanceStatus = 'pending';
+        if (hasInventory) {
+          const reservation = await this.recruitmentInventory.reserveItems(tx, issuanceItems as any[], tenantId, manpower.propertyId ?? null);
+          issuanceItems = reservation.items as any[];
+          if (reservation.reservedAny) issuanceStatus = 'reserved';
+        }
+        await tx.hrEquipmentIssuance.create({
+          data: { tenantId, equipmentRequestId, employeeId, items: issuanceItems, status: issuanceStatus },
+        });
+      }
+      // เลื่อนขั้นเฉพาะเมื่อจ้างครบแล้ว (status = hired) — partial hire (recruiting) ยังไม่ขยับ
+      if (manpower.status === 'hired') {
+        await tx.hrManpowerRequest.updateMany({
+          where: { id: manpower.id, status: 'hired' },
+          data: { status: 'onboarding' },
+        });
+      }
+    });
   }
 
   async reject(id: string, dto: ApprovalDecisionDto, tenantId: string, userId: string) {

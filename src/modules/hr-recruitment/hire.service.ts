@@ -127,9 +127,13 @@ export class HireService {
         where: { tenantId, manpowerRequestId: candidate.manpowerRequestId, status: 'hired' },
       });
       const quotaFilled = hiredCount >= (candidate.manpowerRequest.headcount ?? 1);
+      // อุปกรณ์เป็นขั้นบังคับก่อนเริ่มงาน: ถ้ามีคำขอเบิกที่ "อนุมัติแล้ว" ตอนจ้างครบ → ข้ามไปขั้นรับของ
+      // (onboarding) ได้เลย; ถ้ายังไม่มี ค้างที่ "hired" (ขั้นขออุปกรณ์) จนกว่าจะสร้าง+อนุมัติคำขอเบิก
+      const hasApprovedEquipment = (candidate.manpowerRequest.equipmentRequests?.length ?? 0) > 0;
+      const nextStatus = quotaFilled ? (hasApprovedEquipment ? 'onboarding' : 'hired') : 'recruiting';
       await tx.hrManpowerRequest.update({
         where: { id: candidate.manpowerRequestId },
-        data: { status: quotaFilled ? 'hired' : 'recruiting' },
+        data: { status: nextStatus },
       });
       return { employee, hireRecord };
     });
@@ -212,6 +216,15 @@ export class HireService {
       throw new BadRequestException('Offer must be accepted (employee created) before confirming start');
     }
 
+    // ขั้นอุปกรณ์เป็นขั้นบังคับ (ห้ามข้าม): ต้องสร้าง+อนุมัติคำขอเบิกอุปกรณ์จนเกิดใบเบิก (issuance)
+    // ให้พนักงานก่อน ถึงจะยืนยันรายงานตัว/เปิดทดลองงานได้ — กันการกระโดดข้ามขั้น 5-6
+    const issuanceCount = await (this.prisma as any).hrEquipmentIssuance.count({
+      where: { tenantId, employeeId: hireRecord.employeeId },
+    });
+    if (issuanceCount === 0) {
+      throw new BadRequestException('ต้องสร้างและอนุมัติคำขอเบิกอุปกรณ์ให้พนักงานก่อน จึงจะยืนยันวันเริ่มงานได้');
+    }
+
     const existingRound = await (this.prisma as any).hrProbationRound.findFirst({
       where: { tenantId, employeeId: hireRecord.employeeId, status: 'active' },
     });
@@ -247,9 +260,10 @@ export class HireService {
           },
         });
       }
-      // ขยับคำขอไป "probation" เฉพาะเมื่อจ้างครบโควต้าแล้ว (status = hired)
+      // ขยับคำขอไป "probation" เมื่อผ่านขั้นอุปกรณ์แล้ว (onboarding) หรือกรณีจ้างครบ+อนุมัติอุปกรณ์
+      // พร้อมกัน (hired) — ทั้งสองสถานะแปลว่าผ่านขั้นเบิกอุปกรณ์ที่บังคับมาแล้ว
       await tx.hrManpowerRequest.updateMany({
-        where: { id: hireRecord.candidate.manpowerRequestId, status: 'hired' },
+        where: { id: hireRecord.candidate.manpowerRequestId, status: { in: ['onboarding', 'hired'] } },
         data: { status: 'probation' },
       });
       return created;

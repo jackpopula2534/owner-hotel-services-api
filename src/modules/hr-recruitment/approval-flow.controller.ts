@@ -30,6 +30,16 @@ class UpdateApprovalFlowDto {
   steps: FlowStepDto[];
 }
 
+class UpdateEquipmentCategoriesDto {
+  @ApiProperty({
+    type: [String],
+    description: 'Inventory ItemCategory ids that feed the equipment-requisition modal (empty = all)',
+  })
+  @IsArray()
+  @IsString({ each: true })
+  categoryIds: string[];
+}
+
 type AuthUser = { tenantId?: string };
 
 @ApiTags('hr / recruitment — approval flow setup')
@@ -44,6 +54,26 @@ export class ApprovalFlowController {
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
   async list(@CurrentUser() user: AuthUser) {
     return this.service.getAll(user.tenantId!);
+  }
+
+  @Get('equipment-categories')
+  @ApiOperation({ summary: 'Get inventory category ids configured for the equipment-requisition modal' })
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
+  async getEquipmentCategories(@CurrentUser() user: AuthUser) {
+    const categoryIds = await this.service.getEquipmentCategories(user.tenantId!);
+    return { categoryIds };
+  }
+
+  @Put('equipment-categories')
+  @ApiOperation({ summary: 'Configure which inventory categories feed the equipment-requisition modal' })
+  @HttpCode(HttpStatus.OK)
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'hr')
+  async updateEquipmentCategories(
+    @Body() dto: UpdateEquipmentCategoriesDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    const categoryIds = await this.service.setEquipmentCategories(user.tenantId!, dto.categoryIds);
+    return { categoryIds };
   }
 
   @Put(':flowType')
