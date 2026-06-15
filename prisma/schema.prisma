@@ -650,6 +650,7 @@ model Employee {
   taxId             String?
   workExperiences   Json?
   nickname          String?
+  profileImage      String?          @db.Text // URL หรือ data URL รูปโปรไฟล์ (โอนมาจากใบสมัครตอนจ้าง)
   dateOfBirth       DateTime?
   nationalId        String?
   gender            String?

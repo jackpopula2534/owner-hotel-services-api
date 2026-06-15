@@ -170,6 +170,11 @@ export class HireService {
     if (Array.isArray(app.emergencyContacts) && app.emergencyContacts.length) out.emergencyContacts = app.emergencyContacts;
     if (app.address) out.notes = app.address;
 
+    // รูปโปรไฟล์จากใบสมัคร (attachments kind='photo') → Employee.profileImage
+    const attachments = Array.isArray(candidate.attachments) ? candidate.attachments : [];
+    const photo = attachments.find((a: Record<string, any>) => a?.kind === 'photo' && a?.url);
+    if (photo?.url) out.profileImage = photo.url;
+
     // PDPA consent จากใบสมัคร → employee record
     if (candidate.consentGiven) {
       out.consentGiven = true;

@@ -26,6 +26,11 @@ export class CreateEmployeeDto {
   @IsOptional()
   nickname?: string;
 
+  @ApiPropertyOptional({ description: 'URL หรือ data URL รูปโปรไฟล์พนักงาน' })
+  @IsString()
+  @IsOptional()
+  profileImage?: string;
+
   @ApiProperty({ example: 'john.doe@hotel.com' })
   @IsEmail()
   @IsNotEmpty()

@@ -68,7 +68,15 @@ export class HrService {
         this.prisma.employee.count({ where }),
       ]);
 
-      return { data, total, page, limit };
+      // แผนกที่มาจากระบบคัดสรร (recruitment) จะตั้งแค่ departmentId (FK) ไม่ได้ตั้ง
+      // free-text `department` → frontend ที่อ่าน emp.department จึงเห็นว่าง.
+      // normalize ให้ fallback ไปใช้ชื่อจาก relation hrDepartment เมื่อ string ว่าง.
+      const normalized = (data as any[]).map((emp) => ({
+        ...emp,
+        department: emp.department ?? emp.hrDepartment?.name ?? null,
+      }));
+
+      return { data: normalized, total, page, limit };
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === 'P2021' || error.code === 'P2022') {
@@ -97,7 +105,11 @@ export class HrService {
       throw new NotFoundException(`Employee with ID ${id} not found`);
     }
 
-    return employee;
+    // fallback ชื่อแผนกจาก relation เมื่อ free-text `department` ว่าง (เช่นพนักงานจากระบบคัดสรร)
+    return {
+      ...employee,
+      department: employee.department ?? employee.hrDepartment?.name ?? null,
+    };
   }
 
   async create(createEmployeeDto: CreateEmployeeDto, tenantId?: string) {
