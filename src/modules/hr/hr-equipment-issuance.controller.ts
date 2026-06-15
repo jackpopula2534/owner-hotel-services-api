@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Body,
   Param,
   Query,
@@ -12,7 +13,7 @@ import {
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { HrEquipmentIssuanceService } from './hr-equipment-issuance.service';
-import { IssueEquipmentDto, AcknowledgeIssuanceDto } from './dto/hr-equipment-issuance.dto';
+import { IssueEquipmentDto, AcknowledgeIssuanceDto, EditIssuanceDto } from './dto/hr-equipment-issuance.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -53,6 +54,15 @@ export class HrEquipmentIssuanceController {
   @Roles('platform_admin', 'tenant_admin', 'admin', 'hr')
   async issue(@Param('id') id: string, @Body() dto: IssueEquipmentDto, @CurrentUser() user: AuthUser) {
     return this.service.issue(id, dto, user.tenantId!, user.id!);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Edit an issued record (adjust serial numbers / note, no re-deduction)' })
+  @ApiParam({ name: 'id' })
+  @Throttle({ default: { limit: 20, ttl: 60 } })
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'hr')
+  async edit(@Param('id') id: string, @Body() dto: EditIssuanceDto, @CurrentUser() user: AuthUser) {
+    return this.service.editIssuance(id, dto, user.tenantId!, user.id!);
   }
 
   @Post(':id/acknowledge')

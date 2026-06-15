@@ -9,7 +9,7 @@ import {
   buildApprovalChain,
   isChainApproved,
 } from '../../common/types/approval-chain';
-import { CreateEquipmentRequestDto, ApprovalDecisionDto } from './dto/recruitment.dto';
+import { CreateEquipmentRequestDto, UpdateEquipmentRequestDto, ApprovalDecisionDto } from './dto/recruitment.dto';
 import { ApprovalFlowService } from './approval-flow.service';
 import { RecruitmentInventoryService } from '../hr/recruitment-inventory.service';
 
@@ -96,6 +96,29 @@ export class EquipmentRequestService {
     });
     this.audit(AuditAction.EQUIPMENT_REQUEST_SUBMIT, request.id, tenantId, userId, `Equipment requested for ${manpower.requestNo} (${dto.items.length} items)`);
     return request;
+  }
+
+  /**
+   * แก้ไขรายการของคำขอเบิกที่ยัง "pending" (ยังไม่อนุมัติ) — กันการสร้างคำขอซ้ำ
+   * แก้ได้เฉพาะตอน pending เท่านั้น; เมื่ออนุมัติ/ปฏิเสธไปแล้วจะแก้ไม่ได้
+   */
+  async update(id: string, dto: UpdateEquipmentRequestDto, tenantId: string, userId: string) {
+    const existing = await this.findOne(id, tenantId);
+    if (existing.status !== 'pending') {
+      throw new BadRequestException(`Cannot edit a "${existing.status}" equipment request (only pending requests are editable)`);
+    }
+    if (!dto.items.length) throw new BadRequestException('At least one equipment item is required');
+
+    const totalCost = dto.items.reduce((sum, item) => sum + (item.estimatedCost ?? 0) * item.qty, 0);
+    const updated = await (this.prisma as any).hrEquipmentRequest.update({
+      where: { id },
+      data: {
+        items: dto.items.map((i) => ({ ...i, estimatedCost: i.estimatedCost ?? null, note: i.note ?? null })),
+        totalCost,
+      },
+    });
+    this.audit(AuditAction.EQUIPMENT_REQUEST_UPDATE, id, tenantId, userId, `Equipment request edited (${dto.items.length} items)`);
+    return updated;
   }
 
   async approve(id: string, dto: ApprovalDecisionDto, tenantId: string, userId: string) {

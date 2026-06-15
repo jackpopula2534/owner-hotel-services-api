@@ -101,7 +101,8 @@ export class ManpowerRequestService {
         candidates: {
           include: {
             interviews: { orderBy: [{ round: 'asc' }, { scheduledAt: 'asc' }] },
-            hireRecord: true,
+            // แนบสถานะพนักงาน (PENDING_START → PROBATION) เพื่อให้ลิสต์ผู้สมัครรู้ว่า "ยืนยันวันเริ่มงาน" ได้รายคน
+            hireRecord: { include: { employee: { select: { id: true, status: true, startDate: true } } } },
           },
         },
         jobPosting: true,

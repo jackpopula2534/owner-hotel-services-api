@@ -106,8 +106,8 @@ export class CandidateService {
     }
     if (candidate.hireRecord) throw new BadRequestException('Candidate already has an offer');
 
-    const [hireRecord] = await this.prisma.$transaction([
-      (this.prisma as any).hrHireRecord.create({
+    const hireRecord = await this.prisma.$transaction(async (tx: any) => {
+      const created = await tx.hrHireRecord.create({
         data: {
           tenantId,
           candidateId: id,
@@ -118,15 +118,37 @@ export class CandidateService {
           offerStatus: 'offered',
           offerSentAt: new Date(),
         },
-      }),
-      (this.prisma as any).hrCandidate.update({ where: { id }, data: { status: 'offer_made' } }),
-      (this.prisma as any).hrManpowerRequest.update({
-        where: { id: candidate.manpowerRequestId },
-        data: { status: 'offer_made' },
-      }),
-    ]);
+      });
+      await tx.hrCandidate.update({ where: { id }, data: { status: 'offer_made' } });
+      // คำขอหลายอัตรา: เลื่อนใบ → "offer_made" เฉพาะเมื่อเสนอจ้างครบทุกอัตราแล้ว ไม่ใช่คนแรกที่ได้
+      // offer แล้วใบเดินขั้นทันที — ถ้ายังไม่ครบ คงค้างขั้นสรรหา/สัมภาษณ์ให้ไปหาคนที่เหลือก่อน
+      await this.advanceToOfferMadeIfAllOffered(tx, candidate.manpowerRequestId, tenantId);
+      return created;
+    });
     this.audit(AuditAction.OFFER_MADE, id, tenantId, userId, `Offer made: ${dto.offeredSalary}, start ${dto.startDate} ${dto.startTime ?? ''}`);
     return hireRecord;
+  }
+
+  /**
+   * เลื่อนคำขอ (recruiting/interviewing → offer_made) เฉพาะเมื่อ "ทุกอัตรา" ได้รับ offer แล้ว
+   * (รับหลายคน: ตราบใดยังมีอัตราที่ยังไม่ได้เสนอจ้าง ใบจะยังไม่เดินไปขั้นเสนอจ้าง/จ้าง — กันใบ
+   * กระโดดขั้นเพราะผู้สมัครคนเดียวได้ offer) เรียกภายใน transaction ของ makeOffer หลังอัปเดต candidate
+   */
+  private async advanceToOfferMadeIfAllOffered(tx: any, manpowerRequestId: string, tenantId: string): Promise<void> {
+    const request = await tx.hrManpowerRequest.findFirst({
+      where: { id: manpowerRequestId, tenantId },
+      select: { headcount: true },
+    });
+    if (!request) return;
+    const headcount = request.headcount ?? 1;
+    const offeredCount = await tx.hrCandidate.count({
+      where: { tenantId, manpowerRequestId, status: { in: ['offer_made', 'offer_accepted', 'hired'] } },
+    });
+    if (offeredCount < headcount) return;
+    await tx.hrManpowerRequest.updateMany({
+      where: { id: manpowerRequestId, status: { in: ['recruiting', 'interviewing'] } },
+      data: { status: 'offer_made' },
+    });
   }
 
   async declineOffer(id: string, tenantId: string, userId: string) {

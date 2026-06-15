@@ -44,3 +44,35 @@ export class AcknowledgeIssuanceDto {
   @MaxLength(500)
   signatureUrl?: string;
 }
+
+export class EditIssuedItemDto {
+  @ApiProperty({ description: 'Index ของ item ใน checklist' })
+  @IsInt()
+  @Min(0)
+  index: number;
+
+  @ApiPropertyOptional({ description: 'Serial number ที่ต้องการแก้ (ส่ง "" เพื่อล้าง)' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(191)
+  serialNo?: string;
+}
+
+/**
+ * แก้ไขใบจ่ายของที่จ่ายไปแล้ว — ปรับ serial number / หมายเหตุ ของรายการที่ issued แล้ว
+ * โดยไม่ตัดสต็อกซ้ำ และไม่เปลี่ยนสถานะใบ (ใช้แทนการกด "จ่ายของ" ซ้ำ).
+ */
+export class EditIssuanceDto {
+  @ApiPropertyOptional({ type: [EditIssuedItemDto] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => EditIssuedItemDto)
+  items?: EditIssuedItemDto[];
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  note?: string;
+}

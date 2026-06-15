@@ -1661,10 +1661,30 @@ model HrProbationCheckpoint {
   reviewedAt   DateTime?
   status       String    @default("pending") // pending|done|skipped
 
-  round HrProbationRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  round   HrProbationRound              @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  ratings HrProbationCheckpointRating[]
 
   @@index([roundId])
   @@map("hr_probation_checkpoints")
+}
+
+/// คะแนนรายมิติ (competency) ของแต่ละ checkpoint — แตกคะแนนรวมออกเป็นหลายด้าน
+/// competency: work_quality | attendance | teamwork | attitude | learning
+model HrProbationCheckpointRating {
+  id           String   @id @default(uuid())
+  tenantId     String
+  checkpointId String
+  competency   String // work_quality | attendance | teamwork | attitude | learning
+  score        Decimal  @db.Decimal(5, 2)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  checkpoint HrProbationCheckpoint @relation(fields: [checkpointId], references: [id], onDelete: Cascade)
+
+  @@unique([checkpointId, competency])
+  @@index([tenantId])
+  @@index([checkpointId])
+  @@map("hr_probation_checkpoint_ratings")
 }
 
 model HrLeavePolicy {

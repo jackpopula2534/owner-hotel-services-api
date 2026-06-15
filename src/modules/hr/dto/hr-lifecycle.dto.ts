@@ -112,13 +112,34 @@ export class CreateProbationRoundDto {
   checkpointDays?: number[];
 }
 
+export const PROBATION_COMPETENCIES = ['work_quality', 'attendance', 'teamwork', 'attitude', 'learning'] as const;
+
+export class ProbationCompetencyRatingDto {
+  @ApiProperty({ enum: PROBATION_COMPETENCIES, description: 'มิติการประเมิน (competency)' })
+  @IsIn(PROBATION_COMPETENCIES as unknown as string[])
+  competency: string;
+
+  @ApiProperty({ description: 'คะแนนรายมิติ 0-100' })
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  score: number;
+}
+
 export class ReviewProbationCheckpointDto {
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'คะแนนรวม (ถ้าไม่ส่ง ratings) — ถ้าส่ง ratings ระบบจะเฉลี่ยให้อัตโนมัติ' })
   @IsOptional()
   @IsNumber()
   @Min(0)
   @Max(100)
   score?: number;
+
+  @ApiPropertyOptional({ type: [ProbationCompetencyRatingDto], description: 'คะแนนรายมิติ (competency) — overall = ค่าเฉลี่ย' })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ProbationCompetencyRatingDto)
+  ratings?: ProbationCompetencyRatingDto[];
 
   @ApiPropertyOptional()
   @IsOptional()

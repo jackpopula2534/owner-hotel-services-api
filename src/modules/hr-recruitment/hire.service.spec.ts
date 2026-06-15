@@ -173,12 +173,17 @@ describe('HireService', () => {
       await expect(service.confirmStart('h1', 't1', 'u1')).rejects.toBeInstanceOf(BadRequestException);
     });
 
-    it('rejects when no equipment issuance exists (mandatory equipment step not done)', async () => {
+    it('allows confirming start even when no equipment issuance exists yet (equipment is parallel, not blocking)', async () => {
       prisma.hrHireRecord.findFirst.mockResolvedValue(acceptedHire);
       prisma.hrProbationRound.findFirst.mockResolvedValue(null);
       prisma.hrEquipmentIssuance.count.mockResolvedValue(0);
-      await expect(service.confirmStart('h1', 't1', 'u1')).rejects.toBeInstanceOf(BadRequestException);
-      expect(prisma.tx.employee.update).not.toHaveBeenCalled();
+      await service.confirmStart('h1', 't1', 'u1');
+      expect(prisma.tx.employee.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'emp1' },
+          data: expect.objectContaining({ status: 'PROBATION' }),
+        }),
+      );
     });
 
     it('rejects when an active round already exists', async () => {

@@ -146,6 +146,7 @@ export enum AuditAction {
   BUDGET_APPROVE_STEP = 'budget_approve_step',
   BUDGET_REJECT = 'budget_reject',
   EQUIPMENT_REQUEST_SUBMIT = 'equipment_request_submit',
+  EQUIPMENT_REQUEST_UPDATE = 'equipment_request_update',
   EQUIPMENT_REQUEST_APPROVE_STEP = 'equipment_request_approve_step',
   EQUIPMENT_REQUEST_REJECT = 'equipment_request_reject',
   INTERVIEW_SCHEDULE = 'interview_schedule',

@@ -20,6 +20,7 @@ import {
   SubmitBudgetDto,
   ApprovalDecisionDto,
   CreateEquipmentRequestDto,
+  UpdateEquipmentRequestDto,
 } from './dto/recruitment.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
@@ -168,6 +169,16 @@ export class EquipmentRequestController {
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
   async findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.service.findOneWithAvailability(id, user.tenantId!);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Edit a pending equipment request (prevents duplicate requests before approval)' })
+  @ApiParam({ name: 'id' })
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 20, ttl: 60 } })
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
+  async update(@Param('id') id: string, @Body() dto: UpdateEquipmentRequestDto, @CurrentUser() user: AuthUser) {
+    return this.service.update(id, dto, user.tenantId!, user.id!);
   }
 
   @Post(':id/approve')

@@ -14,6 +14,9 @@ import { HireCandidateDto, CancelHireDto } from './dto/recruitment.dto';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/** สถานะพนักงานที่ถือว่า "รายงานตัวเริ่มงานแล้ว" (ผ่านขั้นยืนยันเริ่มงาน) */
+const STARTED_EMPLOYEE_STATUSES = ['PROBATION', 'ACTIVE'];
+
 /**
  * Stage 5→7 bridge: accept offer → create Employee (PENDING_START) + issuances,
  * then on the actual first day confirm start → PROBATION + auto-open a
@@ -216,14 +219,8 @@ export class HireService {
       throw new BadRequestException('Offer must be accepted (employee created) before confirming start');
     }
 
-    // ขั้นอุปกรณ์เป็นขั้นบังคับ (ห้ามข้าม): ต้องสร้าง+อนุมัติคำขอเบิกอุปกรณ์จนเกิดใบเบิก (issuance)
-    // ให้พนักงานก่อน ถึงจะยืนยันรายงานตัว/เปิดทดลองงานได้ — กันการกระโดดข้ามขั้น 5-6
-    const issuanceCount = await (this.prisma as any).hrEquipmentIssuance.count({
-      where: { tenantId, employeeId: hireRecord.employeeId },
-    });
-    if (issuanceCount === 0) {
-      throw new BadRequestException('ต้องสร้างและอนุมัติคำขอเบิกอุปกรณ์ให้พนักงานก่อน จึงจะยืนยันวันเริ่มงานได้');
-    }
+    // หมายเหตุ: การเบิกอุปกรณ์เป็นขั้นคู่ขนาน (เตรียมของก่อน/หลังวันเริ่มก็ได้) — ไม่บังคับว่าต้อง
+    // มีใบเบิกก่อนจึงจะยืนยันวันเริ่มงานได้ เพื่อให้พนักงานรายงานตัว/เปิดทดลองงานได้ทันแม้ของยังไม่ครบ
 
     const existingRound = await (this.prisma as any).hrProbationRound.findFirst({
       where: { tenantId, employeeId: hireRecord.employeeId, status: 'active' },
@@ -261,16 +258,34 @@ export class HireService {
         });
       }
       // ขยับคำขอไป "probation" เมื่อผ่านขั้นอุปกรณ์แล้ว (onboarding) หรือกรณีจ้างครบ+อนุมัติอุปกรณ์
-      // พร้อมกัน (hired) — ทั้งสองสถานะแปลว่าผ่านขั้นเบิกอุปกรณ์ที่บังคับมาแล้ว
-      await tx.hrManpowerRequest.updateMany({
-        where: { id: hireRecord.candidate.manpowerRequestId, status: { in: ['onboarding', 'hired'] } },
-        data: { status: 'probation' },
-      });
+      // พร้อมกัน (hired) — แต่ต้อง "ยืนยันเริ่มงานครบทุกอัตรา" ก่อน (รับหลายคนต้องรายงานตัวครบ)
+      await this.advanceToProbationIfAllStarted(tx, hireRecord.candidate.manpowerRequestId, tenantId);
       return created;
     });
 
     this.audit(AuditAction.PROBATION_OPEN, round.id, tenantId, userId, `Employee started — probation round opened (due ${dueDate.toISOString().slice(0, 10)})`, { employeeId: hireRecord.employeeId });
     return round;
+  }
+
+  /**
+   * เลื่อนคำขอสรรหา onboarding/hired → probation เฉพาะเมื่อ "ทุกอัตราที่จ้าง" รายงานตัวเริ่มงานครบแล้ว
+   * (รับหลายคน: ตราบใดยังมีพนักงานที่ยังไม่ยืนยันเริ่มงาน — status = PENDING_START — คำขอจะค้างขั้นเดิม)
+   * เรียกภายใน transaction ของ confirmStart หลังตั้งพนักงานคนปัจจุบันเป็น PROBATION แล้ว
+   */
+  private async advanceToProbationIfAllStarted(tx: any, manpowerRequestId: string, tenantId: string): Promise<void> {
+    const hiredCandidates = await tx.hrCandidate.findMany({
+      where: { tenantId, manpowerRequestId, status: 'hired' },
+      select: { hireRecord: { select: { employee: { select: { status: true } } } } },
+    });
+    if (hiredCandidates.length === 0) return;
+    const allStarted = hiredCandidates.every((c: any) =>
+      STARTED_EMPLOYEE_STATUSES.includes(c.hireRecord?.employee?.status ?? ''),
+    );
+    if (!allStarted) return;
+    await tx.hrManpowerRequest.updateMany({
+      where: { id: manpowerRequestId, status: { in: ['onboarding', 'hired'] } },
+      data: { status: 'probation' },
+    });
   }
 
   /**

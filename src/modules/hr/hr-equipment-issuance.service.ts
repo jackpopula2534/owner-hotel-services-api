@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, Logger } from '@nes
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogService } from '../../audit-log/audit-log.service';
 import { AuditAction, AuditResource, AuditCategory } from '../../audit-log/dto/audit-log.dto';
-import { IssueEquipmentDto, AcknowledgeIssuanceDto } from './dto/hr-equipment-issuance.dto';
+import { IssueEquipmentDto, AcknowledgeIssuanceDto, EditIssuanceDto } from './dto/hr-equipment-issuance.dto';
 import { RecruitmentInventoryService, EquipmentLine } from './recruitment-inventory.service';
 
 interface IssuanceItem {
@@ -101,6 +101,42 @@ export class HrEquipmentIssuanceService {
     }
 
     this.audit(AuditAction.EQUIPMENT_ISSUE, id, tenantId, userId, `Equipment issued (${dto.items.length} items, ${allIssued ? 'complete' : 'partial'})`);
+    return updated;
+  }
+
+  /**
+   * แก้ไขใบที่จ่ายแล้ว — ปรับ serial number / หมายเหตุ ของรายการที่ issued แล้ว
+   * โดย "ไม่" ตัดสต็อกซ้ำและ "ไม่" เปลี่ยนสถานะใบ. ใช้แทนการกด "จ่ายของ" ซ้ำ
+   * เพื่อกันการ issue ทับจนนับซ้ำ.
+   */
+  async editIssuance(id: string, dto: EditIssuanceDto, tenantId: string, userId: string) {
+    const issuance = await this.findOne(id, tenantId);
+    if (!['partially_issued', 'issued'].includes(issuance.status)) {
+      throw new BadRequestException(`Only issued records can be edited (current: "${issuance.status}")`);
+    }
+
+    const items: IssuanceItem[] = Array.isArray(issuance.items) ? issuance.items : [];
+    const edits = new Map((dto.items ?? []).map((i) => [i.index, i]));
+    const updatedItems = items.map((item, index) => {
+      const edit = edits.get(index);
+      // แก้ได้เฉพาะรายการที่จ่ายแล้ว — ไม่แตะ issued/qty เพื่อกันการนับซ้ำ
+      if (!edit || !item.issued) return item;
+      return { ...item, serialNo: edit.serialNo === '' ? null : edit.serialNo ?? item.serialNo ?? null };
+    });
+
+    const updated = await (this.prisma as any).hrEquipmentIssuance.update({
+      where: { id },
+      data: {
+        items: updatedItems,
+        ...(dto.note !== undefined && { note: dto.note }),
+      },
+      include: {
+        employee: { select: { id: true, firstName: true, lastName: true, employeeCode: true } },
+        equipmentRequest: { select: { id: true, manpowerRequestId: true, status: true } },
+      },
+    });
+
+    this.audit(AuditAction.UPDATE, id, tenantId, userId, `Equipment issuance edited (${edits.size} items adjusted)`);
     return updated;
   }
 

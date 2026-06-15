@@ -41,7 +41,7 @@ export class HrProbationService {
       orderBy: [{ status: 'asc' }, { dueDate: 'asc' }],
       include: {
         employee: { select: { id: true, firstName: true, lastName: true, employeeCode: true, status: true } },
-        checkpoints: { orderBy: { dueDate: 'asc' } },
+        checkpoints: { orderBy: { dueDate: 'asc' }, include: { ratings: true } },
       },
     });
     return { data, total: data.length };
@@ -52,7 +52,7 @@ export class HrProbationService {
       where: { id, tenantId },
       include: {
         employee: { select: { id: true, firstName: true, lastName: true, employeeCode: true, status: true } },
-        checkpoints: { orderBy: { dueDate: 'asc' } },
+        checkpoints: { orderBy: { dueDate: 'asc' }, include: { ratings: true } },
       },
     });
     if (!round) throw new NotFoundException(`Probation round ${id} not found`);
@@ -112,18 +112,43 @@ export class HrProbationService {
     if (!checkpoint) throw new NotFoundException(`Checkpoint ${checkpointId} not found in round ${roundId}`);
     if (checkpoint.status === 'done') throw new BadRequestException('Checkpoint already reviewed');
 
-    const updated = await (this.prisma as any).hrProbationCheckpoint.update({
-      where: { id: checkpointId },
-      data: {
-        score: dto.score !== undefined ? dto.score.toFixed(2) : null,
-        strengths: dto.strengths ?? null,
-        improvements: dto.improvements ?? null,
-        reviewerId,
-        reviewedAt: new Date(),
-        status: dto.skip ? 'skipped' : 'done',
-      },
+    // คะแนนรวม: ถ้าส่ง ratings รายมิติมา ใช้ค่าเฉลี่ยเป็น overall, ไม่งั้นใช้ score ที่ส่งมาตรง ๆ
+    const ratings = dto.ratings ?? [];
+    const overall =
+      ratings.length > 0
+        ? ratings.reduce((sum, r) => sum + r.score, 0) / ratings.length
+        : dto.score;
+
+    const updated = await this.prisma.$transaction(async (tx: any) => {
+      if (ratings.length > 0) {
+        await tx.hrProbationCheckpointRating.deleteMany({ where: { checkpointId } });
+        for (const r of ratings) {
+          await tx.hrProbationCheckpointRating.create({
+            data: { tenantId, checkpointId, competency: r.competency, score: r.score.toFixed(2) },
+          });
+        }
+      }
+      return tx.hrProbationCheckpoint.update({
+        where: { id: checkpointId },
+        data: {
+          score: overall !== undefined && overall !== null ? Number(overall).toFixed(2) : null,
+          strengths: dto.strengths ?? null,
+          improvements: dto.improvements ?? null,
+          reviewerId,
+          reviewedAt: new Date(),
+          status: dto.skip ? 'skipped' : 'done',
+        },
+        include: { ratings: true },
+      });
     });
-    this.audit(AuditAction.PROBATION_CHECKPOINT_REVIEW, checkpointId, tenantId, reviewerId, `Checkpoint "${checkpoint.label}" reviewed (score: ${dto.score ?? '-'})`);
+
+    this.audit(
+      AuditAction.PROBATION_CHECKPOINT_REVIEW,
+      checkpointId,
+      tenantId,
+      reviewerId,
+      `Checkpoint "${checkpoint.label}" reviewed (score: ${overall != null ? Number(overall).toFixed(0) : '-'}${ratings.length ? `, ${ratings.length} มิติ` : ''})`,
+    );
     return updated;
   }
 
@@ -191,17 +216,15 @@ export class HrProbationService {
         });
       }
 
-      // Close out the source manpower request when the pipeline reaches its end.
-      if (round.hireRecordId && dto.decision === 'passed') {
+      // Close out the source manpower request only when EVERY hired employee's probation
+      // has been resolved (passed/failed) — รับหลายอัตราต้องจบทดลองงานครบทุกคนก่อนถือว่าเสร็จ
+      if (round.hireRecordId && (dto.decision === 'passed' || dto.decision === 'failed')) {
         const hire = await tx.hrHireRecord.findUnique({
           where: { id: round.hireRecordId },
-          include: { candidate: true },
+          include: { candidate: { select: { manpowerRequestId: true } } },
         });
-        if (hire) {
-          await tx.hrManpowerRequest.update({
-            where: { id: hire.candidate.manpowerRequestId },
-            data: { status: 'completed' },
-          });
+        if (hire?.candidate?.manpowerRequestId) {
+          await this.completeRequestIfAllProbationResolved(tx, hire.candidate.manpowerRequestId, tenantId);
         }
       }
       return { round: updated, nextRound };
@@ -216,5 +239,27 @@ export class HrProbationService {
       { decision: dto.decision, employeeStatus: employeeStatusMap[dto.decision] },
     );
     return result;
+  }
+
+  /**
+   * ปิดคำขอสรรหา (probation → completed) เฉพาะเมื่อ "ทุกอัตราที่จ้าง" จบช่วงทดลองงานครบแล้ว
+   * (รับหลายคน: ตราบใดยังมีพนักงานที่ยังไม่รายงานตัว (PENDING_START) หรือยังทดลองงานอยู่ (PROBATION)
+   * คำขอจะยังไม่ถือว่าเสร็จ) เรียกภายใน transaction ของ decide หลังอัปเดตสถานะพนักงานคนปัจจุบันแล้ว
+   */
+  private async completeRequestIfAllProbationResolved(tx: any, manpowerRequestId: string, tenantId: string): Promise<void> {
+    const hiredCandidates = await tx.hrCandidate.findMany({
+      where: { tenantId, manpowerRequestId, status: 'hired' },
+      select: { hireRecord: { select: { employee: { select: { status: true } } } } },
+    });
+    if (hiredCandidates.length === 0) return;
+    const anyUnresolved = hiredCandidates.some((c: any) => {
+      const status = c.hireRecord?.employee?.status;
+      return status === 'PENDING_START' || status === 'PROBATION';
+    });
+    if (anyUnresolved) return;
+    await tx.hrManpowerRequest.updateMany({
+      where: { id: manpowerRequestId, status: 'probation' },
+      data: { status: 'completed' },
+    });
   }
 }

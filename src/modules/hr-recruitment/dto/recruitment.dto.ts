@@ -108,6 +108,15 @@ export class CreateEquipmentRequestDto {
   items: EquipmentItemDto[];
 }
 
+/** แก้ไขรายการของคำขอเบิกที่ยังไม่อนุมัติ (status === 'pending') */
+export class UpdateEquipmentRequestDto {
+  @ApiProperty({ type: [EquipmentItemDto] })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => EquipmentItemDto)
+  items: EquipmentItemDto[];
+}
+
 // ─── Stage 4: Candidate + interview ──────────────────────────────────────────
 
 export class CreateCandidateDto {
