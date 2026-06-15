@@ -1504,6 +1504,9 @@ model HrEquipmentRequest {
   id                String   @id @default(uuid())
   tenantId          String
   manpowerRequestId String
+  // เบิกของ "ทีละคน" — ผูกคำขอเบิกกับพนักงานที่จ้างแล้วรายคน (คำขอหลายอัตรารับหลายคน)
+  // null = คำขอแบบเดิม (ระดับใบสรรหา ก่อนแยกรายคน) — ยังออกใบเบิกให้ทุกคนเพื่อ backward-compat
+  employeeId        String?
   items             Json // [{ name, qty, estimatedCost, note, itemId?, warehouseId? }] — itemId/warehouseId มีเมื่อผูกกับคลัง (INVENTORY_MODULE)
   totalCost         Decimal? @db.Decimal(12, 2)
   status            String   @default("pending") // pending|approved|rejected|procured|ready
@@ -1517,6 +1520,7 @@ model HrEquipmentRequest {
   issuances       HrEquipmentIssuance[]
 
   @@index([tenantId, status])
+  @@index([employeeId])
   @@map("hr_equipment_requests")
 }
 

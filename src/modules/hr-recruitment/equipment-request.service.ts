@@ -81,12 +81,32 @@ export class EquipmentRequestService {
     }
     if (!dto.items.length) throw new BadRequestException('At least one equipment item is required');
 
+    // ── เบิกของ "ทีละคน": ผูกคำขอเบิกกับพนักงานที่จ้างแล้วรายคน ──
+    // ใบสรรหารับได้หลายอัตรา จึงต้องระบุว่าเบิกให้ใคร เพื่อไม่ให้ปนกัน
+    const hiredEmployeeIds = await this.hiredEmployeeIds(manpowerRequestId, tenantId);
+    if (hiredEmployeeIds.length > 0) {
+      if (!dto.employeeId) {
+        throw new BadRequestException('employeeId is required — ระบุพนักงานที่จะเบิกของให้ (เบิกทีละคน)');
+      }
+      if (!hiredEmployeeIds.includes(dto.employeeId)) {
+        throw new BadRequestException('employeeId is not a hired employee of this manpower request');
+      }
+      // กันคำขอซ้ำต่อคน: หนึ่งพนักงานมีคำขอเบิกที่ยัง active (ไม่ถูกปฏิเสธ) ได้ใบเดียว
+      const dup = await (this.prisma as any).hrEquipmentRequest.findFirst({
+        where: { tenantId, manpowerRequestId, employeeId: dto.employeeId, status: { not: 'rejected' } },
+      });
+      if (dup) {
+        throw new BadRequestException('พนักงานคนนี้มีคำขอเบิกอยู่แล้ว — แก้ไขคำขอเดิมแทนการสร้างใหม่');
+      }
+    }
+
     const totalCost = dto.items.reduce((sum, item) => sum + (item.estimatedCost ?? 0) * item.qty, 0);
     const equipmentRoles = await this.approvalFlow.resolveRoles(tenantId, 'equipment');
     const request = await (this.prisma as any).hrEquipmentRequest.create({
       data: {
         tenantId,
         manpowerRequestId,
+        employeeId: dto.employeeId ?? null,
         items: dto.items.map((i) => ({ ...i, estimatedCost: i.estimatedCost ?? null, note: i.note ?? null })),
         totalCost,
         status: 'pending',
@@ -96,6 +116,17 @@ export class EquipmentRequestService {
     });
     this.audit(AuditAction.EQUIPMENT_REQUEST_SUBMIT, request.id, tenantId, userId, `Equipment requested for ${manpower.requestNo} (${dto.items.length} items)`);
     return request;
+  }
+
+  /** id พนักงานที่จ้างแล้ว (มี employee ผูก) ของใบสรรหานี้ — ใช้ตรวจการเบิกรายคน */
+  private async hiredEmployeeIds(manpowerRequestId: string, tenantId: string): Promise<string[]> {
+    const candidates = await (this.prisma as any).hrCandidate.findMany({
+      where: { tenantId, manpowerRequestId, status: 'hired' },
+      select: { hireRecord: { select: { employeeId: true } } },
+    });
+    return candidates
+      .map((c: any) => c.hireRecord?.employeeId)
+      .filter((eid: string | null | undefined): eid is string => Boolean(eid));
   }
 
   /**
@@ -149,7 +180,7 @@ export class EquipmentRequestService {
     // แล้วเลื่อนคำขอสรรหาจากขั้น "ขออุปกรณ์" (hired) ไปขั้น "รับของ" (onboarding)
     // กรณีขออุปกรณ์ "หลังจ้าง": acceptOffer ผ่านไปแล้วจึงยังไม่มี issuance — สร้างตรงนี้
     if (fullyApproved) {
-      await this.issueToHiredEmployeesAndAdvance(existing.manpowerRequestId, existing.id, tenantId);
+      await this.issueToHiredEmployeesAndAdvance(existing.manpowerRequestId, existing.id, existing.employeeId ?? null, tenantId);
     }
 
     this.audit(AuditAction.EQUIPMENT_REQUEST_APPROVE_STEP, id, tenantId, userId, fullyApproved ? 'Equipment request fully approved' : 'Equipment approval step recorded');
@@ -157,10 +188,18 @@ export class EquipmentRequestService {
   }
 
   /**
-   * หลังคำขอเบิกอนุมัติครบ: ออกใบเบิกวันแรกให้พนักงานที่จ้างแล้ว (status 'hired') ของคำขอสรรหานี้
-   * ที่ยังไม่มีใบเบิกผูกกับคำขอเบิกนี้ จากนั้นเลื่อนสถานะคำขอสรรหา hired → onboarding (ขั้นรับของ)
+   * หลังคำขอเบิกอนุมัติครบ: ออกใบเบิกวันแรกให้พนักงานเป้าหมายของคำขอเบิกนี้
+   * - คำขอผูกพนักงานรายคน (employeeId มีค่า) → ออกใบเบิกให้คนนั้นคนเดียว (เบิกทีละคน)
+   * - คำขอแบบเดิม (employeeId = null) → ออกใบเบิกให้พนักงานที่จ้างแล้วทุกคน (backward-compat)
+   * จากนั้นเลื่อนสถานะ hired → onboarding (ขั้นรับของ) เฉพาะเมื่อพนักงานทุกคน "มีใบเบิกครบแล้ว"
+   * เพื่อไม่ให้ใบเดินหน้าทั้งที่ยังเบิกให้ไม่ครบทุกคน
    */
-  private async issueToHiredEmployeesAndAdvance(manpowerRequestId: string, equipmentRequestId: string, tenantId: string): Promise<void> {
+  private async issueToHiredEmployeesAndAdvance(
+    manpowerRequestId: string,
+    equipmentRequestId: string,
+    requestEmployeeId: string | null,
+    tenantId: string,
+  ): Promise<void> {
     const manpower = await (this.prisma as any).hrManpowerRequest.findFirst({
       where: { id: manpowerRequestId, tenantId },
       include: { candidates: { where: { status: 'hired' }, select: { hireRecord: { select: { employeeId: true } } } } },
@@ -170,13 +209,17 @@ export class EquipmentRequestService {
       where: { id: equipmentRequestId, tenantId },
       select: { items: true },
     });
-    const employeeIds: string[] = (manpower.candidates ?? [])
+    const hiredEmployeeIds: string[] = (manpower.candidates ?? [])
       .map((c: any) => c.hireRecord?.employeeId)
       .filter((eid: string | null | undefined): eid is string => Boolean(eid));
+    // คำขอผูกรายคน → ออกใบเบิกให้คนนั้นเท่านั้น (ถ้ายังเป็นพนักงานที่จ้างอยู่)
+    const targetEmployeeIds = requestEmployeeId
+      ? hiredEmployeeIds.filter((eid) => eid === requestEmployeeId)
+      : hiredEmployeeIds;
     const hasInventory = await this.recruitmentInventory.isEnabled(tenantId);
 
     await this.prisma.$transaction(async (tx: any) => {
-      for (const employeeId of employeeIds) {
+      for (const employeeId of targetEmployeeIds) {
         const already = await tx.hrEquipmentIssuance.findFirst({
           where: { tenantId, equipmentRequestId, employeeId },
         });
@@ -193,12 +236,23 @@ export class EquipmentRequestService {
           data: { tenantId, equipmentRequestId, employeeId, items: issuanceItems, status: issuanceStatus },
         });
       }
-      // เลื่อนขั้นเฉพาะเมื่อจ้างครบแล้ว (status = hired) — partial hire (recruiting) ยังไม่ขยับ
-      if (manpower.status === 'hired') {
-        await tx.hrManpowerRequest.updateMany({
-          where: { id: manpower.id, status: 'hired' },
-          data: { status: 'onboarding' },
+
+      // เลื่อนขั้นเฉพาะเมื่อจ้างครบ (status = hired) และพนักงานทุกคน "มีใบเบิกแล้ว"
+      // เบิกทีละคน: คนแรกอนุมัติแล้วยังไม่ครบ ใบจึงยังค้างขั้น "ขออุปกรณ์" จนกว่าจะเบิกครบทุกคน
+      if (manpower.status === 'hired' && hiredEmployeeIds.length > 0) {
+        const issuedEmployees: Array<{ employeeId: string }> = await tx.hrEquipmentIssuance.findMany({
+          where: { tenantId, employeeId: { in: hiredEmployeeIds } },
+          select: { employeeId: true },
+          distinct: ['employeeId'],
         });
+        const issuedSet = new Set(issuedEmployees.map((i) => i.employeeId));
+        const allIssued = hiredEmployeeIds.every((eid) => issuedSet.has(eid));
+        if (allIssued) {
+          await tx.hrManpowerRequest.updateMany({
+            where: { id: manpower.id, status: 'hired' },
+            data: { status: 'onboarding' },
+          });
+        }
       }
     });
   }

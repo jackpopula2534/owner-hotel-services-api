@@ -101,6 +101,14 @@ export class EquipmentItemDto {
 }
 
 export class CreateEquipmentRequestDto {
+  @ApiPropertyOptional({
+    description:
+      'พนักงานที่จ้างแล้วซึ่งจะเบิกของให้ (เบิกทีละคน) — บังคับเมื่อใบสรรหามีพนักงานที่จ้างแล้ว',
+  })
+  @IsOptional()
+  @IsUUID()
+  employeeId?: string;
+
   @ApiProperty({ type: [EquipmentItemDto] })
   @IsArray()
   @ValidateNested({ each: true })
