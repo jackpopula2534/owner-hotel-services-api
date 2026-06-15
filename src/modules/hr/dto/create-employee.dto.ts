@@ -9,6 +9,7 @@ import {
   IsBoolean,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 
 export class CreateEmployeeDto {
   @ApiProperty({ example: 'John' })
@@ -177,6 +178,9 @@ export class CreateEmployeeDto {
   })
   @IsArray()
   @IsOptional()
+  // ระบุ element type เป็น Object — กัน enableImplicitConversion แปลง object ในแต่ละ
+  // รายการเป็น [] (JSON freeform ที่ไม่มี nested DTO type ให้ class-transformer อ้างอิง)
+  @Type(() => Object)
   educations?: Record<string, unknown>[];
 
   @ApiPropertyOptional({
@@ -187,6 +191,7 @@ export class CreateEmployeeDto {
   })
   @IsArray()
   @IsOptional()
+  @Type(() => Object)
   workExperiences?: Record<string, unknown>[];
 
   @ApiPropertyOptional({
@@ -195,6 +200,7 @@ export class CreateEmployeeDto {
   })
   @IsArray()
   @IsOptional()
+  @Type(() => Object)
   emergencyContacts?: Record<string, unknown>[];
 
   // ─── PDPA Consent Fields ─────────────────────────────────────────────────
