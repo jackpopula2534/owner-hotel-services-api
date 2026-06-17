@@ -19,7 +19,7 @@ import {
   ApiQuery,
 } from '@nestjs/swagger';
 import { HrPayrollService } from './hr-payroll.service';
-import { RunPayrollDto, ApprovePayrollDto } from './dto/run-payroll.dto';
+import { RunPayrollDto, ApprovePayrollDto, UpdatePayrollDto } from './dto/run-payroll.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -106,6 +106,28 @@ export class HrPayrollController {
     @CurrentUser() user: { tenantId?: string; id?: string },
   ) {
     return this.payrollService.runPayroll(dto, user.tenantId!, user.id);
+  }
+
+  // ─── Manual edit ──────────────────────────────────────────────────────────
+
+  @Patch(':id')
+  @ApiOperation({
+    summary: 'Edit a draft payroll record (per-employee manual override)',
+    description:
+      'Override base salary and/or replace the itemized breakdown. All totals and ' +
+      'net pay are recomputed from the submitted values. Draft status only.',
+  })
+  @ApiParam({ name: 'id', description: 'Payroll record ID' })
+  @ApiResponse({ status: 200, description: 'Payroll updated' })
+  @ApiResponse({ status: 400, description: 'Payroll is not in draft status' })
+  @HttpCode(HttpStatus.OK)
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'hr')
+  async update(
+    @Param('id') id: string,
+    @Body() dto: UpdatePayrollDto,
+    @CurrentUser() user: { tenantId?: string; id?: string },
+  ) {
+    return this.payrollService.updateDraft(id, dto, user.tenantId!, user.id);
   }
 
   // ─── Workflow ─────────────────────────────────────────────────────────────

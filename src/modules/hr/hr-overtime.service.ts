@@ -16,6 +16,12 @@ import {
   ReviewHrOvertimeRequestDto,
 } from './dto/create-hr-overtime-request.dto';
 
+export interface BulkOvertimeResult {
+  created: number;
+  skipped: number;
+  skippedEmployeeIds: string[];
+}
+
 /**
  * Overtime approval workflow (P1-05). Approved OT is the source of truth the
  * payroll engine uses when a policy sets otRequiresApproval = true.
@@ -114,6 +120,72 @@ export class HrOvertimeService {
       .catch((err) => this.logger.error(`Audit log failed: ${err.message}`));
 
     return record;
+  }
+
+  /**
+   * สร้างคำขอ OT หลายรายการพร้อมกัน (เช่น ขอ OT ทั้งแผนก → ขยายเป็นรายคนจากฝั่ง client).
+   * ตรวจสอบว่าพนักงานทุกคนอยู่ใน tenant เดียวกัน แล้วบันทึกด้วย createMany.
+   */
+  async createBulk(
+    dtos: CreateHrOvertimeRequestDto[],
+    tenantId: string,
+    userId?: string,
+  ): Promise<BulkOvertimeResult> {
+    if (!dtos.length) {
+      throw new BadRequestException('No overtime requests provided');
+    }
+
+    const employeeIds = [...new Set(dtos.map((d) => d.employeeId))];
+    const employees = await (this.prisma.employee as any).findMany({
+      where: { id: { in: employeeIds }, tenantId },
+      select: { id: true },
+    });
+    const validIds = new Set<string>(employees.map((e: any) => e.id));
+
+    const accepted = dtos.filter((d) => validIds.has(d.employeeId));
+    const skippedEmployeeIds = dtos
+      .filter((d) => !validIds.has(d.employeeId))
+      .map((d) => d.employeeId);
+
+    if (!accepted.length) {
+      throw new NotFoundException('No valid employees found for this tenant');
+    }
+
+    const data = accepted.map((d) => ({
+      tenantId,
+      employeeId: d.employeeId,
+      attendanceId: d.attendanceId ?? null,
+      date: this.toDateOnly(d.date),
+      minutes: d.minutes,
+      multiplier: (d.multiplier ?? 1.5).toFixed(2),
+      reason: d.reason ?? null,
+      status: 'pending',
+      createdBy: userId ?? null,
+    }));
+
+    const result = await (this.prisma as any).hrOvertimeRequest.createMany({ data });
+
+    await this.auditLog
+      .log({
+        action: AuditAction.OVERTIME_REQUEST,
+        resource: AuditResource.OVERTIME_REQUEST,
+        category: AuditCategory.HR,
+        tenantId,
+        userId,
+        newValues: { count: result.count, employeeIds: accepted.map((d) => d.employeeId) },
+        description: `Bulk overtime requested (${result.count} employees)`,
+      })
+      .catch((err) => this.logger.error(`Audit log failed: ${err.message}`));
+
+    this.logger.log(
+      `Bulk OT created: ${result.count} request(s), ${skippedEmployeeIds.length} skipped (tenant ${tenantId})`,
+    );
+
+    return {
+      created: result.count,
+      skipped: skippedEmployeeIds.length,
+      skippedEmployeeIds,
+    };
   }
 
   async review(

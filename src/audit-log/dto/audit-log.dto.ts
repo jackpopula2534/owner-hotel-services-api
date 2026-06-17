@@ -120,6 +120,7 @@ export enum AuditAction {
   OVERTIME_APPROVE = 'overtime_approve',
   OVERTIME_REJECT = 'overtime_reject',
   PAYROLL_RUN = 'payroll_run',
+  PAYROLL_UPDATE = 'payroll_update',
   PAYROLL_APPROVE = 'payroll_approve',
   PAYROLL_PAID = 'payroll_paid',
   PAYROLL_CANCEL = 'payroll_cancel',

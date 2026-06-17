@@ -712,12 +712,35 @@ model HrDepartment {
   employees    Employee[]
   positions    HrPosition[]
   assignmentRules HrLifecycleAssignmentRule[]
+  workPolicy   HrDepartmentWorkPolicy?
   costCenter   CostCenter?  @relation(fields: [costCenterId], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, code])
   @@index([tenantId])
   @@index([costCenterId])
   @@map("hr_departments")
+}
+
+/// รูปแบบการทำงาน/วันหยุดประจำสัปดาห์ ต่อแผนก (ใช้บังคับการลงกะใน Roster)
+/// pattern: MON_FRI | MON_SAT | CUSTOM | FLEXIBLE
+/// offDays: JSON array ของเลขวัน (0=อาทิตย์ ... 6=เสาร์) ที่เป็นวันหยุด
+/// enforceOffDays = true → ห้ามลงกะทำงานในวันหยุดที่กำหนด, false → ยืดหยุ่นเลือกเองได้
+model HrDepartmentWorkPolicy {
+  id                 String       @id @default(uuid())
+  tenantId           String
+  departmentId       String       @unique
+  pattern            String       @default("FLEXIBLE")
+  offDays            Json         @default("[]")
+  enforceOffDays     Boolean      @default(true)
+  defaultShiftTypeId String?
+  note               String?      @db.Text
+  isActive           Boolean      @default(true)
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  department         HrDepartment @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("hr_department_work_policies")
 }
 
 model HrPosition {
@@ -1179,6 +1202,10 @@ model HrPayrollPolicy {
   socialSecurityRate    Decimal  @default(0.0500) @db.Decimal(6, 4)
   socialSecurityCap     Decimal  @default(750.00) @db.Decimal(12, 2)
   taxEnabled            Boolean  @default(false)
+  taxPersonalAllowance  Decimal  @default(60000.00) @db.Decimal(12, 2)
+  taxExpenseRate        Decimal  @default(0.5000) @db.Decimal(6, 4)
+  taxExpenseCap         Decimal  @default(100000.00) @db.Decimal(12, 2)
+  taxExtraAllowance     Decimal  @default(0.00) @db.Decimal(12, 2)
   lateDeductionPerMin   Decimal  @default(0.00) @db.Decimal(8, 2)
   note                  String?  @db.Text
   createdAt             DateTime @default(now())

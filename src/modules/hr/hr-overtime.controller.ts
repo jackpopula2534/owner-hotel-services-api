@@ -20,6 +20,7 @@ import {
 import { HrOvertimeService } from './hr-overtime.service';
 import {
   CreateHrOvertimeRequestDto,
+  BulkCreateHrOvertimeRequestDto,
   ReviewHrOvertimeRequestDto,
 } from './dto/create-hr-overtime-request.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -69,6 +70,17 @@ export class HrOvertimeController {
     @CurrentUser() user: { tenantId?: string; id?: string },
   ) {
     return this.service.create(dto, user.tenantId!, user.id);
+  }
+
+  @Post('bulk')
+  @ApiOperation({ summary: 'Submit overtime requests in bulk (e.g. whole department)' })
+  @HttpCode(HttpStatus.CREATED)
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
+  async createBulk(
+    @Body() dto: BulkCreateHrOvertimeRequestDto,
+    @CurrentUser() user: { tenantId?: string; id?: string },
+  ) {
+    return this.service.createBulk(dto.requests, user.tenantId!, user.id);
   }
 
   @Post(':id/review')

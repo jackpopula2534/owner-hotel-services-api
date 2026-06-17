@@ -9,7 +9,11 @@ import {
   Min,
   Max,
   MaxLength,
+  ValidateNested,
+  ArrayMinSize,
+  ArrayMaxSize,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateHrOvertimeRequestDto {
@@ -45,6 +49,18 @@ export class CreateHrOvertimeRequestDto {
   @IsString()
   @MaxLength(1000)
   reason?: string;
+}
+
+export class BulkCreateHrOvertimeRequestDto {
+  @ApiProperty({
+    description: 'รายการคำขอ OT (เช่น ขยายจากทั้งแผนกเป็นรายคน)',
+    type: [CreateHrOvertimeRequestDto],
+  })
+  @ValidateNested({ each: true })
+  @Type(() => CreateHrOvertimeRequestDto)
+  @ArrayMinSize(1)
+  @ArrayMaxSize(500)
+  requests: CreateHrOvertimeRequestDto[];
 }
 
 export class ReviewHrOvertimeRequestDto {

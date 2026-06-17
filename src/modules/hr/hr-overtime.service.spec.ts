@@ -6,12 +6,13 @@ import { AuditLogService } from '../../audit-log/audit-log.service';
 
 function createMockPrisma() {
   return {
-    employee: { findFirst: jest.fn() },
+    employee: { findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
     hrOvertimeRequest: {
       findMany: jest.fn().mockResolvedValue([]),
       count: jest.fn().mockResolvedValue(0),
       findFirst: jest.fn(),
       create: jest.fn(),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
       update: jest.fn(),
     },
   };
@@ -43,6 +44,33 @@ describe('HrOvertimeService', () => {
     expect(arg.data.multiplier).toBe('1.50');
     expect(arg.data.minutes).toBe(120);
     expect(audit.log).toHaveBeenCalled();
+  });
+
+  it('creates bulk OT only for employees in the tenant', async () => {
+    prisma.employee.findMany.mockResolvedValue([{ id: 'e1' }, { id: 'e2' }]);
+    prisma.hrOvertimeRequest.createMany.mockResolvedValue({ count: 2 });
+    const res = await service.createBulk(
+      [
+        { employeeId: 'e1', date: '2026-06-09', minutes: 120 },
+        { employeeId: 'e2', date: '2026-06-09', minutes: 120, multiplier: 2 },
+        { employeeId: 'outsider', date: '2026-06-09', minutes: 120 },
+      ],
+      't1',
+      'u1',
+    );
+    const arg = prisma.hrOvertimeRequest.createMany.mock.calls[0][0];
+    expect(arg.data).toHaveLength(2);
+    expect(arg.data[0].multiplier).toBe('1.50');
+    expect(arg.data[1].multiplier).toBe('2.00');
+    expect(res).toEqual({ created: 2, skipped: 1, skippedEmployeeIds: ['outsider'] });
+    expect(audit.log).toHaveBeenCalled();
+  });
+
+  it('throws when no valid employees in bulk request', async () => {
+    prisma.employee.findMany.mockResolvedValue([]);
+    await expect(
+      service.createBulk([{ employeeId: 'x', date: '2026-06-09', minutes: 60 }], 't1'),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('throws when employee missing', async () => {

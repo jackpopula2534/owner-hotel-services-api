@@ -51,6 +51,18 @@ export class HrOnboardingController {
     return this.service.seed(dto, user.tenantId!, user.id);
   }
 
+  @Post('dedupe')
+  @ApiOperation({ summary: 'Remove duplicate onboarding tasks (ล้างงานซ้ำ)' })
+  @ApiQuery({ name: 'employeeId', required: true, type: String })
+  @HttpCode(HttpStatus.OK)
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'hr')
+  async dedupe(
+    @Query('employeeId') employeeId: string,
+    @CurrentUser() user: { tenantId?: string; id?: string },
+  ) {
+    return this.service.dedupe(employeeId, user.tenantId!, user.id);
+  }
+
   @Post()
   @ApiOperation({ summary: 'Add a single onboarding task' })
   @HttpCode(HttpStatus.CREATED)

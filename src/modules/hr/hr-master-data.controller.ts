@@ -26,6 +26,7 @@ import { CreateHrLeaveTypeDto } from './dto/create-hr-leave-type.dto';
 import { CreateHrShiftTypeDto } from './dto/create-hr-shift-type.dto';
 import { CreateHrAllowanceTypeDto } from './dto/create-hr-allowance-type.dto';
 import { CreateHrDeductionTypeDto } from './dto/create-hr-deduction-type.dto';
+import { CreateHrDepartmentWorkPolicyDto } from './dto/create-hr-department-work-policy.dto';
 
 @ApiTags('HR Master Data')
 @ApiBearerAuth()
@@ -224,6 +225,43 @@ export class HrMasterDataController {
     @Request() req: Express.Request & { user: { tenantId: string } },
   ) {
     return this.hrMasterDataService.removeShiftType(req.user.tenantId, id);
+  }
+
+  // ─── DEPARTMENT WORK POLICIES (รูปแบบการทำงาน/วันหยุดต่อแผนก) ──────────────────
+
+  @Get('work-policies')
+  @ApiOperation({ summary: 'ดึงรายการนโยบายการทำงาน/วันหยุดต่อแผนก' })
+  findAllWorkPolicies(@Request() req: Express.Request & { user: { tenantId: string } }) {
+    return this.hrMasterDataService.findAllWorkPolicies(req.user.tenantId);
+  }
+
+  @Post('work-policies')
+  @ApiOperation({ summary: 'ตั้งค่านโยบายการทำงานของแผนก (upsert ตามแผนก)' })
+  createWorkPolicy(
+    @Body() dto: CreateHrDepartmentWorkPolicyDto,
+    @Request() req: Express.Request & { user: { tenantId: string } },
+  ) {
+    return this.hrMasterDataService.createWorkPolicy(req.user.tenantId, dto);
+  }
+
+  @Patch('work-policies/:id')
+  @ApiOperation({ summary: 'แก้ไขนโยบายการทำงานของแผนก' })
+  updateWorkPolicy(
+    @Param('id') id: string,
+    @Body() dto: Partial<CreateHrDepartmentWorkPolicyDto>,
+    @Request() req: Express.Request & { user: { tenantId: string } },
+  ) {
+    return this.hrMasterDataService.updateWorkPolicy(req.user.tenantId, id, dto);
+  }
+
+  @Delete('work-policies/:id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'ลบนโยบายการทำงานของแผนก' })
+  removeWorkPolicy(
+    @Param('id') id: string,
+    @Request() req: Express.Request & { user: { tenantId: string } },
+  ) {
+    return this.hrMasterDataService.removeWorkPolicy(req.user.tenantId, id);
   }
 
   // ─── ALLOWANCE TYPES ──────────────────────────────────────────────────────

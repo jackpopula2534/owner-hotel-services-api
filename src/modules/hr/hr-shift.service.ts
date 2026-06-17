@@ -33,6 +33,42 @@ export class HrShiftService {
     return d;
   }
 
+  private static readonly TH_WEEKDAYS = [
+    'วันอาทิตย์',
+    'วันจันทร์',
+    'วันอังคาร',
+    'วันพุธ',
+    'วันพฤหัสบดี',
+    'วันศุกร์',
+    'วันเสาร์',
+  ];
+
+  /**
+   * โยน BadRequestException ถ้าวันที่ตรงกับวันหยุดที่แผนกกำหนดไว้และบังคับใช้ (enforceOffDays)
+   * แผนกที่ไม่มีนโยบาย หรือ pattern ยืดหยุ่น (enforceOffDays=false) จะลงกะได้ตามปกติ
+   */
+  private async assertNotDepartmentOffDay(
+    tenantId: string,
+    departmentId: string,
+    date: Date,
+  ): Promise<void> {
+    const policy = await (this.prisma as any).hrDepartmentWorkPolicy.findFirst({
+      where: { tenantId, departmentId, isActive: true },
+      select: { offDays: true, enforceOffDays: true, department: { select: { name: true } } },
+    });
+    if (!policy || !policy.enforceOffDays) return;
+
+    const offDays: number[] = Array.isArray(policy.offDays) ? policy.offDays : [];
+    const weekday = date.getUTCDay();
+    if (offDays.includes(weekday)) {
+      const dayName = HrShiftService.TH_WEEKDAYS[weekday] ?? `วัน ${weekday}`;
+      const deptName = policy.department?.name ?? 'แผนกนี้';
+      throw new BadRequestException(
+        `${dayName}เป็นวันหยุดของ${deptName} ไม่สามารถลงกะทำงานได้ (กำหนดวันหยุดไว้ในตั้งค่าการทำงาน)`,
+      );
+    }
+  }
+
   // ─── Shift Assignments ─────────────────────────────────────────────────────
 
   async findAssignments(query: Record<string, string>, tenantId: string) {
@@ -98,12 +134,19 @@ export class HrShiftService {
     }
 
     const date = this.toDateOnly(dto.date);
+    const departmentId = dto.departmentId ?? employee.departmentId ?? null;
+
+    // บังคับตามนโยบายวันหยุดของแผนก: ห้ามลงกะทำงานในวันหยุดที่กำหนด (เฉพาะกะทำงาน ไม่ใช่วันหยุด)
+    if (!dto.isDayOff && departmentId) {
+      await this.assertNotDepartmentOffDay(tenantId, departmentId, date);
+    }
+
     const data = {
       tenantId,
       employeeId: dto.employeeId,
       shiftTypeId: dto.shiftTypeId ?? null,
       propertyId: dto.propertyId ?? employee.propertyId ?? null,
-      departmentId: dto.departmentId ?? employee.departmentId ?? null,
+      departmentId,
       date,
       startTime: dto.startTime ?? null,
       endTime: dto.endTime ?? null,

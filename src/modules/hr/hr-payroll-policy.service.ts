@@ -44,6 +44,10 @@ export class HrPayrollPolicyService {
     socialSecurityRate: 0.05,
     socialSecurityCap: 750,
     taxEnabled: false,
+    taxPersonalAllowance: 60000,
+    taxExpenseRate: 0.5,
+    taxExpenseCap: 100000,
+    taxExtraAllowance: 0,
     lateDeductionPerMin: 0,
   };
 
@@ -93,6 +97,10 @@ export class HrPayrollPolicyService {
       unpaidLeaveRate: Number(policy.unpaidLeaveRate),
       socialSecurityRate: Number(policy.socialSecurityRate),
       socialSecurityCap: Number(policy.socialSecurityCap),
+      taxPersonalAllowance: Number(policy.taxPersonalAllowance),
+      taxExpenseRate: Number(policy.taxExpenseRate),
+      taxExpenseCap: Number(policy.taxExpenseCap),
+      taxExtraAllowance: Number(policy.taxExtraAllowance),
       lateDeductionPerMin: Number(policy.lateDeductionPerMin),
     };
   }
@@ -170,12 +178,20 @@ export class HrPayrollPolicyService {
     const unpaidLeaveRate = money(dto.unpaidLeaveRate, D.unpaidLeaveRate);
     const socialSecurityRate = decimal(dto.socialSecurityRate, D.socialSecurityRate);
     const socialSecurityCap = money(dto.socialSecurityCap, D.socialSecurityCap);
+    const taxPersonalAllowance = money(dto.taxPersonalAllowance, D.taxPersonalAllowance);
+    const taxExpenseRate = decimal(dto.taxExpenseRate, D.taxExpenseRate);
+    const taxExpenseCap = money(dto.taxExpenseCap, D.taxExpenseCap);
+    const taxExtraAllowance = money(dto.taxExtraAllowance, D.taxExtraAllowance);
     const lateDeductionPerMin = money(dto.lateDeductionPerMin, D.lateDeductionPerMin);
     if (otMultiplier !== undefined) base['otMultiplier'] = otMultiplier;
     if (holidayOtMultiplier !== undefined) base['holidayOtMultiplier'] = holidayOtMultiplier;
     if (unpaidLeaveRate !== undefined) base['unpaidLeaveRate'] = unpaidLeaveRate;
     if (socialSecurityRate !== undefined) base['socialSecurityRate'] = socialSecurityRate;
     if (socialSecurityCap !== undefined) base['socialSecurityCap'] = socialSecurityCap;
+    if (taxPersonalAllowance !== undefined) base['taxPersonalAllowance'] = taxPersonalAllowance;
+    if (taxExpenseRate !== undefined) base['taxExpenseRate'] = taxExpenseRate;
+    if (taxExpenseCap !== undefined) base['taxExpenseCap'] = taxExpenseCap;
+    if (taxExtraAllowance !== undefined) base['taxExtraAllowance'] = taxExtraAllowance;
     if (lateDeductionPerMin !== undefined) base['lateDeductionPerMin'] = lateDeductionPerMin;
     return base;
   }

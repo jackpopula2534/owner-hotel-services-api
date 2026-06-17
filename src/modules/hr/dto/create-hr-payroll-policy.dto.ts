@@ -116,10 +116,35 @@ export class CreateHrPayrollPolicyDto {
   @Min(0)
   socialSecurityCap?: number;
 
-  @ApiPropertyOptional({ description: 'Enable withholding tax (simple)', default: false })
+  @ApiPropertyOptional({ description: 'Enable withholding tax (ภงด.1 progressive)', default: false })
   @IsOptional()
   @IsBoolean()
   taxEnabled?: boolean;
+
+  @ApiPropertyOptional({ description: 'Personal tax allowance per year (ค่าลดหย่อนส่วนตัว)', default: 60000 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  taxPersonalAllowance?: number;
+
+  @ApiPropertyOptional({ description: 'Expense deduction rate (0.5 = 50%)', default: 0.5 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  taxExpenseRate?: number;
+
+  @ApiPropertyOptional({ description: 'Expense deduction annual cap', default: 100000 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  taxExpenseCap?: number;
+
+  @ApiPropertyOptional({ description: 'Extra annual allowances (คู่สมรส/บุตร/ประกัน รวม)', default: 0 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  taxExtraAllowance?: number;
 
   @ApiPropertyOptional({ description: 'Late deduction per minute (THB)', default: 0 })
   @IsOptional()

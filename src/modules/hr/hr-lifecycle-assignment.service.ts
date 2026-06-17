@@ -214,15 +214,46 @@ export class HrLifecycleAssignmentService {
 
   // ─── Requirement status transitions ────────────────────────────────────────
 
+  /**
+   * Complete the document-category onboarding task(s) linked to a document type.
+   * Resolving a requirement (upload / verify / waive) should also tick the
+   * matching "เก็บเอกสาร: <name>" onboarding task so progress stays in sync —
+   * requirements and the onboarding checklist are otherwise independent.
+   */
+  private async completeDocumentOnboardingTasks(
+    employeeId: string,
+    tenantId: string,
+    documentTypeName?: string | null,
+    userId?: string,
+  ): Promise<void> {
+    if (!documentTypeName) return;
+    const tasks = await (this.prisma as any).hrOnboardingTask.findMany({
+      where: {
+        tenantId,
+        employeeId,
+        category: 'document',
+        isComplete: false,
+        title: { contains: documentTypeName },
+      },
+      select: { id: true },
+    });
+    if (!tasks.length) return;
+    await (this.prisma as any).hrOnboardingTask.updateMany({
+      where: { id: { in: tasks.map((t: any) => t.id) } },
+      data: { isComplete: true, completedAt: new Date(), completedBy: userId ?? null },
+    });
+  }
+
   async verifyRequirement(requirementId: string, tenantId: string, userId?: string) {
     const requirement = await (this.prisma as any).hrEmployeeDocumentRequirement.findFirst({
       where: { id: requirementId, tenantId },
+      include: { documentType: { select: { name: true } } },
     });
     if (!requirement) throw new NotFoundException(`Requirement ${requirementId} not found`);
     if (!requirement.uploadedDocumentId) {
       throw new BadRequestException('ต้องอัปโหลดเอกสารก่อนจึงจะตรวจสอบได้');
     }
-    return (this.prisma as any).hrEmployeeDocumentRequirement.update({
+    const updated = await (this.prisma as any).hrEmployeeDocumentRequirement.update({
       where: { id: requirementId },
       data: {
         status: 'verified',
@@ -231,14 +262,22 @@ export class HrLifecycleAssignmentService {
         waivedReason: null,
       },
     });
+    await this.completeDocumentOnboardingTasks(
+      requirement.employeeId,
+      tenantId,
+      requirement.documentType?.name,
+      userId,
+    );
+    return updated;
   }
 
   async waiveRequirement(requirementId: string, tenantId: string, reason?: string) {
     const requirement = await (this.prisma as any).hrEmployeeDocumentRequirement.findFirst({
       where: { id: requirementId, tenantId },
+      include: { documentType: { select: { name: true } } },
     });
     if (!requirement) throw new NotFoundException(`Requirement ${requirementId} not found`);
-    return (this.prisma as any).hrEmployeeDocumentRequirement.update({
+    const updated = await (this.prisma as any).hrEmployeeDocumentRequirement.update({
       where: { id: requirementId },
       data: {
         status: 'waived',
@@ -247,6 +286,13 @@ export class HrLifecycleAssignmentService {
         verifiedAt: null,
       },
     });
+    // เอกสารที่ยกเว้นถือว่าจัดการแล้ว — ปิดงาน onboarding หมวด document ที่เกี่ยวข้องด้วย
+    await this.completeDocumentOnboardingTasks(
+      requirement.employeeId,
+      tenantId,
+      requirement.documentType?.name,
+    );
+    return updated;
   }
 
   async bulkVerifyRequirements(ids: string[], tenantId: string, userId?: string) {
@@ -254,7 +300,11 @@ export class HrLifecycleAssignmentService {
     // Only verify requirements that actually have an uploaded document.
     const verifiable = await (this.prisma as any).hrEmployeeDocumentRequirement.findMany({
       where: { tenantId, id: { in: ids }, uploadedDocumentId: { not: null } },
-      select: { id: true },
+      select: {
+        id: true,
+        employeeId: true,
+        documentType: { select: { name: true } },
+      },
     });
     const verifiableIds = verifiable.map((r: any) => r.id);
     if (verifiableIds.length) {
@@ -262,6 +312,15 @@ export class HrLifecycleAssignmentService {
         where: { id: { in: verifiableIds } },
         data: { status: 'verified', verifiedBy: userId ?? null, verifiedAt: new Date(), waivedReason: null },
       });
+      // ปิดงาน onboarding หมวด document ที่ตรงกับเอกสารที่เพิ่งตรวจสอบ
+      for (const r of verifiable) {
+        await this.completeDocumentOnboardingTasks(
+          r.employeeId,
+          tenantId,
+          r.documentType?.name,
+          userId,
+        );
+      }
     }
     return {
       requested: ids.length,
@@ -438,9 +497,16 @@ export class HrLifecycleAssignmentService {
 
     const documentType = await (this.prisma as any).hrDocumentType.findFirst({
       where: { tenantId, code: document.type },
-      select: { id: true },
+      select: { id: true, name: true },
     });
     if (!documentType) return null;
+
+    // อัปโหลดเอกสารแล้ว = "เก็บเอกสาร" สำเร็จ → ปิดงาน onboarding หมวด document ที่ตรงกัน
+    await this.completeDocumentOnboardingTasks(
+      document.employeeId,
+      tenantId,
+      documentType.name,
+    );
 
     const requirement = await (this.prisma as any).hrEmployeeDocumentRequirement.findFirst({
       where: {
