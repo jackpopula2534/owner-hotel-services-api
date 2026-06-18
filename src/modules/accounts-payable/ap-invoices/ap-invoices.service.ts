@@ -1,13 +1,31 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  BadRequestException,
+  Optional,
+} from '@nestjs/common';
 import { PrismaService } from '@/prisma/prisma.service';
 import { CreateApInvoiceDto } from './dto/create-ap-invoice.dto';
 import { QueryApInvoiceDto } from './dto/query-ap-invoice.dto';
+import { JournalEntriesService } from '@/modules/accounting/journal-entries/journal-entries.service';
+import { JournalSourceTypeEnum } from '@/modules/accounting/journal-entries/dto/create-journal-entry.dto';
 
 @Injectable()
 export class ApInvoicesService {
   private readonly logger = new Logger(ApInvoicesService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly journalEntriesService?: JournalEntriesService,
+  ) {}
+
+  private async findDefaultAccountByCode(tenantId: string, code: string) {
+    return this.prisma.accountChart.findFirst({
+      where: { tenantId, code, isActive: true },
+      select: { id: true, code: true, name: true },
+    });
+  }
 
   private async generateInvoiceNo(tenantId: string): Promise<string> {
     const now = new Date();
@@ -158,8 +176,83 @@ export class ApInvoicesService {
 
     const updated = await this.prisma.apInvoice.update({
       where: { id },
-      data: { status: 'APPROVED', approvedBy, approvedAt: new Date() },
+      data: { status: 'APPROVED', approvedBy, approvedAt: new Date(), isPosted: true, postedAt: new Date() },
     });
+
+    const [apAccount, inputVatAccount, defaultExpenseAccount, whtPayableAccount] = await Promise.all([
+      this.findDefaultAccountByCode(tenantId, '2101'),
+      this.findDefaultAccountByCode(tenantId, '1106'),
+      this.findDefaultAccountByCode(tenantId, '6302'),
+      this.findDefaultAccountByCode(tenantId, '2104'),
+    ]);
+
+    if (!apAccount || !inputVatAccount || !defaultExpenseAccount) {
+      throw new BadRequestException(
+        'ไม่สามารถลงบัญชี AP อัตโนมัติได้: กรุณา seed ผังบัญชีมาตรฐานให้ครบก่อน',
+      );
+    }
+
+    const expenseLines = invoice.lines
+      .map((line, index) => ({
+        accountId: line.accountId ?? defaultExpenseAccount.id,
+        lineNo: index + 1,
+        description: line.description,
+        debit: Number(line.netAmount),
+        credit: 0,
+        costCenterId: line.costCenterId ?? undefined,
+        subRef: invoice.invoiceNo,
+      }))
+      .filter((line) => line.debit > 0);
+
+    let nextLineNo = expenseLines.length + 1;
+    const journalLines = [
+      ...expenseLines,
+      ...(Number(invoice.vatAmount) > 0
+        ? [
+            {
+              accountId: inputVatAccount.id,
+              lineNo: nextLineNo++,
+              description: `VAT Input ${invoice.invoiceNo}`,
+              debit: Number(invoice.vatAmount),
+              credit: 0,
+              subRef: invoice.invoiceNo,
+            },
+          ]
+        : []),
+      ...(Number(invoice.whtAmount) > 0 && whtPayableAccount
+        ? [
+            {
+              accountId: whtPayableAccount.id,
+              lineNo: nextLineNo++,
+              description: `WHT Payable ${invoice.invoiceNo}`,
+              debit: 0,
+              credit: Number(invoice.whtAmount),
+              subRef: invoice.invoiceNo,
+            },
+          ]
+        : []),
+      {
+        accountId: apAccount.id,
+        lineNo: nextLineNo,
+        description: `เจ้าหนี้จาก ${invoice.invoiceNo}`,
+        debit: 0,
+        credit: Number(invoice.netPayable),
+        subRef: invoice.invoiceNo,
+      },
+    ];
+
+    if (this.journalEntriesService) {
+      await this.journalEntriesService.createAndPostAutoEntry(tenantId, {
+        propertyId: invoice.propertyId,
+        entryDate: invoice.invoiceDate,
+        description: `อนุมัติ AP Invoice ${invoice.invoiceNo}`,
+        reference: invoice.invoiceNo,
+        sourceType: JournalSourceTypeEnum.AP_PAYMENT,
+        sourceId: invoice.id,
+        createdBy: approvedBy,
+        lines: journalLines,
+      });
+    }
 
     this.logger.log(`AP Invoice ${invoice.invoiceNo} approved by ${approvedBy}`);
     return updated;

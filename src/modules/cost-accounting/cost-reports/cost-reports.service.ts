@@ -266,8 +266,10 @@ export class CostReportsService {
     } else {
       try {
         // Calculate live from bookings
-        const property = await this.prisma.property.findUnique({
-          where: { id: propertyId },
+        // findFirst (NOT findUnique): Property is tenant-scoped and the
+        // tenant-scope middleware rejects findUnique on scoped models.
+        const property = await this.prisma.property.findFirst({
+          where: { id: propertyId, tenantId },
         });
 
         if (property) {

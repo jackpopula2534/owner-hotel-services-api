@@ -26,8 +26,10 @@ export class PeriodCloseService {
   }
 
   async findOne(id: string, tenantId: string) {
-    const period = await this.prisma.periodClose.findUnique({
-      where: { id },
+    // findFirst (NOT findUnique): PeriodClose is tenant-scoped and the
+    // tenant-scope middleware rejects findUnique on scoped models.
+    const period = await this.prisma.periodClose.findFirst({
+      where: { id, tenantId },
       include: {
         departmentPnLs: {
           orderBy: { costCenterId: 'asc' },

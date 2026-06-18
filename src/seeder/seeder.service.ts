@@ -730,6 +730,7 @@ export class SeederService {
     const loyaltyModule = await findAddon('LOYALTY_MODULE');
     const inventoryModule = await findAddon('INVENTORY_MODULE');
     const costAccountingModule = await findAddon('COST_ACCOUNTING_MODULE');
+    const accountingModule = await findAddon('ACCOUNTING_MODULE');
     const automationModule = await findAddon('AUTOMATION_MODULE');
     const customBranding = await findAddon('CUSTOM_BRANDING');
     const crmModule = await findAddon('CRM_MODULE');
@@ -748,6 +749,7 @@ export class SeederService {
       loyaltyModule,
       inventoryModule,
       costAccountingModule,
+      accountingModule,
       automationModule,
       customBranding,
       crmModule,
@@ -781,6 +783,7 @@ export class SeederService {
       loyaltyModule,
       inventoryModule,
       costAccountingModule,
+      accountingModule,
       automationModule,
       crmModule,
     ]);

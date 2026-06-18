@@ -52,14 +52,14 @@ export class KpiSnapshotsService {
       const kpiData = await this.calculateDailyKpis(tenantId, propertyId, snapshotDateObj);
 
       // Check if snapshot already exists for this date
-      const existingSnapshot = await this.prisma.costKpiSnapshot.findUnique({
+      // NOTE: findFirst (not findUnique) because CostKpiSnapshot is tenant-scoped;
+      // the tenant-scope middleware rejects findUnique on scoped models.
+      const existingSnapshot = await this.prisma.costKpiSnapshot.findFirst({
         where: {
-          tenantId_propertyId_snapshotDate_granularity: {
-            tenantId,
-            propertyId,
-            snapshotDate: snapshotDateObj,
-            granularity: 'daily',
-          },
+          tenantId,
+          propertyId,
+          snapshotDate: snapshotDateObj,
+          granularity: 'daily',
         },
       });
 
@@ -105,14 +105,14 @@ export class KpiSnapshotsService {
     granularity: string = 'daily',
   ): Promise<any> {
     try {
-      const snapshot = await this.prisma.costKpiSnapshot.findUnique({
+      // findFirst (not findUnique): CostKpiSnapshot is tenant-scoped and the
+      // tenant-scope middleware rejects findUnique on scoped models.
+      const snapshot = await this.prisma.costKpiSnapshot.findFirst({
         where: {
-          tenantId_propertyId_snapshotDate_granularity: {
-            tenantId,
-            propertyId,
-            snapshotDate,
-            granularity,
-          },
+          tenantId,
+          propertyId,
+          snapshotDate,
+          granularity,
         },
       });
 
@@ -212,14 +212,12 @@ export class KpiSnapshotsService {
         // If no daily snapshots, calculate fresh
         const kpiData = await this.calculateMonthlyKpis(tenantId, propertyId, startDate, endDate);
         startDate.setHours(0, 0, 0, 0);
-        const existingMonthly = await this.prisma.costKpiSnapshot.findUnique({
+        const existingMonthly = await this.prisma.costKpiSnapshot.findFirst({
           where: {
-            tenantId_propertyId_snapshotDate_granularity: {
-              tenantId,
-              propertyId,
-              snapshotDate: startDate,
-              granularity: 'monthly',
-            },
+            tenantId,
+            propertyId,
+            snapshotDate: startDate,
+            granularity: 'monthly',
           },
         });
 
@@ -248,14 +246,12 @@ export class KpiSnapshotsService {
       const aggregated = this.aggregateSnapshots(dailySnapshots);
 
       startDate.setHours(0, 0, 0, 0);
-      const existingMonthly = await this.prisma.costKpiSnapshot.findUnique({
+      const existingMonthly = await this.prisma.costKpiSnapshot.findFirst({
         where: {
-          tenantId_propertyId_snapshotDate_granularity: {
-            tenantId,
-            propertyId,
-            snapshotDate: startDate,
-            granularity: 'monthly',
-          },
+          tenantId,
+          propertyId,
+          snapshotDate: startDate,
+          granularity: 'monthly',
         },
       });
 

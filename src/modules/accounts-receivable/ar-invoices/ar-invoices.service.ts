@@ -1,13 +1,31 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  BadRequestException,
+  Optional,
+} from '@nestjs/common';
 import { PrismaService } from '@/prisma/prisma.service';
 import { CreateArInvoiceDto } from './dto/create-ar-invoice.dto';
 import { QueryArInvoiceDto } from './dto/query-ar-invoice.dto';
+import { JournalEntriesService } from '@/modules/accounting/journal-entries/journal-entries.service';
+import { JournalSourceTypeEnum } from '@/modules/accounting/journal-entries/dto/create-journal-entry.dto';
 
 @Injectable()
 export class ArInvoicesService {
   private readonly logger = new Logger(ArInvoicesService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly journalEntriesService?: JournalEntriesService,
+  ) {}
+
+  private async findDefaultAccountByCode(tenantId: string, code: string) {
+    return this.prisma.accountChart.findFirst({
+      where: { tenantId, code, isActive: true },
+      select: { id: true, code: true, name: true },
+    });
+  }
 
   private async generateInvoiceNo(tenantId: string): Promise<string> {
     const now = new Date();
@@ -167,8 +185,70 @@ export class ArInvoicesService {
 
     const updated = await this.prisma.arInvoice.update({
       where: { id },
-      data: { status: 'ISSUED', issuedBy, issuedAt: new Date() },
+      data: { status: 'ISSUED', issuedBy, issuedAt: new Date(), isPosted: true, postedAt: new Date() },
     });
+
+    const arAccountCode = invoice.invoiceType === 'CITY_LEDGER' ? '1104' : '1103';
+    const [arAccount, outputVatAccount, defaultRevenueAccount] = await Promise.all([
+      this.findDefaultAccountByCode(tenantId, arAccountCode),
+      this.findDefaultAccountByCode(tenantId, '2103'),
+      this.findDefaultAccountByCode(tenantId, '4101'),
+    ]);
+
+    if (!arAccount || !outputVatAccount || !defaultRevenueAccount) {
+      throw new BadRequestException(
+        'ไม่สามารถลงบัญชี AR อัตโนมัติได้: กรุณา seed ผังบัญชีมาตรฐานให้ครบก่อน',
+      );
+    }
+
+    const revenueLines = invoice.lines
+      .map((line, index) => ({
+        accountId: line.accountId ?? defaultRevenueAccount.id,
+        lineNo: index + 2,
+        description: line.description,
+        debit: 0,
+        credit: Number(line.netAmount),
+        costCenterId: line.costCenterId ?? undefined,
+        subRef: line.sourceRef ?? invoice.invoiceNo,
+      }))
+      .filter((line) => line.credit > 0);
+
+    const journalLines = [
+      {
+        accountId: arAccount.id,
+        lineNo: 1,
+        description: `ลูกหนี้จาก ${invoice.invoiceNo}`,
+        debit: Number(invoice.totalAmount),
+        credit: 0,
+        subRef: invoice.invoiceNo,
+      },
+      ...revenueLines,
+      ...(Number(invoice.vatAmount) > 0
+        ? [
+            {
+              accountId: outputVatAccount.id,
+              lineNo: revenueLines.length + 2,
+              description: `VAT Output ${invoice.invoiceNo}`,
+              debit: 0,
+              credit: Number(invoice.vatAmount),
+              subRef: invoice.invoiceNo,
+            },
+          ]
+        : []),
+    ];
+
+    if (this.journalEntriesService) {
+      await this.journalEntriesService.createAndPostAutoEntry(tenantId, {
+        propertyId: invoice.propertyId,
+        entryDate: invoice.issueDate,
+        description: `ออก AR Invoice ${invoice.invoiceNo}`,
+        reference: invoice.invoiceNo,
+        sourceType: JournalSourceTypeEnum.AR_RECEIPT,
+        sourceId: invoice.id,
+        createdBy: issuedBy,
+        lines: journalLines,
+      });
+    }
 
     this.logger.log(`AR Invoice ${invoice.invoiceNo} issued by ${issuedBy}`);
     return updated;

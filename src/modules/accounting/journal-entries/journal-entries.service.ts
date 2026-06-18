@@ -1,7 +1,21 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@/prisma/prisma.service';
-import { CreateJournalEntryDto } from './dto/create-journal-entry.dto';
+import {
+  CreateJournalEntryDto,
+  JournalSourceTypeEnum,
+} from './dto/create-journal-entry.dto';
 import { QueryJournalEntryDto } from './dto/query-journal-entry.dto';
+
+interface AutoPostJournalEntryInput {
+  propertyId: string;
+  entryDate: string | Date;
+  description: string;
+  reference?: string;
+  sourceType: JournalSourceTypeEnum;
+  sourceId: string;
+  createdBy: string;
+  lines: CreateJournalEntryDto['lines'];
+}
 
 @Injectable()
 export class JournalEntriesService {
@@ -168,6 +182,51 @@ export class JournalEntriesService {
     });
 
     return entry;
+  }
+
+  async createAndPostAutoEntry(tenantId: string, input: AutoPostJournalEntryInput) {
+    const existing = await this.prisma.journalEntry.findFirst({
+      where: {
+        tenantId,
+        propertyId: input.propertyId,
+        sourceType: input.sourceType,
+        sourceId: input.sourceId,
+      },
+      include: {
+        lines: {
+          include: {
+            account: { select: { id: true, code: true, name: true, type: true } },
+          },
+          orderBy: { lineNo: 'asc' },
+        },
+      },
+    });
+
+    if (existing) {
+      if (existing.status === 'DRAFT') {
+        return this.post(existing.id, tenantId, input.createdBy);
+      }
+      return existing;
+    }
+
+    const created = await this.create(
+      {
+        propertyId: input.propertyId,
+        entryDate:
+          input.entryDate instanceof Date
+            ? input.entryDate.toISOString().split('T')[0]
+            : input.entryDate,
+        description: input.description,
+        reference: input.reference,
+        sourceType: input.sourceType,
+        sourceId: input.sourceId,
+        lines: input.lines,
+      },
+      tenantId,
+      input.createdBy,
+    );
+
+    return this.post(created.id, tenantId, input.createdBy);
   }
 
   async post(id: string, tenantId: string, postedBy: string) {

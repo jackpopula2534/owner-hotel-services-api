@@ -167,6 +167,37 @@ export class NightAuditService {
           totalAmount,
           isPosted: false,
         });
+
+        await tx.folioCharge.create({
+          data: {
+            tenantId,
+            propertyId: dto.propertyId,
+            folioId: folio.id,
+            chargeDate: auditDate,
+            chargeType: 'ROOM_CHARGE',
+            description: `ค่าห้องพักคืน ${auditDateStr}`,
+            quantity: 1,
+            unitPrice: amount,
+            netAmount: amount,
+            vatRate: 7,
+            vatAmount,
+            totalAmount,
+            nightAuditId: nightAudit.id,
+            sourceType: 'NIGHT_AUDIT',
+            sourceId: nightAudit.id,
+            isAutoPosted: true,
+            postedBy: startedBy,
+            status: 'POSTED',
+          },
+        });
+
+        await tx.guestFolio.update({
+          where: { id: folio.id },
+          data: {
+            totalCharges: { increment: totalAmount },
+            balance: { increment: totalAmount },
+          },
+        });
       }
 
       // Create charges
