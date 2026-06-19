@@ -62,8 +62,9 @@ export class WarehousesService {
    */
   async findOne(id: string, tenantId: string): Promise<any> {
     try {
-      const warehouse = await this.prisma.warehouse.findUnique({
-        where: { id },
+      // Tenant-scoped model: use findFirst with tenantId (findUnique is blocked by TenantScope)
+      const warehouse = await this.prisma.warehouse.findFirst({
+        where: { id, tenantId },
         include: {
           _count: {
             select: {
@@ -74,10 +75,6 @@ export class WarehousesService {
       });
 
       if (!warehouse) {
-        throw new NotFoundException(`Warehouse with ID ${id} not found`);
-      }
-
-      if (warehouse.tenantId !== tenantId) {
         throw new NotFoundException(`Warehouse with ID ${id} not found`);
       }
 
@@ -116,12 +113,12 @@ export class WarehousesService {
         );
       }
 
-      // Validate propertyId exists
-      const property = await this.prisma.property.findUnique({
-        where: { id: dto.propertyId },
+      // Validate propertyId exists (tenant-scoped: findFirst with tenantId)
+      const property = await this.prisma.property.findFirst({
+        where: { id: dto.propertyId, tenantId },
       });
 
-      if (!property || property.tenantId !== tenantId) {
+      if (!property) {
         throw new BadRequestException('Invalid propertyId');
       }
 
@@ -193,13 +190,13 @@ export class WarehousesService {
         }
       }
 
-      // If propertyId is being changed, validate it
+      // If propertyId is being changed, validate it (tenant-scoped: findFirst with tenantId)
       if (dto.propertyId && dto.propertyId !== warehouse.propertyId) {
-        const property = await this.prisma.property.findUnique({
-          where: { id: dto.propertyId },
+        const property = await this.prisma.property.findFirst({
+          where: { id: dto.propertyId, tenantId },
         });
 
-        if (!property || property.tenantId !== tenantId) {
+        if (!property) {
           throw new BadRequestException('Invalid propertyId');
         }
       }

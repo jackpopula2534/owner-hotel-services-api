@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
+  BulkCreatePitchDto,
   CreatePitchDto,
   UpdatePitchDto,
   UpdatePitchPositionDto,
@@ -40,6 +41,78 @@ export class PitchesService {
     });
     this.logger.log(`Pitch created: ${data.id}`);
     return { success: true, data };
+  }
+
+  /**
+   * สร้างจุดกางเต็นท์หลายจุดในครั้งเดียว (เช่น A4–A20) แบบ transaction
+   * - ข้ามรหัสที่ซ้ำกันเองในรายการ และรหัสที่มีอยู่แล้วในลาน
+   * - คืนรายการที่สร้างสำเร็จ + รายการที่ถูกข้าม
+   */
+  async bulkCreate(dto: BulkCreatePitchDto, tenantId?: string) {
+    const { campgroundId, zoneId, status, sizeSqm, notes } = dto;
+
+    // normalize + ตัดรหัสซ้ำในรายการ (คงลำดับเดิม)
+    const seen = new Set<string>();
+    const requested: string[] = [];
+    for (const raw of dto.codes) {
+      const code = raw.trim();
+      if (!code) continue;
+      const key = code.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      requested.push(code);
+    }
+
+    // หารหัสที่มีอยู่แล้วในลานนี้ เพื่อข้าม (กันชนรหัสซ้ำ)
+    const existing = await this.prisma.campPitch.findMany({
+      where: {
+        campgroundId,
+        ...(tenantId ? { tenantId } : {}),
+        code: { in: requested },
+      },
+      select: { code: true },
+    });
+    const existingSet = new Set(existing.map((p) => p.code.toLowerCase()));
+
+    const toCreate = requested.filter((c) => !existingSet.has(c.toLowerCase()));
+    const skipped = requested.filter((c) => existingSet.has(c.toLowerCase()));
+
+    if (toCreate.length === 0) {
+      return {
+        success: true,
+        data: { created: [], createdCount: 0, skipped, skippedCount: skipped.length },
+      };
+    }
+
+    const created = await this.prisma.$transaction(
+      toCreate.map((code) =>
+        this.prisma.campPitch.create({
+          data: {
+            campgroundId,
+            zoneId,
+            code,
+            ...(status ? { status } : {}),
+            ...(sizeSqm != null ? { sizeSqm } : {}),
+            ...(notes ? { notes } : {}),
+            tenantId: tenantId ?? null,
+          },
+        }),
+      ),
+    );
+
+    this.logger.log(
+      `Bulk pitch create: ${created.length} created, ${skipped.length} skipped (campground ${campgroundId})`,
+    );
+
+    return {
+      success: true,
+      data: {
+        created,
+        createdCount: created.length,
+        skipped,
+        skippedCount: skipped.length,
+      },
+    };
   }
 
   async update(id: string, dto: UpdatePitchDto, tenantId?: string) {

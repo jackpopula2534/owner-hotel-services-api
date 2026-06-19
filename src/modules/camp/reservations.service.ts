@@ -11,7 +11,7 @@ import {
   CreateReservationDto,
   UpdateReservationDto,
 } from './dto/reservation.dto';
-import { calcAddonTotal, calcLodgingTotal, type SeasonalRate } from './camp-pricing';
+import { calcAddonTotal, calcLodgingTotal, countNights, type SeasonalRate } from './camp-pricing';
 
 const BLOCKING_STATUSES = ['pending', 'confirmed', 'checked_in'];
 
@@ -105,14 +105,24 @@ export class ReservationsService {
         });
       }
 
-      const lodging = calcLodgingTotal(
+      const perUnitLodging = calcLodgingTotal(
         Number(pitch.zone.basePrice),
         pitch.zone.weekendPrice ? Number(pitch.zone.weekendPrice) : null,
         checkIn,
         checkOut,
         this.parseSeasons((pitch.zone as any).seasonalRates),
       );
-      const totalPrice = lodging + calcAddonTotal(lineItems);
+      // per_person: ราคาที่กำหนดเป็นราคา "ต่อคน" → คูณจำนวนผู้เข้าพัก
+      const numGuests = dto.numGuests ?? 1;
+      const lodging =
+        pitch.zone.pricingMode === 'per_person' ? perUnitLodging * numGuests : perUnitLodging;
+      // ค่าไฟ (ถ้าโซนมีไฟฟ้า + ตั้งค่าธรรมเนียม) คิดต่อคืน
+      const nights = countNights(checkIn, checkOut);
+      const electricity =
+        pitch.zone.hasElectricity && pitch.zone.electricityFee
+          ? Number(pitch.zone.electricityFee) * nights
+          : 0;
+      const totalPrice = lodging + electricity + calcAddonTotal(lineItems);
 
       const created = await tx.campReservation.create({
         data: {

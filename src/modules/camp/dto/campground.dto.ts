@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import {
+  IsArray,
   IsBoolean,
   IsInt,
   IsNumber,
@@ -59,6 +60,15 @@ export class CreateCampgroundDto {
   @IsInt()
   @Min(0)
   mapHeight?: number;
+
+  @ApiPropertyOptional({
+    type: [String],
+    description: 'คลังรูปภาพของลาน (array ของ URL)',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  images?: string[];
 
   @ApiPropertyOptional({ enum: ['active', 'inactive'], default: 'active' })
   @IsOptional()

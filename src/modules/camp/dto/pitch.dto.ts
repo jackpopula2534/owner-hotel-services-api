@@ -1,5 +1,8 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
   IsInt,
   IsNumber,
   IsOptional,
@@ -60,6 +63,47 @@ export class CreatePitchDto {
 }
 
 export class UpdatePitchDto extends PartialType(CreatePitchDto) {}
+
+export class BulkCreatePitchDto {
+  @ApiProperty()
+  @IsString()
+  @MaxLength(36)
+  campgroundId!: string;
+
+  @ApiProperty()
+  @IsString()
+  @MaxLength(36)
+  zoneId!: string;
+
+  @ApiProperty({
+    description: 'รายการรหัสจุดที่จะสร้าง เช่น ["A4","A5","A6"]',
+    type: [String],
+    example: ['A4', 'A5', 'A6'],
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(500)
+  @IsString({ each: true })
+  @MaxLength(30, { each: true })
+  codes!: string[];
+
+  @ApiPropertyOptional({ enum: PITCH_STATUS, default: 'available' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  status?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  sizeSqm?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  notes?: string;
+}
 
 export class UpdatePitchPositionDto {
   @ApiProperty({ description: 'พิกัด normalized 0..1' })

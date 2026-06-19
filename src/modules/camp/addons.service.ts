@@ -43,6 +43,26 @@ export class AddonsService {
     return { success: true, data };
   }
 
+  /** เพิ่มรูปภาพเข้าอุปกรณ์ (append) — จำกัดสูงสุด 10 รูป */
+  async addImages(id: string, urls: string[], tenantId?: string) {
+    const existing = await this.prisma.campAddon.findFirst({
+      where: { id, ...(tenantId ? { tenantId } : {}) },
+      select: { id: true, images: true },
+    });
+    if (!existing) {
+      throw new NotFoundException(`Addon ${id} not found`);
+    }
+    const current = Array.isArray(existing.images)
+      ? (existing.images as string[])
+      : [];
+    const merged = [...current, ...urls].slice(0, 10);
+    const data = await this.prisma.campAddon.update({
+      where: { id },
+      data: { images: merged },
+    });
+    return { success: true, data };
+  }
+
   async remove(id: string, tenantId?: string) {
     await this.ensureExists(id, tenantId);
     await this.prisma.campAddon.delete({ where: { id } });

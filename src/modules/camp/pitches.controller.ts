@@ -13,6 +13,7 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PitchesService } from './pitches.service';
 import {
+  BulkCreatePitchDto,
   CreatePitchDto,
   UpdatePitchDto,
   UpdatePitchPositionDto,
@@ -67,6 +68,16 @@ export class PitchesController {
   @Roles(...WRITE_ROLES)
   create(@Body() dto: CreatePitchDto, @CurrentUser() user: { tenantId?: string }) {
     return this.service.create(dto, user?.tenantId);
+  }
+
+  @Post('bulk')
+  @ApiOperation({ summary: 'Bulk create pitches (e.g. A4–A20) for a zone in one request' })
+  @Roles(...WRITE_ROLES)
+  bulkCreate(
+    @Body() dto: BulkCreatePitchDto,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    return this.service.bulkCreate(dto, user?.tenantId);
   }
 
   @Put(':id')

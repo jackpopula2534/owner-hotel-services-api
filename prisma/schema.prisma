@@ -53,7 +53,7 @@ model Admin {
   password      String
   role          String         @default("platform_admin")
   status        String         @default("active")
-  menuAccess    Json?          // Admin menu hrefs this admin can access; null/empty = full access
+  menuAccess    Json? // Admin menu hrefs this admin can access; null/empty = full access
   lastLoginAt   DateTime?      @db.DateTime(0)
   lastLoginIp   String?
   createdAt     DateTime       @default(now()) @db.DateTime(6)
@@ -101,7 +101,7 @@ model password_resets {
 }
 
 model Guest {
-  id                 String    @id @default(uuid())
+  id                 String         @id @default(uuid())
   tenantId           String?
   firstName          String
   lastName           String
@@ -115,17 +115,17 @@ model Guest {
   city               String?
   country            String?
   postalCode         String?
-  isVip              Boolean   @default(false)
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  isVip              Boolean        @default(false)
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
   vehiclePlateNumber String?
   vipLevel           String?
-  specialNotes       String?   @db.Text
+  specialNotes       String?        @db.Text
   // ── PDPA Consent (S1-02) ──────────────────────────────────
-  consentGiven       Boolean   @default(false)
+  consentGiven       Boolean        @default(false)
   consentAt          DateTime?
-  consentVersion     String?   @db.VarChar(20)
-  consentIpAddress   String?   @db.VarChar(45)
+  consentVersion     String?        @db.VarChar(20)
+  consentIpAddress   String?        @db.VarChar(45)
   // ── Right to Erasure (S2-02) ─────────────────────────────
   anonymizedAt       DateTime?
   bookings           Booking[]
@@ -140,42 +140,42 @@ model Guest {
 }
 
 model Property {
-  id                    String            @id @default(uuid())
-  tenantId              String
-  name                  String
-  code                  String
-  location              String?
-  description           String?           @db.Text
-  phone                 String?
-  email                 String?
-  isDefault             Boolean           @default(false)
-  status                String            @default("active")
-  createdAt             DateTime          @default(now())
-  updatedAt             DateTime          @updatedAt
-  deletedAt             DateTime?         @map("deleted_at")
-  serviceChargeEnabled  Boolean           @default(true)
-  serviceChargePercent  Float             @default(10)
-  vatEnabled            Boolean           @default(true)
-  vatPercent            Float             @default(7)
-  taxDisplayMode        String            @default("breakdown")
-  standardCheckInTime   String            @default("14:00")
-  standardCheckOutTime  String            @default("12:00")
-  cleaningBufferMinutes Int               @default(60)
-  earlyCheckInEnabled   Boolean           @default(false)
-  lateCheckOutEnabled   Boolean           @default(false)
-  earlyCheckInFeeType   String?           @default("fixed")
-  earlyCheckInFeeAmount Decimal?          @db.Decimal(10, 2)
-  lateCheckOutFeeType   String?           @default("fixed")
-  lateCheckOutFeeAmount Decimal?          @db.Decimal(10, 2)
-  timezone              String            @default("Asia/Bangkok")
-  bookings              Booking[]
-  employees             Employee[]
-  maintenanceTasks      MaintenanceTask[]
-  paymentAccounts       PaymentAccount[]
-  paymentSettings       PaymentSettings?
-  restaurants           Restaurant[]
-  rooms                 Room[]
-  warehouses            Warehouse[]
+  id                       String                      @id @default(uuid())
+  tenantId                 String
+  name                     String
+  code                     String
+  location                 String?
+  description              String?                     @db.Text
+  phone                    String?
+  email                    String?
+  isDefault                Boolean                     @default(false)
+  status                   String                      @default("active")
+  createdAt                DateTime                    @default(now())
+  updatedAt                DateTime                    @updatedAt
+  deletedAt                DateTime?                   @map("deleted_at")
+  serviceChargeEnabled     Boolean                     @default(true)
+  serviceChargePercent     Float                       @default(10)
+  vatEnabled               Boolean                     @default(true)
+  vatPercent               Float                       @default(7)
+  taxDisplayMode           String                      @default("breakdown")
+  standardCheckInTime      String                      @default("14:00")
+  standardCheckOutTime     String                      @default("12:00")
+  cleaningBufferMinutes    Int                         @default(60)
+  earlyCheckInEnabled      Boolean                     @default(false)
+  lateCheckOutEnabled      Boolean                     @default(false)
+  earlyCheckInFeeType      String?                     @default("fixed")
+  earlyCheckInFeeAmount    Decimal?                    @db.Decimal(10, 2)
+  lateCheckOutFeeType      String?                     @default("fixed")
+  lateCheckOutFeeAmount    Decimal?                    @db.Decimal(10, 2)
+  timezone                 String                      @default("Asia/Bangkok")
+  bookings                 Booking[]
+  employees                Employee[]
+  maintenanceTasks         MaintenanceTask[]
+  paymentAccounts          PaymentAccount[]
+  paymentSettings          PaymentSettings?
+  restaurants              Restaurant[]
+  rooms                    Room[]
+  warehouses               Warehouse[]
   lifecycleAssignmentRules HrLifecycleAssignmentRule[]
 
   @@unique([tenantId, code])
@@ -623,51 +623,51 @@ model KitchenOrder {
 }
 
 model Employee {
-  id                String           @id @default(uuid())
-  tenantId          String?
-  firstName         String
-  lastName          String
-  email             String
-  employeeCode      String?
-  department        String?
-  position          String?
-  startDate         DateTime?
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
-  departmentId      String?
-  positionId        String?
-  bankAccount       String?
-  baseSalary        Decimal?         @db.Decimal(12, 2)
-  phone             String?
-  status            String           @default("ACTIVE")
-  allowance         Decimal?         @db.Decimal(12, 2)
-  educations        Json?
-  emergencyContacts Json?
-  overtime          Decimal?         @db.Decimal(12, 2)
-  positionBonus     Decimal?         @db.Decimal(12, 2)
-  propertyId        String?
-  socialSecurity    String?
-  taxId             String?
-  workExperiences   Json?
-  nickname          String?
-  profileImage      String?          @db.Text // URL หรือ data URL รูปโปรไฟล์ (โอนมาจากใบสมัครตอนจ้าง)
-  dateOfBirth       DateTime?
-  nationalId        String?
-  gender            String?
-  employmentType    String?          @default("FULLTIME")
-  bankName          String?
-  notes             String?          @db.Text
-  initialSalary     Decimal?         @db.Decimal(12, 2)
+  id                   String                          @id @default(uuid())
+  tenantId             String?
+  firstName            String
+  lastName             String
+  email                String
+  employeeCode         String?
+  department           String?
+  position             String?
+  startDate            DateTime?
+  createdAt            DateTime                        @default(now())
+  updatedAt            DateTime                        @updatedAt
+  departmentId         String?
+  positionId           String?
+  bankAccount          String?
+  baseSalary           Decimal?                        @db.Decimal(12, 2)
+  phone                String?
+  status               String                          @default("ACTIVE")
+  allowance            Decimal?                        @db.Decimal(12, 2)
+  educations           Json?
+  emergencyContacts    Json?
+  overtime             Decimal?                        @db.Decimal(12, 2)
+  positionBonus        Decimal?                        @db.Decimal(12, 2)
+  propertyId           String?
+  socialSecurity       String?
+  taxId                String?
+  workExperiences      Json?
+  nickname             String?
+  profileImage         String?                         @db.Text // URL หรือ data URL รูปโปรไฟล์ (โอนมาจากใบสมัครตอนจ้าง)
+  dateOfBirth          DateTime?
+  nationalId           String?
+  gender               String?
+  employmentType       String?                         @default("FULLTIME")
+  bankName             String?
+  notes                String?                         @db.Text
+  initialSalary        Decimal?                        @db.Decimal(12, 2)
   // ── PDPA Consent (S1-03) ──────────────────────────────────
-  consentGiven      Boolean          @default(false)
-  consentAt         DateTime?
-  consentVersion    String?          @db.VarChar(20)
-  consentIpAddress  String?          @db.VarChar(45)
+  consentGiven         Boolean                         @default(false)
+  consentAt            DateTime?
+  consentVersion       String?                         @db.VarChar(20)
+  consentIpAddress     String?                         @db.VarChar(45)
   // ── Right to Erasure (S2-02) ─────────────────────────────
-  anonymizedAt      DateTime?
-  hrDepartment      HrDepartment?    @relation(fields: [departmentId], references: [id])
-  hrPosition        HrPosition?      @relation(fields: [positionId], references: [id])
-  property          Property?        @relation(fields: [propertyId], references: [id])
+  anonymizedAt         DateTime?
+  hrDepartment         HrDepartment?                   @relation(fields: [departmentId], references: [id])
+  hrPosition           HrPosition?                     @relation(fields: [positionId], references: [id])
+  property             Property?                       @relation(fields: [propertyId], references: [id])
   attendances          HrAttendance[]
   leaveRequests        HrLeaveRequest[]
   payrolls             HrPayroll[]
@@ -684,7 +684,7 @@ model Employee {
   hireRecord           HrHireRecord?
   offboardings         HrOffboarding[]
   trainingRecords      HrTrainingRecord[]
-  staff                Staff?                 @relation("StaffEmployee")
+  staff                Staff?                          @relation("StaffEmployee")
 
   @@unique([tenantId, propertyId, employeeCode])
   @@unique([tenantId, email])
@@ -697,23 +697,23 @@ model Employee {
 }
 
 model HrDepartment {
-  id           String       @id @default(uuid())
-  tenantId     String
-  name         String
-  nameEn       String?
-  code         String
-  description  String?      @db.Text
-  color        String?
-  costCenterId String? // mapping แผนก ↔ cost center (ใช้โดย cost-accounting integration)
-  isActive     Boolean      @default(true)
-  sortOrder    Int          @default(0)
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  employees    Employee[]
-  positions    HrPosition[]
+  id              String                      @id @default(uuid())
+  tenantId        String
+  name            String
+  nameEn          String?
+  code            String
+  description     String?                     @db.Text
+  color           String?
+  costCenterId    String? // mapping แผนก ↔ cost center (ใช้โดย cost-accounting integration)
+  isActive        Boolean                     @default(true)
+  sortOrder       Int                         @default(0)
+  createdAt       DateTime                    @default(now())
+  updatedAt       DateTime                    @updatedAt
+  employees       Employee[]
+  positions       HrPosition[]
   assignmentRules HrLifecycleAssignmentRule[]
-  workPolicy   HrDepartmentWorkPolicy?
-  costCenter   CostCenter?  @relation(fields: [costCenterId], references: [id], onDelete: SetNull)
+  workPolicy      HrDepartmentWorkPolicy?
+  costCenter      CostCenter?                 @relation(fields: [costCenterId], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -744,20 +744,20 @@ model HrDepartmentWorkPolicy {
 }
 
 model HrPosition {
-  id           String       @id @default(uuid())
-  tenantId     String
-  departmentId String
-  name         String
-  nameEn       String?
-  code         String?
-  level        Int          @default(1)
-  description  String?      @db.Text
-  isActive     Boolean      @default(true)
-  sortOrder    Int          @default(0)
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  employees    Employee[]
-  department   HrDepartment @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  id              String                      @id @default(uuid())
+  tenantId        String
+  departmentId    String
+  name            String
+  nameEn          String?
+  code            String?
+  level           Int                         @default(1)
+  description     String?                     @db.Text
+  isActive        Boolean                     @default(true)
+  sortOrder       Int                         @default(0)
+  createdAt       DateTime                    @default(now())
+  updatedAt       DateTime                    @updatedAt
+  employees       Employee[]
+  department      HrDepartment                @relation(fields: [departmentId], references: [id], onDelete: Cascade)
   assignmentRules HrLifecycleAssignmentRule[]
 
   @@index([tenantId])
@@ -788,20 +788,20 @@ model HrLeaveType {
 }
 
 model HrShiftType {
-  id           String   @id @default(uuid())
-  tenantId     String
-  name         String
-  nameEn       String?
-  code         String
-  startTime    String
-  endTime      String
-  breakMinutes Int      @default(60)
-  isActive     Boolean  @default(true)
-  color        String?
-  description  String?  @db.Text
-  sortOrder    Int      @default(0)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id               String              @id @default(uuid())
+  tenantId         String
+  name             String
+  nameEn           String?
+  code             String
+  startTime        String
+  endTime          String
+  breakMinutes     Int                 @default(60)
+  isActive         Boolean             @default(true)
+  color            String?
+  description      String?             @db.Text
+  sortOrder        Int                 @default(0)
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
   shiftAssignments HrShiftAssignment[]
 
   @@unique([tenantId, code])
@@ -846,21 +846,21 @@ model HrDeductionType {
 }
 
 model HrAttendance {
-  id              String    @id @default(uuid())
-  tenantId        String
-  employeeId      String
-  date            DateTime  @db.Date
-  checkIn         DateTime?
-  checkOut        DateTime?
-  status          String    @default("present")
-  workMinutes     Int?
-  overtimeMinutes Int?
-  note            String?   @db.Text
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  employee        Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  exceptions      HrAttendanceException[]
-  overtimeRequests HrOvertimeRequest[]    @relation("AttendanceOvertime")
+  id               String                  @id @default(uuid())
+  tenantId         String
+  employeeId       String
+  date             DateTime                @db.Date
+  checkIn          DateTime?
+  checkOut         DateTime?
+  status           String                  @default("present")
+  workMinutes      Int?
+  overtimeMinutes  Int?
+  note             String?                 @db.Text
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+  employee         Employee                @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  exceptions       HrAttendanceException[]
+  overtimeRequests HrOvertimeRequest[]     @relation("AttendanceOvertime")
 
   @@unique([employeeId, date])
   @@index([tenantId])
@@ -870,29 +870,29 @@ model HrAttendance {
 }
 
 model HrLeaveRequest {
-  id           String      @id @default(uuid())
-  tenantId     String
-  employeeId   String
-  leaveTypeId  String
-  startDate    DateTime    @db.Date
-  endDate      DateTime    @db.Date
-  totalDays    Float
-  reason       String?     @db.Text
-  status       String      @default("pending")
-  approvedBy   String?
-  approvedAt   DateTime?
-  rejectedBy   String?
-  rejectedAt   DateTime?
-  rejectReason String?     @db.Text
-  substituteId String?
-  attachmentUrl String?    @db.Text
-  approvalChain Json?      // [{ level, role, approverId, status, at }]
-  currentLevel Int         @default(1)
-  requiredLevels Int       @default(1)
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
-  employee     Employee    @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  leaveType    HrLeaveType @relation(fields: [leaveTypeId], references: [id])
+  id             String      @id @default(uuid())
+  tenantId       String
+  employeeId     String
+  leaveTypeId    String
+  startDate      DateTime    @db.Date
+  endDate        DateTime    @db.Date
+  totalDays      Float
+  reason         String?     @db.Text
+  status         String      @default("pending")
+  approvedBy     String?
+  approvedAt     DateTime?
+  rejectedBy     String?
+  rejectedAt     DateTime?
+  rejectReason   String?     @db.Text
+  substituteId   String?
+  attachmentUrl  String?     @db.Text
+  approvalChain  Json? // [{ level, role, approverId, status, at }]
+  currentLevel   Int         @default(1)
+  requiredLevels Int         @default(1)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  employee       Employee    @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveType      HrLeaveType @relation(fields: [leaveTypeId], references: [id])
 
   @@index([tenantId])
   @@index([employeeId])
@@ -1221,22 +1221,22 @@ model HrPayrollPolicy {
 // Documents, onboarding, probation, leave policy, offboarding/clearance.
 
 model HrDocumentType {
-  id                   String   @id @default(uuid())
+  id                   String                          @id @default(uuid())
   tenantId             String
   code                 String
   name                 String
-  category             String   @default("general")
-  description          String?  @db.Text
-  requiredByDefault    Boolean  @default(false)
-  hasExpiry            Boolean  @default(false)
+  category             String                          @default("general")
+  description          String?                         @db.Text
+  requiredByDefault    Boolean                         @default(false)
+  hasExpiry            Boolean                         @default(false)
   expiryPolicyDays     Int?
-  accessLevel          String   @default("hr")
-  requiresVerification Boolean  @default(false)
+  accessLevel          String                          @default("hr")
+  requiresVerification Boolean                         @default(false)
   allowedFileTypes     Json?
-  sortOrder            Int      @default(0)
-  isActive             Boolean  @default(true)
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  sortOrder            Int                             @default(0)
+  isActive             Boolean                         @default(true)
+  createdAt            DateTime                        @default(now())
+  updatedAt            DateTime                        @updatedAt
   packageDocuments     HrLifecyclePackageDocument[]
   requirements         HrEmployeeDocumentRequirement[]
 
@@ -1247,15 +1247,15 @@ model HrDocumentType {
 }
 
 model HrLifecyclePackage {
-  id                   String   @id @default(uuid())
+  id                   String                          @id @default(uuid())
   tenantId             String
   code                 String
   name                 String
-  lifecycleType        String   @default("onboarding")
-  description          String?  @db.Text
-  isActive             Boolean  @default(true)
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  lifecycleType        String                          @default("onboarding")
+  description          String?                         @db.Text
+  isActive             Boolean                         @default(true)
+  createdAt            DateTime                        @default(now())
+  updatedAt            DateTime                        @updatedAt
   documents            HrLifecyclePackageDocument[]
   tasks                HrLifecyclePackageTask[]
   assignmentRules      HrLifecycleAssignmentRule[]
@@ -1305,21 +1305,21 @@ model HrLifecyclePackageTask {
 }
 
 model HrLifecycleAssignmentRule {
-  id                  String                       @id @default(uuid())
+  id                  String                          @id @default(uuid())
   tenantId            String
   packageId           String
   propertyId          String?
   departmentId        String?
   positionId          String?
   employmentType      String?
-  priority            Int                          @default(100)
-  isActive            Boolean                      @default(true)
-  createdAt           DateTime                     @default(now())
-  updatedAt           DateTime                     @updatedAt
-  package             HrLifecyclePackage           @relation(fields: [packageId], references: [id], onDelete: Cascade)
-  property            Property?                    @relation(fields: [propertyId], references: [id], onDelete: SetNull)
-  department          HrDepartment?                @relation(fields: [departmentId], references: [id], onDelete: SetNull)
-  position            HrPosition?                  @relation(fields: [positionId], references: [id], onDelete: SetNull)
+  priority            Int                             @default(100)
+  isActive            Boolean                         @default(true)
+  createdAt           DateTime                        @default(now())
+  updatedAt           DateTime                        @updatedAt
+  package             HrLifecyclePackage              @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  property            Property?                       @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  department          HrDepartment?                   @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  position            HrPosition?                     @relation(fields: [positionId], references: [id], onDelete: SetNull)
   employeeAssignments HrEmployeeLifecycleAssignment[]
 
   @@index([tenantId])
@@ -1332,20 +1332,20 @@ model HrLifecycleAssignmentRule {
 }
 
 model HrEmployeeLifecycleAssignment {
-  id                   String                        @id @default(uuid())
+  id                   String                          @id @default(uuid())
   tenantId             String
   employeeId           String
   packageId            String
   sourceRuleId         String?
-  assignedAt           DateTime                      @default(now())
+  assignedAt           DateTime                        @default(now())
   assignedBy           String?
-  status               String                        @default("active")
+  status               String                          @default("active")
   completedAt          DateTime?
-  createdAt            DateTime                      @default(now())
-  updatedAt            DateTime                      @updatedAt
-  employee             Employee                      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  package              HrLifecyclePackage            @relation(fields: [packageId], references: [id], onDelete: Cascade)
-  sourceRule           HrLifecycleAssignmentRule?    @relation(fields: [sourceRuleId], references: [id], onDelete: SetNull)
+  createdAt            DateTime                        @default(now())
+  updatedAt            DateTime                        @updatedAt
+  employee             Employee                        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  package              HrLifecyclePackage              @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  sourceRule           HrLifecycleAssignmentRule?      @relation(fields: [sourceRuleId], references: [id], onDelete: SetNull)
   documentRequirements HrEmployeeDocumentRequirement[]
 
   @@index([tenantId])
@@ -1357,25 +1357,25 @@ model HrEmployeeLifecycleAssignment {
 }
 
 model HrEmployeeDocumentRequirement {
-  id                 String                       @id @default(uuid())
+  id                 String                         @id @default(uuid())
   tenantId           String
   employeeId         String
   documentTypeId     String
   packageId          String?
   assignmentId       String?
-  status             String                       @default("missing")
-  dueDate            DateTime?                    @db.Date
+  status             String                         @default("missing")
+  dueDate            DateTime?                      @db.Date
   uploadedDocumentId String?
   verifiedBy         String?
   verifiedAt         DateTime?
-  waivedReason       String?                      @db.Text
-  createdAt          DateTime                     @default(now())
-  updatedAt          DateTime                     @updatedAt
-  employee           Employee                     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  documentType       HrDocumentType               @relation(fields: [documentTypeId], references: [id], onDelete: Cascade)
-  package            HrLifecyclePackage?          @relation(fields: [packageId], references: [id], onDelete: SetNull)
+  waivedReason       String?                        @db.Text
+  createdAt          DateTime                       @default(now())
+  updatedAt          DateTime                       @updatedAt
+  employee           Employee                       @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  documentType       HrDocumentType                 @relation(fields: [documentTypeId], references: [id], onDelete: Cascade)
+  package            HrLifecyclePackage?            @relation(fields: [packageId], references: [id], onDelete: SetNull)
   assignment         HrEmployeeLifecycleAssignment? @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
-  uploadedDocument   HrEmployeeDocument?          @relation("RequirementUploadedDocument", fields: [uploadedDocumentId], references: [id], onDelete: SetNull)
+  uploadedDocument   HrEmployeeDocument?            @relation("RequirementUploadedDocument", fields: [uploadedDocumentId], references: [id], onDelete: SetNull)
 
   @@index([tenantId])
   @@index([employeeId])
@@ -1388,24 +1388,24 @@ model HrEmployeeDocumentRequirement {
 }
 
 model HrEmployeeDocument {
-  id          String    @id @default(uuid())
-  tenantId    String
-  employeeId  String
-  type        String // id_card | contract | certificate | visa | work_permit | health | other
-  name        String
-  fileUrl     String    @db.Text
-  fileName    String?
-  mimeType    String?
-  fileSize    Int?
-  issuedAt    DateTime? @db.Date
-  expiresAt   DateTime? @db.Date
-  accessLevel String    @default("hr") // hr | manager | employee
-  note        String?   @db.Text
-  uploadedBy  String?
-  deletedAt   DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  employee    Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  id                      String                          @id @default(uuid())
+  tenantId                String
+  employeeId              String
+  type                    String // id_card | contract | certificate | visa | work_permit | health | other
+  name                    String
+  fileUrl                 String                          @db.Text
+  fileName                String?
+  mimeType                String?
+  fileSize                Int?
+  issuedAt                DateTime?                       @db.Date
+  expiresAt               DateTime?                       @db.Date
+  accessLevel             String                          @default("hr") // hr | manager | employee
+  note                    String?                         @db.Text
+  uploadedBy              String?
+  deletedAt               DateTime?
+  createdAt               DateTime                        @default(now())
+  updatedAt               DateTime                        @updatedAt
+  employee                Employee                        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   uploadedForRequirements HrEmployeeDocumentRequirement[] @relation("RequirementUploadedDocument")
 
   @@index([tenantId])
@@ -1443,15 +1443,15 @@ model HrOnboardingTask {
 // One row per flowType: "manpower" | "budget" | "equipment".
 // `steps` = ordered JSON [{ role: 'dept_head'|'hr'|'owner', label?: string }]
 model HrApprovalFlow {
-  id        String   @id @default(uuid())
-  tenantId  String
-  flowType  String // manpower | budget | equipment
-  steps     Json // [{ role, label? }] — ordered approval steps
-  isActive  Boolean  @default(true)
+  id                   String   @id @default(uuid())
+  tenantId             String
+  flowType             String // manpower | budget | equipment
+  steps                Json // [{ role, label? }] — ordered approval steps
+  isActive             Boolean  @default(true)
   // เฉพาะ flowType=equipment: id หมวดสินค้าคลังที่ให้ดึง item มาเลือกตอนเปิดอุปกรณ์ (null/[] = ทุกหมวด)
   equipmentCategoryIds Json? // string[] of inventory ItemCategory ids
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
   @@unique([tenantId, flowType])
   @@index([tenantId])
@@ -1529,20 +1529,20 @@ model HrJobPosting {
 
 // Stage 3: ขออุปกรณ์
 model HrEquipmentRequest {
-  id                String   @id @default(uuid())
-  tenantId          String
-  manpowerRequestId String
+  id                    String   @id @default(uuid())
+  tenantId              String
+  manpowerRequestId     String
   // เบิกของ "ทีละคน" — ผูกคำขอเบิกกับพนักงานที่จ้างแล้วรายคน (คำขอหลายอัตรารับหลายคน)
   // null = คำขอแบบเดิม (ระดับใบสรรหา ก่อนแยกรายคน) — ยังออกใบเบิกให้ทุกคนเพื่อ backward-compat
-  employeeId        String?
-  items             Json // [{ name, qty, estimatedCost, note, itemId?, warehouseId? }] — itemId/warehouseId มีเมื่อผูกกับคลัง (INVENTORY_MODULE)
-  totalCost         Decimal? @db.Decimal(12, 2)
-  status            String   @default("pending") // pending|approved|rejected|procured|ready
-  approvalChain     Json?
+  employeeId            String?
+  items                 Json // [{ name, qty, estimatedCost, note, itemId?, warehouseId? }] — itemId/warehouseId มีเมื่อผูกกับคลัง (INVENTORY_MODULE)
+  totalCost             Decimal? @db.Decimal(12, 2)
+  status                String   @default("pending") // pending|approved|rejected|procured|ready
+  approvalChain         Json?
   purchaseRequisitionId String? // PR ที่ออกอัตโนมัติเมื่อของขาด (INVENTORY_MODULE)
-  requestedBy       String
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  requestedBy           String
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 
   manpowerRequest HrManpowerRequest     @relation(fields: [manpowerRequestId], references: [id], onDelete: Cascade)
   issuances       HrEquipmentIssuance[]
@@ -1852,25 +1852,25 @@ model features {
 }
 
 model add_ons {
-  id            String                @id @default(uuid()) @db.VarChar(36)
-  code          String                @unique(map: "IDX_add_ons_code") @db.VarChar(80)
-  name          String                @db.VarChar(150)
-  description   String?               @db.Text
-  price         Decimal               @default(0.00) @db.Decimal(10, 2)
-  billing_cycle add_ons_billing_cycle @default(monthly)
-  category      String?               @db.VarChar(80)
-  icon          String?               @db.VarChar(80)
-  display_order Int                   @default(0)
-  min_quantity  Int                   @default(1)
-  max_quantity  Int                   @default(1)
-  is_active     Int                   @default(1) @db.TinyInt
+  id              String                @id @default(uuid()) @db.VarChar(36)
+  code            String                @unique(map: "IDX_add_ons_code") @db.VarChar(80)
+  name            String                @db.VarChar(150)
+  description     String?               @db.Text
+  price           Decimal               @default(0.00) @db.Decimal(10, 2)
+  billing_cycle   add_ons_billing_cycle @default(monthly)
+  category        String?               @db.VarChar(80)
+  icon            String?               @db.VarChar(80)
+  display_order   Int                   @default(0)
+  min_quantity    Int                   @default(1)
+  max_quantity    Int                   @default(1)
+  is_active       Int                   @default(1) @db.TinyInt
   // Sub-System flag: marks an add-on as a "Terminal / ระบบย่อย" shown on the Sub Systems page.
-  is_sub_system Int                   @default(0) @db.TinyInt
+  is_sub_system   Int                   @default(0) @db.TinyInt
   // JSON array of card metadata for the Sub Systems page (one add-on may expose several terminal cards).
-  sub_system_meta String?             @db.Text
-  created_at    DateTime              @default(now()) @db.DateTime(6)
-  updated_at    DateTime              @default(now()) @updatedAt @db.DateTime(6)
-  plan_addons   plan_addons[]
+  sub_system_meta String?               @db.Text
+  created_at      DateTime              @default(now()) @db.DateTime(6)
+  updated_at      DateTime              @default(now()) @updatedAt @db.DateTime(6)
+  plan_addons     plan_addons[]
 
   @@index([is_active], map: "IDX_add_ons_is_active")
   @@index([category], map: "IDX_add_ons_category")
@@ -3090,33 +3090,33 @@ model InventoryItem {
 }
 
 model Supplier {
-  id             String                 @id @default(uuid())
-  tenantId       String
-  name           String
-  code           String
-  contactPerson  String?
-  email          String?
-  phone          String?
-  address        String?                @db.Text
-  taxId          String?
-  paymentTerms   String?
-  leadTimeDays   Int?
-  rating         Decimal?               @db.Decimal(3, 2)
-  notes          String?                @db.Text
-  isActive       Boolean                @default(true)
-  createdAt      DateTime               @default(now())
-  updatedAt      DateTime               @updatedAt
-  deletedAt      DateTime?
-  emoji          String?                @default("?")
-  tags           String?
-  itemSuppliers  ItemSupplier[]
-  purchaseOrders PurchaseOrder[]
-  rfqRecipients  RfqSupplierRecipient[]
-  quoteTokens    SupplierQuoteToken[]
-  supplierQuotes SupplierQuote[]
+  id              String                 @id @default(uuid())
+  tenantId        String
+  name            String
+  code            String
+  contactPerson   String?
+  email           String?
+  phone           String?
+  address         String?                @db.Text
+  taxId           String?
+  paymentTerms    String?
+  leadTimeDays    Int?
+  rating          Decimal?               @db.Decimal(3, 2)
+  notes           String?                @db.Text
+  isActive        Boolean                @default(true)
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  deletedAt       DateTime?
+  emoji           String?                @default("?")
+  tags            String?
+  itemSuppliers   ItemSupplier[]
+  purchaseOrders  PurchaseOrder[]
+  rfqRecipients   RfqSupplierRecipient[]
+  quoteTokens     SupplierQuoteToken[]
+  supplierQuotes  SupplierQuote[]
   whtCertificates WhtCertificate[]
-  apInvoices     ApInvoice[]
-  apPayments     ApPayment[]
+  apInvoices      ApInvoice[]
+  apPayments      ApPayment[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -4824,18 +4824,18 @@ enum addon_trial_request_status {
 }
 
 model addon_trial_requests {
-  id          String                       @id @default(uuid())
+  id          String                     @id @default(uuid())
   tenant_id   String
   addon_code  String
   addon_name  String?
-  status      addon_trial_request_status   @default(pending)
-  note        String?                      @db.Text
-  admin_note  String?                      @db.Text
+  status      addon_trial_request_status @default(pending)
+  note        String?                    @db.Text
+  admin_note  String?                    @db.Text
   approved_by String?
-  approved_at DateTime?                    @db.DateTime(6)
-  expires_at  DateTime?                    @db.DateTime(6)
-  created_at  DateTime                     @default(now()) @db.DateTime(6)
-  updated_at  DateTime                     @default(now()) @updatedAt @db.DateTime(6)
+  approved_at DateTime?                  @db.DateTime(6)
+  expires_at  DateTime?                  @db.DateTime(6)
+  created_at  DateTime                   @default(now()) @db.DateTime(6)
+  updated_at  DateTime                   @default(now()) @updatedAt @db.DateTime(6)
 
   @@index([tenant_id])
   @@index([status])
@@ -4846,20 +4846,21 @@ model addon_trial_requests {
 // ─── LINE Messaging / Unified Chat ────────────────────────────────────────────
 
 model Conversation {
-  id           String              @id @default(uuid())
-  tenantId     String
-  channel      String              // "LINE", "FACEBOOK"
-  externalId   String              // LINE userId / FB PSID
-  displayName  String?
-  pictureUrl   String?             @db.Text
-  isActive     Boolean             @default(true)
-  guestId      String?
+  id            String    @id @default(uuid())
+  tenantId      String
+  channel       String // "LINE", "FACEBOOK"
+  externalId    String // LINE userId / FB PSID
+  displayName   String?
+  pictureUrl    String?   @db.Text
+  isActive      Boolean   @default(true)
+  guestId       String?
   lastMessageAt DateTime?
-  createdAt    DateTime            @default(now())
-  updatedAt    DateTime            @updatedAt
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  guest        Guest?              @relation(fields: [guestId], references: [id])
-  messages     Message[]
+  guest    Guest?    @relation(fields: [guestId], references: [id])
+  messages Message[]
+
   @@unique([tenantId, channel, externalId])
   @@index([tenantId, channel])
   @@index([tenantId, lastMessageAt])
@@ -4868,37 +4869,38 @@ model Conversation {
 }
 
 model Message {
-  id             String       @id @default(uuid())
+  id             String    @id @default(uuid())
   conversationId String
   tenantId       String
-  channel        String       // "LINE", "FACEBOOK"
-  direction      String       // "INBOUND" | "OUTBOUND"
-  messageType    String       @default("text") // "text" | "image" | "sticker" | "file"
-  content        String       @db.Text
-  externalMsgId  String?      // LINE messageId / FB mid
-  staffId        String?      // null = auto-reply
-  isAutoReply    Boolean      @default(false)
+  channel        String // "LINE", "FACEBOOK"
+  direction      String // "INBOUND" | "OUTBOUND"
+  messageType    String    @default("text") // "text" | "image" | "sticker" | "file"
+  content        String    @db.Text
+  externalMsgId  String? // LINE messageId / FB mid
+  staffId        String? // null = auto-reply
+  isAutoReply    Boolean   @default(false)
   readAt         DateTime?
-  createdAt      DateTime     @default(now())
+  createdAt      DateTime  @default(now())
 
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
   @@index([conversationId])
   @@index([tenantId, createdAt])
   @@map("messages")
 }
 
 model AutoReplyTemplate {
-  id          String    @id @default(uuid())
+  id          String   @id @default(uuid())
   tenantId    String
   name        String
-  channel     String    @default("ALL") // "ALL" | "LINE" | "FACEBOOK"
-  triggerType String    @default("KEYWORD") // "KEYWORD" | "GREETING" | "OUT_OF_HOURS" | "FALLBACK"
-  keywords    Json?     // string[] เช่น ["ราคา","ห้อง"]
-  replyText   String    @db.Text
-  isActive    Boolean   @default(true)
-  priority    Int       @default(0)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  channel     String   @default("ALL") // "ALL" | "LINE" | "FACEBOOK"
+  triggerType String   @default("KEYWORD") // "KEYWORD" | "GREETING" | "OUT_OF_HOURS" | "FALLBACK"
+  keywords    Json? // string[] เช่น ["ราคา","ห้อง"]
+  replyText   String   @db.Text
+  isActive    Boolean  @default(true)
+  priority    Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([tenantId, channel, isActive])
   @@map("auto_reply_templates")
@@ -4930,7 +4932,7 @@ model StripePaymentIntent {
   stripeClientSecret    String   @db.Text
   amount                Decimal  @db.Decimal(10, 2)
   currency              String   @default("thb") @db.VarChar(10)
-  status                String   @db.VarChar(50)  // requires_payment_method | succeeded | canceled | ...
+  status                String   @db.VarChar(50) // requires_payment_method | succeeded | canceled | ...
   paymentMethodId       String?
   receiptUrl            String?  @db.Text
   metadata              Json?
@@ -4948,26 +4950,27 @@ model StripePaymentIntent {
 // ─── TrueMoney (via 2C2P) ────────────────────────────────────────────────────
 
 model TrueMoneyTransaction {
-  id              String   @id @default(uuid())
+  id              String    @id @default(uuid())
   tenantId        String
   invoiceId       String?
-  merchantOrderId String   @unique
-  amount          Decimal  @db.Decimal(10, 2)
-  currency        String   @default("THB") @db.VarChar(10)
-  status          String   @db.VarChar(50)  // pending | completed | failed | canceled
-  paymentToken    String?  @db.Text
-  redirectUrl     String?  @db.Text
+  merchantOrderId String    @unique
+  amount          Decimal   @db.Decimal(10, 2)
+  currency        String    @default("THB") @db.VarChar(10)
+  status          String    @db.VarChar(50) // pending | completed | failed | canceled
+  paymentToken    String?   @db.Text
+  redirectUrl     String?   @db.Text
   callbackData    Json?
   paidAt          DateTime?
-  errorMessage    String?  @db.Text
-  createdAt       DateTime @default(now()) @db.DateTime(6)
-  updatedAt       DateTime @default(now()) @updatedAt @db.DateTime(6)
+  errorMessage    String?   @db.Text
+  createdAt       DateTime  @default(now()) @db.DateTime(6)
+  updatedAt       DateTime  @default(now()) @updatedAt @db.DateTime(6)
 
   @@index([tenantId])
   @@index([invoiceId])
   @@index([merchantOrderId])
   @@map("truemoney_transactions")
 }
+
 // =============================================================================
 // HOTEL ACCOUNTING SYSTEM — Prisma Schema
 // =============================================================================
@@ -4989,11 +4992,11 @@ model TrueMoneyTransaction {
 
 // ประเภทบัญชีหลัก (5 หมวด)
 enum AccountType {
-  ASSET       // สินทรัพย์
-  LIABILITY   // หนี้สิน
-  EQUITY      // ส่วนของเจ้าของ
-  REVENUE     // รายได้
-  EXPENSE     // ค่าใช้จ่าย
+  ASSET // สินทรัพย์
+  LIABILITY // หนี้สิน
+  EQUITY // ส่วนของเจ้าของ
+  REVENUE // รายได้
+  EXPENSE // ค่าใช้จ่าย
 }
 
 // ด้านปกติของบัญชี
@@ -5004,44 +5007,44 @@ enum NormalBalance {
 
 // ระดับผังบัญชี
 enum AccountLevel {
-  CATEGORY     // หมวด เช่น "1 สินทรัพย์"
-  GROUP        // กลุ่ม เช่น "11 สินทรัพย์หมุนเวียน"
-  ACCOUNT      // บัญชี เช่น "1101 เงินสด"
-  SUB_ACCOUNT  // บัญชีย่อย เช่น "1101.01 เงินสดที่แผนกต้อนรับ"
+  CATEGORY // หมวด เช่น "1 สินทรัพย์"
+  GROUP // กลุ่ม เช่น "11 สินทรัพย์หมุนเวียน"
+  ACCOUNT // บัญชี เช่น "1101 เงินสด"
+  SUB_ACCOUNT // บัญชีย่อย เช่น "1101.01 เงินสดที่แผนกต้อนรับ"
 }
 
 // สถานะ Journal Entry
 enum JournalEntryStatus {
-  DRAFT    // รอตรวจสอบ
-  POSTED   // บันทึกแล้ว
+  DRAFT // รอตรวจสอบ
+  POSTED // บันทึกแล้ว
   REVERSED // กลับรายการแล้ว
-  VOID     // ยกเลิก
+  VOID // ยกเลิก
 }
 
 // ประเภทที่มาของ Journal Entry
 enum JournalSourceType {
-  MANUAL          // บันทึกด้วยมือ
+  MANUAL // บันทึกด้วยมือ
   BOOKING_PAYMENT // รับชำระจากการจอง
-  FOLIO_CHARGE    // charge ลง folio แขก
-  AR_RECEIPT      // รับชำระ AR
-  AP_PAYMENT      // จ่ายชำระ AP
-  NIGHT_AUDIT     // Night Audit auto-post
-  DEPRECIATION    // ตัดค่าเสื่อมราคา
-  PAYROLL         // จ่ายเงินเดือน (จาก HR)
+  FOLIO_CHARGE // charge ลง folio แขก
+  AR_RECEIPT // รับชำระ AR
+  AP_PAYMENT // จ่ายชำระ AP
+  NIGHT_AUDIT // Night Audit auto-post
+  DEPRECIATION // ตัดค่าเสื่อมราคา
+  PAYROLL // จ่ายเงินเดือน (จาก HR)
   PURCHASE_RECEIPT // รับสินค้า (จาก Inventory)
-  TAX_FILING      // บันทึกภาษี
-  CLOSING_ENTRY   // รายการปิดบัญชี
-  ADJUSTMENT      // รายการปรับปรุง
+  TAX_FILING // บันทึกภาษี
+  CLOSING_ENTRY // รายการปิดบัญชี
+  ADJUSTMENT // รายการปรับปรุง
 }
 
 // สถานะ AR Invoice
 enum ArInvoiceStatus {
-  DRAFT    // ร่าง
-  ISSUED   // ออกใบแจ้งหนี้แล้ว
-  PARTIAL  // ชำระบางส่วน
-  PAID     // ชำระครบแล้ว
-  OVERDUE  // เกินกำหนดชำระ
-  VOID     // ยกเลิก
+  DRAFT // ร่าง
+  ISSUED // ออกใบแจ้งหนี้แล้ว
+  PARTIAL // ชำระบางส่วน
+  PAID // ชำระครบแล้ว
+  OVERDUE // เกินกำหนดชำระ
+  VOID // ยกเลิก
 }
 
 enum ArReceiptStatus {
@@ -5052,42 +5055,42 @@ enum ArReceiptStatus {
 
 // ประเภท AR Invoice
 enum ArInvoiceType {
-  GUEST_BILL       // ใบแจ้งหนี้แขก
-  CITY_LEDGER      // City Ledger (บริษัท/ตัวแทน)
-  ADVANCE_DEPOSIT  // มัดจำล่วงหน้า
-  CREDIT_NOTE      // ใบลดหนี้
-  PROFORMA         // ใบเสนอราคา (ก่อนออกจริง)
+  GUEST_BILL // ใบแจ้งหนี้แขก
+  CITY_LEDGER // City Ledger (บริษัท/ตัวแทน)
+  ADVANCE_DEPOSIT // มัดจำล่วงหน้า
+  CREDIT_NOTE // ใบลดหนี้
+  PROFORMA // ใบเสนอราคา (ก่อนออกจริง)
 }
 
 // ประเภท Charge ใน Folio
 enum FolioChargeType {
-  ROOM_CHARGE        // ค่าห้องพัก
-  FB_CHARGE          // ค่าอาหารและเครื่องดื่ม
-  SERVICE_CHARGE     // ค่าบริการ
-  TELEPHONE          // ค่าโทรศัพท์
-  LAUNDRY            // ค่าซักรีด
-  SPA                // ค่าสปา
-  MINIBAR            // ค่า Minibar
-  PARKING            // ค่าจอดรถ
-  TRANSPORT          // ค่าบริการรถรับส่ง
-  EXTRA_BED          // ค่าเตียงเสริม
-  EARLY_CHECKIN      // ค่า Early Check-in
-  LATE_CHECKOUT      // ค่า Late Check-out
-  DAMAGE             // ค่าเสียหาย
-  DEPOSIT_APPLIED    // หักมัดจำ
-  DISCOUNT           // ส่วนลด
-  TAX                // ภาษี
-  SERVICE_FEE        // ค่าธรรมเนียม
-  ADJUSTMENT         // ปรับปรุงรายการ
-  OTHER              // อื่นๆ
+  ROOM_CHARGE // ค่าห้องพัก
+  FB_CHARGE // ค่าอาหารและเครื่องดื่ม
+  SERVICE_CHARGE // ค่าบริการ
+  TELEPHONE // ค่าโทรศัพท์
+  LAUNDRY // ค่าซักรีด
+  SPA // ค่าสปา
+  MINIBAR // ค่า Minibar
+  PARKING // ค่าจอดรถ
+  TRANSPORT // ค่าบริการรถรับส่ง
+  EXTRA_BED // ค่าเตียงเสริม
+  EARLY_CHECKIN // ค่า Early Check-in
+  LATE_CHECKOUT // ค่า Late Check-out
+  DAMAGE // ค่าเสียหาย
+  DEPOSIT_APPLIED // หักมัดจำ
+  DISCOUNT // ส่วนลด
+  TAX // ภาษี
+  SERVICE_FEE // ค่าธรรมเนียม
+  ADJUSTMENT // ปรับปรุงรายการ
+  OTHER // อื่นๆ
 }
 
 // สถานะ Guest Folio
 enum FolioStatus {
-  OPEN     // เปิดอยู่ (แขกยังอยู่)
-  CLOSED   // ปิดแล้ว (Check-out แล้ว)
-  VOID     // ยกเลิก
-  PENDING  // รอชำระ (Check-out แล้วแต่ยังค้างชำระ)
+  OPEN // เปิดอยู่ (แขกยังอยู่)
+  CLOSED // ปิดแล้ว (Check-out แล้ว)
+  VOID // ยกเลิก
+  PENDING // รอชำระ (Check-out แล้วแต่ยังค้างชำระ)
 }
 
 enum FolioChargeStatus {
@@ -5098,148 +5101,148 @@ enum FolioChargeStatus {
 
 // ประเภทการชำระเงิน (สำหรับ Accounting)
 enum AccPaymentMethod {
-  CASH           // เงินสด
-  BANK_TRANSFER  // โอนธนาคาร
-  CREDIT_CARD    // บัตรเครดิต
-  DEBIT_CARD     // บัตรเดบิต
-  QR_PROMPTPAY   // QR PromptPay
-  TRUEMONEY      // TrueMoney
-  CHEQUE         // เช็ค
-  CREDIT_NOTE    // ใบลดหนี้
-  ADVANCE        // ตัดมัดจำ
-  CITY_LEDGER    // ลงบัญชีบริษัท
+  CASH // เงินสด
+  BANK_TRANSFER // โอนธนาคาร
+  CREDIT_CARD // บัตรเครดิต
+  DEBIT_CARD // บัตรเดบิต
+  QR_PROMPTPAY // QR PromptPay
+  TRUEMONEY // TrueMoney
+  CHEQUE // เช็ค
+  CREDIT_NOTE // ใบลดหนี้
+  ADVANCE // ตัดมัดจำ
+  CITY_LEDGER // ลงบัญชีบริษัท
   ONLINE_BOOKING // OTA (Agoda, Booking.com)
-  OTHER          // อื่นๆ
+  OTHER // อื่นๆ
 }
 
 // สถานะ AP Invoice
 enum ApInvoiceStatus {
-  PENDING   // รอตรวจสอบ
-  APPROVED  // อนุมัติแล้ว
-  PARTIAL   // จ่ายบางส่วน
-  PAID      // จ่ายครบแล้ว
-  OVERDUE   // เกินกำหนด
-  DISPUTED  // มีข้อโต้แย้ง
-  VOID      // ยกเลิก
+  PENDING // รอตรวจสอบ
+  APPROVED // อนุมัติแล้ว
+  PARTIAL // จ่ายบางส่วน
+  PAID // จ่ายครบแล้ว
+  OVERDUE // เกินกำหนด
+  DISPUTED // มีข้อโต้แย้ง
+  VOID // ยกเลิก
 }
 
 // ประเภท AP Invoice
 enum ApInvoiceType {
-  SUPPLIER_INVOICE  // ใบแจ้งหนี้จาก supplier
-  UTILITY_BILL      // ค่าสาธารณูปโภค (ไฟ/น้ำ/โทรศัพท์)
-  RENT              // ค่าเช่า
-  SERVICE_CONTRACT  // ค่าจ้างบริการ
-  CREDIT_NOTE       // ใบลดหนี้จาก supplier
+  SUPPLIER_INVOICE // ใบแจ้งหนี้จาก supplier
+  UTILITY_BILL // ค่าสาธารณูปโภค (ไฟ/น้ำ/โทรศัพท์)
+  RENT // ค่าเช่า
+  SERVICE_CONTRACT // ค่าจ้างบริการ
+  CREDIT_NOTE // ใบลดหนี้จาก supplier
 }
 
 // ประเภทภาษี
 enum TaxType {
-  VAT              // ภาษีมูลค่าเพิ่ม
-  WHT_INDIVIDUAL   // หัก ณ ที่จ่าย บุคคลธรรมดา
-  WHT_JURISTIC     // หัก ณ ที่จ่าย นิติบุคคล
+  VAT // ภาษีมูลค่าเพิ่ม
+  WHT_INDIVIDUAL // หัก ณ ที่จ่าย บุคคลธรรมดา
+  WHT_JURISTIC // หัก ณ ที่จ่าย นิติบุคคล
   SPECIFIC_BUSINESS // ภาษีธุรกิจเฉพาะ
 }
 
 // ประเภทเงินได้ WHT (ตามกฎหมายไทย)
 enum WhtIncomeType {
-  TYPE_40_2  // เงินได้ตามมาตรา 40(2) - ค่าจ้าง
-  TYPE_40_3  // เงินได้ตามมาตรา 40(3) - ค่าลิขสิทธิ์
-  TYPE_40_4  // เงินได้ตามมาตรา 40(4) - ดอกเบี้ย/เงินปันผล
-  TYPE_40_5  // เงินได้ตามมาตรา 40(5) - ค่าเช่า
-  TYPE_40_6  // เงินได้ตามมาตรา 40(6) - วิชาชีพ
-  TYPE_40_7  // เงินได้ตามมาตรา 40(7) - รับเหมา
-  TYPE_40_8  // เงินได้ตามมาตรา 40(8) - อื่นๆ
+  TYPE_40_2 // เงินได้ตามมาตรา 40(2) - ค่าจ้าง
+  TYPE_40_3 // เงินได้ตามมาตรา 40(3) - ค่าลิขสิทธิ์
+  TYPE_40_4 // เงินได้ตามมาตรา 40(4) - ดอกเบี้ย/เงินปันผล
+  TYPE_40_5 // เงินได้ตามมาตรา 40(5) - ค่าเช่า
+  TYPE_40_6 // เงินได้ตามมาตรา 40(6) - วิชาชีพ
+  TYPE_40_7 // เงินได้ตามมาตรา 40(7) - รับเหมา
+  TYPE_40_8 // เงินได้ตามมาตรา 40(8) - อื่นๆ
 }
 
 // ประเภทแบบภาษี
 enum TaxFilingType {
-  VAT_PP30     // ภ.พ.30 (ภาษีมูลค่าเพิ่มรายเดือน)
-  WHT_PND1     // ภ.ง.ด.1 (หัก ณ ที่จ่าย พนักงาน)
-  WHT_PND3     // ภ.ง.ด.3 (หัก ณ ที่จ่าย บุคคลธรรมดา)
-  WHT_PND53    // ภ.ง.ด.53 (หัก ณ ที่จ่าย นิติบุคคล)
-  CIT_PND51    // ภ.ง.ด.51 (ประมาณการภาษีเงินได้กลางปี)
-  CIT_PND50    // ภ.ง.ด.50 (ภาษีเงินได้นิติบุคคลประจำปี)
+  VAT_PP30 // ภ.พ.30 (ภาษีมูลค่าเพิ่มรายเดือน)
+  WHT_PND1 // ภ.ง.ด.1 (หัก ณ ที่จ่าย พนักงาน)
+  WHT_PND3 // ภ.ง.ด.3 (หัก ณ ที่จ่าย บุคคลธรรมดา)
+  WHT_PND53 // ภ.ง.ด.53 (หัก ณ ที่จ่าย นิติบุคคล)
+  CIT_PND51 // ภ.ง.ด.51 (ประมาณการภาษีเงินได้กลางปี)
+  CIT_PND50 // ภ.ง.ด.50 (ภาษีเงินได้นิติบุคคลประจำปี)
 }
 
 // สถานะการยื่นแบบ
 enum TaxFilingStatus {
-  DRAFT   // กำลังจัดทำ
-  READY   // พร้อมยื่น
-  FILED   // ยื่นแล้ว
-  PAID    // ชำระภาษีแล้ว
+  DRAFT // กำลังจัดทำ
+  READY // พร้อมยื่น
+  FILED // ยื่นแล้ว
+  PAID // ชำระภาษีแล้ว
   AMENDED // ยื่นแก้ไข
 }
 
 // สถานะใบหัก ณ ที่จ่าย
 enum WhtCertStatus {
-  DRAFT   // ร่าง
-  ISSUED  // ออกแล้ว
-  VOID    // ยกเลิก
+  DRAFT // ร่าง
+  ISSUED // ออกแล้ว
+  VOID // ยกเลิก
 }
 
 // สถานะ Night Audit
 enum NightAuditStatus {
-  OPEN         // ยังไม่เริ่ม
-  IN_PROGRESS  // กำลังทำ
-  COMPLETED    // เสร็จแล้ว
-  CLOSED       // ปิดแล้ว (ล็อคแก้ไขไม่ได้)
+  OPEN // ยังไม่เริ่ม
+  IN_PROGRESS // กำลังทำ
+  COMPLETED // เสร็จแล้ว
+  CLOSED // ปิดแล้ว (ล็อคแก้ไขไม่ได้)
 }
 
 // สถานะ Cash Drawer
 enum CashDrawerStatus {
-  OPEN    // เปิดใช้งาน
-  CLOSED  // ปิดแล้ว (สรุปยอดแล้ว)
+  OPEN // เปิดใช้งาน
+  CLOSED // ปิดแล้ว (สรุปยอดแล้ว)
   PENDING // รอตรวจสอบ
 }
 
 // ประเภทรายการเงินสด
 enum CashTxnType {
-  RECEIPT    // รับเงิน
-  PAYMENT    // จ่ายเงิน
-  TRANSFER   // โอนระหว่าง Drawer
+  RECEIPT // รับเงิน
+  PAYMENT // จ่ายเงิน
+  TRANSFER // โอนระหว่าง Drawer
   ADJUSTMENT // ปรับปรุงยอด
-  OPENING    // ยอดเปิด
-  CLOSING    // ยอดปิด
+  OPENING // ยอดเปิด
+  CLOSING // ยอดปิด
 }
 
 // สถานะกระทบยอดธนาคาร
 enum ReconcileStatus {
-  OPEN         // เปิด
-  IN_PROGRESS  // กำลังกระทบยอด
-  COMPLETED    // กระทบยอดแล้ว
-  APPROVED     // อนุมัติแล้ว
+  OPEN // เปิด
+  IN_PROGRESS // กำลังกระทบยอด
+  COMPLETED // กระทบยอดแล้ว
+  APPROVED // อนุมัติแล้ว
 }
 
 // ประเภทสินทรัพย์ถาวร
 enum FixedAssetCategory {
-  LAND              // ที่ดิน
-  BUILDING          // อาคาร
-  BUILDING_IMPROVE  // ส่วนปรับปรุงอาคาร
-  FURNITURE         // เฟอร์นิเจอร์และของตกแต่ง
-  EQUIPMENT         // เครื่องจักรและอุปกรณ์
-  IT_EQUIPMENT      // อุปกรณ์ IT
-  VEHICLE           // ยานพาหนะ
-  LINEN_UNIFORM     // ผ้า/ชุดเครื่องแบบ
+  LAND // ที่ดิน
+  BUILDING // อาคาร
+  BUILDING_IMPROVE // ส่วนปรับปรุงอาคาร
+  FURNITURE // เฟอร์นิเจอร์และของตกแต่ง
+  EQUIPMENT // เครื่องจักรและอุปกรณ์
+  IT_EQUIPMENT // อุปกรณ์ IT
+  VEHICLE // ยานพาหนะ
+  LINEN_UNIFORM // ผ้า/ชุดเครื่องแบบ
   KITCHEN_EQUIPMENT // อุปกรณ์ครัว
-  OTHER             // อื่นๆ
+  OTHER // อื่นๆ
 }
 
 // วิธีคิดค่าเสื่อมราคา
 enum DepreciationMethod {
-  STRAIGHT_LINE      // เส้นตรง
-  DECLINING_BALANCE  // ยอดลดลง
-  UNITS_OF_ACTIVITY  // ตามการใช้งาน
-  SUM_OF_YEARS       // ผลรวมตัวเลขปี
-  NO_DEPRECIATION    // ไม่คิดค่าเสื่อม (เช่น ที่ดิน)
+  STRAIGHT_LINE // เส้นตรง
+  DECLINING_BALANCE // ยอดลดลง
+  UNITS_OF_ACTIVITY // ตามการใช้งาน
+  SUM_OF_YEARS // ผลรวมตัวเลขปี
+  NO_DEPRECIATION // ไม่คิดค่าเสื่อม (เช่น ที่ดิน)
 }
 
 // สถานะสินทรัพย์
 enum AssetStatus {
-  ACTIVE        // ใช้งานอยู่
-  IDLE          // ไม่ได้ใช้งาน
-  UNDER_REPAIR  // อยู่ระหว่างซ่อม
-  DISPOSED      // จำหน่ายแล้ว
-  WRITTEN_OFF   // ตัดจำหน่ายแล้ว
+  ACTIVE // ใช้งานอยู่
+  IDLE // ไม่ได้ใช้งาน
+  UNDER_REPAIR // อยู่ระหว่างซ่อม
+  DISPOSED // จำหน่ายแล้ว
+  WRITTEN_OFF // ตัดจำหน่ายแล้ว
 }
 
 // ─── MODULE 1: ACCOUNTING CORE ────────────────────────────────────────────────
@@ -5248,22 +5251,22 @@ enum AssetStatus {
 /// ปีบัญชี (Fiscal Year)
 /// กำหนดช่วงเวลาของรอบบัญชีแต่ละปี
 model FiscalYear {
-  id          String         @id @default(uuid())
-  tenantId    String
-  propertyId  String
+  id         String    @id @default(uuid())
+  tenantId   String
+  propertyId String
   /// ปี เช่น 2024, 2025
-  year        Int
+  year       Int
   /// วันเริ่มต้นปีบัญชี
-  startDate   DateTime       @db.Date
+  startDate  DateTime  @db.Date
   /// วันสิ้นสุดปีบัญชี
-  endDate     DateTime       @db.Date
+  endDate    DateTime  @db.Date
   /// สถานะ: OPEN, CLOSED, LOCKED
-  status      String         @default("OPEN") @db.VarChar(20)
+  status     String    @default("OPEN") @db.VarChar(20)
   /// ปิดบัญชีโดย
-  closedBy    String?
-  closedAt    DateTime?
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+  closedBy   String?
+  closedAt   DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   journalEntries JournalEntry[]
   periodBalances LedgerBalance[]
@@ -5280,47 +5283,47 @@ model FiscalYear {
 ///   1xxx = สินทรัพย์, 2xxx = หนี้สิน, 3xxx = ทุน
 ///   4xxx = รายได้, 5xxx = ต้นทุน, 6xxx = ค่าใช้จ่าย
 model AccountChart {
-  id              String        @id @default(uuid())
-  tenantId        String
+  id            String        @id @default(uuid())
+  tenantId      String
   /// รหัสบัญชี เช่น "1101", "4101"
-  code            String        @db.VarChar(20)
+  code          String        @db.VarChar(20)
   /// ชื่อบัญชี (ภาษาไทย)
-  name            String        @db.VarChar(200)
+  name          String        @db.VarChar(200)
   /// ชื่อบัญชี (ภาษาอังกฤษ)
-  nameEn          String?       @db.VarChar(200)
+  nameEn        String?       @db.VarChar(200)
   /// ประเภทบัญชีหลัก
-  type            AccountType
+  type          AccountType
   /// ประเภทย่อย เช่น "current_asset", "fixed_asset", "current_liability"
-  subType         String?       @db.VarChar(50)
+  subType       String?       @db.VarChar(50)
   /// ด้านปกติของบัญชี
-  normalBalance   NormalBalance
+  normalBalance NormalBalance
   /// ระดับผังบัญชี
-  level           AccountLevel  @default(ACCOUNT)
+  level         AccountLevel  @default(ACCOUNT)
   /// บัญชีแม่ (สำหรับ hierarchy)
-  parentId        String?
+  parentId      String?
   /// บัญชีควบคุม (Accounts ใน sub-ledger เช่น AR, AP)
-  isControl       Boolean       @default(false)
+  isControl     Boolean       @default(false)
   /// ใช้งานอยู่
-  isActive        Boolean       @default(true)
+  isActive      Boolean       @default(true)
   /// ห้ามบันทึกรายการโดยตรง (เป็นแค่ category/group)
-  isHeaderOnly    Boolean       @default(false)
+  isHeaderOnly  Boolean       @default(false)
   /// รหัสงบการเงิน สำหรับ mapping งบดุล/งบกำไรขาดทุน
-  fsCode          String?       @db.VarChar(20)
+  fsCode        String?       @db.VarChar(20)
   /// หมายเหตุ
-  description     String?       @db.Text
+  description   String?       @db.Text
   /// เชื่อมกับ CostCenter (optional)
-  costCenterId    String?
-  sortOrder       Int           @default(0)
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  costCenterId  String?
+  sortOrder     Int           @default(0)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
-  parent          AccountChart?  @relation("AccountTree", fields: [parentId], references: [id])
-  children        AccountChart[] @relation("AccountTree")
-  journalLines    JournalLine[]
-  ledgerBalances  LedgerBalance[]
-  arInvoiceLines  ArInvoiceLine[]
-  apInvoiceLines  ApInvoiceLine[]
-  taxRates        TaxRate[]
+  parent         AccountChart?   @relation("AccountTree", fields: [parentId], references: [id])
+  children       AccountChart[]  @relation("AccountTree")
+  journalLines   JournalLine[]
+  ledgerBalances LedgerBalance[]
+  arInvoiceLines ArInvoiceLine[]
+  apInvoiceLines ApInvoiceLine[]
+  taxRates       TaxRate[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -5371,9 +5374,9 @@ model JournalEntry {
   createdAt    DateTime           @default(now())
   updatedAt    DateTime           @updatedAt
 
-  fiscalYearRef FiscalYear?   @relation(fields: [fiscalYearId], references: [id])
+  fiscalYearRef FiscalYear?    @relation(fields: [fiscalYearId], references: [id])
   lines         JournalLine[]
-  reversedBy    JournalEntry? @relation("JournalReversal", fields: [reversedById], references: [id])
+  reversedBy    JournalEntry?  @relation("JournalReversal", fields: [reversedById], references: [id])
   reversals     JournalEntry[] @relation("JournalReversal")
 
   @@unique([tenantId, entryNo])
@@ -5389,26 +5392,26 @@ model JournalEntry {
 /// รายการในสมุดรายวัน (Journal Line)
 /// แต่ละ JournalEntry ต้องมีอย่างน้อย 2 lines (1 debit + 1 credit)
 model JournalLine {
-  id             String       @id @default(uuid())
+  id             String   @id @default(uuid())
   journalEntryId String
   /// รหัสบัญชี
   accountId      String
   /// บรรทัดที่
   lineNo         Int
   /// คำอธิบายรายการบรรทัด
-  description    String?      @db.VarChar(300)
+  description    String?  @db.VarChar(300)
   /// เดบิต (0 ถ้าเป็น credit side)
-  debit          Decimal      @default(0.00) @db.Decimal(14, 2)
+  debit          Decimal  @default(0.00) @db.Decimal(14, 2)
   /// เครดิต (0 ถ้าเป็น debit side)
-  credit         Decimal      @default(0.00) @db.Decimal(14, 2)
+  credit         Decimal  @default(0.00) @db.Decimal(14, 2)
   /// Cost Center (optional)
   costCenterId   String?
   /// อ้างอิงรายการย่อย
-  subRef         String?      @db.VarChar(100)
-  createdAt      DateTime     @default(now())
+  subRef         String?  @db.VarChar(100)
+  createdAt      DateTime @default(now())
 
-  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
-  account        AccountChart @relation(fields: [accountId], references: [id])
+  journalEntry JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  account      AccountChart @relation(fields: [accountId], references: [id])
 
   @@index([journalEntryId])
   @@index([accountId])
@@ -5419,7 +5422,7 @@ model JournalLine {
 /// ยอดคงเหลือบัญชีแยกประเภท (Ledger Balance)
 /// Summary per account per period — ใช้ generate งบการเงิน
 model LedgerBalance {
-  id             String       @id @default(uuid())
+  id             String   @id @default(uuid())
   tenantId       String
   propertyId     String
   accountId      String
@@ -5429,19 +5432,19 @@ model LedgerBalance {
   /// งวด (1-12)
   fiscalPeriod   Int
   /// ยอดยกมาต้นงวด
-  openingBalance Decimal      @default(0.00) @db.Decimal(14, 2)
+  openingBalance Decimal  @default(0.00) @db.Decimal(14, 2)
   /// รวม Debit ในงวด
-  periodDebit    Decimal      @default(0.00) @db.Decimal(14, 2)
+  periodDebit    Decimal  @default(0.00) @db.Decimal(14, 2)
   /// รวม Credit ในงวด
-  periodCredit   Decimal      @default(0.00) @db.Decimal(14, 2)
+  periodCredit   Decimal  @default(0.00) @db.Decimal(14, 2)
   /// ยอดยกไปปลายงวด
-  closingBalance Decimal      @default(0.00) @db.Decimal(14, 2)
+  closingBalance Decimal  @default(0.00) @db.Decimal(14, 2)
   /// จำนวนรายการในงวด
-  txnCount       Int          @default(0)
-  updatedAt      DateTime     @updatedAt
+  txnCount       Int      @default(0)
+  updatedAt      DateTime @updatedAt
 
-  account        AccountChart @relation(fields: [accountId], references: [id])
-  fiscalYearRef  FiscalYear?  @relation(fields: [fiscalYearId], references: [id])
+  account       AccountChart @relation(fields: [accountId], references: [id])
+  fiscalYearRef FiscalYear?  @relation(fields: [fiscalYearId], references: [id])
 
   @@unique([tenantId, propertyId, accountId, fiscalYear, fiscalPeriod])
   @@index([tenantId])
@@ -5457,67 +5460,67 @@ model LedgerBalance {
 /// ใบแจ้งหนี้ลูกหนี้ (AR Invoice)
 /// ใช้สำหรับ: ใบเสร็จแขก, City Ledger, มัดจำ, ใบลดหนี้
 model ArInvoice {
-  id              String          @id @default(uuid())
-  tenantId        String
-  propertyId      String
+  id             String          @id @default(uuid())
+  tenantId       String
+  propertyId     String
   /// เลขที่ใบแจ้งหนี้ เช่น "INV-2024-001234"
-  invoiceNo       String          @db.VarChar(30)
-  invoiceType     ArInvoiceType   @default(GUEST_BILL)
+  invoiceNo      String          @db.VarChar(30)
+  invoiceType    ArInvoiceType   @default(GUEST_BILL)
   /// แขก (ถ้ามี)
-  guestId         String?
+  guestId        String?
   /// การจอง (ถ้ามี)
-  bookingId       String?
+  bookingId      String?
   /// Folio ที่เกี่ยวข้อง
-  folioId         String?
+  folioId        String?
   /// บริษัท/ตัวแทน (City Ledger)
-  companyName     String?         @db.VarChar(200)
-  companyTaxId    String?         @db.VarChar(20)
-  companyAddress  String?         @db.Text
+  companyName    String?         @db.VarChar(200)
+  companyTaxId   String?         @db.VarChar(20)
+  companyAddress String?         @db.Text
   /// วันที่ออกใบแจ้งหนี้
-  issueDate       DateTime        @db.Date
+  issueDate      DateTime        @db.Date
   /// กำหนดชำระ
-  dueDate         DateTime        @db.Date
+  dueDate        DateTime        @db.Date
   /// ก่อน VAT
-  subtotal        Decimal         @default(0.00) @db.Decimal(12, 2)
+  subtotal       Decimal         @default(0.00) @db.Decimal(12, 2)
   /// ส่วนลด
-  discountAmount  Decimal         @default(0.00) @db.Decimal(12, 2)
+  discountAmount Decimal         @default(0.00) @db.Decimal(12, 2)
   /// ฐานภาษี VAT
-  taxableAmount   Decimal         @default(0.00) @db.Decimal(12, 2)
+  taxableAmount  Decimal         @default(0.00) @db.Decimal(12, 2)
   /// VAT 7%
-  vatAmount       Decimal         @default(0.00) @db.Decimal(12, 2)
+  vatAmount      Decimal         @default(0.00) @db.Decimal(12, 2)
   /// หัก ณ ที่จ่าย (ถ้ามี)
-  whtAmount       Decimal         @default(0.00) @db.Decimal(12, 2)
+  whtAmount      Decimal         @default(0.00) @db.Decimal(12, 2)
   /// ยอดรวมสุทธิ
-  totalAmount     Decimal         @default(0.00) @db.Decimal(12, 2)
+  totalAmount    Decimal         @default(0.00) @db.Decimal(12, 2)
   /// ยอดที่ชำระแล้ว
-  paidAmount      Decimal         @default(0.00) @db.Decimal(12, 2)
+  paidAmount     Decimal         @default(0.00) @db.Decimal(12, 2)
   /// ยอดค้างชำระ
-  balance         Decimal         @default(0.00) @db.Decimal(12, 2)
-  status          ArInvoiceStatus @default(DRAFT)
+  balance        Decimal         @default(0.00) @db.Decimal(12, 2)
+  status         ArInvoiceStatus @default(DRAFT)
   /// สกุลเงิน
-  currency        String          @default("THB") @db.VarChar(3)
-  exchangeRate    Decimal         @default(1.000000) @db.Decimal(12, 6)
+  currency       String          @default("THB") @db.VarChar(3)
+  exchangeRate   Decimal         @default(1.000000) @db.Decimal(12, 6)
   /// หมายเหตุ
-  notes           String?         @db.Text
+  notes          String?         @db.Text
   /// GL posting แล้วหรือยัง
-  isPosted        Boolean          @default(false)
-  postedAt        DateTime?
-  postedBy        String?
-  issuedBy        String?
-  issuedAt        DateTime?
+  isPosted       Boolean         @default(false)
+  postedAt       DateTime?
+  postedBy       String?
+  issuedBy       String?
+  issuedAt       DateTime?
   /// ยกเลิกโดย
-  voidedBy        String?
-  voidedAt        DateTime?
-  voidReason      String?         @db.Text
-  createdBy       String
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  voidedBy       String?
+  voidedAt       DateTime?
+  voidReason     String?         @db.Text
+  createdBy      String
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
 
-  guest       Guest?          @relation(fields: [guestId], references: [id])
-  booking     Booking?        @relation(fields: [bookingId], references: [id])
-  folio       GuestFolio?     @relation(fields: [folioId], references: [id])
-  lines       ArInvoiceLine[]
-  receipts    ArReceiptAllocation[]
+  guest    Guest?                @relation(fields: [guestId], references: [id])
+  booking  Booking?              @relation(fields: [bookingId], references: [id])
+  folio    GuestFolio?           @relation(fields: [folioId], references: [id])
+  lines    ArInvoiceLine[]
+  receipts ArReceiptAllocation[]
 
   @@unique([tenantId, invoiceNo])
   @@index([tenantId])
@@ -5533,29 +5536,29 @@ model ArInvoice {
 
 /// รายการในใบแจ้งหนี้ AR
 model ArInvoiceLine {
-  id           String        @id @default(uuid())
+  id           String          @id @default(uuid())
   invoiceId    String
   lineNo       Int
   /// คำอธิบายรายการ
-  description  String        @db.VarChar(300)
+  description  String          @db.VarChar(300)
   chargeType   FolioChargeType
-  quantity     Decimal       @default(1.00) @db.Decimal(10, 3)
-  unitPrice    Decimal       @default(0.00) @db.Decimal(12, 2)
-  discountAmt  Decimal       @default(0.00) @db.Decimal(12, 2)
+  quantity     Decimal         @default(1.00) @db.Decimal(10, 3)
+  unitPrice    Decimal         @default(0.00) @db.Decimal(12, 2)
+  discountAmt  Decimal         @default(0.00) @db.Decimal(12, 2)
   /// ยอดก่อนภาษี
-  netAmount    Decimal       @default(0.00) @db.Decimal(12, 2)
-  vatRate      Decimal       @default(7.00) @db.Decimal(5, 2)
-  vatAmount    Decimal       @default(0.00) @db.Decimal(12, 2)
-  totalAmount  Decimal       @default(0.00) @db.Decimal(12, 2)
+  netAmount    Decimal         @default(0.00) @db.Decimal(12, 2)
+  vatRate      Decimal         @default(7.00) @db.Decimal(5, 2)
+  vatAmount    Decimal         @default(0.00) @db.Decimal(12, 2)
+  totalAmount  Decimal         @default(0.00) @db.Decimal(12, 2)
   /// GL Account ที่ map รายได้ประเภทนี้
   accountId    String?
   costCenterId String?
   /// อ้างอิงรายการต้นทาง (folioChargeId, orderId ฯลฯ)
-  sourceRef    String?       @db.VarChar(100)
-  createdAt    DateTime      @default(now())
+  sourceRef    String?         @db.VarChar(100)
+  createdAt    DateTime        @default(now())
 
-  invoice      ArInvoice    @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  account      AccountChart? @relation(fields: [accountId], references: [id])
+  invoice ArInvoice     @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  account AccountChart? @relation(fields: [accountId], references: [id])
 
   @@index([invoiceId])
   @@index([accountId])
@@ -5565,44 +5568,44 @@ model ArInvoiceLine {
 /// Guest Folio — บัญชีแขก (สะสม charge ระหว่าง Stay)
 /// เปิดตอน Check-in, ปิดตอน Check-out
 model GuestFolio {
-  id           String      @id @default(uuid())
-  tenantId     String
-  propertyId   String
+  id            String      @id @default(uuid())
+  tenantId      String
+  propertyId    String
   /// เลขที่ Folio เช่น "FOLIO-2024-001234"
-  folioNo      String      @db.VarChar(30)
-  bookingId    String
-  guestId      String
-  roomId       String?
+  folioNo       String      @db.VarChar(30)
+  bookingId     String
+  guestId       String
+  roomId        String?
   /// วันที่ Check-in
-  checkInDate  DateTime    @db.Date
+  checkInDate   DateTime    @db.Date
   /// วันที่ Check-out (อาจยังไม่มีถ้ายังอยู่)
-  checkOutDate DateTime?   @db.Date
+  checkOutDate  DateTime?   @db.Date
   /// วันที่เปิด Folio
-  openDate     DateTime    @default(now())
-  status       FolioStatus @default(OPEN)
+  openDate      DateTime    @default(now())
+  status        FolioStatus @default(OPEN)
   /// ยอดรวม charge ทั้งหมด
-  totalCharges Decimal     @default(0.00) @db.Decimal(12, 2)
+  totalCharges  Decimal     @default(0.00) @db.Decimal(12, 2)
   /// ยอดที่ชำระแล้ว
-  totalPayments Decimal    @default(0.00) @db.Decimal(12, 2)
+  totalPayments Decimal     @default(0.00) @db.Decimal(12, 2)
   /// ยอดคงเหลือ (+ = ค้างชำระ, - = เครดิต)
-  balance      Decimal     @default(0.00) @db.Decimal(12, 2)
+  balance       Decimal     @default(0.00) @db.Decimal(12, 2)
   /// ยอดมัดจำ
-  depositAmount Decimal    @default(0.00) @db.Decimal(12, 2)
+  depositAmount Decimal     @default(0.00) @db.Decimal(12, 2)
   /// สกุลเงิน
-  currency     String      @default("THB") @db.VarChar(3)
+  currency      String      @default("THB") @db.VarChar(3)
   /// หมายเหตุ
-  notes        String?     @db.Text
-  closedBy     String?
-  closedAt     DateTime?
-  createdBy    String
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  notes         String?     @db.Text
+  closedBy      String?
+  closedAt      DateTime?
+  createdBy     String
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
 
-  charges      FolioCharge[]
-  payments     FolioPayment[]
-  booking      Booking      @relation(fields: [bookingId], references: [id])
-  guest        Guest        @relation(fields: [guestId], references: [id])
-  arInvoices   ArInvoice[]
+  charges    FolioCharge[]
+  payments   FolioPayment[]
+  booking    Booking        @relation(fields: [bookingId], references: [id])
+  guest      Guest          @relation(fields: [guestId], references: [id])
+  arInvoices ArInvoice[]
 
   @@unique([tenantId, folioNo])
   @@index([tenantId])
@@ -5615,41 +5618,41 @@ model GuestFolio {
 
 /// รายการ Charge ใน Folio (ค่าใช้จ่ายสะสมของแขก)
 model FolioCharge {
-  id            String          @id @default(uuid())
-  tenantId      String
-  propertyId    String
-  folioId       String
-  chargeDate    DateTime        @default(now())
-  chargeType    FolioChargeType
-  description   String          @db.VarChar(300)
-  quantity      Decimal         @default(1.00) @db.Decimal(10, 3)
-  unitPrice     Decimal         @default(0.00) @db.Decimal(12, 2)
+  id           String            @id @default(uuid())
+  tenantId     String
+  propertyId   String
+  folioId      String
+  chargeDate   DateTime          @default(now())
+  chargeType   FolioChargeType
+  description  String            @db.VarChar(300)
+  quantity     Decimal           @default(1.00) @db.Decimal(10, 3)
+  unitPrice    Decimal           @default(0.00) @db.Decimal(12, 2)
   /// ยอดก่อน VAT
-  netAmount     Decimal         @default(0.00) @db.Decimal(12, 2)
-  vatRate       Decimal         @default(7.00) @db.Decimal(5, 2)
-  vatAmount     Decimal         @default(0.00) @db.Decimal(12, 2)
-  totalAmount   Decimal         @default(0.00) @db.Decimal(12, 2)
+  netAmount    Decimal           @default(0.00) @db.Decimal(12, 2)
+  vatRate      Decimal           @default(7.00) @db.Decimal(5, 2)
+  vatAmount    Decimal           @default(0.00) @db.Decimal(12, 2)
+  totalAmount  Decimal           @default(0.00) @db.Decimal(12, 2)
   /// GL Account สำหรับ posting
-  accountId     String?
-  costCenterId  String?
+  accountId    String?
+  costCenterId String?
   /// Night Audit ที่ post รายการนี้
-  nightAuditId  String?
+  nightAuditId String?
   /// อ้างอิง source (orderId, bookingId ฯลฯ)
-  sourceType    String?         @db.VarChar(50)
-  sourceId      String?
+  sourceType   String?           @db.VarChar(50)
+  sourceId     String?
   /// Night Audit ที่ post
-  isAutoPosted  Boolean         @default(false)
+  isAutoPosted Boolean           @default(false)
   /// กลับรายการแล้วหรือยัง
-  isReversed    Boolean         @default(false)
-  status        FolioChargeStatus @default(POSTED)
-  reversedById  String?
-  reversedBy    String?
-  reversedAt    DateTime?
-  postedBy      String
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
+  isReversed   Boolean           @default(false)
+  status       FolioChargeStatus @default(POSTED)
+  reversedById String?
+  reversedBy   String?
+  reversedAt   DateTime?
+  postedBy     String
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
 
-  folio         GuestFolio      @relation(fields: [folioId], references: [id], onDelete: Cascade)
+  folio GuestFolio @relation(fields: [folioId], references: [id], onDelete: Cascade)
 
   @@index([folioId])
   @@index([chargeDate])
@@ -5661,25 +5664,25 @@ model FolioCharge {
 
 /// รายการชำระเงินใน Folio
 model FolioPayment {
-  id            String            @id @default(uuid())
-  tenantId      String
-  propertyId    String
-  folioId       String
-  paymentDate   DateTime          @default(now())
-  method        AccPaymentMethod
-  amount        Decimal           @db.Decimal(12, 2)
+  id          String           @id @default(uuid())
+  tenantId    String
+  propertyId  String
+  folioId     String
+  paymentDate DateTime         @default(now())
+  method      AccPaymentMethod
+  amount      Decimal          @db.Decimal(12, 2)
   /// อ้างอิง (เลขที่บัตร last 4, เลขที่โอน ฯลฯ)
-  reference     String?           @db.VarChar(100)
+  reference   String?          @db.VarChar(100)
   /// ชื่อผู้ชำระ
-  payerName     String?           @db.VarChar(200)
+  payerName   String?          @db.VarChar(200)
   /// หมายเหตุ
-  notes         String?           @db.Text
-  status        ArReceiptStatus   @default(CLEARED)
-  isReversed    Boolean           @default(false)
-  postedBy      String
-  createdAt     DateTime          @default(now())
+  notes       String?          @db.Text
+  status      ArReceiptStatus  @default(CLEARED)
+  isReversed  Boolean          @default(false)
+  postedBy    String
+  createdAt   DateTime         @default(now())
 
-  folio         GuestFolio        @relation(fields: [folioId], references: [id], onDelete: Cascade)
+  folio GuestFolio @relation(fields: [folioId], references: [id], onDelete: Cascade)
 
   @@index([folioId])
   @@index([paymentDate])
@@ -5715,8 +5718,8 @@ model ArReceipt {
   createdAt    DateTime         @default(now())
   updatedAt    DateTime         @updatedAt
 
-  guest        Guest?           @relation(fields: [guestId], references: [id])
-  allocations  ArReceiptAllocation[]
+  guest       Guest?                @relation(fields: [guestId], references: [id])
+  allocations ArReceiptAllocation[]
 
   @@unique([tenantId, receiptNo])
   @@index([tenantId])
@@ -5728,15 +5731,15 @@ model ArReceipt {
 
 /// การจัดสรรการรับชำระกับ Invoice
 model ArReceiptAllocation {
-  id          String    @id @default(uuid())
-  tenantId    String
-  receiptId   String
-  invoiceId   String
-  amount      Decimal   @db.Decimal(12, 2)
-  createdAt   DateTime  @default(now())
+  id        String   @id @default(uuid())
+  tenantId  String
+  receiptId String
+  invoiceId String
+  amount    Decimal  @db.Decimal(12, 2)
+  createdAt DateTime @default(now())
 
-  receipt     ArReceipt  @relation(fields: [receiptId], references: [id], onDelete: Cascade)
-  invoice     ArInvoice  @relation(fields: [invoiceId], references: [id])
+  receipt ArReceipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  invoice ArInvoice @relation(fields: [invoiceId], references: [id])
 
   @@unique([receiptId, invoiceId])
   @@index([receiptId])
@@ -5750,60 +5753,60 @@ model ArReceiptAllocation {
 /// ใบแจ้งหนี้จาก Supplier (AP Invoice)
 /// ต่อเนื่องจาก PurchaseOrder + GoodsReceive ที่มีอยู่แล้ว
 model ApInvoice {
-  id               String          @id @default(uuid())
-  tenantId         String
-  propertyId       String
+  id                String          @id @default(uuid())
+  tenantId          String
+  propertyId        String
   /// เลขที่ใบแจ้งหนี้ (ภายใน) เช่น "APINV-2024-001234"
-  invoiceNo        String          @db.VarChar(30)
+  invoiceNo         String          @db.VarChar(30)
   /// เลขที่ใบแจ้งหนี้ของ Supplier
-  supplierInvoiceNo String?        @db.VarChar(100)
-  invoiceType      ApInvoiceType   @default(SUPPLIER_INVOICE)
-  supplierId       String
+  supplierInvoiceNo String?         @db.VarChar(100)
+  invoiceType       ApInvoiceType   @default(SUPPLIER_INVOICE)
+  supplierId        String
   /// อ้างอิง Purchase Order
-  purchaseOrderId  String?
+  purchaseOrderId   String?
   /// อ้างอิง Goods Receive
-  goodsReceiveId   String?
-  invoiceDate      DateTime        @db.Date
-  dueDate          DateTime        @db.Date
+  goodsReceiveId    String?
+  invoiceDate       DateTime        @db.Date
+  dueDate           DateTime        @db.Date
   /// ยอดก่อน VAT
-  subtotal         Decimal         @default(0.00) @db.Decimal(12, 2)
+  subtotal          Decimal         @default(0.00) @db.Decimal(12, 2)
   /// ส่วนลด
-  discountAmount   Decimal         @default(0.00) @db.Decimal(12, 2)
+  discountAmount    Decimal         @default(0.00) @db.Decimal(12, 2)
   /// ฐานภาษี VAT
-  taxableAmount    Decimal         @default(0.00) @db.Decimal(12, 2)
+  taxableAmount     Decimal         @default(0.00) @db.Decimal(12, 2)
   /// VAT 7%
-  vatAmount        Decimal         @default(0.00) @db.Decimal(12, 2)
+  vatAmount         Decimal         @default(0.00) @db.Decimal(12, 2)
   /// หัก ณ ที่จ่าย
-  whtAmount        Decimal         @default(0.00) @db.Decimal(12, 2)
+  whtAmount         Decimal         @default(0.00) @db.Decimal(12, 2)
   /// ยอดรวมสุทธิที่ต้องจ่าย
-  totalAmount      Decimal         @default(0.00) @db.Decimal(12, 2)
+  totalAmount       Decimal         @default(0.00) @db.Decimal(12, 2)
   /// ยอดที่หัก WHT แล้ว (Code expects this)
-  netPayable       Decimal         @default(0.00) @db.Decimal(12, 2)
+  netPayable        Decimal         @default(0.00) @db.Decimal(12, 2)
   /// ยอดที่จ่ายแล้ว
-  paidAmount       Decimal         @default(0.00) @db.Decimal(12, 2)
+  paidAmount        Decimal         @default(0.00) @db.Decimal(12, 2)
   /// ยอดค้างจ่าย
-  balance          Decimal         @default(0.00) @db.Decimal(12, 2)
-  status           ApInvoiceStatus @default(PENDING)
-  currency         String          @default("THB") @db.VarChar(3)
-  exchangeRate     Decimal         @default(1.000000) @db.Decimal(12, 6)
-  paymentTerms     String?         @db.VarChar(100)
-  notes            String?         @db.Text
-  internalNotes    String?         @db.Text
+  balance           Decimal         @default(0.00) @db.Decimal(12, 2)
+  status            ApInvoiceStatus @default(PENDING)
+  currency          String          @default("THB") @db.VarChar(3)
+  exchangeRate      Decimal         @default(1.000000) @db.Decimal(12, 6)
+  paymentTerms      String?         @db.VarChar(100)
+  notes             String?         @db.Text
+  internalNotes     String?         @db.Text
   /// GL posting แล้วหรือยัง
-  isPosted         Boolean         @default(false)
-  postedAt         DateTime?
-  approvedBy       String?
-  approvedAt       DateTime?
-  voidedBy         String?
-  voidedAt         DateTime?
-  voidReason       String?         @db.Text
-  createdBy        String
-  createdAt        DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
+  isPosted          Boolean         @default(false)
+  postedAt          DateTime?
+  approvedBy        String?
+  approvedAt        DateTime?
+  voidedBy          String?
+  voidedAt          DateTime?
+  voidReason        String?         @db.Text
+  createdBy         String
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
 
-  supplier     Supplier        @relation(fields: [supplierId], references: [id])
-  lines        ApInvoiceLine[]
-  payments     ApPaymentAllocation[]
+  supplier Supplier              @relation(fields: [supplierId], references: [id])
+  lines    ApInvoiceLine[]
+  payments ApPaymentAllocation[]
 
   @@unique([tenantId, invoiceNo])
   @@index([tenantId])
@@ -5817,28 +5820,28 @@ model ApInvoice {
 
 /// รายการในใบแจ้งหนี้ AP
 model ApInvoiceLine {
-  id           String        @id @default(uuid())
+  id           String   @id @default(uuid())
   invoiceId    String
   lineNo       Int
-  description  String        @db.VarChar(300)
+  description  String   @db.VarChar(300)
   /// อ้างอิงสินค้า/บริการ
   itemId       String?
-  quantity     Decimal       @default(1.00) @db.Decimal(10, 3)
-  unitPrice    Decimal       @default(0.00) @db.Decimal(12, 2)
-  discountAmt  Decimal       @default(0.00) @db.Decimal(12, 2)
-  netAmount    Decimal       @default(0.00) @db.Decimal(12, 2)
-  vatRate      Decimal       @default(7.00) @db.Decimal(5, 2)
-  vatAmount    Decimal       @default(0.00) @db.Decimal(12, 2)
-  whtRate      Decimal       @default(0.00) @db.Decimal(5, 2)
-  whtAmount    Decimal       @default(0.00) @db.Decimal(12, 2)
-  totalAmount  Decimal       @default(0.00) @db.Decimal(12, 2)
+  quantity     Decimal  @default(1.00) @db.Decimal(10, 3)
+  unitPrice    Decimal  @default(0.00) @db.Decimal(12, 2)
+  discountAmt  Decimal  @default(0.00) @db.Decimal(12, 2)
+  netAmount    Decimal  @default(0.00) @db.Decimal(12, 2)
+  vatRate      Decimal  @default(7.00) @db.Decimal(5, 2)
+  vatAmount    Decimal  @default(0.00) @db.Decimal(12, 2)
+  whtRate      Decimal  @default(0.00) @db.Decimal(5, 2)
+  whtAmount    Decimal  @default(0.00) @db.Decimal(12, 2)
+  totalAmount  Decimal  @default(0.00) @db.Decimal(12, 2)
   /// GL Account ที่ map ค่าใช้จ่ายประเภทนี้
   accountId    String?
   costCenterId String?
-  createdAt    DateTime      @default(now())
+  createdAt    DateTime @default(now())
 
-  invoice      ApInvoice     @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  account      AccountChart? @relation(fields: [accountId], references: [id])
+  invoice ApInvoice     @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  account AccountChart? @relation(fields: [accountId], references: [id])
 
   @@index([invoiceId])
   @@index([accountId])
@@ -5879,9 +5882,9 @@ model ApPayment {
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
 
-  supplier      Supplier         @relation(fields: [supplierId], references: [id])
-  allocations   ApPaymentAllocation[]
-  whtCerts      WhtCertificate[]
+  supplier    Supplier              @relation(fields: [supplierId], references: [id])
+  allocations ApPaymentAllocation[]
+  whtCerts    WhtCertificate[]
 
   @@unique([tenantId, paymentNo])
   @@index([tenantId])
@@ -5894,15 +5897,15 @@ model ApPayment {
 
 /// การจัดสรรการจ่ายชำระกับ AP Invoice
 model ApPaymentAllocation {
-  id          String    @id @default(uuid())
-  tenantId    String
-  paymentId   String
-  invoiceId   String
-  amount      Decimal   @db.Decimal(12, 2)
-  createdAt   DateTime  @default(now())
+  id        String   @id @default(uuid())
+  tenantId  String
+  paymentId String
+  invoiceId String
+  amount    Decimal  @db.Decimal(12, 2)
+  createdAt DateTime @default(now())
 
-  payment     ApPayment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
-  invoice     ApInvoice  @relation(fields: [invoiceId], references: [id])
+  payment ApPayment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  invoice ApInvoice @relation(fields: [invoiceId], references: [id])
 
   @@unique([paymentId, invoiceId])
   @@index([paymentId])
@@ -5915,28 +5918,28 @@ model ApPaymentAllocation {
 
 /// อัตราภาษี (Tax Rate Configuration)
 model TaxRate {
-  id          String    @id @default(uuid())
-  tenantId    String
+  id                  String         @id @default(uuid())
+  tenantId            String
   /// ชื่อ เช่น "VAT 7%", "WHT 3% (บริการ)"
-  name        String    @db.VarChar(100)
+  name                String         @db.VarChar(100)
   /// รหัส เช่น "VAT", "WHT_SERVICE_3"
-  code        String    @db.VarChar(30)
-  type        TaxType
+  code                String         @db.VarChar(30)
+  type                TaxType
   /// อัตราภาษี (%)
-  rate        Decimal   @db.Decimal(5, 2)
+  rate                Decimal        @db.Decimal(5, 2)
   /// GL Account สำหรับภาษีที่ต้องนำส่ง
-  taxPayableAccountId   String?
+  taxPayableAccountId String?
   /// GL Account สำหรับภาษีซื้อ
-  taxInputAccountId     String?
+  taxInputAccountId   String?
   /// ประเภทเงินได้ WHT (ถ้าเป็น WHT)
-  whtIncomeType         WhtIncomeType?
-  isDefault   Boolean   @default(false)
-  isActive    Boolean   @default(true)
-  description String?   @db.Text
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  whtIncomeType       WhtIncomeType?
+  isDefault           Boolean        @default(false)
+  isActive            Boolean        @default(true)
+  description         String?        @db.Text
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
 
-  taxPayableAccount  AccountChart? @relation(fields: [taxPayableAccountId], references: [id])
+  taxPayableAccount AccountChart? @relation(fields: [taxPayableAccountId], references: [id])
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -5947,43 +5950,43 @@ model TaxRate {
 /// ใบหัก ณ ที่จ่าย (WHT Certificate)
 /// ออกให้ Supplier เมื่อมีการหักภาษี ณ ที่จ่าย
 model WhtCertificate {
-  id            String        @id @default(uuid())
-  tenantId      String
-  propertyId    String
+  id           String        @id @default(uuid())
+  tenantId     String
+  propertyId   String
   /// เลขที่ใบหัก ณ ที่จ่าย เช่น "WHT-2024-001234"
-  certNo        String        @db.VarChar(30)
-  supplierId    String
+  certNo       String        @db.VarChar(30)
+  supplierId   String
   /// AP Payment ที่เกี่ยวข้อง
-  apPaymentId   String?
+  apPaymentId  String?
   /// วันที่จ่าย
-  paymentDate   DateTime      @db.Date
+  paymentDate  DateTime      @db.Date
   /// ประเภทเงินได้
-  incomeType    WhtIncomeType
+  incomeType   WhtIncomeType
   /// ยอดเงินได้
-  incomeAmount  Decimal       @db.Decimal(12, 2)
+  incomeAmount Decimal       @db.Decimal(12, 2)
   /// อัตรา WHT (%)
-  whtRate       Decimal       @db.Decimal(5, 2)
+  whtRate      Decimal       @db.Decimal(5, 2)
   /// ยอดภาษีที่หัก
-  whtAmount     Decimal       @db.Decimal(12, 2)
-  status        WhtCertStatus @default(DRAFT)
+  whtAmount    Decimal       @db.Decimal(12, 2)
+  status       WhtCertStatus @default(DRAFT)
   /// ผู้รับเงิน (ชื่อ/ที่อยู่ ณ วันที่ออก)
-  payeeName     String        @db.VarChar(200)
-  payeeTaxId    String?       @db.VarChar(20)
-  payeeAddress  String?       @db.Text
+  payeeName    String        @db.VarChar(200)
+  payeeTaxId   String?       @db.VarChar(20)
+  payeeAddress String?       @db.Text
   /// ผู้ออกใบหัก (บริษัทโรงแรม)
-  issuerName    String?       @db.VarChar(200)
-  issuerTaxId   String?       @db.VarChar(20)
+  issuerName   String?       @db.VarChar(200)
+  issuerTaxId  String?       @db.VarChar(20)
   /// สร้างโดย
-  issuedBy      String
-  createdBy     String?
-  issuedAt      DateTime?
-  voidedBy      String?
-  voidedAt      DateTime?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  issuedBy     String
+  createdBy    String?
+  issuedAt     DateTime?
+  voidedBy     String?
+  voidedAt     DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 
-  apPayment     ApPayment?    @relation(fields: [apPaymentId], references: [id])
-  supplier      Supplier      @relation(fields: [supplierId], references: [id])
+  apPayment ApPayment? @relation(fields: [apPaymentId], references: [id])
+  supplier  Supplier   @relation(fields: [supplierId], references: [id])
 
   @@unique([tenantId, certNo])
   @@index([tenantId])
@@ -5997,42 +6000,42 @@ model WhtCertificate {
 /// แบบยื่นภาษี (Tax Filing)
 /// รวบรวมรายการเพื่อยื่น ภ.พ.30, ภ.ง.ด.1/3/53
 model TaxFiling {
-  id           String          @id @default(uuid())
-  tenantId     String
-  propertyId   String
-  filingType   TaxFilingType
+  id         String          @id @default(uuid())
+  tenantId   String
+  propertyId String
+  filingType TaxFilingType
   /// งวดที่ยื่น เช่น "2024-01"
-  period       String          @db.VarChar(10)
+  period     String          @db.VarChar(10)
   /// ปีภาษี
-  taxYear      Int
+  taxYear    Int
   /// เดือนภาษี
-  taxMonth     Int
+  taxMonth   Int
   /// ยอดรวมรายได้/ฐานภาษี
-  totalBase    Decimal         @default(0.00) @db.Decimal(14, 2)
+  totalBase  Decimal         @default(0.00) @db.Decimal(14, 2)
   /// ยอดภาษี
-  totalTax     Decimal         @default(0.00) @db.Decimal(14, 2)
+  totalTax   Decimal         @default(0.00) @db.Decimal(14, 2)
   /// ยอดที่ชำระ
-  paidAmount   Decimal         @default(0.00) @db.Decimal(14, 2)
-  status       TaxFilingStatus @default(DRAFT)
+  paidAmount Decimal         @default(0.00) @db.Decimal(14, 2)
+  status     TaxFilingStatus @default(DRAFT)
   /// วันครบกำหนดยื่น
-  dueDate      DateTime        @db.Date
+  dueDate    DateTime        @db.Date
   /// วันที่ยื่นจริง
-  filedAt      DateTime?
+  filedAt    DateTime?
   /// ยื่นโดย
-  filedBy      String?
+  filedBy    String?
   /// วันที่ชำระ
-  paidAt       DateTime?
+  paidAt     DateTime?
   /// ชำระโดย
-  paidBy       String?
+  paidBy     String?
   /// สร้างโดย
-  createdBy    String?
+  createdBy  String?
   /// เลขที่อ้างอิงการยื่น
-  filingRef    String?         @db.VarChar(100)
-  notes        String?         @db.Text
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
+  filingRef  String?         @db.VarChar(100)
+  notes      String?         @db.Text
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
 
-  lines        TaxFilingLine[]
+  lines TaxFilingLine[]
 
   @@unique([tenantId, propertyId, filingType, period])
   @@index([tenantId])
@@ -6045,18 +6048,18 @@ model TaxFiling {
 
 /// รายการในแบบยื่นภาษี
 model TaxFilingLine {
-  id          String    @id @default(uuid())
+  id          String   @id @default(uuid())
   filingId    String
   lineNo      Int
-  description String    @db.VarChar(300)
+  description String   @db.VarChar(300)
   /// อ้างอิงเอกสาร (WHT cert no, invoice no ฯลฯ)
-  docRef      String?   @db.VarChar(100)
-  baseAmount  Decimal   @default(0.00) @db.Decimal(12, 2)
-  taxRate     Decimal   @default(0.00) @db.Decimal(5, 2)
-  taxAmount   Decimal   @default(0.00) @db.Decimal(12, 2)
-  createdAt   DateTime  @default(now())
+  docRef      String?  @db.VarChar(100)
+  baseAmount  Decimal  @default(0.00) @db.Decimal(12, 2)
+  taxRate     Decimal  @default(0.00) @db.Decimal(5, 2)
+  taxAmount   Decimal  @default(0.00) @db.Decimal(12, 2)
+  createdAt   DateTime @default(now())
 
-  filing      TaxFiling @relation(fields: [filingId], references: [id], onDelete: Cascade)
+  filing TaxFiling @relation(fields: [filingId], references: [id], onDelete: Cascade)
 
   @@index([filingId])
   @@map("tax_filing_lines")
@@ -6068,56 +6071,56 @@ model TaxFilingLine {
 /// Night Audit รายวัน
 /// ทำทุกคืนเพื่อ: post ค่าห้อง, สรุปรายได้, ปิดงวดวัน
 model NightAudit {
-  id                String           @id @default(uuid())
-  tenantId          String
-  propertyId        String
+  id         String           @id @default(uuid())
+  tenantId   String
+  propertyId String
   /// วันที่ทำ Night Audit
-  auditDate         DateTime         @db.Date
-  status            NightAuditStatus @default(OPEN)
+  auditDate  DateTime         @db.Date
+  status     NightAuditStatus @default(OPEN)
 
   // ── สรุปรายได้ ──
   /// รายได้ค่าห้อง
-  roomRevenue       Decimal          @default(0.00) @db.Decimal(12, 2)
+  roomRevenue  Decimal @default(0.00) @db.Decimal(12, 2)
   /// รายได้ F&B
-  fbRevenue         Decimal          @default(0.00) @db.Decimal(12, 2)
+  fbRevenue    Decimal @default(0.00) @db.Decimal(12, 2)
   /// รายได้อื่นๆ
-  otherRevenue      Decimal          @default(0.00) @db.Decimal(12, 2)
+  otherRevenue Decimal @default(0.00) @db.Decimal(12, 2)
   /// รายได้รวม
-  totalRevenue      Decimal          @default(0.00) @db.Decimal(12, 2)
+  totalRevenue Decimal @default(0.00) @db.Decimal(12, 2)
 
   // ── สรุป Folio ──
   /// ยอด Charge รวม
-  totalCharges      Decimal          @default(0.00) @db.Decimal(12, 2)
+  totalCharges  Decimal @default(0.00) @db.Decimal(12, 2)
   /// ยอดรับชำระรวม
-  totalPayments     Decimal          @default(0.00) @db.Decimal(12, 2)
+  totalPayments Decimal @default(0.00) @db.Decimal(12, 2)
   /// ยอดคงเหลือ
-  totalBalance      Decimal          @default(0.00) @db.Decimal(12, 2)
+  totalBalance  Decimal @default(0.00) @db.Decimal(12, 2)
 
   // ── สถิติห้องพัก ──
-  totalRooms        Int              @default(0)
-  occupiedRooms     Int              @default(0)
+  totalRooms     Int     @default(0)
+  occupiedRooms  Int     @default(0)
   /// เปอร์เซ็นต์ Occupancy
-  occupancyRate     Decimal          @default(0.00) @db.Decimal(5, 2)
+  occupancyRate  Decimal @default(0.00) @db.Decimal(5, 2)
   /// Average Daily Rate
-  adr               Decimal          @default(0.00) @db.Decimal(10, 2)
+  adr            Decimal @default(0.00) @db.Decimal(10, 2)
   /// Revenue Per Available Room
-  revPAR            Decimal          @default(0.00) @db.Decimal(10, 2)
+  revPAR         Decimal @default(0.00) @db.Decimal(10, 2)
   /// จำนวนแขก check-in วันนี้
-  checkInsCount     Int              @default(0)
+  checkInsCount  Int     @default(0)
   /// จำนวนแขก check-out วันนี้
-  checkOutsCount    Int              @default(0)
+  checkOutsCount Int     @default(0)
 
-  startedBy         String?
-  startedAt         DateTime?
-  completedBy       String?
-  completedAt       DateTime?
+  startedBy      String?
+  startedAt      DateTime?
+  completedBy    String?
+  completedAt    DateTime?
   /// Journal Entry ที่สร้างจาก Night Audit
-  journalEntryId    String?
-  notes             String?          @db.Text
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
+  journalEntryId String?
+  notes          String?   @db.Text
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
-  charges           NightAuditCharge[]
+  charges NightAuditCharge[]
 
   @@unique([tenantId, propertyId, auditDate])
   @@index([tenantId])
@@ -6129,22 +6132,22 @@ model NightAudit {
 
 /// รายการ Charge ที่ Night Audit สร้าง (ส่วนใหญ่คือค่าห้องพัก)
 model NightAuditCharge {
-  id            String    @id @default(uuid())
-  nightAuditId  String
-  folioId       String
-  bookingId     String
-  roomId        String?
-  chargeType    FolioChargeType
-  description   String    @db.VarChar(300)
-  amount        Decimal   @db.Decimal(12, 2)
-  vatAmount     Decimal   @default(0.00) @db.Decimal(12, 2)
-  totalAmount   Decimal   @db.Decimal(12, 2)
+  id           String          @id @default(uuid())
+  nightAuditId String
+  folioId      String
+  bookingId    String
+  roomId       String?
+  chargeType   FolioChargeType
+  description  String          @db.VarChar(300)
+  amount       Decimal         @db.Decimal(12, 2)
+  vatAmount    Decimal         @default(0.00) @db.Decimal(12, 2)
+  totalAmount  Decimal         @db.Decimal(12, 2)
   /// post ลง folio สำเร็จหรือยัง
-  isPosted      Boolean   @default(false)
-  postedAt      DateTime?
-  createdAt     DateTime  @default(now())
+  isPosted     Boolean         @default(false)
+  postedAt     DateTime?
+  createdAt    DateTime        @default(now())
 
-  nightAudit    NightAudit @relation(fields: [nightAuditId], references: [id], onDelete: Cascade)
+  nightAudit NightAudit @relation(fields: [nightAuditId], references: [id], onDelete: Cascade)
 
   @@index([nightAuditId])
   @@index([folioId])
@@ -6158,33 +6161,33 @@ model NightAuditCharge {
 /// ลิ้นชักเงินสด (Cash Drawer)
 /// แต่ละแผนก/กะมีลิ้นชักของตัวเอง
 model CashDrawer {
-  id              String           @id @default(uuid())
-  tenantId        String
-  propertyId      String
+  id             String           @id @default(uuid())
+  tenantId       String
+  propertyId     String
   /// ชื่อ เช่น "แผนกต้อนรับ - กะเช้า"
-  name            String           @db.VarChar(100)
+  name           String           @db.VarChar(100)
   /// รหัสลิ้นชัก
-  code            String           @db.VarChar(20)
+  code           String           @db.VarChar(20)
   /// ยอดเงินเปิดกะ
-  openingBalance  Decimal          @default(0.00) @db.Decimal(12, 2)
+  openingBalance Decimal          @default(0.00) @db.Decimal(12, 2)
   /// ยอดเงินปัจจุบัน
-  currentBalance  Decimal          @default(0.00) @db.Decimal(12, 2)
-  status          CashDrawerStatus @default(OPEN)
+  currentBalance Decimal          @default(0.00) @db.Decimal(12, 2)
+  status         CashDrawerStatus @default(OPEN)
   /// เปิดกะโดย
-  openedBy        String?
-  openedAt        DateTime?
+  openedBy       String?
+  openedAt       DateTime?
   /// ปิดกะโดย
-  closedBy        String?
-  closedAt        DateTime?
+  closedBy       String?
+  closedAt       DateTime?
   /// ยอดเงินที่นับได้จริงตอนปิดกะ
-  countedAmount   Decimal?         @db.Decimal(12, 2)
+  countedAmount  Decimal?         @db.Decimal(12, 2)
   /// ผลต่าง (นับได้ - ระบบ)
-  variance        Decimal?         @db.Decimal(12, 2)
-  notes           String?          @db.Text
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  variance       Decimal?         @db.Decimal(12, 2)
+  notes          String?          @db.Text
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
 
-  transactions    CashTransaction[]
+  transactions CashTransaction[]
 
   @@unique([tenantId, propertyId, code])
   @@index([tenantId])
@@ -6195,26 +6198,26 @@ model CashDrawer {
 
 /// รายการเงินสด (Cash Transaction)
 model CashTransaction {
-  id          String       @id @default(uuid())
+  id          String      @id @default(uuid())
   drawerId    String
   tenantId    String
   propertyId  String
-  txnDate     DateTime     @default(now())
+  txnDate     DateTime    @default(now())
   txnType     CashTxnType
-  description String       @db.VarChar(300)
-  amount      Decimal      @db.Decimal(12, 2)
+  description String      @db.VarChar(300)
+  amount      Decimal     @db.Decimal(12, 2)
   /// ยอดหลังรายการ
-  balance     Decimal      @db.Decimal(12, 2)
+  balance     Decimal     @db.Decimal(12, 2)
   /// ลิ้นชักปลายทาง (กรณี TRANSFER)
   toDrawerId  String?
   /// อ้างอิงเอกสาร (folioId, invoiceNo ฯลฯ)
-  sourceType  String?      @db.VarChar(50)
+  sourceType  String?     @db.VarChar(50)
   sourceId    String?
-  reference   String?      @db.VarChar(100)
+  reference   String?     @db.VarChar(100)
   createdBy   String
-  createdAt   DateTime     @default(now())
+  createdAt   DateTime    @default(now())
 
-  drawer      CashDrawer   @relation(fields: [drawerId], references: [id])
+  drawer CashDrawer @relation(fields: [drawerId], references: [id])
 
   @@index([drawerId])
   @@index([tenantId])
@@ -6226,30 +6229,30 @@ model CashTransaction {
 /// กระทบยอดธนาคาร (Bank Reconciliation)
 /// กระทบยอด Statement จากธนาคาร vs ยอดในระบบ
 model BankReconciliation {
-  id                String          @id @default(uuid())
-  tenantId          String
-  propertyId        String
+  id               String          @id @default(uuid())
+  tenantId         String
+  propertyId       String
   /// บัญชีธนาคาร (FK ไปหา BankAccount ที่มีอยู่แล้ว)
-  bankAccountId     String
+  bankAccountId    String
   /// งวด เช่น "2024-01"
-  period            String          @db.VarChar(10)
+  period           String          @db.VarChar(10)
   /// วันที่ Statement
-  statementDate     DateTime        @db.Date
+  statementDate    DateTime        @db.Date
   /// ยอด Statement จากธนาคาร
-  statementBalance  Decimal         @db.Decimal(14, 2)
+  statementBalance Decimal         @db.Decimal(14, 2)
   /// ยอดในสมุดบัญชี
-  bookBalance       Decimal         @db.Decimal(14, 2)
+  bookBalance      Decimal         @db.Decimal(14, 2)
   /// ผลต่าง
-  variance          Decimal         @default(0.00) @db.Decimal(14, 2)
-  status            ReconcileStatus @default(OPEN)
-  approvedBy        String?
-  approvedAt        DateTime?
-  notes             String?         @db.Text
-  createdBy         String
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
+  variance         Decimal         @default(0.00) @db.Decimal(14, 2)
+  status           ReconcileStatus @default(OPEN)
+  approvedBy       String?
+  approvedAt       DateTime?
+  notes            String?         @db.Text
+  createdBy        String
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
 
-  lines             BankReconLine[]
+  lines BankReconLine[]
 
   @@unique([tenantId, propertyId, bankAccountId, period])
   @@index([tenantId])
@@ -6261,28 +6264,28 @@ model BankReconciliation {
 
 /// รายการกระทบยอดธนาคาร
 model BankReconLine {
-  id              String             @id @default(uuid())
+  id              String    @id @default(uuid())
   reconId         String
   /// ประเภท: DEPOSIT (ฝาก), WITHDRAWAL (ถอน), TRANSFER
-  txnType         String             @db.VarChar(20)
+  txnType         String    @db.VarChar(20)
   /// วันที่รายการ
-  txnDate         DateTime           @db.Date
-  description     String             @db.VarChar(300)
+  txnDate         DateTime  @db.Date
+  description     String    @db.VarChar(300)
   /// ยอดจาก Statement
-  statementAmount Decimal            @default(0.00) @db.Decimal(12, 2)
+  statementAmount Decimal   @default(0.00) @db.Decimal(12, 2)
   /// ยอดในสมุดบัญชี
-  bookAmount      Decimal            @default(0.00) @db.Decimal(12, 2)
+  bookAmount      Decimal   @default(0.00) @db.Decimal(12, 2)
   /// กระทบยอดแล้ว
-  isMatched       Boolean            @default(false)
+  isMatched       Boolean   @default(false)
   matchedAt       DateTime?
   /// อ้างอิงรายการในระบบ (JournalEntryId, PaymentId ฯลฯ)
-  bookRef         String?            @db.VarChar(100)
+  bookRef         String?   @db.VarChar(100)
   /// อ้างอิง Statement (เลขที่รายการจากธนาคาร)
-  statementRef    String?            @db.VarChar(100)
-  notes           String?            @db.Text
-  createdAt       DateTime           @default(now())
+  statementRef    String?   @db.VarChar(100)
+  notes           String?   @db.Text
+  createdAt       DateTime  @default(now())
 
-  reconciliation  BankReconciliation @relation(fields: [reconId], references: [id], onDelete: Cascade)
+  reconciliation BankReconciliation @relation(fields: [reconId], references: [id], onDelete: Cascade)
 
   @@index([reconId])
   @@index([txnDate])
@@ -6295,59 +6298,59 @@ model BankReconLine {
 
 /// สินทรัพย์ถาวร (Fixed Asset Register)
 model FixedAsset {
-  id                  String              @id @default(uuid())
-  tenantId            String
-  propertyId          String
+  id                      String             @id @default(uuid())
+  tenantId                String
+  propertyId              String
   /// รหัสสินทรัพย์ เช่น "FA-2024-001234"
-  assetCode           String              @db.VarChar(30)
-  name                String              @db.VarChar(200)
-  description         String?             @db.Text
-  category            FixedAssetCategory
+  assetCode               String             @db.VarChar(30)
+  name                    String             @db.VarChar(200)
+  description             String?            @db.Text
+  category                FixedAssetCategory
   /// แผนก/Cost Center ที่ใช้สินทรัพย์
-  costCenterId        String?
+  costCenterId            String?
   /// GL Account สินทรัพย์
-  assetAccountId      String?
+  assetAccountId          String?
   /// GL Account ค่าเสื่อมสะสม
-  accumDeprecAccountId String?
+  accumDeprecAccountId    String?
   /// GL Account ค่าเสื่อมราคา (Expense)
-  deprecExpenseAccountId String?
+  deprecExpenseAccountId  String?
   /// วันที่ซื้อ
-  purchaseDate        DateTime            @db.Date
+  purchaseDate            DateTime           @db.Date
   /// ราคาซื้อ
-  purchaseCost        Decimal             @db.Decimal(14, 2)
+  purchaseCost            Decimal            @db.Decimal(14, 2)
   /// ค่าใช้จ่ายในการได้มาเพิ่มเติม
-  acquisitionCost     Decimal             @default(0.00) @db.Decimal(14, 2)
+  acquisitionCost         Decimal            @default(0.00) @db.Decimal(14, 2)
   /// มูลค่าซาก (Residual Value)
-  residualValue       Decimal             @default(0.00) @db.Decimal(14, 2)
+  residualValue           Decimal            @default(0.00) @db.Decimal(14, 2)
   /// อายุการใช้งาน (ปี)
-  usefulLifeYears     Int
-  depreciationMethod  DepreciationMethod  @default(STRAIGHT_LINE)
+  usefulLifeYears         Int
+  depreciationMethod      DepreciationMethod @default(STRAIGHT_LINE)
   /// อัตราค่าเสื่อม (%) สำหรับ Declining Balance
-  depreciationRate    Decimal?            @db.Decimal(5, 2)
+  depreciationRate        Decimal?           @db.Decimal(5, 2)
   /// มูลค่าสะสมค่าเสื่อม
-  accumulatedDepreciation Decimal         @default(0.00) @db.Decimal(14, 2)
+  accumulatedDepreciation Decimal            @default(0.00) @db.Decimal(14, 2)
   /// มูลค่าตามบัญชี (Book Value)
-  bookValue           Decimal             @db.Decimal(14, 2)
-  status              AssetStatus         @default(ACTIVE)
+  bookValue               Decimal            @db.Decimal(14, 2)
+  status                  AssetStatus        @default(ACTIVE)
   /// ที่ตั้ง/ห้อง
-  location            String?             @db.VarChar(200)
+  location                String?            @db.VarChar(200)
   /// Serial Number / ทะเบียน
-  serialNo            String?             @db.VarChar(100)
+  serialNo                String?            @db.VarChar(100)
   /// ผู้ดูแล
-  responsiblePerson   String?
+  responsiblePerson       String?
   /// อ้างอิง PO ที่ซื้อ
-  purchaseOrderId     String?
+  purchaseOrderId         String?
   /// วันที่จำหน่าย
-  disposalDate        DateTime?           @db.Date
-  disposalAmount      Decimal?            @db.Decimal(14, 2)
-  disposedBy          String?
-  disposalReason      String?             @db.Text
-  notes               String?             @db.Text
-  createdBy           String
-  createdAt           DateTime            @default(now())
-  updatedAt           DateTime            @updatedAt
+  disposalDate            DateTime?          @db.Date
+  disposalAmount          Decimal?           @db.Decimal(14, 2)
+  disposedBy              String?
+  disposalReason          String?            @db.Text
+  notes                   String?            @db.Text
+  createdBy               String
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
 
-  depreciations       AssetDepreciation[]
+  depreciations AssetDepreciation[]
 
   @@unique([tenantId, assetCode])
   @@index([tenantId])
@@ -6361,30 +6364,30 @@ model FixedAsset {
 /// ค่าเสื่อมราคา (Asset Depreciation Schedule)
 /// บันทึกค่าเสื่อมทุกงวด (รายเดือน)
 model AssetDepreciation {
-  id                    String     @id @default(uuid())
-  assetId               String
-  tenantId              String
+  id                 String    @id @default(uuid())
+  assetId            String
+  tenantId           String
   /// งวด เช่น "2024-01"
-  period                String     @db.VarChar(10)
-  fiscalYear            Int
-  fiscalPeriod          Int
+  period             String    @db.VarChar(10)
+  fiscalYear         Int
+  fiscalPeriod       Int
   /// วันที่บันทึกค่าเสื่อม
-  depreciationDate      DateTime   @db.Date
+  depreciationDate   DateTime  @db.Date
   /// ค่าเสื่อมงวดนี้
-  depreciationAmount    Decimal    @db.Decimal(14, 2)
+  depreciationAmount Decimal   @db.Decimal(14, 2)
   /// ค่าเสื่อมสะสมหลังงวดนี้
-  accumulatedAmount     Decimal    @db.Decimal(14, 2)
+  accumulatedAmount  Decimal   @db.Decimal(14, 2)
   /// มูลค่าตามบัญชีหลังงวดนี้
-  bookValue             Decimal    @db.Decimal(14, 2)
+  bookValue          Decimal   @db.Decimal(14, 2)
   /// Journal Entry ที่บันทึก
-  journalEntryId        String?
+  journalEntryId     String?
   /// บันทึกแล้วหรือยัง
-  isPosted              Boolean    @default(false)
-  postedAt              DateTime?
-  postedBy              String?
-  createdAt             DateTime   @default(now())
+  isPosted           Boolean   @default(false)
+  postedAt           DateTime?
+  postedBy           String?
+  createdAt          DateTime  @default(now())
 
-  asset                 FixedAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  asset FixedAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
 
   @@unique([assetId, period])
   @@index([assetId])
@@ -6430,7 +6433,6 @@ model AssetDepreciation {
 //   FixedAssetCategory, DepreciationMethod, AssetStatus
 // =============================================================================
 
-
 // =============================================================================
 // Operating Costs / ระบบติดตามต้นทุนระบบ (Platform-level)
 // =============================================================================
@@ -6460,16 +6462,16 @@ enum OpCostBehavior {
 }
 
 model OpCostCategory {
-  id          String   @id @default(uuid()) @db.VarChar(36)
-  code        String   @unique @db.VarChar(50)
-  name        String   @db.VarChar(100)
-  nameEn      String?  @db.VarChar(100)
-  description String?  @db.Text
-  color       String?  @db.VarChar(20)
-  icon        String?  @db.VarChar(50)
-  isCogs      Boolean  @default(false)
-  sortOrder   Int      @default(0)
-  isActive    Boolean  @default(true)
+  id          String  @id @default(uuid()) @db.VarChar(36)
+  code        String  @unique @db.VarChar(50)
+  name        String  @db.VarChar(100)
+  nameEn      String? @db.VarChar(100)
+  description String? @db.Text
+  color       String? @db.VarChar(20)
+  icon        String? @db.VarChar(50)
+  isCogs      Boolean @default(false)
+  sortOrder   Int     @default(0)
+  isActive    Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
@@ -6612,25 +6614,25 @@ model OpMarketingCampaign {
 /// One CrmContact per Guest per tenant, plus optional B2B/corporate contacts
 /// not yet linked to a Guest record.
 model CrmContact {
-  id            String    @id @default(uuid()) @db.VarChar(36)
-  tenantId      String    @db.VarChar(36)
-  guestId       String?   @db.VarChar(36)
-  companyName   String?   @db.VarChar(200)
-  contactType   String    @default("individual") @db.VarChar(30) // individual, corporate, agent
-  segment       String?   @db.VarChar(50)                          // vip, regular, churn_risk, new
-  rfmRecency    Int?                                                // 1-5
-  rfmFrequency  Int?
-  rfmMonetary   Int?
-  lifetimeValue Decimal   @default(0) @db.Decimal(14, 2)
-  totalStays    Int       @default(0)
-  lastStayAt    DateTime?
-  preferredChannel String? @db.VarChar(20)                         // email, line, sms, push
-  tags          String?   @db.Text                                 // JSON array
-  notes         String?   @db.Text
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  guest         Guest?      @relation(fields: [guestId], references: [id], onDelete: SetNull)
-  tickets       CrmTicket[]
+  id                  String               @id @default(uuid()) @db.VarChar(36)
+  tenantId            String               @db.VarChar(36)
+  guestId             String?              @db.VarChar(36)
+  companyName         String?              @db.VarChar(200)
+  contactType         String               @default("individual") @db.VarChar(30) // individual, corporate, agent
+  segment             String?              @db.VarChar(50) // vip, regular, churn_risk, new
+  rfmRecency          Int? // 1-5
+  rfmFrequency        Int?
+  rfmMonetary         Int?
+  lifetimeValue       Decimal              @default(0) @db.Decimal(14, 2)
+  totalStays          Int                  @default(0)
+  lastStayAt          DateTime?
+  preferredChannel    String?              @db.VarChar(20) // email, line, sms, push
+  tags                String?              @db.Text // JSON array
+  notes               String?              @db.Text
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  guest               Guest?               @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  tickets             CrmTicket[]
   loyaltyTransactions LoyaltyTransaction[]
 
   @@unique([tenantId, guestId])
@@ -6643,25 +6645,25 @@ model CrmContact {
 /// Service-desk ticket — created manually or by event listeners
 /// (low review score, LINE/Messenger complaint, low CSAT).
 model CrmTicket {
-  id           String    @id @default(uuid()) @db.VarChar(36)
-  tenantId     String    @db.VarChar(36)
-  contactId    String?   @db.VarChar(36)
-  guestId      String?   @db.VarChar(36)
-  bookingId    String?   @db.VarChar(36)
-  subject      String    @db.VarChar(255)
-  description  String?   @db.Text
-  channel      String    @default("manual") @db.VarChar(20)         // line, email, phone, walk_in, manual, review
-  category     String?   @db.VarChar(50)                            // maintenance, billing, service, other
-  priority     String    @default("normal") @db.VarChar(20)         // low, normal, high, urgent
-  status       String    @default("open") @db.VarChar(20)           // open, in_progress, waiting, resolved, closed
-  assignedToId String?   @db.VarChar(36)
+  id           String      @id @default(uuid()) @db.VarChar(36)
+  tenantId     String      @db.VarChar(36)
+  contactId    String?     @db.VarChar(36)
+  guestId      String?     @db.VarChar(36)
+  bookingId    String?     @db.VarChar(36)
+  subject      String      @db.VarChar(255)
+  description  String?     @db.Text
+  channel      String      @default("manual") @db.VarChar(20) // line, email, phone, walk_in, manual, review
+  category     String?     @db.VarChar(50) // maintenance, billing, service, other
+  priority     String      @default("normal") @db.VarChar(20) // low, normal, high, urgent
+  status       String      @default("open") @db.VarChar(20) // open, in_progress, waiting, resolved, closed
+  assignedToId String?     @db.VarChar(36)
   slaDueAt     DateTime?
   resolvedAt   DateTime?
   closedAt     DateTime?
-  csatScore    Int?                                                  // 1-5 collected after closure
-  metadata     String?   @db.Text                                    // JSON for source/event info
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  csatScore    Int? // 1-5 collected after closure
+  metadata     String?     @db.Text // JSON for source/event info
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
   contact      CrmContact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, status])
@@ -6675,19 +6677,19 @@ model CrmTicket {
 /// Append-only audit trail of loyalty point movements.
 /// Complements existing LoyaltyPoint balance model.
 model LoyaltyTransaction {
-  id          String    @id @default(uuid()) @db.VarChar(36)
-  tenantId    String    @db.VarChar(36)
-  guestId     String    @db.VarChar(36)
-  contactId   String?   @db.VarChar(36)
-  type        String    @db.VarChar(20)                              // earn, redeem, expire, adjust
-  points      Int                                                     // positive for earn, negative for redeem/expire
-  bookingId   String?   @db.VarChar(36)
-  reason      String?   @db.VarChar(255)
-  metadata    String?   @db.Text                                      // JSON
+  id           String      @id @default(uuid()) @db.VarChar(36)
+  tenantId     String      @db.VarChar(36)
+  guestId      String      @db.VarChar(36)
+  contactId    String?     @db.VarChar(36)
+  type         String      @db.VarChar(20) // earn, redeem, expire, adjust
+  points       Int // positive for earn, negative for redeem/expire
+  bookingId    String?     @db.VarChar(36)
+  reason       String?     @db.VarChar(255)
+  metadata     String?     @db.Text // JSON
   balanceAfter Int?
-  tierAfter   String?   @db.VarChar(20)
-  createdAt   DateTime  @default(now())
-  contact     CrmContact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  tierAfter    String?     @db.VarChar(20)
+  createdAt    DateTime    @default(now())
+  contact      CrmContact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, guestId, createdAt])
   @@index([tenantId, type])
@@ -6703,27 +6705,27 @@ model LoyaltyTransaction {
 /// One-off or recurring campaign. Audience is resolved at dispatch time
 /// from `audienceQuery` (JSON with segmentation rules).
 model CrmCampaign {
-  id              String    @id @default(uuid()) @db.VarChar(36)
-  tenantId        String    @db.VarChar(36)
-  name            String    @db.VarChar(200)
-  description     String?   @db.Text
-  channel         String    @db.VarChar(20)                            // email, line, sms, push
-  templateKey     String?   @db.VarChar(100)                           // handlebars template name
-  subject         String?   @db.VarChar(255)                           // for email/sms
-  bodyOverride    String?   @db.Text                                   // raw content if no template
-  audienceQuery   String?   @db.Text                                   // JSON: { segment, contactType, tags, minLtv, ... }
-  status          String    @default("draft") @db.VarChar(20)          // draft, scheduled, running, completed, cancelled
+  id              String                @id @default(uuid()) @db.VarChar(36)
+  tenantId        String                @db.VarChar(36)
+  name            String                @db.VarChar(200)
+  description     String?               @db.Text
+  channel         String                @db.VarChar(20) // email, line, sms, push
+  templateKey     String?               @db.VarChar(100) // handlebars template name
+  subject         String?               @db.VarChar(255) // for email/sms
+  bodyOverride    String?               @db.Text // raw content if no template
+  audienceQuery   String?               @db.Text // JSON: { segment, contactType, tags, minLtv, ... }
+  status          String                @default("draft") @db.VarChar(20) // draft, scheduled, running, completed, cancelled
   scheduledAt     DateTime?
   startedAt       DateTime?
   completedAt     DateTime?
-  totalRecipients Int       @default(0)
-  totalSent       Int       @default(0)
-  totalOpened     Int       @default(0)
-  totalClicked    Int       @default(0)
-  totalFailed     Int       @default(0)
-  createdById     String?   @db.VarChar(36)
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  totalRecipients Int                   @default(0)
+  totalSent       Int                   @default(0)
+  totalOpened     Int                   @default(0)
+  totalClicked    Int                   @default(0)
+  totalFailed     Int                   @default(0)
+  createdById     String?               @db.VarChar(36)
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
   deliveries      CrmCampaignDelivery[]
 
   @@index([tenantId, status])
@@ -6733,20 +6735,20 @@ model CrmCampaign {
 
 /// Per-recipient delivery log for a campaign.
 model CrmCampaignDelivery {
-  id          String    @id @default(uuid()) @db.VarChar(36)
-  campaignId  String    @db.VarChar(36)
-  tenantId    String    @db.VarChar(36)
-  guestId     String?   @db.VarChar(36)
-  contactId   String?   @db.VarChar(36)
-  recipient   String    @db.VarChar(255)                               // email address or LINE userId
-  status      String    @default("pending") @db.VarChar(20)            // pending, sent, opened, clicked, failed
-  errorMessage String?  @db.Text
-  sentAt      DateTime?
-  openedAt    DateTime?
-  clickedAt   DateTime?
-  metadata    String?   @db.Text                                       // JSON
-  createdAt   DateTime  @default(now())
-  campaign    CrmCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  id           String      @id @default(uuid()) @db.VarChar(36)
+  campaignId   String      @db.VarChar(36)
+  tenantId     String      @db.VarChar(36)
+  guestId      String?     @db.VarChar(36)
+  contactId    String?     @db.VarChar(36)
+  recipient    String      @db.VarChar(255) // email address or LINE userId
+  status       String      @default("pending") @db.VarChar(20) // pending, sent, opened, clicked, failed
+  errorMessage String?     @db.Text
+  sentAt       DateTime?
+  openedAt     DateTime?
+  clickedAt    DateTime?
+  metadata     String?     @db.Text // JSON
+  createdAt    DateTime    @default(now())
+  campaign     CrmCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 
   @@index([campaignId, status])
   @@index([tenantId, status])
@@ -6757,17 +6759,17 @@ model CrmCampaignDelivery {
 /// Multi-step automation flow. Steps are stored as JSON in `stepsConfig` to
 /// keep the schema simple. Each step is { type: 'wait'|'send'|'branch', ... }.
 model CrmJourney {
-  id            String    @id @default(uuid()) @db.VarChar(36)
-  tenantId      String    @db.VarChar(36)
-  name          String    @db.VarChar(200)
-  description   String?   @db.Text
-  triggerEvent  String    @db.VarChar(50)                              // booking.created, booking.checked_out, guest.birthday, manual
-  isActive      Boolean   @default(false)
-  stepsConfig   String    @db.LongText                                 // JSON array of steps
-  createdById   String?   @db.VarChar(36)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  enrollments   CrmJourneyEnrollment[]
+  id           String                 @id @default(uuid()) @db.VarChar(36)
+  tenantId     String                 @db.VarChar(36)
+  name         String                 @db.VarChar(200)
+  description  String?                @db.Text
+  triggerEvent String                 @db.VarChar(50) // booking.created, booking.checked_out, guest.birthday, manual
+  isActive     Boolean                @default(false)
+  stepsConfig  String                 @db.LongText // JSON array of steps
+  createdById  String?                @db.VarChar(36)
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+  enrollments  CrmJourneyEnrollment[]
 
   @@index([tenantId, isActive])
   @@index([triggerEvent])
@@ -6776,19 +6778,19 @@ model CrmJourney {
 
 /// A guest enrolled in a journey, with current step pointer.
 model CrmJourneyEnrollment {
-  id              String    @id @default(uuid()) @db.VarChar(36)
-  journeyId       String    @db.VarChar(36)
-  tenantId        String    @db.VarChar(36)
-  guestId         String    @db.VarChar(36)
-  contactId       String?   @db.VarChar(36)
-  bookingId       String?   @db.VarChar(36)
-  currentStepIdx  Int       @default(0)
-  status          String    @default("active") @db.VarChar(20)         // active, completed, cancelled, failed
-  nextRunAt       DateTime?
-  startedAt       DateTime  @default(now())
-  completedAt     DateTime?
-  metadata        String?   @db.Text                                   // JSON for trigger payload
-  journey         CrmJourney @relation(fields: [journeyId], references: [id], onDelete: Cascade)
+  id             String     @id @default(uuid()) @db.VarChar(36)
+  journeyId      String     @db.VarChar(36)
+  tenantId       String     @db.VarChar(36)
+  guestId        String     @db.VarChar(36)
+  contactId      String?    @db.VarChar(36)
+  bookingId      String?    @db.VarChar(36)
+  currentStepIdx Int        @default(0)
+  status         String     @default("active") @db.VarChar(20) // active, completed, cancelled, failed
+  nextRunAt      DateTime?
+  startedAt      DateTime   @default(now())
+  completedAt    DateTime?
+  metadata       String?    @db.Text // JSON for trigger payload
+  journey        CrmJourney @relation(fields: [journeyId], references: [id], onDelete: Cascade)
 
   @@unique([journeyId, guestId, bookingId])
   @@index([tenantId, status])
@@ -6805,26 +6807,26 @@ model CrmJourneyEnrollment {
 /// Sales lead — inquiry from corporate/agent/website not yet qualified.
 /// Becomes a CrmDeal once an opportunity value can be estimated.
 model CrmLead {
-  id            String    @id @default(uuid()) @db.VarChar(36)
-  tenantId      String    @db.VarChar(36)
-  contactId     String?   @db.VarChar(36)
-  companyName   String?   @db.VarChar(200)
-  contactName   String    @db.VarChar(200)
-  email         String?   @db.VarChar(255)
-  phone         String?   @db.VarChar(50)
-  source        String    @db.VarChar(50)                              // ota, website, email, walk_in, referral, cold_call, event
-  status        String    @default("new") @db.VarChar(20)              // new, contacted, qualified, unqualified, lost, converted
-  score         Int       @default(0)                                   // 0-100 lead score
-  estValue      Decimal?  @db.Decimal(14, 2)
+  id               String             @id @default(uuid()) @db.VarChar(36)
+  tenantId         String             @db.VarChar(36)
+  contactId        String?            @db.VarChar(36)
+  companyName      String?            @db.VarChar(200)
+  contactName      String             @db.VarChar(200)
+  email            String?            @db.VarChar(255)
+  phone            String?            @db.VarChar(50)
+  source           String             @db.VarChar(50) // ota, website, email, walk_in, referral, cold_call, event
+  status           String             @default("new") @db.VarChar(20) // new, contacted, qualified, unqualified, lost, converted
+  score            Int                @default(0) // 0-100 lead score
+  estValue         Decimal?           @db.Decimal(14, 2)
   expectedCheckIn  DateTime?
   expectedCheckOut DateTime?
-  partySize     Int?
-  notes         String?   @db.Text
-  ownerUserId   String?   @db.VarChar(36)
-  convertedDealId String? @db.VarChar(36)                              // set when status=converted
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  activities    CrmSalesActivity[] @relation("leadActivities")
+  partySize        Int?
+  notes            String?            @db.Text
+  ownerUserId      String?            @db.VarChar(36)
+  convertedDealId  String?            @db.VarChar(36) // set when status=converted
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  activities       CrmSalesActivity[] @relation("leadActivities")
 
   @@index([tenantId, status])
   @@index([tenantId, source])
@@ -6835,27 +6837,27 @@ model CrmLead {
 /// Qualified opportunity in the sales pipeline.
 /// Stage progression: discovery → quoted → negotiation → won | lost
 model CrmDeal {
-  id            String    @id @default(uuid()) @db.VarChar(36)
-  tenantId      String    @db.VarChar(36)
-  leadId        String?   @db.VarChar(36)                              // source lead if converted
-  contactId     String?   @db.VarChar(36)
-  companyName   String?   @db.VarChar(200)
-  name          String    @db.VarChar(200)                              // e.g. "Acme Q4 Conference - 50 rooms"
-  stage         String    @default("discovery") @db.VarChar(20)        // discovery, quoted, negotiation, won, lost
-  amount        Decimal   @db.Decimal(14, 2)
-  probability   Int       @default(20)                                  // 0-100 win probability
+  id                String             @id @default(uuid()) @db.VarChar(36)
+  tenantId          String             @db.VarChar(36)
+  leadId            String?            @db.VarChar(36) // source lead if converted
+  contactId         String?            @db.VarChar(36)
+  companyName       String?            @db.VarChar(200)
+  name              String             @db.VarChar(200) // e.g. "Acme Q4 Conference - 50 rooms"
+  stage             String             @default("discovery") @db.VarChar(20) // discovery, quoted, negotiation, won, lost
+  amount            Decimal            @db.Decimal(14, 2)
+  probability       Int                @default(20) // 0-100 win probability
   expectedCloseDate DateTime?
-  closedAt      DateTime?
-  lostReason    String?   @db.VarChar(255)
-  ownerUserId   String?   @db.VarChar(36)
-  bookingIds    String?   @db.Text                                      // JSON array of generated booking ids
-  partySize     Int?
-  checkInDate   DateTime?
-  checkOutDate  DateTime?
-  notes         String?   @db.Text
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  activities    CrmSalesActivity[] @relation("dealActivities")
+  closedAt          DateTime?
+  lostReason        String?            @db.VarChar(255)
+  ownerUserId       String?            @db.VarChar(36)
+  bookingIds        String?            @db.Text // JSON array of generated booking ids
+  partySize         Int?
+  checkInDate       DateTime?
+  checkOutDate      DateTime?
+  notes             String?            @db.Text
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  activities        CrmSalesActivity[] @relation("dealActivities")
 
   @@index([tenantId, stage])
   @@index([tenantId, expectedCloseDate])
@@ -6866,20 +6868,20 @@ model CrmDeal {
 
 /// Timeline entry attached to a Lead or Deal (note, call, email, meeting).
 model CrmSalesActivity {
-  id          String    @id @default(uuid()) @db.VarChar(36)
-  tenantId    String    @db.VarChar(36)
-  leadId      String?   @db.VarChar(36)
-  dealId      String?   @db.VarChar(36)
-  type        String    @db.VarChar(20)                                // note, call, email, meeting, task
-  subject     String    @db.VarChar(255)
-  body        String?   @db.Text
-  occurredAt  DateTime  @default(now())
-  dueAt       DateTime?                                                  // for tasks
-  completedAt DateTime?                                                  // for tasks
-  authorUserId String?  @db.VarChar(36)
-  createdAt   DateTime  @default(now())
-  lead        CrmLead?  @relation("leadActivities", fields: [leadId], references: [id], onDelete: Cascade)
-  deal        CrmDeal?  @relation("dealActivities", fields: [dealId], references: [id], onDelete: Cascade)
+  id           String    @id @default(uuid()) @db.VarChar(36)
+  tenantId     String    @db.VarChar(36)
+  leadId       String?   @db.VarChar(36)
+  dealId       String?   @db.VarChar(36)
+  type         String    @db.VarChar(20) // note, call, email, meeting, task
+  subject      String    @db.VarChar(255)
+  body         String?   @db.Text
+  occurredAt   DateTime  @default(now())
+  dueAt        DateTime? // for tasks
+  completedAt  DateTime? // for tasks
+  authorUserId String?   @db.VarChar(36)
+  createdAt    DateTime  @default(now())
+  lead         CrmLead?  @relation("leadActivities", fields: [leadId], references: [id], onDelete: Cascade)
+  deal         CrmDeal?  @relation("dealActivities", fields: [dealId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, leadId, occurredAt])
   @@index([tenantId, dealId, occurredAt])
@@ -6895,17 +6897,17 @@ model CrmSalesActivity {
 /// Cached sentiment analysis result for a piece of text (review, ticket, message).
 /// Source-of-truth model is referenced by (sourceType, sourceId).
 model CrmSentimentAnalysis {
-  id          String    @id @default(uuid()) @db.VarChar(36)
-  tenantId    String    @db.VarChar(36)
-  sourceType  String    @db.VarChar(20)                                // review, ticket, message
-  sourceId    String    @db.VarChar(36)
-  text        String    @db.Text
-  language    String?   @db.VarChar(10)                                // th, en, auto
-  label       String    @db.VarChar(20)                                // positive, neutral, negative
-  score       Decimal   @db.Decimal(5, 4)                              // -1.0000 to 1.0000
-  confidence  Decimal   @db.Decimal(5, 4)                              // 0.0000 to 1.0000
-  keywords    String?   @db.Text                                       // JSON array of triggered keywords
-  analyzedAt  DateTime  @default(now())
+  id         String   @id @default(uuid()) @db.VarChar(36)
+  tenantId   String   @db.VarChar(36)
+  sourceType String   @db.VarChar(20) // review, ticket, message
+  sourceId   String   @db.VarChar(36)
+  text       String   @db.Text
+  language   String?  @db.VarChar(10) // th, en, auto
+  label      String   @db.VarChar(20) // positive, neutral, negative
+  score      Decimal  @db.Decimal(5, 4) // -1.0000 to 1.0000
+  confidence Decimal  @db.Decimal(5, 4) // 0.0000 to 1.0000
+  keywords   String?  @db.Text // JSON array of triggered keywords
+  analyzedAt DateTime @default(now())
 
   @@unique([sourceType, sourceId])
   @@index([tenantId, label])
@@ -6916,17 +6918,17 @@ model CrmSentimentAnalysis {
 /// Daily churn risk snapshot per contact.
 /// Recomputed by cron — append new row only when score changes.
 model CrmChurnScore {
-  id            String    @id @default(uuid()) @db.VarChar(36)
-  tenantId      String    @db.VarChar(36)
-  guestId       String    @db.VarChar(36)
-  contactId     String?   @db.VarChar(36)
-  riskScore     Decimal   @db.Decimal(5, 4)                            // 0.0000 (loyal) to 1.0000 (high churn)
-  riskBand      String    @db.VarChar(20)                              // low, medium, high, critical
-  reasons       String?   @db.Text                                     // JSON array of contributing factors
+  id                String   @id @default(uuid()) @db.VarChar(36)
+  tenantId          String   @db.VarChar(36)
+  guestId           String   @db.VarChar(36)
+  contactId         String?  @db.VarChar(36)
+  riskScore         Decimal  @db.Decimal(5, 4) // 0.0000 (loyal) to 1.0000 (high churn)
+  riskBand          String   @db.VarChar(20) // low, medium, high, critical
+  reasons           String?  @db.Text // JSON array of contributing factors
   daysSinceLastStay Int?
-  staysLast90d  Int?
-  staysLast365d Int?
-  computedAt    DateTime  @default(now())
+  staysLast90d      Int?
+  staysLast365d     Int?
+  computedAt        DateTime @default(now())
 
   @@index([tenantId, guestId, computedAt])
   @@index([tenantId, riskBand])
@@ -6941,29 +6943,38 @@ model CrmChurnScore {
 
 /// ลานกางแคมป์ (เทียบ Property ของระบบโรงแรม)
 model Campground {
-  id          String   @id @default(uuid()) @db.VarChar(36)
-  tenantId    String?  @db.VarChar(36)
-  name        String   @db.VarChar(180)
-  description String?  @db.Text
-  address     String?  @db.VarChar(255)
-  phone       String?  @db.VarChar(30)
-  latitude    Float?
-  longitude   Float?
+  id           String            @id @default(uuid()) @db.VarChar(36)
+  tenantId     String?           @db.VarChar(36)
+  name         String            @db.VarChar(180)
+  description  String?           @db.Text
+  address      String?           @db.VarChar(255)
+  phone        String?           @db.VarChar(30)
+  latitude     Float?
+  longitude    Float?
   /// URL รูปแปลนพื้นที่ ใช้เป็น background ของแผนผัง 2D
-  mapImageUrl String?  @db.VarChar(500)
+  mapImageUrl  String?           @db.VarChar(500)
   /// ขนาด canvas อ้างอิงพิกัด marker (ปกติเก็บพิกัดแบบ normalized 0..1)
-  mapWidth    Int?
-  mapHeight   Int?
+  mapWidth     Int?
+  mapHeight    Int?
+  /// คลังรูปภาพของลาน (gallery) — เก็บเป็น array ของ URL
+  images       Json?
   /// active | inactive
-  status      String   @default("active") @db.VarChar(20)
-  checkInTime  String? @default("14:00") @db.VarChar(10)
-  checkOutTime String? @default("12:00") @db.VarChar(10)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  zones       CampZone[]
-  pitches     CampPitch[]
+  status       String            @default("active") @db.VarChar(20)
+  checkInTime  String?           @default("14:00") @db.VarChar(10)
+  checkOutTime String?           @default("12:00") @db.VarChar(10)
+  /// คลังย่อยของลานใน Inventory Module (auto-create เมื่อเชื่อมคลังกลาง) — null = โหมดคลังย่อยลาน
+  warehouseId  String?           @db.VarChar(36)
+  /// เวลาที่กดเชื่อมต่อระบบ POS ให้ลานนี้ (ต้องมี add-on POS_MODULE) — null = ยังไม่เชื่อม
+  posConnectedAt     DateTime?
+  /// เวลาที่กดเชื่อมต่อระบบครัว (KDS) ให้ลานนี้ (มากับแพ็กเกจ POS) — null = ยังไม่เชื่อม
+  kitchenConnectedAt DateTime?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  zones        CampZone[]
+  pitches      CampPitch[]
   reservations CampReservation[]
-  campAddons  CampAddon[]
+  campAddons   CampAddon[]
+  requisitions CampRequisition[]
 
   @@index([tenantId])
   @@index([status])
@@ -6972,28 +6983,42 @@ model Campground {
 
 /// โซนภายในลาน (เทียบ Room Type) — กำหนดประเภท/ราคาฐาน/ความจุ
 model CampZone {
-  id           String   @id @default(uuid()) @db.VarChar(36)
-  tenantId     String?  @db.VarChar(36)
-  campgroundId String   @db.VarChar(36)
-  name         String   @db.VarChar(120)
+  id            String      @id @default(uuid()) @db.VarChar(36)
+  tenantId      String?     @db.VarChar(36)
+  campgroundId  String      @db.VarChar(36)
+  name          String      @db.VarChar(120)
+  /// รหัสนำหน้าจุดกางเต็นท์ของโซนนี้ (เช่น "A") — จุดในโซนจะใช้เป็น prefix อัตโนมัติ
+  code          String?     @db.VarChar(10)
   /// mountain_view | riverside | lawn | rv | glamping
-  type         String   @default("lawn") @db.VarChar(30)
-  description  String?  @db.Text
-  basePrice    Decimal  @db.Decimal(10, 2)
-  weekendPrice Decimal? @db.Decimal(10, 2)
+  type          String      @default("lawn") @db.VarChar(30)
+  description   String?     @db.Text
+  basePrice     Decimal     @db.Decimal(10, 2)
+  weekendPrice  Decimal?    @db.Decimal(10, 2)
   /// ราคาช่วงเทศกาล/วันหยุดยาว — JSON array [{name, start:"YYYY-MM-DD", end:"YYYY-MM-DD", price}]
   /// priority ตอนคิดราคา: season > weekend > base
   seasonalRates Json?
-  maxGuests    Int      @default(4)
-  maxTents     Int      @default(1)
-  allowVehicle Boolean  @default(false)
-  allowPet     Boolean  @default(false)
+  maxGuests     Int         @default(4)
+  maxTents      Int         @default(1)
+  allowVehicle  Boolean     @default(false)
+  allowPet      Boolean     @default(false)
+  /// โหมดคิดราคา: per_night (ต่อคืน) | per_person (basePrice/weekend/season = ราคาต่อคน คูณจำนวนคน)
+  pricingMode    String     @default("per_night") @db.VarChar(20)
+  /// โซนนี้มีไฟฟ้าให้ใช้หรือไม่
+  hasElectricity Boolean    @default(false)
+  /// ค่าไฟเพิ่ม/คืน (คิดเมื่อ hasElectricity = true)
+  electricityFee Decimal?   @db.Decimal(10, 2)
+  /// อนุญาตให้ใช้แอร์เคลื่อนที่/เครื่องทำความเย็นในโซนนี้หรือไม่
+  allowAircon   Boolean     @default(false)
+  /// จำกัดกำลังไฟสูงสุดต่อจุด (วัตต์) — null/0 = ไม่จำกัด
+  maxWatt       Int?
+  /// ข้อห้าม/กฎประจำโซน — JSON array ของ string เช่น ["ห้ามก่อกองไฟ","ห้ามส่งเสียงดัง"]
+  restrictions  Json?
   /// สีของ marker บนแผนผัง (hex หรือ token)
-  color        String?  @db.VarChar(20)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  campground   Campground @relation(fields: [campgroundId], references: [id], onDelete: Cascade)
-  pitches      CampPitch[]
+  color         String?     @db.VarChar(20)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  campground    Campground  @relation(fields: [campgroundId], references: [id], onDelete: Cascade)
+  pitches       CampPitch[]
 
   @@index([tenantId])
   @@index([campgroundId])
@@ -7002,22 +7027,22 @@ model CampZone {
 
 /// จุดกางเต็นท์รายจุด (เทียบ Room) — มีพิกัดบนแผนผัง 2D
 model CampPitch {
-  id           String   @id @default(uuid()) @db.VarChar(36)
-  tenantId     String?  @db.VarChar(36)
-  campgroundId String   @db.VarChar(36)
-  zoneId       String   @db.VarChar(36)
-  code         String   @db.VarChar(30)
+  id           String            @id @default(uuid()) @db.VarChar(36)
+  tenantId     String?           @db.VarChar(36)
+  campgroundId String            @db.VarChar(36)
+  zoneId       String            @db.VarChar(36)
+  code         String            @db.VarChar(30)
   /// available | occupied | cleaning | maintenance | closed
-  status       String   @default("available") @db.VarChar(20)
+  status       String            @default("available") @db.VarChar(20)
   /// พิกัด normalized บนแผนผัง (0..1) — responsive ทุกขนาดจอ
-  posX         Float    @default(0.5)
-  posY         Float    @default(0.5)
+  posX         Float             @default(0.5)
+  posY         Float             @default(0.5)
   sizeSqm      Float?
-  notes        String?  @db.Text
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  campground   Campground @relation(fields: [campgroundId], references: [id], onDelete: Cascade)
-  zone         CampZone   @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  notes        String?           @db.Text
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  campground   Campground        @relation(fields: [campgroundId], references: [id], onDelete: Cascade)
+  zone         CampZone          @relation(fields: [zoneId], references: [id], onDelete: Cascade)
   reservations CampReservation[]
 
   @@unique([campgroundId, code])
@@ -7029,40 +7054,40 @@ model CampPitch {
 
 /// การจองจุดกางเต็นท์ (เทียบ Booking)
 model CampReservation {
-  id                String   @id @default(uuid()) @db.VarChar(36)
-  tenantId          String?  @db.VarChar(36)
-  campgroundId      String   @db.VarChar(36)
-  zoneId            String?  @db.VarChar(36)
-  pitchId           String   @db.VarChar(36)
-  reservationNo     String?  @db.VarChar(30)
-  guestId           String?  @db.VarChar(36)
-  guestFirstName    String   @db.VarChar(120)
-  guestLastName     String?  @db.VarChar(120)
-  guestEmail        String?  @db.VarChar(180)
-  guestPhone        String?  @db.VarChar(30)
+  id                String                 @id @default(uuid()) @db.VarChar(36)
+  tenantId          String?                @db.VarChar(36)
+  campgroundId      String                 @db.VarChar(36)
+  zoneId            String?                @db.VarChar(36)
+  pitchId           String                 @db.VarChar(36)
+  reservationNo     String?                @db.VarChar(30)
+  guestId           String?                @db.VarChar(36)
+  guestFirstName    String                 @db.VarChar(120)
+  guestLastName     String?                @db.VarChar(120)
+  guestEmail        String?                @db.VarChar(180)
+  guestPhone        String?                @db.VarChar(30)
   checkIn           DateTime
   checkOut          DateTime
   scheduledCheckIn  DateTime?
   scheduledCheckOut DateTime?
   actualCheckIn     DateTime?
   actualCheckOut    DateTime?
-  numGuests         Int      @default(1)
-  numTents          Int      @default(1)
-  numVehicles       Int      @default(0)
-  hasPet            Boolean  @default(false)
+  numGuests         Int                    @default(1)
+  numTents          Int                    @default(1)
+  numVehicles       Int                    @default(0)
+  hasPet            Boolean                @default(false)
   /// pending | confirmed | checked_in | checked_out | cancelled | no_show
-  status            String   @default("pending") @db.VarChar(20)
-  totalPrice        Decimal  @db.Decimal(10, 2)
+  status            String                 @default("pending") @db.VarChar(20)
+  totalPrice        Decimal                @db.Decimal(10, 2)
   /// รายการ add-on เช่าอุปกรณ์ (เก็บ JSON ใน phase 1) [{name, qty, price}]
   addons            Json?
-  paymentStatus     String?  @default("pending") @db.VarChar(20)
-  paymentMethod     String?  @db.VarChar(30)
-  amountPaid        Decimal? @db.Decimal(10, 2)
-  notes             String?  @db.Text
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  campground        Campground @relation(fields: [campgroundId], references: [id], onDelete: Cascade)
-  pitch             CampPitch  @relation(fields: [pitchId], references: [id])
+  paymentStatus     String?                @default("pending") @db.VarChar(20)
+  paymentMethod     String?                @db.VarChar(30)
+  amountPaid        Decimal?               @db.Decimal(10, 2)
+  notes             String?                @db.Text
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+  campground        Campground             @relation(fields: [campgroundId], references: [id], onDelete: Cascade)
+  pitch             CampPitch              @relation(fields: [pitchId], references: [id])
   addonItems        CampReservationAddon[]
 
   @@index([tenantId])
@@ -7075,38 +7100,102 @@ model CampReservation {
 
 /// อุปกรณ์ให้เช่าในลานแคมป์ (เต็นท์ ถุงนอน เตา ฟืน ฯลฯ) — catalog + stock
 model CampAddon {
-  id           String   @id @default(uuid()) @db.VarChar(36)
-  tenantId     String?  @db.VarChar(36)
-  campgroundId String   @db.VarChar(36)
-  name         String   @db.VarChar(150)
+  id               String                 @id @default(uuid()) @db.VarChar(36)
+  tenantId         String?                @db.VarChar(36)
+  campgroundId     String                 @db.VarChar(36)
+  name             String                 @db.VarChar(150)
   /// tent | sleeping | gear | cooking | firewood | electric | other
-  category     String   @default("other") @db.VarChar(20)
-  pricePerUnit Decimal  @db.Decimal(10, 2)
-  stockQty     Int      @default(0)
-  active       Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  campground   Campground @relation(fields: [campgroundId], references: [id], onDelete: Cascade)
-  items        CampReservationAddon[]
+  category         String                 @default("other") @db.VarChar(20)
+  /// รายละเอียด/สเปกอุปกรณ์ (วัสดุ ขนาด เงื่อนไขการใช้งาน)
+  description      String?                @db.Text
+  pricePerUnit     Decimal                @db.Decimal(10, 2)
+  /// หน่วยนับ เช่น ชิ้น/ชุด/หลัง/อัน
+  unit             String                 @default("ชิ้น") @db.VarChar(20)
+  /// ค่ามัดจำต่อหน่วย (null/0 = ไม่เก็บมัดจำ)
+  deposit          Decimal?               @db.Decimal(10, 2)
+  /// รูปภาพอุปกรณ์ (อัปโหลดได้หลายรูป) — array ของ URL
+  images           Json?
+  stockQty         Int                    @default(0)
+  active           Boolean                @default(true)
+  /// ผูกกับสินค้าใน Inventory Module — ใช้เติมสต็อกผ่านใบเบิก/ใบโอน (null = ไม่ผูก)
+  inventoryItemId  String?                @db.VarChar(36)
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  campground       Campground             @relation(fields: [campgroundId], references: [id], onDelete: Cascade)
+  items            CampReservationAddon[]
+  requisitionItems CampRequisitionItem[]
 
   @@index([tenantId])
   @@index([campgroundId])
+  @@index([inventoryItemId])
   @@map("camp_addons")
 }
 
 /// รายการ add-on ที่ผูกกับการจอง (snapshot ราคา ณ เวลาจอง)
 model CampReservationAddon {
-  id            String   @id @default(uuid()) @db.VarChar(36)
-  reservationId String   @db.VarChar(36)
-  addonId       String   @db.VarChar(36)
-  name          String   @db.VarChar(150)
-  qty           Int      @default(1)
-  priceSnapshot Decimal  @db.Decimal(10, 2)
-  createdAt     DateTime @default(now())
+  id            String          @id @default(uuid()) @db.VarChar(36)
+  reservationId String          @db.VarChar(36)
+  addonId       String          @db.VarChar(36)
+  name          String          @db.VarChar(150)
+  qty           Int             @default(1)
+  priceSnapshot Decimal         @db.Decimal(10, 2)
+  createdAt     DateTime        @default(now())
   reservation   CampReservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
   addon         CampAddon       @relation(fields: [addonId], references: [id])
 
   @@index([reservationId])
   @@index([addonId])
   @@map("camp_reservation_addons")
+}
+
+/// ใบเบิก/ใบโอนของจากคลังกลาง (Inventory Module) มายังลานแคมป์
+/// type: issue = ใบเบิก (GOODS_ISSUE จากคลังต้นทาง), transfer = ใบโอน (โอนเข้าคลังย่อยของลาน)
+model CampRequisition {
+  id                String                @id @default(uuid()) @db.VarChar(36)
+  tenantId          String?               @db.VarChar(36)
+  campgroundId      String                @db.VarChar(36)
+  /// REQ-YYYYMM-NNNN (ใบเบิก) | TRF-YYYYMM-NNNN (ใบโอน)
+  requisitionNo     String                @db.VarChar(30)
+  /// issue | transfer
+  type              String                @default("transfer") @db.VarChar(20)
+  /// คลังต้นทางใน Inventory Module ที่เบิก/โอนออก
+  sourceWarehouseId String                @db.VarChar(36)
+  /// คลังปลายทาง (คลังย่อยของลาน) — ใช้เฉพาะ type=transfer
+  destWarehouseId   String?               @db.VarChar(36)
+  /// draft | confirmed | cancelled
+  status            String                @default("draft") @db.VarChar(20)
+  notes             String?               @db.Text
+  createdBy         String?               @db.VarChar(36)
+  confirmedAt       DateTime?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  campground        Campground            @relation(fields: [campgroundId], references: [id], onDelete: Cascade)
+  items             CampRequisitionItem[]
+
+  @@index([tenantId])
+  @@index([campgroundId])
+  @@index([status])
+  @@map("camp_requisitions")
+}
+
+/// รายการสินค้าในใบเบิก/ใบโอน
+model CampRequisitionItem {
+  id              String          @id @default(uuid()) @db.VarChar(36)
+  requisitionId   String          @db.VarChar(36)
+  /// สินค้าใน Inventory Module ที่เบิก/โอน
+  inventoryItemId String          @db.VarChar(36)
+  /// อุปกรณ์ให้เช่าในลานที่จะเติมสต็อก (null = แค่เบิก/โอน ไม่ผูกอุปกรณ์)
+  addonId         String?         @db.VarChar(36)
+  name            String          @db.VarChar(180)
+  sku             String?         @db.VarChar(60)
+  qty             Int             @default(1)
+  unitCost        Decimal         @default(0) @db.Decimal(10, 2)
+  createdAt       DateTime        @default(now())
+  requisition     CampRequisition @relation(fields: [requisitionId], references: [id], onDelete: Cascade)
+  addon           CampAddon?      @relation(fields: [addonId], references: [id], onDelete: SetNull)
+
+  @@index([requisitionId])
+  @@index([inventoryItemId])
+  @@index([addonId])
+  @@map("camp_requisition_items")
 }

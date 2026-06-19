@@ -3,6 +3,7 @@ import { Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -13,6 +14,7 @@ import {
 } from 'class-validator';
 
 const ZONE_TYPES = ['mountain_view', 'riverside', 'lawn', 'rv', 'glamping'] as const;
+const PRICING_MODES = ['per_night', 'per_person'] as const;
 
 export class SeasonalRateDto {
   @ApiPropertyOptional({ example: 'ปีใหม่' })
@@ -45,6 +47,12 @@ export class CreateZoneDto {
   @IsString()
   @MaxLength(120)
   name!: string;
+
+  @ApiPropertyOptional({ example: 'A', description: 'รหัสนำหน้าจุดกางเต็นท์ของโซน เช่น A' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  code?: string;
 
   @ApiPropertyOptional({ enum: ZONE_TYPES, default: 'lawn' })
   @IsOptional()
@@ -89,6 +97,51 @@ export class CreateZoneDto {
   @IsOptional()
   @IsBoolean()
   allowPet?: boolean;
+
+  @ApiPropertyOptional({
+    enum: PRICING_MODES,
+    default: 'per_night',
+    description: 'per_night = คิดต่อคืน, per_person = คิดต่อคน/คืน (base/weekend/season คือราคาต่อคน)',
+  })
+  @IsOptional()
+  @IsIn(PRICING_MODES)
+  pricingMode?: string;
+
+  @ApiPropertyOptional({ default: false, description: 'โซนนี้มีไฟฟ้าให้ใช้หรือไม่' })
+  @IsOptional()
+  @IsBoolean()
+  hasElectricity?: boolean;
+
+  @ApiPropertyOptional({ example: 150, description: 'ค่าไฟเพิ่ม/คืน (เมื่อ hasElectricity = true)' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  electricityFee?: number;
+
+  @ApiPropertyOptional({ default: false, description: 'อนุญาตให้ใช้แอร์เคลื่อนที่/เครื่องทำความเย็น' })
+  @IsOptional()
+  @IsBoolean()
+  allowAircon?: boolean;
+
+  @ApiPropertyOptional({
+    example: 1000,
+    description: 'จำกัดกำลังไฟสูงสุดต่อจุด (วัตต์) — 0/ไม่ส่ง = ไม่จำกัด',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  maxWatt?: number;
+
+  @ApiPropertyOptional({
+    type: [String],
+    example: ['ห้ามก่อกองไฟ', 'ห้ามส่งเสียงดัง'],
+    description: 'รายการข้อห้าม/กฎประจำโซน',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(120, { each: true })
+  restrictions?: string[];
 
   @ApiPropertyOptional({ example: '#22c55e' })
   @IsOptional()
