@@ -124,6 +124,23 @@ export class PitchesService {
     return { success: true, data };
   }
 
+  async addImages(id: string, imageUrls: string[], tenantId?: string) {
+    const pitch = await this.prisma.campPitch.findFirst({
+      where: { id, ...(tenantId ? { tenantId } : {}) },
+      select: { id: true, images: true },
+    });
+    if (!pitch) {
+      throw new NotFoundException(`Pitch ${id} not found`);
+    }
+
+    const currentImages = Array.isArray(pitch.images) ? (pitch.images as string[]) : [];
+    const data = await this.prisma.campPitch.update({
+      where: { id },
+      data: { images: [...currentImages, ...imageUrls] },
+    });
+    return { success: true, data };
+  }
+
   async updatePosition(id: string, dto: UpdatePitchPositionDto, tenantId?: string) {
     await this.ensureExists(id, tenantId);
     const data = await this.prisma.campPitch.update({

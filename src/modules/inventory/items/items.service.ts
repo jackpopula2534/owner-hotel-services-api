@@ -60,6 +60,13 @@ export interface ItemSearchResult {
   isPerishable: boolean;
   defaultShelfLifeDays: number | null;
   reorderPoint: number;
+  /**
+   * On-hand balance of the item in the warehouse passed via `warehouseId`.
+   * `null` when no warehouse was supplied (the generic typeahead does not join
+   * stock rows). Used by the requisition form to show what can be drawn from
+   * the source warehouse.
+   */
+  stockQuantity?: number | null;
 }
 
 export interface StockSummary {
@@ -111,6 +118,11 @@ export class ItemsService {
         where.isPerishable = query.isPerishable;
       }
 
+      // When filtering by warehouse, only return items that hold stock in it.
+      if (query.warehouseId) {
+        where.warehouseStocks = { some: { warehouseId: query.warehouseId } };
+      }
+
       // Get total count
       const total = await this.prisma.inventoryItem.count({ where });
 
@@ -122,6 +134,9 @@ export class ItemsService {
             select: { id: true, name: true },
           },
           warehouseStocks: {
+            // Scope the stock rows to the selected warehouse so totalStock
+            // reflects that warehouse only; otherwise aggregate across all.
+            ...(query.warehouseId ? { where: { warehouseId: query.warehouseId } } : {}),
             select: { quantity: true },
           },
         },
@@ -212,15 +227,33 @@ export class ItemsService {
           requiresLotTracking: true,
           reorderPoint: true,
           category: { select: { id: true, name: true } },
+          // Only join stock rows when a warehouse was supplied — keeps the
+          // generic typeahead lightweight (see DTO docblock).
+          ...(dto.warehouseId
+            ? {
+                warehouseStocks: {
+                  where: { warehouseId: dto.warehouseId },
+                  select: { quantity: true },
+                },
+              }
+            : {}),
         },
         take: limit,
         orderBy: [{ name: 'asc' }, { sku: 'asc' }],
       });
 
-      return items.map((item) => ({
-        ...item,
-        category: item.category ?? null,
-      }));
+      return items.map((item) => {
+        const { warehouseStocks, ...rest } = item as typeof item & {
+          warehouseStocks?: Array<{ quantity: number }>;
+        };
+        return {
+          ...rest,
+          category: item.category ?? null,
+          stockQuantity: dto.warehouseId
+            ? (warehouseStocks ?? []).reduce((sum, ws) => sum + ws.quantity, 0)
+            : null,
+        };
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'unknown error';
       const stack = error instanceof Error ? error.stack : undefined;

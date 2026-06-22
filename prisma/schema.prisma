@@ -6972,6 +6972,7 @@ model Campground {
   updatedAt    DateTime          @updatedAt
   zones        CampZone[]
   pitches      CampPitch[]
+  facilities   CampFacility[]
   reservations CampReservation[]
   campAddons   CampAddon[]
   requisitions CampRequisition[]
@@ -7039,6 +7040,7 @@ model CampPitch {
   posY         Float             @default(0.5)
   sizeSqm      Float?
   notes        String?           @db.Text
+  images       Json?
   createdAt    DateTime          @default(now())
   updatedAt    DateTime          @updatedAt
   campground   Campground        @relation(fields: [campgroundId], references: [id], onDelete: Cascade)
@@ -7050,6 +7052,33 @@ model CampPitch {
   @@index([zoneId])
   @@index([status])
   @@map("camp_pitches")
+}
+
+/// จุดบริการบนแผนผังลาน (ห้องน้ำ/ห้องอาบน้ำ, จุดจ่ายไฟ, ร้านค้า, จุดบริการลูกค้า) — มีพิกัดบนแผนผัง 2D
+model CampFacility {
+  id           String     @id @default(uuid()) @db.VarChar(36)
+  tenantId     String?    @db.VarChar(36)
+  campgroundId String     @db.VarChar(36)
+  name         String     @db.VarChar(150)
+  /// restroom | electricity | shop | service | other
+  type         String     @default("restroom") @db.VarChar(30)
+  /// open | closed | maintenance
+  status       String     @default("open") @db.VarChar(20)
+  /// พิกัด normalized บนแผนผัง (0..1)
+  posX         Float      @default(0.5)
+  posY         Float      @default(0.5)
+  openingTime  String?    @db.VarChar(10)
+  closingTime  String?    @db.VarChar(10)
+  open24h      Boolean    @default(false)
+  notes        String?    @db.Text
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  campground   Campground @relation(fields: [campgroundId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([campgroundId])
+  @@index([status])
+  @@map("camp_facilities")
 }
 
 /// การจองจุดกางเต็นท์ (เทียบ Booking)

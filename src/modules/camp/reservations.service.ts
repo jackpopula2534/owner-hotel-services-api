@@ -9,6 +9,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   CreateReservationDto,
+  RecordPaymentDto,
   UpdateReservationDto,
 } from './dto/reservation.dto';
 import { calcAddonTotal, calcLodgingTotal, countNights, type SeasonalRate } from './camp-pricing';
@@ -232,6 +233,57 @@ export class ReservationsService {
         data: { status: 'cancelled' },
       });
     });
+    return { success: true, data };
+  }
+
+  /**
+   * รับชำระเงินจริง — บันทึกยอดที่รับเข้ามาแบบสะสม แล้วอัปเดตสถานะการชำระ
+   * paid เมื่อยอดสะสม >= totalPrice, partial เมื่อ > 0, ไม่งั้น pending
+   */
+  async recordPayment(id: string, dto: RecordPaymentDto, tenantId?: string) {
+    const reservation = await this.prisma.campReservation.findFirst({
+      where: { id, ...(tenantId ? { tenantId } : {}) },
+      select: { id: true, status: true, totalPrice: true, amountPaid: true, notes: true },
+    });
+    if (!reservation) {
+      throw new NotFoundException(`Reservation ${id} not found`);
+    }
+    if (reservation.status === 'cancelled') {
+      throw new BadRequestException('การจองนี้ถูกยกเลิกแล้ว ไม่สามารถรับชำระได้');
+    }
+
+    const total = Number(reservation.totalPrice);
+    const currentPaid = Number(reservation.amountPaid ?? 0);
+    const remaining = Math.round((total - currentPaid) * 100) / 100;
+
+    if (remaining <= 0) {
+      throw new BadRequestException('การจองนี้ชำระครบแล้ว');
+    }
+    if (dto.amount > remaining) {
+      throw new BadRequestException(`รับชำระเกินยอดคงค้าง (คงเหลือ ${remaining.toFixed(2)} บาท)`);
+    }
+
+    const newPaid = Math.round((currentPaid + dto.amount) * 100) / 100;
+    const paymentStatus = newPaid >= total ? 'paid' : newPaid > 0 ? 'partial' : 'pending';
+
+    const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    const paymentLine = `[ชำระเงิน ${stamp}] ${dto.amount.toFixed(2)} บาท ผ่าน ${dto.method}${
+      dto.note ? ` — ${dto.note}` : ''
+    }`;
+    const notes = reservation.notes ? `${reservation.notes}\n${paymentLine}` : paymentLine;
+
+    const data = await this.prisma.campReservation.update({
+      where: { id },
+      data: {
+        amountPaid: newPaid,
+        paymentMethod: dto.method,
+        paymentStatus,
+        notes,
+      },
+    });
+    this.logger.log(
+      `Payment recorded: ${id} +${dto.amount} (${dto.method}) → ${paymentStatus} ${newPaid}/${total}`,
+    );
     return { success: true, data };
   }
 

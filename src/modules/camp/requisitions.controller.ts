@@ -87,6 +87,6 @@ export class RequisitionsController {
   @ApiOperation({ summary: 'Cancel a draft requisition' })
   @Roles(...WRITE_ROLES)
   cancel(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.service.cancel(id, user?.tenantId);
+    return this.service.cancel(id, user?.tenantId, user?.id);
   }
 }

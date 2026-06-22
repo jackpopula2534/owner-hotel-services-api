@@ -8,12 +8,16 @@ import { ZonesController } from './zones.controller';
 import { ZonesService } from './zones.service';
 import { PitchesController } from './pitches.controller';
 import { PitchesService } from './pitches.service';
+import { FacilitiesController } from './facilities.controller';
+import { FacilitiesService } from './facilities.service';
 import { ReservationsController } from './reservations.controller';
 import { ReservationsService } from './reservations.service';
 import { AddonsController } from './addons.controller';
 import { AddonsService } from './addons.service';
 import { RequisitionsController } from './requisitions.controller';
 import { RequisitionsService } from './requisitions.service';
+import { CampDashboardController } from './dashboard.controller';
+import { CampDashboardService } from './dashboard.service';
 
 /**
  * CampModule — ระบบจัดการลานกางแคมป์ (CampSync sub-system)
@@ -26,22 +30,27 @@ import { RequisitionsService } from './requisitions.service';
     CampgroundsController,
     ZonesController,
     PitchesController,
+    FacilitiesController,
     ReservationsController,
     AddonsController,
     RequisitionsController,
+    CampDashboardController,
   ],
   providers: [
     CampgroundsService,
     ZonesService,
     PitchesService,
+    FacilitiesService,
     ReservationsService,
     AddonsService,
     RequisitionsService,
+    CampDashboardService,
   ],
   exports: [
     CampgroundsService,
     ZonesService,
     PitchesService,
+    FacilitiesService,
     ReservationsService,
     AddonsService,
     RequisitionsService,

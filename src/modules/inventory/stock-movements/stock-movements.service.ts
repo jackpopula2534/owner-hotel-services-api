@@ -285,9 +285,15 @@ export class StockMovementsService {
     const inboundLotTypes = [StockMovementTypeDto.ADJUSTMENT_IN];
     const isInboundLotType = inboundLotTypes.includes(dto.type);
 
+    // Only lot-tracked items (perishable or explicitly lot-tracked) go through
+    // the FEFO lot picker. Non-lot items (e.g. rental equipment) are tracked at
+    // the WarehouseStock level only — forcing a lot pick on them throws a
+    // spurious "สต็อก lot ไม่เพียงพอ" even when warehouse stock is sufficient.
+    const needsLot = (item as any).isPerishable || (item as any).requiresLotTracking;
+
     let resolvedLotId: string | undefined = explicitLotId;
 
-    if (isOutboundLotType && !resolvedLotId) {
+    if (isOutboundLotType && needsLot && !resolvedLotId) {
       // Auto FEFO pick — returns the first lot with enough remainingQty
       const picks = await this.pickLotsForIssue(
         tenantId,
@@ -532,6 +538,8 @@ export class StockMovementsService {
         quantity: dto.quantity,
         unitCost: avgCost,
         transferWarehouseId: dto.toWarehouseId,
+        referenceType: dto.referenceType,
+        referenceId: dto.referenceId,
         notes: dto.notes,
       },
       userId,

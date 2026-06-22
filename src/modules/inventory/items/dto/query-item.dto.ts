@@ -45,6 +45,15 @@ export class QueryItemDto {
   categoryId?: string;
 
   @ApiPropertyOptional({
+    description:
+      'Filter by warehouse ID — returns only items stocked in this warehouse, and totalStock reflects that warehouse only',
+    example: 'uuid',
+  })
+  @IsOptional()
+  @IsString()
+  warehouseId?: string;
+
+  @ApiPropertyOptional({
     description: 'Filter by active status',
     example: true,
   })

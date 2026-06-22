@@ -117,3 +117,24 @@ export class UpdateReservationDto extends PartialType(CreateReservationDto) {
   @MaxLength(20)
   status?: string;
 }
+
+export class RecordPaymentDto {
+  @ApiProperty({ description: 'จำนวนเงินที่รับชำระครั้งนี้ (บาท)', minimum: 0.01 })
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
+  amount!: number;
+
+  @ApiProperty({
+    description: 'ช่องทางการชำระเงิน',
+    enum: ['cash', 'transfer', 'qr', 'card', 'other'],
+  })
+  @IsString()
+  @MaxLength(30)
+  method!: string;
+
+  @ApiPropertyOptional({ description: 'หมายเหตุการชำระเงิน' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  note?: string;
+}

@@ -54,6 +54,15 @@ export class SearchItemDto {
 
   @ApiPropertyOptional({
     description:
+      'When provided, each result includes `stockQuantity` — the on-hand balance of the item in this warehouse. Used by the requisition form to show what can be drawn from the source warehouse.',
+    example: 'uuid',
+  })
+  @IsOptional()
+  @IsString()
+  warehouseId?: string;
+
+  @ApiPropertyOptional({
+    description:
       'Restrict results to active items. Default true (dropdowns rarely need archived items).',
     example: true,
     default: true,

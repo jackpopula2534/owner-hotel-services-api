@@ -12,6 +12,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ReservationsService } from './reservations.service';
 import {
   CreateReservationDto,
+  RecordPaymentDto,
   UpdateReservationDto,
 } from './dto/reservation.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -85,5 +86,16 @@ export class ReservationsController {
   @Roles(...WRITE_ROLES)
   cancel(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.service.cancel(id, user?.tenantId);
+  }
+
+  @Post(':id/payment')
+  @ApiOperation({ summary: 'Record a payment against a reservation' })
+  @Roles(...WRITE_ROLES)
+  recordPayment(
+    @Param('id') id: string,
+    @Body() dto: RecordPaymentDto,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    return this.service.recordPayment(id, dto, user?.tenantId);
   }
 }

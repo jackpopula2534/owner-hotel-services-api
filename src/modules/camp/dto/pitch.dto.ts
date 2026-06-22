@@ -60,6 +60,13 @@ export class CreatePitchDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @ApiPropertyOptional({ type: [String], description: 'รูปจุดกางเต็นท์หลายรูป' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(12)
+  @IsString({ each: true })
+  images?: string[];
 }
 
 export class UpdatePitchDto extends PartialType(CreatePitchDto) {}

@@ -27,4 +27,14 @@ export class CreateTransferDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @ApiPropertyOptional({ description: 'Reference type, e.g. CAMP_REQUISITION' })
+  @IsOptional()
+  @IsString()
+  referenceType?: string;
+
+  @ApiPropertyOptional({ description: 'Reference ID from source module' })
+  @IsOptional()
+  @IsString()
+  referenceId?: string;
 }

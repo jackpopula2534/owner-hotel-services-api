@@ -76,6 +76,14 @@ export class CreateAddonDto {
   @IsOptional()
   @IsBoolean()
   active?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Inventory item id from Inventory Module used to replenish this addon',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(36)
+  inventoryItemId?: string;
 }
 
 export class UpdateAddonDto extends PartialType(CreateAddonDto) {}
