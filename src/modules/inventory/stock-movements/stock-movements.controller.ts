@@ -15,6 +15,7 @@ import { StockMovementsService } from './stock-movements.service';
 import { CreateStockMovementDto } from './dto/create-stock-movement.dto';
 import { CreateTransferDto } from './dto/create-transfer.dto';
 import { QueryStockMovementDto } from './dto/query-stock-movement.dto';
+import { CancelStockMovementDto } from './dto/cancel-stock-movement.dto';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AddonGuard } from '@/common/guards/addon.guard';
 import { RequireAddon } from '@/common/decorators/require-addon.decorator';
@@ -87,6 +88,26 @@ export class StockMovementsController {
     @Req() req: { user: { tenantId: string } },
   ): Promise<{ success: boolean; data: unknown }> {
     const data = await this.stockMovementsService.findOne(id, req.user.tenantId);
+    return { success: true, data };
+  }
+
+  @Post(':id/cancel')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Cancel a stock movement by creating a reversing movement' })
+  @ApiResponse({ status: 200, description: 'Stock movement cancelled with reversal record' })
+  @ApiResponse({ status: 400, description: 'Cancellation cannot be completed' })
+  @ApiResponse({ status: 404, description: 'Not found' })
+  async cancel(
+    @Param('id') id: string,
+    @Body() dto: CancelStockMovementDto,
+    @Req() req: { user: { id: string; tenantId: string } },
+  ): Promise<{ success: boolean; data: unknown }> {
+    const data = await this.stockMovementsService.cancelMovement(
+      id,
+      dto.reason,
+      req.user.id,
+      req.user.tenantId,
+    );
     return { success: true, data };
   }
 

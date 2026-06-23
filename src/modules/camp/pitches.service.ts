@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   BulkCreatePitchDto,
@@ -154,6 +154,56 @@ export class PitchesService {
     await this.ensureExists(id, tenantId);
     await this.prisma.campPitch.delete({ where: { id } });
     return { success: true };
+  }
+
+  /**
+   * ลบจุดกางเต็นท์หลายจุดในครั้งเดียว
+   * - ไม่ระบุ zoneId → ลบทุกจุดในลาน (Clear all)
+   * - ระบุ zoneId → ลบเฉพาะจุดในโซนนั้น
+   *
+   * กันลบจุดที่มีการจองที่ยัง active อยู่ (pending/confirmed/checked_in) — ต้อง
+   * ยกเลิก/เช็คเอาท์ก่อน ส่วนการจองที่จบแล้ว (ประวัติ) จะถูกลบไปพร้อมจุดใน transaction
+   */
+  async bulkDelete(
+    campgroundId: string,
+    zoneId: string | undefined,
+    tenantId?: string,
+  ) {
+    const where = {
+      campgroundId,
+      ...(tenantId ? { tenantId } : {}),
+      ...(zoneId ? { zoneId } : {}),
+    };
+
+    const targets = await this.prisma.campPitch.findMany({
+      where,
+      select: { id: true },
+    });
+    const pitchIds = targets.map((p) => p.id);
+
+    if (pitchIds.length === 0) {
+      return { success: true, data: { deletedCount: 0 } };
+    }
+
+    const activeCount = await this.prisma.campReservation.count({
+      where: { pitchId: { in: pitchIds }, status: { in: BLOCKING_STATUSES } },
+    });
+    if (activeCount > 0) {
+      throw new BadRequestException(
+        `ลบไม่ได้ — มี ${activeCount} การจองที่ยังใช้งานอยู่บนจุดเหล่านี้ กรุณายกเลิกหรือเช็คเอาท์ก่อน`,
+      );
+    }
+
+    const [, deleted] = await this.prisma.$transaction([
+      this.prisma.campReservation.deleteMany({ where: { pitchId: { in: pitchIds } } }),
+      this.prisma.campPitch.deleteMany({ where }),
+    ]);
+
+    this.logger.log(
+      `Bulk pitch delete: ${deleted.count} pitches removed (campground ${campgroundId}${zoneId ? `, zone ${zoneId}` : ''})`,
+    );
+
+    return { success: true, data: { deletedCount: deleted.count } };
   }
 
   /**

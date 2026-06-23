@@ -96,6 +96,32 @@ export class StockMovementsService {
       where.itemId = query.itemId;
     }
 
+    const itemWhere: Record<string, any> = {};
+    if (query.categoryId) {
+      itemWhere.categoryId = query.categoryId;
+    }
+    if (query.search?.trim()) {
+      const search = query.search.trim();
+      where.OR = [
+        { notes: { contains: search } },
+        { referenceId: { contains: search } },
+        {
+          item: {
+            is: {
+              OR: [
+                { name: { contains: search } },
+                { sku: { contains: search } },
+                { barcode: { contains: search } },
+              ],
+            },
+          },
+        },
+      ];
+    }
+    if (Object.keys(itemWhere).length > 0) {
+      where.item = { is: itemWhere };
+    }
+
     if (query.type) {
       where.type = query.type;
     }
@@ -573,6 +599,125 @@ export class StockMovementsService {
     return {
       from: fromMovement,
       to: toMovement ? this.mapToDetail(toMovement, transferUser) : fromMovement,
+    };
+  }
+
+  async cancelMovement(
+    id: string,
+    reason: string,
+    userId: string,
+    tenantId: string,
+  ): Promise<{ original: StockMovementDetail; reversal: unknown }> {
+    const original = await this.prisma.stockMovement.findFirst({
+      where: { id, tenantId },
+      include: {
+        warehouse: { select: { id: true, name: true } },
+        item: { select: { id: true, name: true, sku: true } },
+        lot: { select: { id: true, lotNumber: true, expiryDate: true, status: true } },
+      },
+    });
+
+    if (!original) {
+      throw new NotFoundException(`Stock movement with ID ${id} not found`);
+    }
+
+    if (original.referenceType === 'STOCK_MOVEMENT_CANCEL') {
+      throw new BadRequestException('รายการยกเลิกไม่สามารถยกเลิกซ้ำได้');
+    }
+
+    const existingCancellation = await this.prisma.stockMovement.findFirst({
+      where: {
+        tenantId,
+        referenceType: 'STOCK_MOVEMENT_CANCEL',
+        referenceId: id,
+      },
+      select: { id: true },
+    });
+
+    if (existingCancellation) {
+      throw new BadRequestException('รายการนี้ถูกยกเลิกแล้ว');
+    }
+
+    const note = `ยกเลิกรายการ ${id}: ${reason}`;
+
+    if (
+      original.type === StockMovementTypeDto.TRANSFER_OUT ||
+      original.type === StockMovementTypeDto.TRANSFER_IN
+    ) {
+      if (!original.transferWarehouseId) {
+        throw new BadRequestException('ไม่พบคลังอีกฝั่งของรายการโอน ไม่สามารถยกเลิกได้');
+      }
+
+      const reversal =
+        original.type === StockMovementTypeDto.TRANSFER_OUT
+          ? await this.createTransfer(
+              {
+                fromWarehouseId: original.transferWarehouseId,
+                toWarehouseId: original.warehouseId,
+                itemId: original.itemId,
+                quantity: original.quantity,
+                referenceType: 'STOCK_MOVEMENT_CANCEL',
+                referenceId: original.id,
+                notes: note,
+              },
+              userId,
+              tenantId,
+            )
+          : await this.createTransfer(
+              {
+                fromWarehouseId: original.warehouseId,
+                toWarehouseId: original.transferWarehouseId,
+                itemId: original.itemId,
+                quantity: original.quantity,
+                referenceType: 'STOCK_MOVEMENT_CANCEL',
+                referenceId: original.id,
+                notes: note,
+              },
+              userId,
+              tenantId,
+            );
+
+      return {
+        original: this.mapToDetail(original),
+        reversal,
+      };
+    }
+
+    const reverseTypeByOriginal: Partial<Record<StockMovementTypeDto, StockMovementTypeDto>> = {
+      [StockMovementTypeDto.GOODS_RECEIVE]: StockMovementTypeDto.ADJUSTMENT_OUT,
+      [StockMovementTypeDto.GOODS_ISSUE]: StockMovementTypeDto.ADJUSTMENT_IN,
+      [StockMovementTypeDto.ADJUSTMENT_IN]: StockMovementTypeDto.ADJUSTMENT_OUT,
+      [StockMovementTypeDto.ADJUSTMENT_OUT]: StockMovementTypeDto.ADJUSTMENT_IN,
+      [StockMovementTypeDto.RETURN_SUPPLIER]: StockMovementTypeDto.ADJUSTMENT_IN,
+      [StockMovementTypeDto.WASTE]: StockMovementTypeDto.ADJUSTMENT_IN,
+    };
+    const reverseType = reverseTypeByOriginal[original.type as StockMovementTypeDto];
+
+    if (!reverseType) {
+      throw new BadRequestException(`ไม่รองรับการยกเลิกรายการประเภท ${original.type}`);
+    }
+
+    const reversal = await this.createMovement(
+      {
+        warehouseId: original.warehouseId,
+        itemId: original.itemId,
+        type: reverseType,
+        quantity: original.quantity,
+        unitCost: this.toNumber(original.unitCost),
+        referenceType: 'STOCK_MOVEMENT_CANCEL',
+        referenceId: original.id,
+        notes: note,
+        batchNumber: original.batchNumber ?? undefined,
+        expiryDate: original.expiryDate ? original.expiryDate.toISOString() : undefined,
+        lotId: original.lotId ?? undefined,
+      },
+      userId,
+      tenantId,
+    );
+
+    return {
+      original: this.mapToDetail(original),
+      reversal,
     };
   }
 

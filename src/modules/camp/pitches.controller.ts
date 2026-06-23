@@ -21,6 +21,7 @@ import { existsSync, mkdirSync } from 'fs';
 import { PitchesService } from './pitches.service';
 import {
   BulkCreatePitchDto,
+  BulkDeletePitchDto,
   CreatePitchDto,
   UpdatePitchDto,
   UpdatePitchPositionDto,
@@ -92,6 +93,18 @@ export class PitchesController {
     @CurrentUser() user: { tenantId?: string },
   ) {
     return this.service.bulkCreate(dto, user?.tenantId);
+  }
+
+  @Post('bulk-delete')
+  @ApiOperation({
+    summary: 'Bulk delete pitches — all in a campground (Clear all) or all in one zone',
+  })
+  @Roles(...WRITE_ROLES)
+  bulkDelete(
+    @Body() dto: BulkDeletePitchDto,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    return this.service.bulkDelete(dto.campgroundId, dto.zoneId, user?.tenantId);
   }
 
   @Put(':id')

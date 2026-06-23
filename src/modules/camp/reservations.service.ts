@@ -81,6 +81,14 @@ export class ReservationsService {
         throw new ConflictException('จุดนี้ถูกจองแล้วในช่วงเวลาที่เลือก');
       }
 
+      // ลานเชื่อมต่อระบบคลังกลางหรือไม่ (มี warehouseId) → ถ้าไม่เชื่อม จะไม่บริหารสต็อก:
+      // เพิ่ม add-on ได้อิสระเพื่อคิดเงิน ไม่ตรวจคงเหลือ และไม่ตัด stock
+      const campground = await tx.campground.findFirst({
+        where: { id: dto.campgroundId, ...(tenantId ? { tenantId } : {}) },
+        select: { warehouseId: true },
+      });
+      const stockManaged = Boolean(campground?.warehouseId);
+
       // ── ตรวจ add-on + stock แล้วเตรียม line items (snapshot ราคาจาก DB) ──
       const lineItems: {
         addonId: string;
@@ -95,7 +103,7 @@ export class ReservationsService {
         if (!addon || !addon.active) {
           throw new NotFoundException(`Addon ${req.addonId} not found`);
         }
-        if (addon.stockQty < req.qty) {
+        if (stockManaged && addon.stockQty < req.qty) {
           throw new ConflictException(`อุปกรณ์ "${addon.name}" คงเหลือไม่พอ (เหลือ ${addon.stockQty})`);
         }
         lineItems.push({
@@ -150,15 +158,17 @@ export class ReservationsService {
         },
       });
 
-      // สร้าง line items + ตัด stock
+      // สร้าง line items + ตัด stock (เฉพาะลานที่เชื่อมระบบคลัง)
       for (const item of lineItems) {
         await tx.campReservationAddon.create({
           data: { reservationId: created.id, ...item },
         });
-        await tx.campAddon.update({
-          where: { id: item.addonId },
-          data: { stockQty: { decrement: item.qty } },
-        });
+        if (stockManaged) {
+          await tx.campAddon.update({
+            where: { id: item.addonId },
+            data: { stockQty: { decrement: item.qty } },
+          });
+        }
       }
 
       this.logger.log(`Reservation created: ${created.id} pitch=${dto.pitchId}`);
@@ -221,12 +231,19 @@ export class ReservationsService {
         where: { id },
         include: { addonItems: true },
       });
-      // คืน stock อุปกรณ์เช่ากลับคลัง
-      for (const item of reservation.addonItems) {
-        await tx.campAddon.update({
-          where: { id: item.addonId },
-          data: { stockQty: { increment: item.qty } },
-        });
+      // คืน stock อุปกรณ์เช่ากลับคลัง — เฉพาะลานที่เชื่อมระบบคลัง
+      // (ลานที่ไม่บริหารคลังไม่เคยตัด stock ตอนจอง จึงไม่ต้องคืน)
+      const campground = await tx.campground.findFirst({
+        where: { id: reservation.campgroundId },
+        select: { warehouseId: true },
+      });
+      if (campground?.warehouseId) {
+        for (const item of reservation.addonItems) {
+          await tx.campAddon.update({
+            where: { id: item.addonId },
+            data: { stockQty: { increment: item.qty } },
+          });
+        }
       }
       return tx.campReservation.update({
         where: { id },

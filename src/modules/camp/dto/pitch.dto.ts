@@ -112,6 +112,21 @@ export class BulkCreatePitchDto {
   notes?: string;
 }
 
+export class BulkDeletePitchDto {
+  @ApiProperty({ description: 'ลานที่จะลบจุดทั้งหมด' })
+  @IsString()
+  @MaxLength(36)
+  campgroundId!: string;
+
+  @ApiPropertyOptional({
+    description: 'ถ้าระบุ จะลบเฉพาะจุดในโซนนี้ — ถ้าไม่ระบุ จะลบทุกจุดในลาน (Clear all)',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(36)
+  zoneId?: string;
+}
+
 export class UpdatePitchPositionDto {
   @ApiProperty({ description: 'พิกัด normalized 0..1' })
   @IsNumber()
