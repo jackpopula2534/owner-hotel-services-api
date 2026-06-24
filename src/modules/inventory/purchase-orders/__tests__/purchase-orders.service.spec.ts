@@ -67,7 +67,7 @@ describe('PurchaseOrdersService — discount mode & breakdown', () => {
   const mockPrismaService = {
     purchaseOrder: {
       create: jest.fn().mockResolvedValue({ id: newPoId, poNumber: 'PO-202604-0001' }),
-      findUnique: jest.fn().mockResolvedValue(createdPoRow),
+      findFirst: jest.fn().mockResolvedValue(createdPoRow),
       update: jest.fn(),
     },
     purchaseOrderItem: {
@@ -76,14 +76,16 @@ describe('PurchaseOrdersService — discount mode & breakdown', () => {
       findMany: jest.fn(),
     },
     property: {
-      findUnique: jest.fn().mockResolvedValue({ id: propertyId, tenantId }),
-      findFirst: jest.fn().mockResolvedValue({ id: propertyId }),
+      // Service calls findFirst both for the default-property lookup and the
+      // tenant-scoped validation. Default returns a property with tenantId so the
+      // validation passes; tests that need the auto-resolve path override per-call.
+      findFirst: jest.fn().mockResolvedValue({ id: propertyId, tenantId }),
     },
     supplier: {
-      findUnique: jest.fn().mockResolvedValue({ id: supplierId, tenantId }),
+      findFirst: jest.fn().mockResolvedValue({ id: supplierId, tenantId }),
     },
     warehouse: {
-      findUnique: jest.fn().mockResolvedValue({ id: warehouseId, tenantId }),
+      findFirst: jest.fn().mockResolvedValue({ id: warehouseId, tenantId }),
     },
     inventoryItem: {
       // Default: return one row per queried id so `existingItems.length === itemIds.length`.
@@ -117,7 +119,7 @@ describe('PurchaseOrdersService — discount mode & breakdown', () => {
     service = module.get<PurchaseOrdersService>(PurchaseOrdersService);
 
     jest.clearAllMocks();
-    mockPrismaService.purchaseOrder.findUnique.mockResolvedValue(createdPoRow);
+    mockPrismaService.purchaseOrder.findFirst.mockResolvedValue(createdPoRow);
     mockPrismaService.purchaseOrder.create.mockResolvedValue({
       id: newPoId,
       poNumber: 'PO-202604-0001',
@@ -128,10 +130,9 @@ describe('PurchaseOrdersService — discount mode & breakdown', () => {
         return Promise.resolve(ids.map((id) => ({ id })));
       },
     );
-    mockPrismaService.property.findUnique.mockResolvedValue({ id: propertyId, tenantId });
-    mockPrismaService.property.findFirst.mockResolvedValue({ id: propertyId });
-    mockPrismaService.supplier.findUnique.mockResolvedValue({ id: supplierId, tenantId });
-    mockPrismaService.warehouse.findUnique.mockResolvedValue({ id: warehouseId, tenantId });
+    mockPrismaService.property.findFirst.mockResolvedValue({ id: propertyId, tenantId });
+    mockPrismaService.supplier.findFirst.mockResolvedValue({ id: supplierId, tenantId });
+    mockPrismaService.warehouse.findFirst.mockResolvedValue({ id: warehouseId, tenantId });
     mockPrismaService.documentSequence.upsert.mockResolvedValue({ lastNumber: 1 });
     mockPrismaService.$transaction.mockImplementation((fn: (tx: unknown) => Promise<unknown>) =>
       fn(mockPrismaService),
@@ -255,7 +256,7 @@ describe('PurchaseOrdersService — discount mode & breakdown', () => {
     });
 
     it('snapshots paymentTerms from DTO and deliveryAddress as-is', async () => {
-      mockPrismaService.supplier.findUnique.mockResolvedValueOnce({
+      mockPrismaService.supplier.findFirst.mockResolvedValueOnce({
         id: supplierId,
         tenantId,
         paymentTerms: 'NET 30',
@@ -277,7 +278,7 @@ describe('PurchaseOrdersService — discount mode & breakdown', () => {
     });
 
     it('falls back to supplier.paymentTerms when DTO omits it', async () => {
-      mockPrismaService.supplier.findUnique.mockResolvedValueOnce({
+      mockPrismaService.supplier.findFirst.mockResolvedValueOnce({
         id: supplierId,
         tenantId,
         paymentTerms: 'NET 30',

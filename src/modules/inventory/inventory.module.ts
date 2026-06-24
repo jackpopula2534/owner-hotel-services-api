@@ -27,6 +27,8 @@ import { QCModule } from './qc/qc.module';
 import { ProcurementStockModule } from './procurement-stock/procurement-stock.module';
 // Sprint 5: realtime WS broadcaster for gr.completed / po.received
 import { ProcurementEventsModule } from './procurement-events/procurement-events.module';
+// Retail / POS checkout + sales history
+import { RetailSalesModule } from './retail-sales/retail-sales.module';
 import {
   InventoryDashboardController,
   InventoryReportsController,
@@ -62,6 +64,7 @@ import { PrismaModule } from '@/prisma/prisma.module';
     QCModule,
     ProcurementStockModule,
     ProcurementEventsModule,
+    RetailSalesModule,
     BullModule.registerQueue({ name: INVENTORY_QUEUE }),
   ],
   controllers: [InventoryDashboardController, InventoryReportsController],
@@ -89,6 +92,7 @@ import { PrismaModule } from '@/prisma/prisma.module';
     QCModule,
     ProcurementStockModule,
     ProcurementEventsModule,
+    RetailSalesModule,
   ],
 })
 export class InventoryModule {}

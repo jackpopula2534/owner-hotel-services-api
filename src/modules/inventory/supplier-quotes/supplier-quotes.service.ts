@@ -122,8 +122,8 @@ export class SupplierQuotesService {
   }
 
   async findOne(id: string, tenantId: string): Promise<any> {
-    const quote = await this.prisma.supplierQuote.findUnique({
-      where: { id },
+    const quote = await this.prisma.supplierQuote.findFirst({
+      where: { id, tenantId },
       include: {
         items: {
           select: {
@@ -211,8 +211,8 @@ export class SupplierQuotesService {
   }
 
   async submitQuote(id: string, dto: SubmitQuoteDto, tenantId: string): Promise<any> {
-    const quote = await this.prisma.supplierQuote.findUnique({
-      where: { id },
+    const quote = await this.prisma.supplierQuote.findFirst({
+      where: { id, tenantId },
     });
 
     if (!quote || quote.tenantId !== tenantId) {
@@ -337,8 +337,8 @@ export class SupplierQuotesService {
   }
 
   async selectQuote(id: string, userId: string, tenantId: string): Promise<any> {
-    const quote = await this.prisma.supplierQuote.findUnique({
-      where: { id },
+    const quote = await this.prisma.supplierQuote.findFirst({
+      where: { id, tenantId },
       include: {
         purchaseRequisition: true,
       },
@@ -407,8 +407,8 @@ export class SupplierQuotesService {
   }
 
   async rejectQuote(id: string, reason: string, tenantId: string): Promise<any> {
-    const quote = await this.prisma.supplierQuote.findUnique({
-      where: { id },
+    const quote = await this.prisma.supplierQuote.findFirst({
+      where: { id, tenantId },
     });
 
     if (!quote || quote.tenantId !== tenantId) {

@@ -204,7 +204,11 @@ export class SupplierPortalService {
       throw new ForbiddenException('ลิงก์ไม่ถูกต้อง');
     }
     const tokenHash = this.hashToken(rawToken);
-    const record = await this.prisma.supplierQuoteToken.findUnique({
+    // Public portal entry: tenant is resolved FROM the token, so this runs with
+    // no tenant context. Use findFirst (not findUnique — blocked by TenantScope
+    // middleware on this tenant-scoped model) WITHOUT adding tenantId, so the
+    // globally-unique tokenHash resolves the record across tenants.
+    const record = await this.prisma.supplierQuoteToken.findFirst({
       where: { tokenHash },
     });
     if (!record) {

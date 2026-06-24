@@ -396,8 +396,8 @@ export class QCService {
     // human-readable name instead of a raw UUID.
     let inspectedByName: string | null = null;
     if (record.inspectedBy) {
-      const inspector = await this.prisma.user.findUnique({
-        where: { id: record.inspectedBy },
+      const inspector = await this.prisma.user.findFirst({
+        where: { id: record.inspectedBy, tenantId },
         select: { firstName: true, lastName: true, email: true },
       });
       if (inspector) {
@@ -430,8 +430,8 @@ export class QCService {
     } | null = null;
 
     if (record.goodsReceiveId) {
-      const gr = await this.prisma.goodsReceive.findUnique({
-        where: { id: record.goodsReceiveId },
+      const gr = await this.prisma.goodsReceive.findFirst({
+        where: { id: record.goodsReceiveId, tenantId },
         select: {
           grNumber: true,
           receiveDate: true,

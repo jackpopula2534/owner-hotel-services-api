@@ -7,11 +7,18 @@ import {
   Param,
   Delete,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
+  BadRequestException,
   Query,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import { extname, join } from 'path';
+import { existsSync, mkdirSync } from 'fs';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiQuery, ApiConsumes } from '@nestjs/swagger';
 import {
   ItemsService,
   ItemWithStock,
@@ -33,6 +40,13 @@ interface JwtPayload {
   tenantId: string;
   email: string;
   role: string;
+}
+
+interface MulterFile {
+  originalname: string;
+  mimetype: string;
+  size: number;
+  filename: string;
 }
 
 @ApiTags('Inventory - Items')
@@ -362,6 +376,56 @@ export class ItemsController {
     @Body() dto: UpdateItemDto,
   ) {
     const data = await this.itemsService.update(id, dto, user.tenantId);
+    return { success: true, data };
+  }
+
+  @Post(':id/image')
+  @ApiOperation({ summary: 'Upload item image from device' })
+  @ApiConsumes('multipart/form-data')
+  @ApiResponse({ status: 201, description: 'Image uploaded, item.imageUrl updated' })
+  @ApiResponse({ status: 400, description: 'Missing or invalid image file' })
+  @ApiResponse({ status: 404, description: 'Item not found' })
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: diskStorage({
+        destination: (_req, _file, cb) => {
+          const uploadPath = join(process.cwd(), 'uploads', 'inventory');
+          if (!existsSync(uploadPath)) {
+            mkdirSync(uploadPath, { recursive: true });
+          }
+          cb(null, uploadPath);
+        },
+        filename: (req, file, cb) => {
+          const itemId = req.params.id;
+          const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+          const ext = extname(file.originalname);
+          cb(null, `item-${itemId}-${uniqueSuffix}${ext}`);
+        },
+      }),
+      fileFilter: (_req, file, cb) => {
+        if (!file.mimetype.match(/^image\/(jpeg|jpg|png|webp|gif)$/)) {
+          return cb(
+            new BadRequestException('อัปโหลดได้เฉพาะไฟล์รูปภาพ (jpg, png, webp, gif)'),
+            false,
+          );
+        }
+        cb(null, true);
+      },
+      limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+    }),
+  )
+  async uploadImage(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @UploadedFile() file: MulterFile,
+  ) {
+    if (!file) {
+      throw new BadRequestException('ไม่พบไฟล์รูปภาพ');
+    }
+    const baseUrl =
+      process.env.API_BASE_URL || `http://localhost:${process.env.PORT || 9011}`;
+    const imageUrl = `${baseUrl}/uploads/inventory/${file.filename}`;
+    const data = await this.itemsService.setImageUrl(id, imageUrl, user.tenantId);
     return { success: true, data };
   }
 

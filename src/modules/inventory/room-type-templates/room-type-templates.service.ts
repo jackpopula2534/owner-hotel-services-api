@@ -270,8 +270,8 @@ export class RoomTypeTemplatesService {
     }
 
     try {
-      const template = await this.prisma.roomTypeAmenityTemplate.findUnique({
-        where: { id },
+      const template = await this.prisma.roomTypeAmenityTemplate.findFirst({
+        where: { id, tenantId },
       });
 
       if (!template) {
@@ -327,8 +327,8 @@ export class RoomTypeTemplatesService {
     }
 
     try {
-      const template = await this.prisma.roomTypeAmenityTemplate.findUnique({
-        where: { id },
+      const template = await this.prisma.roomTypeAmenityTemplate.findFirst({
+        where: { id, tenantId },
       });
 
       if (!template) {

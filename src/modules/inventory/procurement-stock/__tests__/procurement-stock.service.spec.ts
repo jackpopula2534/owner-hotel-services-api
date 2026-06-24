@@ -167,6 +167,29 @@ describe('ProcurementStockService', () => {
       expect(result.data.every((r) => r.status === 'LOW')).toBe(true);
     });
 
+    it('filter=REORDER returns LOW + OUT_OF_STOCK rows (OUT first)', async () => {
+      const result = await service.findBalance(tenantId, {
+        filter: StockBalanceFilter.REORDER,
+      });
+      expect(result.data).toHaveLength(3);
+      expect(result.data.every((r) => r.status === 'LOW' || r.status === 'OUT_OF_STOCK')).toBe(true);
+      expect(result.data[0].status).toBe('OUT_OF_STOCK');
+      // breakdown stays unfiltered
+      expect(result.meta.breakdown.OK).toBe(1);
+    });
+
+    it('filter=REORDER paginates: page 1 limit 2 returns first 2 of 3', async () => {
+      const result = await service.findBalance(tenantId, {
+        filter: StockBalanceFilter.REORDER,
+        page: 1,
+        limit: 2,
+      });
+      expect(result.data).toHaveLength(2);
+      expect(result.meta.total).toBe(3);
+      expect(result.meta.page).toBe(1);
+      expect(result.meta.limit).toBe(2);
+    });
+
     it('filter=ALL returns everything but sorts OUT_OF_STOCK first, then by deficit desc', async () => {
       const result = await service.findBalance(tenantId, {
         filter: StockBalanceFilter.ALL,

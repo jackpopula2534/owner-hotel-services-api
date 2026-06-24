@@ -14,6 +14,8 @@ export enum StockBalanceFilter {
   OVERSTOCK = 'OVERSTOCK',
   /** quantity is exactly 0 — separate from LOW so the UI can highlight stockouts */
   OUT_OF_STOCK = 'OUT_OF_STOCK',
+  /** needs replenishment: LOW or OUT_OF_STOCK combined (drives the "ต้องสั่งซื้อ" tab) */
+  REORDER = 'REORDER',
 }
 
 export class QueryStockBalanceDto {

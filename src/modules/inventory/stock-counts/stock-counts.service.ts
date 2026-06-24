@@ -148,8 +148,8 @@ export class StockCountsService {
    * Find a single stock count by ID with full details
    */
   async findOne(id: string, tenantId: string): Promise<StockCountDetail> {
-    const count = await this.prisma.stockCount.findUnique({
-      where: { id },
+    const count = await this.prisma.stockCount.findFirst({
+      where: { id, tenantId },
       include: {
         warehouse: { select: { id: true, name: true } },
         items: {
@@ -181,8 +181,8 @@ export class StockCountsService {
   ): Promise<StockCountDetail> {
     return await this.prisma.$transaction(async (tx) => {
       // 1. Validate warehouse
-      const warehouse = await tx.warehouse.findUnique({
-        where: { id: dto.warehouseId },
+      const warehouse = await tx.warehouse.findFirst({
+        where: { id: dto.warehouseId, tenantId },
       });
 
       if (!warehouse) {
@@ -236,8 +236,8 @@ export class StockCountsService {
       // Validate all items exist and snapshot quantities
       const countItems = [];
       for (const itemId of itemsToCount) {
-        const invItem = await tx.inventoryItem.findUnique({
-          where: { id: itemId },
+        const invItem = await tx.inventoryItem.findFirst({
+          where: { id: itemId, tenantId },
         });
 
         if (!invItem) {
@@ -284,8 +284,8 @@ export class StockCountsService {
    * Start stock count (PLANNED → IN_PROGRESS)
    */
   async startCount(id: string, userId: string, tenantId: string): Promise<StockCountDetail> {
-    const count = await this.prisma.stockCount.findUnique({
-      where: { id },
+    const count = await this.prisma.stockCount.findFirst({
+      where: { id, tenantId },
     });
 
     if (!count) {
@@ -330,8 +330,8 @@ export class StockCountsService {
   ): Promise<any> {
     return await this.prisma.$transaction(async (tx) => {
       // Validate stock count exists
-      const count = await tx.stockCount.findUnique({
-        where: { id },
+      const count = await tx.stockCount.findFirst({
+        where: { id, tenantId },
         include: { items: true },
       });
 
@@ -411,8 +411,8 @@ export class StockCountsService {
    */
   async completeCount(id: string, userId: string, tenantId: string): Promise<StockCountDetail> {
     return await this.prisma.$transaction(async (tx) => {
-      const count = await tx.stockCount.findUnique({
-        where: { id },
+      const count = await tx.stockCount.findFirst({
+        where: { id, tenantId },
         include: { items: true },
       });
 
@@ -463,8 +463,8 @@ export class StockCountsService {
    */
   async approveCount(id: string, userId: string, tenantId: string): Promise<StockCountDetail> {
     return await this.prisma.$transaction(async (tx) => {
-      const count = await tx.stockCount.findUnique({
-        where: { id },
+      const count = await tx.stockCount.findFirst({
+        where: { id, tenantId },
         include: { items: true },
       });
 
@@ -579,8 +579,8 @@ export class StockCountsService {
    * Cancel stock count
    */
   async cancelCount(id: string, tenantId: string): Promise<StockCountDetail> {
-    const count = await this.prisma.stockCount.findUnique({
-      where: { id },
+    const count = await this.prisma.stockCount.findFirst({
+      where: { id, tenantId },
     });
 
     if (!count) {

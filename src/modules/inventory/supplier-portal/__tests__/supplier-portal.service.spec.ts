@@ -30,7 +30,7 @@ describe('SupplierPortalService', () => {
       findFirst: jest.fn(),
     },
     supplierQuoteToken: {
-      findUnique: jest.fn(),
+      findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
       updateMany: jest.fn(),
@@ -305,12 +305,12 @@ describe('SupplierPortalService', () => {
     });
 
     it('rejects unknown tokens', async () => {
-      mockPrisma.supplierQuoteToken.findUnique.mockResolvedValue(null);
+      mockPrisma.supplierQuoteToken.findFirst.mockResolvedValue(null);
       await expect(service.verifyToken(rawToken)).rejects.toThrow(ForbiddenException);
     });
 
     it('rejects revoked tokens', async () => {
-      mockPrisma.supplierQuoteToken.findUnique.mockResolvedValue({
+      mockPrisma.supplierQuoteToken.findFirst.mockResolvedValue({
         ...baseRecord,
         revokedAt: new Date(),
       });
@@ -318,7 +318,7 @@ describe('SupplierPortalService', () => {
     });
 
     it('rejects already-used tokens', async () => {
-      mockPrisma.supplierQuoteToken.findUnique.mockResolvedValue({
+      mockPrisma.supplierQuoteToken.findFirst.mockResolvedValue({
         ...baseRecord,
         usedAt: new Date(),
       });
@@ -326,7 +326,7 @@ describe('SupplierPortalService', () => {
     });
 
     it('rejects expired tokens', async () => {
-      mockPrisma.supplierQuoteToken.findUnique.mockResolvedValue({
+      mockPrisma.supplierQuoteToken.findFirst.mockResolvedValue({
         ...baseRecord,
         expiresAt: pastDate(1),
       });
@@ -334,7 +334,7 @@ describe('SupplierPortalService', () => {
     });
 
     it('accepts a valid token and bumps accessCount', async () => {
-      mockPrisma.supplierQuoteToken.findUnique.mockResolvedValue(baseRecord);
+      mockPrisma.supplierQuoteToken.findFirst.mockResolvedValue(baseRecord);
       mockPrisma.supplierQuoteToken.update.mockResolvedValue({});
 
       const ctx = await service.verifyToken(rawToken);
@@ -357,12 +357,12 @@ describe('SupplierPortalService', () => {
     });
 
     it('looks up by hashed token, never the raw value', async () => {
-      mockPrisma.supplierQuoteToken.findUnique.mockResolvedValue(baseRecord);
+      mockPrisma.supplierQuoteToken.findFirst.mockResolvedValue(baseRecord);
       mockPrisma.supplierQuoteToken.update.mockResolvedValue({});
 
       await service.verifyToken(rawToken);
 
-      const lookup = mockPrisma.supplierQuoteToken.findUnique.mock.calls[0][0];
+      const lookup = mockPrisma.supplierQuoteToken.findFirst.mock.calls[0][0];
       expect(lookup.where.tokenHash).toBe(tokenHash);
       expect(lookup.where.tokenHash).not.toBe(rawToken);
     });
@@ -428,7 +428,7 @@ describe('SupplierPortalService', () => {
     };
 
     it('throws NotFoundException when quote or RFQ row is missing', async () => {
-      mockPrisma.supplierQuoteToken.findUnique.mockResolvedValue(tokenRow);
+      mockPrisma.supplierQuoteToken.findFirst.mockResolvedValue(tokenRow);
       mockPrisma.supplierQuoteToken.update.mockResolvedValue({});
       mockPrisma.supplierQuote.findFirst.mockResolvedValue(null);
       mockPrisma.requestForQuotation.findFirst.mockResolvedValue({
@@ -440,7 +440,7 @@ describe('SupplierPortalService', () => {
     });
 
     it('returns the shaped session payload when everything resolves', async () => {
-      mockPrisma.supplierQuoteToken.findUnique.mockResolvedValue(tokenRow);
+      mockPrisma.supplierQuoteToken.findFirst.mockResolvedValue(tokenRow);
       mockPrisma.supplierQuoteToken.update.mockResolvedValue({});
       mockPrisma.supplierQuote.findFirst.mockResolvedValue({
         id: supplierQuoteId,

@@ -15,7 +15,7 @@ describe('PurchaseOrdersService — Sprint 4 Variance + Force Close', () => {
 
   const mockPrisma = {
     purchaseOrder: {
-      findUnique: jest.fn(),
+      findFirst: jest.fn(),
       update: jest.fn(),
       findMany: jest.fn(),
     },
@@ -45,14 +45,14 @@ describe('PurchaseOrdersService — Sprint 4 Variance + Force Close', () => {
     });
 
     it('throws NotFoundException when PO does not exist', async () => {
-      mockPrisma.purchaseOrder.findUnique.mockResolvedValue(null);
+      mockPrisma.purchaseOrder.findFirst.mockResolvedValue(null);
       await expect(
         service.forceClose('po-missing', userId, 'supplier bankrupt', tenantId),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
 
     it('rejects from non-receiving statuses', async () => {
-      mockPrisma.purchaseOrder.findUnique.mockResolvedValue({
+      mockPrisma.purchaseOrder.findFirst.mockResolvedValue({
         id: 'po-1',
         tenantId,
         status: 'DRAFT',
@@ -64,7 +64,7 @@ describe('PurchaseOrdersService — Sprint 4 Variance + Force Close', () => {
     });
 
     it('updates PO to CLOSED + records forceClosedAt/By/Reason from PARTIAL', async () => {
-      mockPrisma.purchaseOrder.findUnique
+      mockPrisma.purchaseOrder.findFirst
         .mockResolvedValueOnce({
           id: 'po-1',
           tenantId,

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -6,9 +7,15 @@ import {
   Post,
   Put,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import { extname, join } from 'path';
+import { existsSync, mkdirSync } from 'fs';
 import { ReservationsService } from './reservations.service';
 import {
   CreateReservationDto,
@@ -23,6 +30,13 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 const READ_ROLES: UserRole[] = ['admin', 'manager', 'tenant_admin', 'platform_admin', 'staff', 'user'];
 const WRITE_ROLES: UserRole[] = ['admin', 'manager', 'tenant_admin', 'platform_admin', 'staff'];
+
+interface MulterFile {
+  originalname: string;
+  mimetype: string;
+  size: number;
+  filename: string;
+}
 
 @ApiTags('camp-reservations')
 @ApiBearerAuth('JWT-auth')
@@ -97,5 +111,49 @@ export class ReservationsController {
     @CurrentUser() user: { tenantId?: string },
   ) {
     return this.service.recordPayment(id, dto, user?.tenantId);
+  }
+
+  @Post(':id/payment-slip')
+  @ApiOperation({ summary: 'Upload a bank-transfer slip image; returns its URL to attach on /payment' })
+  @ApiConsumes('multipart/form-data')
+  @ApiResponse({ status: 201, description: 'Slip uploaded' })
+  @Roles(...WRITE_ROLES)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: diskStorage({
+        destination: (_req, _file, cb) => {
+          const uploadPath = join(process.cwd(), 'uploads', 'camp');
+          if (!existsSync(uploadPath)) {
+            mkdirSync(uploadPath, { recursive: true });
+          }
+          cb(null, uploadPath);
+        },
+        filename: (req, file, cb) => {
+          const reservationId = req.params.id;
+          const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+          const ext = extname(file.originalname);
+          cb(null, `slip-${reservationId}-${uniqueSuffix}${ext}`);
+        },
+      }),
+      fileFilter: (_req, file, cb) => {
+        if (!file.mimetype.match(/^image\/(jpeg|jpg|png|webp|gif)$/)) {
+          return cb(new BadRequestException('อัปโหลดได้เฉพาะไฟล์รูปภาพ (jpg, png, webp, gif)'), false);
+        }
+        cb(null, true);
+      },
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  uploadPaymentSlip(
+    @Param('id') id: string,
+    @UploadedFile() file: MulterFile,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    if (!file) {
+      throw new BadRequestException('ไม่พบไฟล์สลิป');
+    }
+    const baseUrl = process.env.API_BASE_URL || `http://localhost:${process.env.PORT || 9011}`;
+    const slipUrl = `${baseUrl}/uploads/camp/${file.filename}`;
+    return this.service.attachSlipUrl(id, slipUrl, user?.tenantId);
   }
 }

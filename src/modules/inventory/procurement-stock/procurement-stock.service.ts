@@ -203,7 +203,10 @@ export class ProcurementStockService {
 
     // Apply filter AFTER classification so summary counts stay consistent
     let filtered = allRows;
-    if (filter !== StockBalanceFilter.ALL) {
+    if (filter === StockBalanceFilter.REORDER) {
+      // Combined replenishment view: anything below reorder point or stocked out
+      filtered = allRows.filter((r) => r.status === 'LOW' || r.status === 'OUT_OF_STOCK');
+    } else if (filter !== StockBalanceFilter.ALL) {
       filtered = allRows.filter((r) => r.status === filter);
     }
 

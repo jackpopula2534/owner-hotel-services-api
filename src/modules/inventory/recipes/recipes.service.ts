@@ -151,8 +151,8 @@ export class RecipesService {
     }
 
     try {
-      const recipe = await this.prisma.inventoryRecipe.findUnique({
-        where: { id },
+      const recipe = await this.prisma.inventoryRecipe.findFirst({
+        where: { id, tenantId },
         include: {
           ingredients: {
             select: {
@@ -339,8 +339,8 @@ export class RecipesService {
     }
 
     try {
-      const recipe = await this.prisma.inventoryRecipe.findUnique({
-        where: { id },
+      const recipe = await this.prisma.inventoryRecipe.findFirst({
+        where: { id, tenantId },
       });
 
       if (!recipe) {
@@ -381,8 +381,8 @@ export class RecipesService {
         }
 
         // Fetch updated recipe with ingredients
-        const recipeWithIngredients = await tx.inventoryRecipe.findUnique({
-          where: { id },
+        const recipeWithIngredients = await tx.inventoryRecipe.findFirst({
+          where: { id, tenantId },
           include: {
             ingredients: {
               select: {
@@ -436,8 +436,8 @@ export class RecipesService {
     }
 
     try {
-      const recipe = await this.prisma.inventoryRecipe.findUnique({
-        where: { id },
+      const recipe = await this.prisma.inventoryRecipe.findFirst({
+        where: { id, tenantId },
       });
 
       if (!recipe) {
@@ -479,8 +479,8 @@ export class RecipesService {
     }
 
     try {
-      const recipe = await this.prisma.inventoryRecipe.findUnique({
-        where: { id },
+      const recipe = await this.prisma.inventoryRecipe.findFirst({
+        where: { id, tenantId },
         include: {
           ingredients: {
             select: {

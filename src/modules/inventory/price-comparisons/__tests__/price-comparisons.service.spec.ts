@@ -45,12 +45,12 @@ describe('PriceComparisonsService — supervisor approval workflow', () => {
 
   const mockPrisma = {
     priceComparison: {
-      findUnique: jest.fn(),
+      findFirst: jest.fn(),
       update: jest.fn(),
       findMany: jest.fn(),
     },
     supplierQuote: {
-      findUnique: jest.fn(),
+      findFirst: jest.fn(),
       update: jest.fn(),
       updateMany: jest.fn(),
     },
@@ -86,7 +86,7 @@ describe('PriceComparisonsService — supervisor approval workflow', () => {
     jest.clearAllMocks();
     comparisonState = { ...baseComparison };
 
-    mockPrisma.priceComparison.findUnique.mockImplementation(async () => ({
+    mockPrisma.priceComparison.findFirst.mockImplementation(async () => ({
       ...comparisonState,
     }));
     mockPrisma.priceComparison.update.mockImplementation(
@@ -95,7 +95,7 @@ describe('PriceComparisonsService — supervisor approval workflow', () => {
         return { ...comparisonState };
       },
     );
-    mockPrisma.supplierQuote.findUnique.mockResolvedValue({
+    mockPrisma.supplierQuote.findFirst.mockResolvedValue({
       id: quoteId,
       purchaseRequisitionId: prId,
     });

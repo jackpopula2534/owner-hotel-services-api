@@ -123,8 +123,8 @@ export class PurchaseRequisitionsService {
   }
 
   async findOne(id: string, tenantId: string): Promise<unknown> {
-    const pr = await this.prisma.purchaseRequisition.findUnique({
-      where: { id },
+    const pr = await this.prisma.purchaseRequisition.findFirst({
+      where: { id, tenantId },
       include: {
         items: {
           select: {
@@ -229,8 +229,8 @@ export class PurchaseRequisitionsService {
     tenantId: string,
   ): Promise<unknown> {
     // Validate that property exists
-    const property = await this.prisma.property.findUnique({
-      where: { id: dto.propertyId },
+    const property = await this.prisma.property.findFirst({
+      where: { id: dto.propertyId, tenantId },
     });
 
     if (!property || property.tenantId !== tenantId) {
@@ -313,8 +313,8 @@ export class PurchaseRequisitionsService {
   }
 
   async update(id: string, dto: UpdatePurchaseRequisitionDto, tenantId: string): Promise<unknown> {
-    const pr = await this.prisma.purchaseRequisition.findUnique({
-      where: { id },
+    const pr = await this.prisma.purchaseRequisition.findFirst({
+      where: { id, tenantId },
     });
 
     if (!pr || pr.tenantId !== tenantId) {
@@ -411,8 +411,8 @@ export class PurchaseRequisitionsService {
   }
 
   async submit(id: string, tenantId: string): Promise<unknown> {
-    const pr = await this.prisma.purchaseRequisition.findUnique({
-      where: { id },
+    const pr = await this.prisma.purchaseRequisition.findFirst({
+      where: { id, tenantId },
     });
 
     if (!pr || pr.tenantId !== tenantId) {
@@ -438,8 +438,8 @@ export class PurchaseRequisitionsService {
   }
 
   async approve(id: string, userId: string, tenantId: string): Promise<unknown> {
-    const pr = await this.prisma.purchaseRequisition.findUnique({
-      where: { id },
+    const pr = await this.prisma.purchaseRequisition.findFirst({
+      where: { id, tenantId },
     });
 
     if (!pr || pr.tenantId !== tenantId) {
@@ -465,8 +465,8 @@ export class PurchaseRequisitionsService {
   }
 
   async requestQuotes(id: string, supplierIds: string[], tenantId: string): Promise<unknown> {
-    const pr = await this.prisma.purchaseRequisition.findUnique({
-      where: { id },
+    const pr = await this.prisma.purchaseRequisition.findFirst({
+      where: { id, tenantId },
     });
 
     if (!pr || pr.tenantId !== tenantId) {
@@ -524,8 +524,8 @@ export class PurchaseRequisitionsService {
   }
 
   async cancel(id: string, reason: string, userId: string, tenantId: string): Promise<unknown> {
-    const pr = await this.prisma.purchaseRequisition.findUnique({
-      where: { id },
+    const pr = await this.prisma.purchaseRequisition.findFirst({
+      where: { id, tenantId },
     });
 
     if (!pr || pr.tenantId !== tenantId) {
@@ -563,8 +563,8 @@ export class PurchaseRequisitionsService {
     userId: string,
     tenantId: string,
   ): Promise<unknown> {
-    const pr = await this.prisma.purchaseRequisition.findUnique({
-      where: { id: prId },
+    const pr = await this.prisma.purchaseRequisition.findFirst({
+      where: { id: prId, tenantId },
       include: {
         items: true,
         supplierQuotes: {
@@ -591,8 +591,8 @@ export class PurchaseRequisitionsService {
     }
 
     // Verify warehouse exists
-    const warehouse = await this.prisma.warehouse.findUnique({
-      where: { id: warehouseId },
+    const warehouse = await this.prisma.warehouse.findFirst({
+      where: { id: warehouseId, tenantId },
     });
 
     if (!warehouse || warehouse.tenantId !== tenantId) {
@@ -670,8 +670,8 @@ export class PurchaseRequisitionsService {
     );
 
     // Return the PO details
-    return this.prisma.purchaseOrder.findUnique({
-      where: { id: result.id },
+    return this.prisma.purchaseOrder.findFirst({
+      where: { id: result.id, tenantId },
       include: {
         items: true,
         supplier: true,

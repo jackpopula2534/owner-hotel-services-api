@@ -132,6 +132,18 @@ export class RecordPaymentDto {
   @MaxLength(30)
   method!: string;
 
+  @ApiPropertyOptional({ description: 'เลขอ้างอิงการโอน/ธุรกรรม' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  reference?: string;
+
+  @ApiPropertyOptional({ description: 'URL สลิปการโอนเงิน (อัปโหลดผ่าน /payment-slip ก่อน)' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  slipUrl?: string;
+
   @ApiPropertyOptional({ description: 'หมายเหตุการชำระเงิน' })
   @IsOptional()
   @IsString()

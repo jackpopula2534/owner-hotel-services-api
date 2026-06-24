@@ -23,6 +23,7 @@ import {
   PurchaseRequisitionStatus,
   PurchaseOrderStatus,
   SupplierQuoteStatus,
+  InventoryLotStatus,
 } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { DEFAULT_HR_PERMISSIONS as HR_DEFAULT_PERMISSIONS } from '../modules/hr-terminal-users/dto/create-hr-terminal-user.dto';
@@ -5241,6 +5242,11 @@ export class SeederService {
       { code: 'CAT-FB-DRY', name: 'ของแห้ง', parentCode: 'CAT-FB' },
       { code: 'CAT-FB-VEG', name: 'ผักและผลไม้', parentCode: 'CAT-FB' },
       { code: 'CAT-FB-BEV', name: 'เครื่องดื่ม', parentCode: 'CAT-FB' },
+      { code: 'CAT-RETAIL', name: 'สินค้าร้านค้า / Mini Mart', parentCode: null },
+      { code: 'CAT-RETAIL-DRINK', name: 'เครื่องดื่มร้านค้า', parentCode: 'CAT-RETAIL' },
+      { code: 'CAT-RETAIL-SNACK', name: 'ขนมและของทานเล่น', parentCode: 'CAT-RETAIL' },
+      { code: 'CAT-RETAIL-DAILY', name: 'ของใช้จำเป็น', parentCode: 'CAT-RETAIL' },
+      { code: 'CAT-RETAIL-SOUV', name: 'ของฝากและสินค้ารีสอร์ต', parentCode: 'CAT-RETAIL' },
       { code: 'CAT-ROOM', name: 'ของใช้ห้องพัก', parentCode: null },
       { code: 'CAT-ROOM-BED', name: 'ผ้าปูและผ้าห่ม', parentCode: 'CAT-ROOM' },
       { code: 'CAT-ROOM-AMEN', name: 'Amenities', parentCode: 'CAT-ROOM' },
@@ -5312,6 +5318,15 @@ export class SeederService {
         paymentTerms: 'NET30',
         leadTimeDays: 5,
       },
+      {
+        code: 'SUP-RETAIL',
+        name: 'Village Mini Mart Wholesale',
+        contactPerson: 'คุณมินตรา',
+        email: 'retail@supply-village.th',
+        phone: '081-234-5678',
+        paymentTerms: 'COD',
+        leadTimeDays: 1,
+      },
     ];
 
     const supplierMap: Record<string, string> = {};
@@ -5336,6 +5351,7 @@ export class SeederService {
       { code: 'WH-KITCH', name: 'คลังครัว', type: 'KITCHEN', isDefault: false },
       { code: 'WH-HK', name: 'คลัง Housekeeping', type: 'HOUSEKEEPING', isDefault: false },
       { code: 'WH-MAINT', name: 'คลังช่างซ่อม', type: 'MAINTENANCE', isDefault: false },
+      { code: 'WH-RETAIL', name: 'คลังร้านขายของ', type: 'GENERAL', isDefault: false },
     ];
 
     const warehouseMap: Record<string, string> = {};
@@ -5520,6 +5536,193 @@ export class SeederService {
         defaultShelfLifeDays: 365,
         supplierCode: 'SUP-BIGC',
         unitPrice: 180,
+      },
+      // Retail / Mini Mart products
+      {
+        sku: 'RT-WATER-600',
+        name: 'น้ำดื่ม 600ml',
+        catCode: 'CAT-RETAIL-DRINK',
+        unit: 'BOTTLE',
+        barcode: '8850001000011',
+        brand: 'StaySync',
+        reorderPoint: 48,
+        reorderQty: 120,
+        minStock: 24,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: true,
+        defaultShelfLifeDays: 365,
+        supplierCode: 'SUP-RETAIL',
+        unitPrice: 6,
+      },
+      {
+        sku: 'RT-SPARKLING-LEMON',
+        name: 'โซดามะนาว 325ml',
+        catCode: 'CAT-RETAIL-DRINK',
+        unit: 'CAN',
+        barcode: '8850001000028',
+        brand: 'Fresh Pop',
+        reorderPoint: 24,
+        reorderQty: 72,
+        minStock: 12,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: true,
+        defaultShelfLifeDays: 365,
+        supplierCode: 'SUP-RETAIL',
+        unitPrice: 14,
+      },
+      {
+        sku: 'RT-ICED-TEA',
+        name: 'ชาเย็นพร้อมดื่ม 350ml',
+        catCode: 'CAT-RETAIL-DRINK',
+        unit: 'BOTTLE',
+        barcode: '8850001000035',
+        brand: 'Thai Tea Co.',
+        reorderPoint: 24,
+        reorderQty: 72,
+        minStock: 12,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: true,
+        defaultShelfLifeDays: 180,
+        supplierCode: 'SUP-RETAIL',
+        unitPrice: 18,
+      },
+      {
+        sku: 'RT-CHIPS-SALT',
+        name: 'มันฝรั่งทอดรสเกลือ 50g',
+        catCode: 'CAT-RETAIL-SNACK',
+        unit: 'BAG',
+        barcode: '8850002000010',
+        brand: 'Crispy Hill',
+        reorderPoint: 20,
+        reorderQty: 60,
+        minStock: 10,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: true,
+        defaultShelfLifeDays: 180,
+        supplierCode: 'SUP-RETAIL',
+        unitPrice: 16,
+      },
+      {
+        sku: 'RT-NUTS-CASHEW',
+        name: 'เม็ดมะม่วงหิมพานต์อบ 40g',
+        catCode: 'CAT-RETAIL-SNACK',
+        unit: 'BAG',
+        barcode: '8850002000027',
+        brand: 'Mountain Snack',
+        reorderPoint: 15,
+        reorderQty: 45,
+        minStock: 8,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: true,
+        defaultShelfLifeDays: 240,
+        supplierCode: 'SUP-RETAIL',
+        unitPrice: 28,
+      },
+      {
+        sku: 'RT-COOKIE-BOX',
+        name: 'คุกกี้กล่องเล็ก',
+        catCode: 'CAT-RETAIL-SNACK',
+        unit: 'BOX',
+        barcode: '8850002000034',
+        brand: 'Resort Bakery',
+        reorderPoint: 12,
+        reorderQty: 36,
+        minStock: 6,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: true,
+        defaultShelfLifeDays: 90,
+        supplierCode: 'SUP-RETAIL',
+        unitPrice: 45,
+      },
+      {
+        sku: 'RT-TOOTHBRUSH',
+        name: 'แปรงสีฟันพกพา',
+        catCode: 'CAT-RETAIL-DAILY',
+        unit: 'PIECE',
+        barcode: '8850003000019',
+        brand: 'Travel Kit',
+        reorderPoint: 15,
+        reorderQty: 50,
+        minStock: 8,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-RETAIL',
+        unitPrice: 12,
+      },
+      {
+        sku: 'RT-TOOTHPASTE',
+        name: 'ยาสีฟันหลอดเล็ก 40g',
+        catCode: 'CAT-RETAIL-DAILY',
+        unit: 'PIECE',
+        barcode: '8850003000026',
+        brand: 'Travel Kit',
+        reorderPoint: 15,
+        reorderQty: 50,
+        minStock: 8,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-RETAIL',
+        unitPrice: 18,
+      },
+      {
+        sku: 'RT-RAINCOAT',
+        name: 'เสื้อกันฝนพกพา',
+        catCode: 'CAT-RETAIL-DAILY',
+        unit: 'PIECE',
+        barcode: '8850003000033',
+        brand: 'Travel Care',
+        reorderPoint: 10,
+        reorderQty: 30,
+        minStock: 5,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-RETAIL',
+        unitPrice: 22,
+      },
+      {
+        sku: 'RT-REPELLENT',
+        name: 'สเปรย์กันยุง 60ml',
+        catCode: 'CAT-RETAIL-DAILY',
+        unit: 'BOTTLE',
+        barcode: '8850003000040',
+        brand: 'Outdoor Safe',
+        reorderPoint: 12,
+        reorderQty: 36,
+        minStock: 6,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-RETAIL',
+        unitPrice: 42,
+      },
+      {
+        sku: 'RT-POSTCARD-MV',
+        name: 'โปสการ์ด Mountain View',
+        catCode: 'CAT-RETAIL-SOUV',
+        unit: 'PIECE',
+        barcode: '8850004000018',
+        brand: 'Mountain View',
+        reorderPoint: 20,
+        reorderQty: 100,
+        minStock: 10,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-RETAIL',
+        unitPrice: 8,
+      },
+      {
+        sku: 'RT-MAGNET-MV',
+        name: 'แม่เหล็กติดตู้เย็น Mountain View',
+        catCode: 'CAT-RETAIL-SOUV',
+        unit: 'PIECE',
+        barcode: '8850004000025',
+        brand: 'Mountain View',
+        reorderPoint: 15,
+        reorderQty: 60,
+        minStock: 8,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-RETAIL',
+        unitPrice: 25,
       },
       // Cleaning Supplies
       {
@@ -5826,10 +6029,29 @@ export class SeederService {
       },
     ];
 
+    // Max-stock ceilings (for the OVERSTOCK / "เหลือเยอะเกิน" classification on
+    // the retail Stock Balance dashboard). Only items with a ceiling set can be
+    // flagged overstocked; the rest are treated as having no upper bound.
+    const maxStockBySku: Record<string, number> = {
+      'RT-WATER-600': 120,
+      'RT-SPARKLING-LEMON': 120,
+      'RT-ICED-TEA': 120,
+      'RT-CHIPS-SALT': 120,
+      'RT-NUTS-CASHEW': 90,
+      'RT-COOKIE-BOX': 72,
+      'RT-TOOTHBRUSH': 120,
+      'RT-TOOTHPASTE': 120,
+      'RT-RAINCOAT': 60,
+      'RT-REPELLENT': 72,
+      'RT-POSTCARD-MV': 80,
+      'RT-MAGNET-MV': 120,
+    };
+
     const itemMap: Record<string, string> = {};
     let itemCount = 0;
     for (const item of itemDefs) {
       const catId = categoryMap[item.catCode];
+      const maxStock = maxStockBySku[item.sku] ?? null;
       const existing = await this.prisma.inventoryItem.findFirst({
         where: { tenantId, sku: item.sku },
       });
@@ -5846,6 +6068,9 @@ export class SeederService {
             reorderPoint: item.reorderPoint,
             reorderQty: item.reorderQty,
             minStock: item.minStock,
+            maxStock,
+            barcode: item.barcode ?? null,
+            brand: item.brand ?? null,
             isPerishable: item.isPerishable,
             defaultShelfLifeDays: item.defaultShelfLifeDays ?? null,
             isActive: true,
@@ -5855,6 +6080,13 @@ export class SeederService {
         itemCount++;
       } else {
         itemId = existing.id;
+        // Keep demo ceilings in sync even when re-seeding without a wipe.
+        if (maxStock != null && existing.maxStock !== maxStock) {
+          await this.prisma.inventoryItem.update({
+            where: { id: itemId },
+            data: { maxStock },
+          });
+        }
       }
       itemMap[item.sku] = itemId;
 
@@ -5897,6 +6129,20 @@ export class SeederService {
       { sku: 'SUGAR-1KG', whCode: 'WH-KITCH', qty: 20, avgCost: 28 },
       { sku: 'WATER-600', whCode: 'WH-KITCH', qty: 35, avgCost: 90 },
       { sku: 'COLA-330', whCode: 'WH-KITCH', qty: 15, avgCost: 180 },
+      // Retail shop warehouse stocks — จงใจตั้งให้หลากหลายสถานะเพื่อโชว์
+      // Stock Balance Dashboard: OVERSTOCK 🔵 / LOW 🟠 / OUT 🔴 / OK 🟢
+      { sku: 'RT-WATER-600', whCode: 'WH-RETAIL', qty: 144, avgCost: 6 }, // 🔵 OVERSTOCK (max 120)
+      { sku: 'RT-SPARKLING-LEMON', whCode: 'WH-RETAIL', qty: 60, avgCost: 14 }, // 🟢 OK
+      { sku: 'RT-ICED-TEA', whCode: 'WH-RETAIL', qty: 18, avgCost: 18 }, // 🟠 LOW (RP 24) + lot ใกล้หมดอายุ
+      { sku: 'RT-CHIPS-SALT', whCode: 'WH-RETAIL', qty: 48, avgCost: 16 }, // 🟢 OK + lot ใกล้หมดอายุ
+      { sku: 'RT-NUTS-CASHEW', whCode: 'WH-RETAIL', qty: 12, avgCost: 28 }, // 🟠 LOW (RP 15)
+      { sku: 'RT-COOKIE-BOX', whCode: 'WH-RETAIL', qty: 10, avgCost: 45 }, // 🟠 LOW (RP 12) + lot หมดอายุแล้ว
+      { sku: 'RT-TOOTHBRUSH', whCode: 'WH-RETAIL', qty: 50, avgCost: 12 }, // 🟢 OK
+      { sku: 'RT-TOOTHPASTE', whCode: 'WH-RETAIL', qty: 50, avgCost: 18 }, // 🟢 OK
+      { sku: 'RT-RAINCOAT', whCode: 'WH-RETAIL', qty: 0, avgCost: 22 }, // 🔴 OUT_OF_STOCK
+      { sku: 'RT-REPELLENT', whCode: 'WH-RETAIL', qty: 8, avgCost: 42 }, // 🟠 LOW (RP 12)
+      { sku: 'RT-POSTCARD-MV', whCode: 'WH-RETAIL', qty: 100, avgCost: 8 }, // 🔵 OVERSTOCK (max 80)
+      { sku: 'RT-MAGNET-MV', whCode: 'WH-RETAIL', qty: 60, avgCost: 25 }, // 🟢 OK
       // Maintenance warehouse stocks
       { sku: 'BULB-E27', whCode: 'WH-MAINT', qty: 35, avgCost: 85 },
       { sku: 'FILTER-AC', whCode: 'WH-MAINT', qty: 12, avgCost: 120 },
@@ -5929,23 +6175,101 @@ export class SeederService {
       const warehouseId = warehouseMap[stock.whCode];
       if (!itemId || !warehouseId) continue;
 
-      const existing = await this.prisma.warehouseStock.findUnique({
+      // Upsert so re-seeding refreshes the demo balances (needed for the
+      // LOW/OUT/OVERSTOCK showcase to stay correct without a full DB wipe).
+      await this.prisma.warehouseStock.upsert({
         where: { warehouseId_itemId: { warehouseId, itemId } },
+        create: {
+          warehouseId,
+          itemId,
+          quantity: stock.qty,
+          avgCost: stock.avgCost,
+          totalValue: stock.qty * stock.avgCost,
+        },
+        update: {
+          quantity: stock.qty,
+          avgCost: stock.avgCost,
+          totalValue: stock.qty * stock.avgCost,
+        },
       });
-      if (!existing) {
-        await this.prisma.warehouseStock.create({
-          data: {
-            warehouseId,
-            itemId,
-            quantity: stock.qty,
-            avgCost: stock.avgCost,
-            totalValue: stock.qty * stock.avgCost,
-          },
-        });
-        stockCount++;
-      }
+      stockCount++;
     }
     this.logger.log(`  ✓ ${stockCount} warehouse stock records seeded`);
+
+    // ── 5b. Inventory Lots (FEFO demo: หลาย lot + lot ใกล้หมดอายุ/หมดอายุแล้ว) ──
+    // มอบข้อมูลให้แท็บ "ใกล้หมดอายุ" + KPI nearExpiry/expired ของ Stock Balance
+    // Dashboard มีของจริงให้ดู. remainingQty ของแต่ละ lot รวมแล้ว = ยอดสต็อกในคลัง
+    // (จำลอง First-Expired-First-Out)
+    const lotToday = new Date();
+    lotToday.setHours(0, 0, 0, 0);
+    const shiftDays = (base: Date, d: number): Date => {
+      const next = new Date(base);
+      next.setDate(next.getDate() + d);
+      return next;
+    };
+
+    const lotDefs: Array<{
+      sku: string;
+      whCode: string;
+      suffix: string;
+      qty: number;
+      unitCost: number;
+      expiresInDays: number;
+      receivedDaysAgo: number;
+      status?: InventoryLotStatus;
+    }> = [
+      // RT-WATER-600 (144) — 2 lot สุขภาพดี
+      { sku: 'RT-WATER-600', whCode: 'WH-RETAIL', suffix: 'A', qty: 80, unitCost: 6, expiresInDays: 200, receivedDaysAgo: 60 },
+      { sku: 'RT-WATER-600', whCode: 'WH-RETAIL', suffix: 'B', qty: 64, unitCost: 6, expiresInDays: 330, receivedDaysAgo: 10 },
+      // RT-SPARKLING-LEMON (60) — 2 lot
+      { sku: 'RT-SPARKLING-LEMON', whCode: 'WH-RETAIL', suffix: 'A', qty: 30, unitCost: 14, expiresInDays: 150, receivedDaysAgo: 40 },
+      { sku: 'RT-SPARKLING-LEMON', whCode: 'WH-RETAIL', suffix: 'B', qty: 30, unitCost: 14, expiresInDays: 300, receivedDaysAgo: 5 },
+      // RT-ICED-TEA (18, LOW) — lot ใกล้หมดอายุด่วน + lot ปกติ
+      { sku: 'RT-ICED-TEA', whCode: 'WH-RETAIL', suffix: 'A', qty: 6, unitCost: 18, expiresInDays: 5, receivedDaysAgo: 80 }, // 🔴 เหลือ 5 วัน
+      { sku: 'RT-ICED-TEA', whCode: 'WH-RETAIL', suffix: 'B', qty: 12, unitCost: 18, expiresInDays: 60, receivedDaysAgo: 20 },
+      // RT-CHIPS-SALT (48) — lot ใกล้หมดอายุ + lot ปกติ
+      { sku: 'RT-CHIPS-SALT', whCode: 'WH-RETAIL', suffix: 'A', qty: 18, unitCost: 16, expiresInDays: 12, receivedDaysAgo: 70 }, // 🟠 เหลือ 12 วัน
+      { sku: 'RT-CHIPS-SALT', whCode: 'WH-RETAIL', suffix: 'B', qty: 30, unitCost: 16, expiresInDays: 90, receivedDaysAgo: 15 },
+      // RT-NUTS-CASHEW (12, LOW) — lot เดียว
+      { sku: 'RT-NUTS-CASHEW', whCode: 'WH-RETAIL', suffix: 'A', qty: 12, unitCost: 28, expiresInDays: 120, receivedDaysAgo: 30 },
+      // RT-COOKIE-BOX (10, LOW) — lot หมดอายุแล้ว + lot ใกล้หมดอายุ
+      { sku: 'RT-COOKIE-BOX', whCode: 'WH-RETAIL', suffix: 'A', qty: 4, unitCost: 45, expiresInDays: -3, receivedDaysAgo: 95, status: InventoryLotStatus.EXPIRED }, // ⛔ หมดอายุแล้ว 3 วัน
+      { sku: 'RT-COOKIE-BOX', whCode: 'WH-RETAIL', suffix: 'B', qty: 6, unitCost: 45, expiresInDays: 20, receivedDaysAgo: 25 }, // 🟠 เหลือ 20 วัน
+    ];
+
+    let lotCount = 0;
+    for (const lot of lotDefs) {
+      const itemId = itemMap[lot.sku];
+      const warehouseId = warehouseMap[lot.whCode];
+      if (!itemId || !warehouseId) continue;
+
+      const lotNumber = `LOT-${lot.sku}-${lot.suffix}`;
+      const existing = await this.prisma.inventoryLot.findFirst({
+        where: { tenantId, lotNumber },
+      });
+      if (existing) continue;
+
+      const receivedDate = shiftDays(lotToday, -lot.receivedDaysAgo);
+      await this.prisma.inventoryLot.create({
+        data: {
+          tenantId,
+          itemId,
+          warehouseId,
+          lotNumber,
+          batchNumber: `${lot.sku}-${lot.suffix}`,
+          receivedDate,
+          manufactureDate: receivedDate,
+          expiryDate: shiftDays(lotToday, lot.expiresInDays),
+          initialQty: lot.qty,
+          remainingQty: lot.qty,
+          unitCost: lot.unitCost,
+          status: lot.status ?? InventoryLotStatus.ACTIVE,
+          notes: 'Seed demo lot (Stock Balance showcase)',
+        },
+      });
+      lotCount++;
+    }
+    this.logger.log(`  ✓ ${lotCount} inventory lots seeded (multi-lot + near/expired demo)`);
 
     // ── 6. Room Type Amenity Templates ────────────────────────────────────────
     // Define what gets auto-deducted per room type per housekeeping task

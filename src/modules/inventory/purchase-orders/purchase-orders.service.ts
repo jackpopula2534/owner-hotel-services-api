@@ -911,8 +911,8 @@ export class PurchaseOrdersService {
    * `orderBy` on grand-children so we resolve it in-memory.
    */
   async findReceiving(id: string, tenantId: string): Promise<PurchaseOrderReceivingDetail> {
-    const po = await this.prisma.purchaseOrder.findUnique({
-      where: { id },
+    const po = await this.prisma.purchaseOrder.findFirst({
+      where: { id, tenantId },
       select: {
         id: true,
         tenantId: true,
@@ -1059,8 +1059,8 @@ export class PurchaseOrdersService {
     // `discountType` on items and `discountMode`/`headerDiscount*`/`calculationBreakdown`
     // on the PO are newly-added columns (see migration 20260417). They are cast via
     // the widened row types below until `prisma generate` runs against the updated schema.
-    const poRaw = await this.prisma.purchaseOrder.findUnique({
-      where: { id },
+    const poRaw = await this.prisma.purchaseOrder.findFirst({
+      where: { id, tenantId },
       include: {
         items: {
           select: {
@@ -1211,14 +1211,14 @@ export class PurchaseOrdersService {
 
     // Validate that property, supplier, warehouse, and items exist
     const [property, supplier, warehouse] = await Promise.all([
-      this.prisma.property.findUnique({
-        where: { id: propertyId },
+      this.prisma.property.findFirst({
+        where: { id: propertyId, tenantId },
       }),
-      this.prisma.supplier.findUnique({
-        where: { id: dto.supplierId },
+      this.prisma.supplier.findFirst({
+        where: { id: dto.supplierId, tenantId },
       }),
-      this.prisma.warehouse.findUnique({
-        where: { id: dto.warehouseId },
+      this.prisma.warehouse.findFirst({
+        where: { id: dto.warehouseId, tenantId },
       }),
     ]);
 
@@ -1236,12 +1236,10 @@ export class PurchaseOrdersService {
     // must be APPROVED before the PO can be created. Direct POs (without a
     // PR or with a PR that has no comparison) bypass this check.
     if (dto.purchaseRequisitionId) {
-      const comparison = await this.prisma.priceComparison.findUnique({
+      const comparison = await this.prisma.priceComparison.findFirst({
         where: {
-          tenantId_purchaseRequisitionId: {
-            tenantId,
-            purchaseRequisitionId: dto.purchaseRequisitionId,
-          },
+          tenantId,
+          purchaseRequisitionId: dto.purchaseRequisitionId,
         },
       });
 
@@ -1344,8 +1342,8 @@ export class PurchaseOrdersService {
     dto: UpdatePurchaseOrderDto,
     tenantId: string,
   ): Promise<Record<string, unknown>> {
-    const poRaw = await this.prisma.purchaseOrder.findUnique({
-      where: { id },
+    const poRaw = await this.prisma.purchaseOrder.findFirst({
+      where: { id, tenantId },
     });
 
     if (!poRaw || poRaw.tenantId !== tenantId) {
@@ -1459,8 +1457,8 @@ export class PurchaseOrdersService {
   }
 
   async submitForApproval(id: string, tenantId: string): Promise<Record<string, unknown>> {
-    const po = await this.prisma.purchaseOrder.findUnique({
-      where: { id },
+    const po = await this.prisma.purchaseOrder.findFirst({
+      where: { id, tenantId },
     });
 
     if (!po || po.tenantId !== tenantId) {
@@ -1484,8 +1482,8 @@ export class PurchaseOrdersService {
   }
 
   async approve(id: string, userId: string, tenantId: string): Promise<Record<string, unknown>> {
-    const po = await this.prisma.purchaseOrder.findUnique({
-      where: { id },
+    const po = await this.prisma.purchaseOrder.findFirst({
+      where: { id, tenantId },
     });
 
     if (!po || po.tenantId !== tenantId) {
@@ -1529,8 +1527,8 @@ export class PurchaseOrdersService {
     reason: string,
     tenantId: string,
   ): Promise<Record<string, unknown>> {
-    const po = await this.prisma.purchaseOrder.findUnique({
-      where: { id },
+    const po = await this.prisma.purchaseOrder.findFirst({
+      where: { id, tenantId },
     });
 
     if (!po || po.tenantId !== tenantId) {
@@ -1578,8 +1576,8 @@ export class PurchaseOrdersService {
       throw new BadRequestException('A reason of at least 5 characters is required to force-close');
     }
 
-    const po = await this.prisma.purchaseOrder.findUnique({
-      where: { id },
+    const po = await this.prisma.purchaseOrder.findFirst({
+      where: { id, tenantId },
       include: { items: true },
     });
 
@@ -1615,8 +1613,8 @@ export class PurchaseOrdersService {
   }
 
   async close(id: string, tenantId: string): Promise<Record<string, unknown>> {
-    const po = await this.prisma.purchaseOrder.findUnique({
-      where: { id },
+    const po = await this.prisma.purchaseOrder.findFirst({
+      where: { id, tenantId },
     });
 
     if (!po || po.tenantId !== tenantId) {

@@ -85,10 +85,10 @@ describe('GoodsReceivesService', () => {
       __state: state,
       $transaction: jest.fn((fn: any) => fn(mockPrisma)),
       warehouse: {
-        findUnique: jest.fn().mockResolvedValue(warehouseRow),
+        findFirst: jest.fn().mockResolvedValue(warehouseRow),
       },
       purchaseOrder: {
-        findUnique: jest.fn().mockResolvedValue(poRow),
+        findFirst: jest.fn().mockResolvedValue(poRow),
         update: jest.fn().mockImplementation(({ where, data }: any) => {
           state.poStatusUpdate = { where, data };
           return { ...poRow, ...data };
@@ -226,7 +226,7 @@ describe('GoodsReceivesService', () => {
     await service.create(baseDto(), userId, tenantId);
 
     expect(mockPrisma.goodsReceive.create).toHaveBeenCalledTimes(1);
-    expect(mockPrisma.purchaseOrder.findUnique).not.toHaveBeenCalled();
+    expect(mockPrisma.purchaseOrder.findFirst).not.toHaveBeenCalled();
     expect(mockPrisma.purchaseOrderItem.update).not.toHaveBeenCalled();
     // Non-perishable item → no lot was created
     expect(mockPrisma.inventoryLot.create).not.toHaveBeenCalled();
@@ -680,14 +680,14 @@ describe('GoodsReceivesService', () => {
 
   // ─── Error paths ──────────────────────────────────────────────────────────
   it('throws NotFoundException when warehouse is missing', async () => {
-    mockPrisma.warehouse.findUnique.mockResolvedValue(null);
+    mockPrisma.warehouse.findFirst.mockResolvedValue(null);
     await expect(service.create(baseDto(), userId, tenantId)).rejects.toBeInstanceOf(
       NotFoundException,
     );
   });
 
   it('throws NotFoundException when warehouse belongs to a different tenant', async () => {
-    mockPrisma.warehouse.findUnique.mockResolvedValue({
+    mockPrisma.warehouse.findFirst.mockResolvedValue({
       id: warehouseId,
       tenantId: 'other-tenant',
       name: 'x',
@@ -698,14 +698,14 @@ describe('GoodsReceivesService', () => {
   });
 
   it('throws NotFoundException when the linked PO is missing', async () => {
-    mockPrisma.purchaseOrder.findUnique.mockResolvedValue(null);
+    mockPrisma.purchaseOrder.findFirst.mockResolvedValue(null);
     await expect(
       service.create(baseDto({ purchaseOrderId: poId }), userId, tenantId),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('throws ConflictException when PO status is DRAFT', async () => {
-    mockPrisma.purchaseOrder.findUnique.mockResolvedValue({
+    mockPrisma.purchaseOrder.findFirst.mockResolvedValue({
       id: poId,
       tenantId,
       poNumber: 'PO-X',
@@ -718,7 +718,7 @@ describe('GoodsReceivesService', () => {
   });
 
   it('throws ConflictException when PO status is FULLY_RECEIVED', async () => {
-    mockPrisma.purchaseOrder.findUnique.mockResolvedValue({
+    mockPrisma.purchaseOrder.findFirst.mockResolvedValue({
       id: poId,
       tenantId,
       poNumber: 'PO-X',
@@ -770,7 +770,7 @@ describe('GoodsReceivesService', () => {
   // ─── Inspect ──────────────────────────────────────────────────────────────
   describe('inspect', () => {
     it('rejects when GR is not in ACCEPTED status', async () => {
-      mockPrisma.goodsReceive.findUnique = jest.fn().mockResolvedValue({
+      mockPrisma.goodsReceive.findFirst = jest.fn().mockResolvedValue({
         id: 'g1',
         tenantId,
         status: 'DRAFT',
@@ -781,7 +781,7 @@ describe('GoodsReceivesService', () => {
     });
 
     it('rejects when the GR belongs to another tenant', async () => {
-      mockPrisma.goodsReceive.findUnique = jest.fn().mockResolvedValue({
+      mockPrisma.goodsReceive.findFirst = jest.fn().mockResolvedValue({
         id: 'g1',
         tenantId: 'other',
         status: 'ACCEPTED',

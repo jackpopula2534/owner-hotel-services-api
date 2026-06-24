@@ -64,12 +64,10 @@ export class PriceComparisonsService {
     };
   }> {
     // Get price comparison
-    const comparison = await this.prisma.priceComparison.findUnique({
+    const comparison = await this.prisma.priceComparison.findFirst({
       where: {
-        tenantId_purchaseRequisitionId: {
-          tenantId,
-          purchaseRequisitionId: prId,
-        },
+        tenantId,
+        purchaseRequisitionId: prId,
       },
       include: {
         purchaseRequisition: {
@@ -244,8 +242,8 @@ export class PriceComparisonsService {
 
   async create(dto: CreatePriceComparisonDto, userId: string, tenantId: string): Promise<unknown> {
     // Verify PR exists
-    const pr = await this.prisma.purchaseRequisition.findUnique({
-      where: { id: dto.purchaseRequisitionId },
+    const pr = await this.prisma.purchaseRequisition.findFirst({
+      where: { id: dto.purchaseRequisitionId, tenantId },
     });
 
     if (!pr || pr.tenantId !== tenantId) {
@@ -253,12 +251,10 @@ export class PriceComparisonsService {
     }
 
     // If comparison already exists, return it instead of throwing error
-    const existing = await this.prisma.priceComparison.findUnique({
+    const existing = await this.prisma.priceComparison.findFirst({
       where: {
-        tenantId_purchaseRequisitionId: {
-          tenantId,
-          purchaseRequisitionId: dto.purchaseRequisitionId,
-        },
+        tenantId,
+        purchaseRequisitionId: dto.purchaseRequisitionId,
       },
       include: {
         purchaseRequisition: {
@@ -280,8 +276,8 @@ export class PriceComparisonsService {
       if (dto.selectedQuoteId !== undefined) {
         // Validate selected quote belongs to this PR
         if (dto.selectedQuoteId) {
-          const selectedQuote = await this.prisma.supplierQuote.findUnique({
-            where: { id: dto.selectedQuoteId },
+          const selectedQuote = await this.prisma.supplierQuote.findFirst({
+            where: { id: dto.selectedQuoteId, tenantId },
           });
           if (!selectedQuote || selectedQuote.purchaseRequisitionId !== dto.purchaseRequisitionId) {
             throw new BadRequestException('Selected quote does not belong to this PR');
@@ -339,8 +335,8 @@ export class PriceComparisonsService {
 
         // If selectedQuoteId provided, validate it
         if (dto.selectedQuoteId) {
-          const selectedQuote = await tx.supplierQuote.findUnique({
-            where: { id: dto.selectedQuoteId },
+          const selectedQuote = await tx.supplierQuote.findFirst({
+            where: { id: dto.selectedQuoteId, tenantId },
           });
 
           if (!selectedQuote || selectedQuote.purchaseRequisitionId !== dto.purchaseRequisitionId) {
@@ -399,8 +395,8 @@ export class PriceComparisonsService {
     userId: string,
     tenantId: string,
   ): Promise<unknown> {
-    const comparison = await this.prisma.priceComparison.findUnique({
-      where: { id },
+    const comparison = await this.prisma.priceComparison.findFirst({
+      where: { id, tenantId },
     });
 
     if (!comparison || comparison.tenantId !== tenantId) {
@@ -408,8 +404,8 @@ export class PriceComparisonsService {
     }
 
     // Verify selected quote belongs to this comparison's PR
-    const selectedQuote = await this.prisma.supplierQuote.findUnique({
-      where: { id: dto.selectedQuoteId },
+    const selectedQuote = await this.prisma.supplierQuote.findFirst({
+      where: { id: dto.selectedQuoteId, tenantId },
     });
 
     if (
@@ -521,8 +517,8 @@ export class PriceComparisonsService {
   }
 
   async approve(id: string, userId: string, tenantId: string): Promise<unknown> {
-    const comparison = await this.prisma.priceComparison.findUnique({
-      where: { id },
+    const comparison = await this.prisma.priceComparison.findFirst({
+      where: { id, tenantId },
       include: {
         purchaseRequisition: true,
         selectedQuote: true,
@@ -609,8 +605,8 @@ export class PriceComparisonsService {
     userId: string,
     tenantId: string,
   ): Promise<unknown> {
-    const comparison = await this.prisma.priceComparison.findUnique({
-      where: { id },
+    const comparison = await this.prisma.priceComparison.findFirst({
+      where: { id, tenantId },
     });
 
     if (!comparison || comparison.tenantId !== tenantId) {

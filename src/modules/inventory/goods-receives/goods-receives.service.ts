@@ -246,8 +246,8 @@ export class GoodsReceivesService {
     //   - PO header (number, dates, supplier, terms)
     //   - PO items (so we can compute per-line ordered/received variance)
     //   - GR items + their inventory item master (sku, name, unit) + linked lot
-    const receive = await this.prisma.goodsReceive.findUnique({
-      where: { id },
+    const receive = await this.prisma.goodsReceive.findFirst({
+      where: { id, tenantId },
       include: {
         warehouse: { select: { id: true, name: true, code: true, location: true } },
         purchaseOrder: {
@@ -380,8 +380,8 @@ export class GoodsReceivesService {
 
     const detail = await this.prisma.$transaction(async (tx) => {
       // 1. Validate warehouse
-      const warehouse = await tx.warehouse.findUnique({
-        where: { id: dto.warehouseId },
+      const warehouse = await tx.warehouse.findFirst({
+        where: { id: dto.warehouseId, tenantId },
       });
 
       if (!warehouse) {
@@ -395,8 +395,8 @@ export class GoodsReceivesService {
       // 2. Validate PO if provided
       let po: any = null;
       if (dto.purchaseOrderId) {
-        po = await tx.purchaseOrder.findUnique({
-          where: { id: dto.purchaseOrderId },
+        po = await tx.purchaseOrder.findFirst({
+          where: { id: dto.purchaseOrderId, tenantId },
           include: { items: true },
         });
 
@@ -580,8 +580,8 @@ export class GoodsReceivesService {
     tenantId: string,
     status: 'INSPECTING' | 'REJECTED',
   ): Promise<GoodsReceiveDetail> {
-    const receive = await this.prisma.goodsReceive.findUnique({
-      where: { id },
+    const receive = await this.prisma.goodsReceive.findFirst({
+      where: { id, tenantId },
     });
 
     if (!receive) {
@@ -967,8 +967,8 @@ export class GoodsReceivesService {
     let grEventPayload: GoodsReceiveCompletedEvent | null = null;
 
     const result = await this.prisma.$transaction(async (tx) => {
-      const gr = await tx.goodsReceive.findUnique({
-        where: { id },
+      const gr = await tx.goodsReceive.findFirst({
+        where: { id, tenantId },
         include: {
           items: true,
           warehouse: true,
@@ -983,8 +983,8 @@ export class GoodsReceivesService {
       // treat this as a no-op success instead of throwing a conflict.
       if (gr.status === 'ACCEPTED') {
         // Idempotent no-op — return current state without re-running acceptance.
-        const fresh = await tx.goodsReceive.findUnique({
-          where: { id },
+        const fresh = await tx.goodsReceive.findFirst({
+          where: { id, tenantId },
           include: {
             items: true,
             warehouse: true,
@@ -1033,8 +1033,8 @@ export class GoodsReceivesService {
       poStatusTransition = acceptResult.poStatusTransition;
       grEventPayload = acceptResult.grEventPayload;
 
-      const fresh = await tx.goodsReceive.findUnique({
-        where: { id },
+      const fresh = await tx.goodsReceive.findFirst({
+        where: { id, tenantId },
         include: {
           warehouse: { select: { id: true, name: true, code: true, location: true } },
           purchaseOrder: {
@@ -1098,7 +1098,7 @@ export class GoodsReceivesService {
       );
     }
 
-    const gr = await this.prisma.goodsReceive.findUnique({ where: { id } });
+    const gr = await this.prisma.goodsReceive.findFirst({ where: { id, tenantId } });
     if (!gr || gr.tenantId !== tenantId) {
       throw new NotFoundException('Goods receive not found');
     }

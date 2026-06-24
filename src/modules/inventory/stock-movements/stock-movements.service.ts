@@ -182,8 +182,8 @@ export class StockMovementsService {
    * Find a single stock movement by ID
    */
   async findOne(id: string, tenantId: string): Promise<StockMovementDetail> {
-    const movement = await this.prisma.stockMovement.findUnique({
-      where: { id },
+    const movement = await this.prisma.stockMovement.findFirst({
+      where: { id, tenantId },
       include: {
         warehouse: { select: { id: true, name: true } },
         item: { select: { id: true, name: true, sku: true } },
@@ -200,8 +200,8 @@ export class StockMovementsService {
     }
 
     const user = movement.createdBy
-      ? await this.prisma.user.findUnique({
-          where: { id: movement.createdBy },
+      ? await this.prisma.user.findFirst({
+          where: { id: movement.createdBy, tenantId },
           select: { id: true, firstName: true, lastName: true, email: true },
         })
       : null;
@@ -367,7 +367,7 @@ export class StockMovementsService {
       if (resolvedLotId) {
         if (isOutboundLotType) {
           // Deduct from lot
-          const lot = await tx.inventoryLot.findUnique({ where: { id: resolvedLotId } });
+          const lot = await tx.inventoryLot.findFirst({ where: { id: resolvedLotId, tenantId } });
           if (!lot) {
             throw new BadRequestException(`Lot ${resolvedLotId} not found`);
           }
@@ -590,8 +590,8 @@ export class StockMovementsService {
     });
 
     const transferUser = toMovement?.createdBy
-      ? await this.prisma.user.findUnique({
-          where: { id: toMovement.createdBy },
+      ? await this.prisma.user.findFirst({
+          where: { id: toMovement.createdBy, tenantId },
           select: { id: true, firstName: true, lastName: true, email: true },
         })
       : null;

@@ -260,7 +260,7 @@ export class ReservationsService {
   async recordPayment(id: string, dto: RecordPaymentDto, tenantId?: string) {
     const reservation = await this.prisma.campReservation.findFirst({
       where: { id, ...(tenantId ? { tenantId } : {}) },
-      select: { id: true, status: true, totalPrice: true, amountPaid: true, notes: true },
+      select: { id: true, status: true, totalPrice: true, amountPaid: true, payments: true },
     });
     if (!reservation) {
       throw new NotFoundException(`Reservation ${id} not found`);
@@ -283,11 +283,17 @@ export class ReservationsService {
     const newPaid = Math.round((currentPaid + dto.amount) * 100) / 100;
     const paymentStatus = newPaid >= total ? 'paid' : newPaid > 0 ? 'partial' : 'pending';
 
-    const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ');
-    const paymentLine = `[ชำระเงิน ${stamp}] ${dto.amount.toFixed(2)} บาท ผ่าน ${dto.method}${
-      dto.note ? ` — ${dto.note}` : ''
-    }`;
-    const notes = reservation.notes ? `${reservation.notes}\n${paymentLine}` : paymentLine;
+    // เก็บประวัติการชำระแบบรายการ (append เข้า payments JSON)
+    const history = this.parsePayments(reservation.payments);
+    const record = {
+      at: new Date().toISOString(),
+      amount: Math.round(dto.amount * 100) / 100,
+      method: dto.method,
+      ...(dto.reference ? { reference: dto.reference } : {}),
+      ...(dto.slipUrl ? { slipUrl: dto.slipUrl } : {}),
+      ...(dto.note ? { note: dto.note } : {}),
+    };
+    const payments = [...history, record];
 
     const data = await this.prisma.campReservation.update({
       where: { id },
@@ -295,13 +301,34 @@ export class ReservationsService {
         amountPaid: newPaid,
         paymentMethod: dto.method,
         paymentStatus,
-        notes,
+        payments: payments as unknown as Prisma.InputJsonValue,
       },
     });
     this.logger.log(
       `Payment recorded: ${id} +${dto.amount} (${dto.method}) → ${paymentStatus} ${newPaid}/${total}`,
     );
     return { success: true, data };
+  }
+
+  /**
+   * อัปโหลดสลิปการโอนเงินแล้วคืน URL — ใช้ก่อนเรียก recordPayment เพื่อแนบ slipUrl
+   * (เก็บไฟล์ผ่าน multer ใน controller; ที่นี่แค่ตรวจสิทธิ์เข้าถึงการจอง)
+   */
+  async attachSlipUrl(id: string, slipUrl: string, tenantId?: string) {
+    const reservation = await this.prisma.campReservation.findFirst({
+      where: { id, ...(tenantId ? { tenantId } : {}) },
+      select: { id: true },
+    });
+    if (!reservation) {
+      throw new NotFoundException(`Reservation ${id} not found`);
+    }
+    return { success: true, data: { slipUrl } };
+  }
+
+  /** แปลงค่า payments (Json จาก DB) เป็น array อย่างปลอดภัย */
+  private parsePayments(raw: unknown): Record<string, unknown>[] {
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((p): p is Record<string, unknown> => !!p && typeof p === 'object');
   }
 
   /** แปลงค่า seasonalRates (Json จาก DB) เป็น SeasonalRate[] อย่างปลอดภัย */

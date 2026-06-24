@@ -15,7 +15,7 @@ describe('PurchaseRequisitionsService', () => {
   const mockPrismaService = withPrismaFallback({
     purchaseRequisition: {
       findMany: jest.fn(),
-      findUnique: jest.fn(),
+      findFirst: jest.fn(),
       count: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
@@ -25,7 +25,7 @@ describe('PurchaseRequisitionsService', () => {
       deleteMany: jest.fn(),
     },
     property: {
-      findUnique: jest.fn(),
+      findFirst: jest.fn(),
     },
     inventoryItem: {
       findMany: jest.fn(),
@@ -37,11 +37,11 @@ describe('PurchaseRequisitionsService', () => {
       create: jest.fn(),
     },
     warehouse: {
-      findUnique: jest.fn(),
+      findFirst: jest.fn(),
     },
     purchaseOrder: {
       create: jest.fn(),
-      findUnique: jest.fn(),
+      findFirst: jest.fn(),
     },
     purchaseOrderItem: {
       createMany: jest.fn(),
@@ -184,7 +184,7 @@ describe('PurchaseRequisitionsService', () => {
         supplierQuotes: [],
       };
 
-      mockPrismaService.purchaseRequisition.findUnique.mockResolvedValue(mockPR);
+      mockPrismaService.purchaseRequisition.findFirst.mockResolvedValue(mockPR);
 
       const result = await service.findOne(mockPRId, mockTenantId);
 
@@ -194,7 +194,7 @@ describe('PurchaseRequisitionsService', () => {
     });
 
     it('should throw NotFoundException if PR not found', async () => {
-      mockPrismaService.purchaseRequisition.findUnique.mockResolvedValue(null);
+      mockPrismaService.purchaseRequisition.findFirst.mockResolvedValue(null);
 
       await expect(service.findOne('nonexistent-id', mockTenantId)).rejects.toThrow(
         NotFoundException,
@@ -202,7 +202,7 @@ describe('PurchaseRequisitionsService', () => {
     });
 
     it('should throw NotFoundException if PR belongs to different tenant', async () => {
-      mockPrismaService.purchaseRequisition.findUnique.mockResolvedValue({
+      mockPrismaService.purchaseRequisition.findFirst.mockResolvedValue({
         id: mockPRId,
         tenantId: 'other-tenant',
       });
@@ -236,7 +236,7 @@ describe('PurchaseRequisitionsService', () => {
     };
 
     it('should create PR with items successfully', async () => {
-      mockPrismaService.property.findUnique.mockResolvedValue({
+      mockPrismaService.property.findFirst.mockResolvedValue({
         id: mockPropertyId,
         tenantId: mockTenantId,
       });
@@ -263,7 +263,7 @@ describe('PurchaseRequisitionsService', () => {
       });
 
       // Mock findOne for the return value
-      mockPrismaService.purchaseRequisition.findUnique.mockResolvedValue({
+      mockPrismaService.purchaseRequisition.findFirst.mockResolvedValue({
         ...createdPR,
         status: 'DRAFT',
         priority: 'HIGH',
@@ -314,7 +314,7 @@ describe('PurchaseRequisitionsService', () => {
     });
 
     it('should throw NotFoundException if property not found', async () => {
-      mockPrismaService.property.findUnique.mockResolvedValue(null);
+      mockPrismaService.property.findFirst.mockResolvedValue(null);
 
       await expect(service.create(createDto, mockUserId, mockTenantId)).rejects.toThrow(
         NotFoundException,
@@ -322,7 +322,7 @@ describe('PurchaseRequisitionsService', () => {
     });
 
     it('should throw NotFoundException if inventory items not found', async () => {
-      mockPrismaService.property.findUnique.mockResolvedValue({
+      mockPrismaService.property.findFirst.mockResolvedValue({
         id: mockPropertyId,
         tenantId: mockTenantId,
       });
@@ -336,7 +336,7 @@ describe('PurchaseRequisitionsService', () => {
     });
 
     it('should throw NotFoundException if preferred supplier not found', async () => {
-      mockPrismaService.property.findUnique.mockResolvedValue({
+      mockPrismaService.property.findFirst.mockResolvedValue({
         id: mockPropertyId,
         tenantId: mockTenantId,
       });
@@ -358,7 +358,7 @@ describe('PurchaseRequisitionsService', () => {
   // ===================== update =====================
   describe('update', () => {
     it('should update a DRAFT PR successfully', async () => {
-      mockPrismaService.purchaseRequisition.findUnique
+      mockPrismaService.purchaseRequisition.findFirst
         .mockResolvedValueOnce({
           id: mockPRId,
           tenantId: mockTenantId,
@@ -407,7 +407,7 @@ describe('PurchaseRequisitionsService', () => {
     });
 
     it('should reject update on APPROVED status PR', async () => {
-      mockPrismaService.purchaseRequisition.findUnique.mockResolvedValue({
+      mockPrismaService.purchaseRequisition.findFirst.mockResolvedValue({
         id: mockPRId,
         tenantId: mockTenantId,
         status: 'APPROVED',
@@ -419,7 +419,7 @@ describe('PurchaseRequisitionsService', () => {
     });
 
     it('should replace items when items array is provided', async () => {
-      mockPrismaService.purchaseRequisition.findUnique
+      mockPrismaService.purchaseRequisition.findFirst
         .mockResolvedValueOnce({
           id: mockPRId,
           tenantId: mockTenantId,
@@ -489,7 +489,7 @@ describe('PurchaseRequisitionsService', () => {
   // ===================== submit =====================
   describe('submit', () => {
     it('should change DRAFT to PENDING_APPROVAL', async () => {
-      mockPrismaService.purchaseRequisition.findUnique
+      mockPrismaService.purchaseRequisition.findFirst
         .mockResolvedValueOnce({
           id: mockPRId,
           tenantId: mockTenantId,
@@ -529,7 +529,7 @@ describe('PurchaseRequisitionsService', () => {
     });
 
     it('should reject submit if not in DRAFT status', async () => {
-      mockPrismaService.purchaseRequisition.findUnique.mockResolvedValue({
+      mockPrismaService.purchaseRequisition.findFirst.mockResolvedValue({
         id: mockPRId,
         tenantId: mockTenantId,
         status: 'APPROVED',
@@ -542,7 +542,7 @@ describe('PurchaseRequisitionsService', () => {
   // ===================== approve =====================
   describe('approve', () => {
     it('should change PENDING_APPROVAL to APPROVED', async () => {
-      mockPrismaService.purchaseRequisition.findUnique
+      mockPrismaService.purchaseRequisition.findFirst
         .mockResolvedValueOnce({
           id: mockPRId,
           tenantId: mockTenantId,
@@ -583,7 +583,7 @@ describe('PurchaseRequisitionsService', () => {
     });
 
     it('should reject approve if not in PENDING_APPROVAL status', async () => {
-      mockPrismaService.purchaseRequisition.findUnique.mockResolvedValue({
+      mockPrismaService.purchaseRequisition.findFirst.mockResolvedValue({
         id: mockPRId,
         tenantId: mockTenantId,
         status: 'DRAFT',
@@ -598,7 +598,7 @@ describe('PurchaseRequisitionsService', () => {
   // ===================== cancel =====================
   describe('cancel', () => {
     it('should cancel a PR with reason', async () => {
-      mockPrismaService.purchaseRequisition.findUnique
+      mockPrismaService.purchaseRequisition.findFirst
         .mockResolvedValueOnce({
           id: mockPRId,
           tenantId: mockTenantId,
@@ -639,7 +639,7 @@ describe('PurchaseRequisitionsService', () => {
     });
 
     it('should reject cancel if PO already created', async () => {
-      mockPrismaService.purchaseRequisition.findUnique.mockResolvedValue({
+      mockPrismaService.purchaseRequisition.findFirst.mockResolvedValue({
         id: mockPRId,
         tenantId: mockTenantId,
         status: 'PO_CREATED',
@@ -670,7 +670,7 @@ describe('PurchaseRequisitionsService', () => {
         ],
       };
 
-      mockPrismaService.property.findUnique.mockResolvedValue({
+      mockPrismaService.property.findFirst.mockResolvedValue({
         id: mockPropertyId,
         tenantId: mockTenantId,
       });
@@ -694,7 +694,7 @@ describe('PurchaseRequisitionsService', () => {
         count: 2,
       });
 
-      mockPrismaService.purchaseRequisition.findUnique.mockResolvedValue({
+      mockPrismaService.purchaseRequisition.findFirst.mockResolvedValue({
         ...createdPR,
         status: 'DRAFT',
         priority: 'NORMAL',
@@ -740,7 +740,7 @@ describe('PurchaseRequisitionsService', () => {
         ],
       };
 
-      mockPrismaService.property.findUnique.mockResolvedValue({
+      mockPrismaService.property.findFirst.mockResolvedValue({
         id: mockPropertyId,
         tenantId: mockTenantId,
       });
@@ -766,7 +766,7 @@ describe('PurchaseRequisitionsService', () => {
         count: 2,
       });
 
-      mockPrismaService.purchaseRequisition.findUnique.mockResolvedValue({
+      mockPrismaService.purchaseRequisition.findFirst.mockResolvedValue({
         ...createdPR,
         status: 'DRAFT',
         priority: 'NORMAL',
@@ -804,7 +804,7 @@ describe('PurchaseRequisitionsService', () => {
         items: [{ itemId: 'inv-item-1', quantity: 1 }],
       };
 
-      mockPrismaService.property.findUnique.mockResolvedValue({
+      mockPrismaService.property.findFirst.mockResolvedValue({
         id: mockPropertyId,
         tenantId: mockTenantId,
       });
@@ -822,7 +822,7 @@ describe('PurchaseRequisitionsService', () => {
       mockPrismaService.purchaseRequisitionItem.createMany.mockResolvedValue({
         count: 1,
       });
-      mockPrismaService.purchaseRequisition.findUnique.mockResolvedValue({
+      mockPrismaService.purchaseRequisition.findFirst.mockResolvedValue({
         ...createdPR,
         status: 'DRAFT',
         priority: 'NORMAL',
@@ -853,7 +853,7 @@ describe('PurchaseRequisitionsService', () => {
   describe('full lifecycle: DRAFT → PENDING_APPROVAL → APPROVED → cancel', () => {
     it('should progress through status transitions correctly', async () => {
       // Step 1: Submit (DRAFT → PENDING_APPROVAL)
-      mockPrismaService.purchaseRequisition.findUnique
+      mockPrismaService.purchaseRequisition.findFirst
         .mockResolvedValueOnce({
           id: mockPRId,
           tenantId: mockTenantId,
@@ -892,7 +892,7 @@ describe('PurchaseRequisitionsService', () => {
       expect((submitted as any).status).toBe('PENDING_APPROVAL');
 
       // Step 2: Approve (PENDING_APPROVAL → APPROVED)
-      mockPrismaService.purchaseRequisition.findUnique
+      mockPrismaService.purchaseRequisition.findFirst
         .mockResolvedValueOnce({
           id: mockPRId,
           tenantId: mockTenantId,
@@ -932,7 +932,7 @@ describe('PurchaseRequisitionsService', () => {
       expect((approved as any).approvedBy).toBe(mockUserId);
 
       // Step 3: Cancel (APPROVED → CANCELLED)
-      mockPrismaService.purchaseRequisition.findUnique
+      mockPrismaService.purchaseRequisition.findFirst
         .mockResolvedValueOnce({
           id: mockPRId,
           tenantId: mockTenantId,

@@ -268,8 +268,8 @@ export class ItemsService {
    */
   async findOne(id: string, tenantId: string): Promise<any> {
     try {
-      const item = await this.prisma.inventoryItem.findUnique({
-        where: { id },
+      const item = await this.prisma.inventoryItem.findFirst({
+        where: { id, tenantId },
         include: {
           category: true,
           itemSuppliers: {
@@ -296,10 +296,6 @@ export class ItemsService {
       });
 
       if (!item) {
-        throw new NotFoundException(`Item with ID ${id} not found`);
-      }
-
-      if (item.tenantId !== tenantId) {
         throw new NotFoundException(`Item with ID ${id} not found`);
       }
 
@@ -338,11 +334,11 @@ export class ItemsService {
 
       // Validate categoryId exists if provided
       if (dto.categoryId) {
-        const category = await this.prisma.itemCategory.findUnique({
-          where: { id: dto.categoryId },
+        const category = await this.prisma.itemCategory.findFirst({
+          where: { id: dto.categoryId, tenantId },
         });
 
-        if (!category || category.tenantId !== tenantId) {
+        if (!category) {
           throw new BadRequestException('Invalid categoryId');
         }
       }
@@ -410,11 +406,11 @@ export class ItemsService {
 
       // Validate categoryId if being changed
       if (dto.categoryId && dto.categoryId !== item.categoryId) {
-        const category = await this.prisma.itemCategory.findUnique({
-          where: { id: dto.categoryId },
+        const category = await this.prisma.itemCategory.findFirst({
+          where: { id: dto.categoryId, tenantId },
         });
 
-        if (!category || category.tenantId !== tenantId) {
+        if (!category) {
           throw new BadRequestException('Invalid categoryId');
         }
       }
@@ -457,6 +453,33 @@ export class ItemsService {
         throw error;
       }
       this.logger.error(`Error updating item ${id}: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
+  /**
+   * Set the item's image URL (called after a successful file upload).
+   * Validates tenant ownership via findOne before persisting.
+   */
+  async setImageUrl(id: string, imageUrl: string, tenantId: string): Promise<any> {
+    try {
+      await this.findOne(id, tenantId);
+
+      const updated = await this.prisma.inventoryItem.update({
+        where: { id },
+        data: { imageUrl },
+      });
+
+      this.logger.log(`Item ${id} image updated`);
+      return updated;
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      this.logger.error(
+        `Error setting image for item ${id}: ${error.message}`,
+        error.stack,
+      );
       throw error;
     }
   }
