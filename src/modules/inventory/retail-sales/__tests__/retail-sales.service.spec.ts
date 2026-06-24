@@ -203,4 +203,60 @@ describe('RetailSalesService', () => {
       await expect(service.findOne('nope', TENANT)).rejects.toBeInstanceOf(NotFoundException);
     });
   });
+
+  describe('getDashboard', () => {
+    it('aggregates KPIs, payment breakdown, top items and a zero-filled daily series for a week', async () => {
+      const prisma = buildPrisma();
+      const anchor = '2026-06-24T10:00:00.000Z'; // a Wednesday
+      // Two sales in the same week, different days/payment methods.
+      prisma.retailSale.findMany.mockResolvedValue([
+        {
+          id: 'r1', receiptNo: 'RCP-202606-0001', warehouseId: WH, status: 'COMPLETED', paymentMethod: 'CASH',
+          grandTotal: 267.5, profitTotal: 100, costTotal: 150,
+          soldAt: new Date('2026-06-22T09:00:00.000Z'),
+          items: [{ itemId: 'i1', sku: 'A', name: 'Cola', unit: 'CAN', quantity: 2, lineTotal: 200 }],
+        },
+        {
+          id: 'r2', receiptNo: 'RCP-202606-0002', warehouseId: WH, status: 'COMPLETED', paymentMethod: 'QR',
+          grandTotal: 53.5, profitTotal: 20, costTotal: 30,
+          soldAt: new Date('2026-06-24T11:00:00.000Z'),
+          items: [{ itemId: 'i1', sku: 'A', name: 'Cola', unit: 'CAN', quantity: 1, lineTotal: 50 }],
+        },
+      ]);
+
+      const service = await makeService(prisma);
+      const res = await service.getDashboard(TENANT, { period: 'week', date: anchor });
+
+      expect(res.period).toBe('week');
+      expect(res.kpis.totalSales).toBe(321);
+      expect(res.kpis.totalProfit).toBe(120);
+      expect(res.kpis.salesCount).toBe(2);
+      expect(res.kpis.itemsSold).toBe(3);
+      expect(res.kpis.avgSale).toBe(160.5);
+      // Week (Mon–Sun) => 7 daily buckets
+      expect(res.series).toHaveLength(7);
+      const seriesTotal = res.series.reduce((sum, b) => sum + b.sales, 0);
+      expect(seriesTotal).toBe(321);
+      // Payment breakdown has both methods
+      expect(res.paymentBreakdown).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ method: 'CASH', count: 1 }),
+          expect.objectContaining({ method: 'QR', count: 1 }),
+        ]),
+      );
+      // Top item aggregates across sales
+      expect(res.topItems[0]).toEqual(
+        expect.objectContaining({ itemId: 'i1', quantity: 3, sales: 250 }),
+      );
+    });
+
+    it('builds 12 monthly buckets for a year period', async () => {
+      const prisma = buildPrisma();
+      prisma.retailSale.findMany.mockResolvedValue([]);
+      const service = await makeService(prisma);
+      const res = await service.getDashboard(TENANT, { period: 'year', date: '2026-06-24T00:00:00.000Z' });
+      expect(res.series).toHaveLength(12);
+      expect(res.kpis.totalSales).toBe(0);
+    });
+  });
 });

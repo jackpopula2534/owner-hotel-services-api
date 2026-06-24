@@ -4,6 +4,12 @@ import { Prisma, RetailPaymentMethod } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
 import { CreateRetailSaleDto } from './dto/create-retail-sale.dto';
 import { QueryRetailSaleDto } from './dto/query-retail-sale.dto';
+import { DashboardRetailSaleDto, RetailDashboardPeriod } from './dto/dashboard-retail-sale.dto';
+
+const MONTHS_TH_SHORT = [
+  'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+  'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.',
+];
 
 /** Round to 2 decimal places (THB). */
 function round2(n: number): number {
@@ -228,7 +234,171 @@ export class RetailSalesService {
     return this.toDetail(sale);
   }
 
+  /**
+   * Sales dashboard summary (สรุปยอดขาย) for a week / month / year window.
+   * Returns headline KPIs, a per-bucket time series for charting (daily for
+   * week & month, monthly for year), a payment-method breakdown and top items.
+   * Only COMPLETED sales are counted (voided sales are excluded).
+   */
+  async getDashboard(tenantId: string, query: DashboardRetailSaleDto) {
+    const period: RetailDashboardPeriod = query.period ?? 'week';
+    const anchor = query.date ? new Date(query.date) : new Date();
+    const { from, to } = this.resolveRange(period, anchor);
+
+    const where: Prisma.RetailSaleWhereInput = {
+      tenantId,
+      status: 'COMPLETED',
+      soldAt: { gte: from, lte: to },
+    };
+    if (query.warehouseId) where.warehouseId = query.warehouseId;
+
+    const sales = await this.prisma.retailSale.findMany({
+      where,
+      include: { items: true },
+      orderBy: { soldAt: 'asc' },
+    });
+
+    const buckets = this.makeBuckets(period, from, to);
+    const bucketByKey = new Map(buckets.map((b) => [b.key, b]));
+    const paymentMap = new Map<string, { count: number; total: number }>();
+    const itemMap = new Map<
+      string,
+      { itemId: string; name: string; sku: string; quantity: number; sales: number }
+    >();
+
+    let totalSales = 0;
+    let totalProfit = 0;
+    let totalCost = 0;
+    let itemsSold = 0;
+
+    for (const sale of sales) {
+      const gross = Number(sale.grandTotal);
+      totalSales += gross;
+      totalProfit += Number(sale.profitTotal);
+      totalCost += Number(sale.costTotal);
+
+      const pm = paymentMap.get(sale.paymentMethod) ?? { count: 0, total: 0 };
+      pm.count += 1;
+      pm.total += gross;
+      paymentMap.set(sale.paymentMethod, pm);
+
+      const key =
+        period === 'year' ? this.localMonthKey(sale.soldAt) : this.localDayKey(sale.soldAt);
+      const bucket = bucketByKey.get(key);
+      if (bucket) {
+        bucket.sales += gross;
+        bucket.profit += Number(sale.profitTotal);
+        bucket.count += 1;
+      }
+
+      for (const it of sale.items) {
+        itemsSold += it.quantity;
+        const cur =
+          itemMap.get(it.itemId) ??
+          { itemId: it.itemId, name: it.name, sku: it.sku, quantity: 0, sales: 0 };
+        cur.quantity += it.quantity;
+        cur.sales += Number(it.lineTotal);
+        itemMap.set(it.itemId, cur);
+      }
+    }
+
+    const salesCount = sales.length;
+    const topItems = [...itemMap.values()]
+      .sort((a, b) => b.sales - a.sales)
+      .slice(0, 5)
+      .map((t) => ({ ...t, sales: round2(t.sales) }));
+
+    return {
+      period,
+      range: { from: from.toISOString(), to: to.toISOString() },
+      kpis: {
+        totalSales: round2(totalSales),
+        totalProfit: round2(totalProfit),
+        totalCost: round2(totalCost),
+        salesCount,
+        itemsSold,
+        avgSale: salesCount ? round2(totalSales / salesCount) : 0,
+        marginPct: totalSales ? round2((totalProfit / totalSales) * 100) : 0,
+      },
+      series: buckets.map((b) => ({
+        key: b.key,
+        label: b.label,
+        sales: round2(b.sales),
+        profit: round2(b.profit),
+        count: b.count,
+      })),
+      paymentBreakdown: [...paymentMap.entries()].map(([method, v]) => ({
+        method,
+        count: v.count,
+        total: round2(v.total),
+      })),
+      topItems,
+    };
+  }
+
   // ─── internals ──────────────────────────────────────────────────────────────
+
+  /** Local YYYY-MM-DD key (no timezone shift). */
+  private localDayKey(d: Date): string {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  /** Local YYYY-MM key (no timezone shift). */
+  private localMonthKey(d: Date): string {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }
+
+  /** Resolve the inclusive [from, to] window for a dashboard period around an anchor date. */
+  private resolveRange(
+    period: RetailDashboardPeriod,
+    anchor: Date,
+  ): { from: Date; to: Date } {
+    if (period === 'week') {
+      // Week starts on Monday.
+      const diffToMonday = (anchor.getDay() + 6) % 7;
+      const from = new Date(
+        anchor.getFullYear(),
+        anchor.getMonth(),
+        anchor.getDate() - diffToMonday,
+        0, 0, 0, 0,
+      );
+      const to = new Date(from.getFullYear(), from.getMonth(), from.getDate() + 6, 23, 59, 59, 999);
+      return { from, to };
+    }
+    if (period === 'year') {
+      return {
+        from: new Date(anchor.getFullYear(), 0, 1, 0, 0, 0, 0),
+        to: new Date(anchor.getFullYear(), 11, 31, 23, 59, 59, 999),
+      };
+    }
+    // month
+    return {
+      from: new Date(anchor.getFullYear(), anchor.getMonth(), 1, 0, 0, 0, 0),
+      to: new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0, 23, 59, 59, 999),
+    };
+  }
+
+  /** Build the ordered, zero-filled series buckets for a period window. */
+  private makeBuckets(
+    period: RetailDashboardPeriod,
+    from: Date,
+    to: Date,
+  ): Array<{ key: string; label: string; sales: number; profit: number; count: number }> {
+    const buckets: Array<{ key: string; label: string; sales: number; profit: number; count: number }> = [];
+    if (period === 'year') {
+      for (let m = 0; m < 12; m++) {
+        const d = new Date(from.getFullYear(), m, 1);
+        buckets.push({ key: this.localMonthKey(d), label: MONTHS_TH_SHORT[m], sales: 0, profit: 0, count: 0 });
+      }
+      return buckets;
+    }
+    const cursor = new Date(from);
+    while (cursor <= to) {
+      buckets.push({ key: this.localDayKey(cursor), label: String(cursor.getDate()), sales: 0, profit: 0, count: 0 });
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return buckets;
+  }
 
   /** Generate a per-tenant, per-month receipt number, e.g. RCP-202606-0001. */
   private async generateReceiptNo(

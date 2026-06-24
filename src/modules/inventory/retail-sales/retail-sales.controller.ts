@@ -17,6 +17,7 @@ import { RequireAddon } from '@/common/decorators/require-addon.decorator';
 import { RetailSalesService } from './retail-sales.service';
 import { CreateRetailSaleDto } from './dto/create-retail-sale.dto';
 import { QueryRetailSaleDto } from './dto/query-retail-sale.dto';
+import { DashboardRetailSaleDto } from './dto/dashboard-retail-sale.dto';
 
 type AuthedReq = { user: { id: string; tenantId: string } };
 
@@ -54,6 +55,17 @@ export class RetailSalesController {
       meta: result.meta,
       summary: result.summary,
     };
+  }
+
+  @Get('dashboard')
+  @ApiOperation({ summary: 'Retail sales dashboard summary (week/month/year)' })
+  @ApiResponse({ status: 200, description: 'Dashboard summary retrieved' })
+  async dashboard(
+    @Query() query: DashboardRetailSaleDto,
+    @Req() req: AuthedReq,
+  ): Promise<{ success: boolean; data: unknown }> {
+    const data = await this.retailSalesService.getDashboard(req.user.tenantId, query);
+    return { success: true, data };
   }
 
   @Get(':id')
