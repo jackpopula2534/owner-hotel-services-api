@@ -4983,6 +4983,32 @@ model AutoReplyTemplate {
   @@map("auto_reply_templates")
 }
 
+// ─── Channel Integration (per-tenant social credentials) ──────────────────────
+// เก็บ credential ของแต่ละ tenant สำหรับเชื่อม LINE OA / Facebook Page / Instagram
+// token + secret เข้ารหัสด้วย EncryptionService (prefix "enc:") ก่อนบันทึก
+model ChannelIntegration {
+  id                String    @id @default(uuid())
+  tenantId          String
+  channel           String // "LINE" | "FACEBOOK" | "INSTAGRAM"
+  // LINE: bot basicId/channelId, FB/IG: pageId — ใช้ map webhook → tenant (Meta ส่งมา URL เดียว)
+  externalAccountId String?
+  displayName       String? // ชื่อ OA / Page ไว้แสดงผลในหน้าตั้งค่า
+  accessToken       String?   @db.Text // เข้ารหัส (enc:)
+  channelSecret     String?   @db.Text // เข้ารหัส (enc:) — LINE channel secret / Meta app secret
+  // "CONNECTED" | "DISCONNECTED" | "EXPIRED" | "ERROR"
+  status            String    @default("DISCONNECTED")
+  statusMessage     String?   @db.Text // รายละเอียด error ล่าสุด (ถ้ามี)
+  webhookVerified   Boolean   @default(false)
+  tokenExpiresAt    DateTime?
+  connectedAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@unique([tenantId, channel])
+  @@index([channel, externalAccountId])
+  @@map("channel_integrations")
+}
+
 // ─── Stripe ──────────────────────────────────────────────────────────────────
 
 model StripeCustomer {
@@ -7020,39 +7046,39 @@ model CrmChurnScore {
 
 /// ลานกางแคมป์ (เทียบ Property ของระบบโรงแรม)
 model Campground {
-  id           String            @id @default(uuid()) @db.VarChar(36)
-  tenantId     String?           @db.VarChar(36)
-  name         String            @db.VarChar(180)
-  description  String?           @db.Text
-  address      String?           @db.VarChar(255)
-  phone        String?           @db.VarChar(30)
-  latitude     Float?
-  longitude    Float?
+  id                 String            @id @default(uuid()) @db.VarChar(36)
+  tenantId           String?           @db.VarChar(36)
+  name               String            @db.VarChar(180)
+  description        String?           @db.Text
+  address            String?           @db.VarChar(255)
+  phone              String?           @db.VarChar(30)
+  latitude           Float?
+  longitude          Float?
   /// URL รูปแปลนพื้นที่ ใช้เป็น background ของแผนผัง 2D
-  mapImageUrl  String?           @db.VarChar(500)
+  mapImageUrl        String?           @db.VarChar(500)
   /// ขนาด canvas อ้างอิงพิกัด marker (ปกติเก็บพิกัดแบบ normalized 0..1)
-  mapWidth     Int?
-  mapHeight    Int?
+  mapWidth           Int?
+  mapHeight          Int?
   /// คลังรูปภาพของลาน (gallery) — เก็บเป็น array ของ URL
-  images       Json?
+  images             Json?
   /// active | inactive
-  status       String            @default("active") @db.VarChar(20)
-  checkInTime  String?           @default("14:00") @db.VarChar(10)
-  checkOutTime String?           @default("12:00") @db.VarChar(10)
+  status             String            @default("active") @db.VarChar(20)
+  checkInTime        String?           @default("14:00") @db.VarChar(10)
+  checkOutTime       String?           @default("12:00") @db.VarChar(10)
   /// คลังย่อยของลานใน Inventory Module (auto-create เมื่อเชื่อมคลังกลาง) — null = โหมดคลังย่อยลาน
-  warehouseId  String?           @db.VarChar(36)
+  warehouseId        String?           @db.VarChar(36)
   /// เวลาที่กดเชื่อมต่อระบบ POS ให้ลานนี้ (ต้องมี add-on POS_MODULE) — null = ยังไม่เชื่อม
   posConnectedAt     DateTime?
   /// เวลาที่กดเชื่อมต่อระบบครัว (KDS) ให้ลานนี้ (มากับแพ็กเกจ POS) — null = ยังไม่เชื่อม
   kitchenConnectedAt DateTime?
-  createdAt    DateTime          @default(now())
-  updatedAt    DateTime          @updatedAt
-  zones        CampZone[]
-  pitches      CampPitch[]
-  facilities   CampFacility[]
-  reservations CampReservation[]
-  campAddons   CampAddon[]
-  requisitions CampRequisition[]
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  zones              CampZone[]
+  pitches            CampPitch[]
+  facilities         CampFacility[]
+  reservations       CampReservation[]
+  campAddons         CampAddon[]
+  requisitions       CampRequisition[]
 
   @@index([tenantId])
   @@index([status])
@@ -7061,42 +7087,42 @@ model Campground {
 
 /// โซนภายในลาน (เทียบ Room Type) — กำหนดประเภท/ราคาฐาน/ความจุ
 model CampZone {
-  id            String      @id @default(uuid()) @db.VarChar(36)
-  tenantId      String?     @db.VarChar(36)
-  campgroundId  String      @db.VarChar(36)
-  name          String      @db.VarChar(120)
+  id             String      @id @default(uuid()) @db.VarChar(36)
+  tenantId       String?     @db.VarChar(36)
+  campgroundId   String      @db.VarChar(36)
+  name           String      @db.VarChar(120)
   /// รหัสนำหน้าจุดกางเต็นท์ของโซนนี้ (เช่น "A") — จุดในโซนจะใช้เป็น prefix อัตโนมัติ
-  code          String?     @db.VarChar(10)
+  code           String?     @db.VarChar(10)
   /// mountain_view | riverside | lawn | rv | glamping
-  type          String      @default("lawn") @db.VarChar(30)
-  description   String?     @db.Text
-  basePrice     Decimal     @db.Decimal(10, 2)
-  weekendPrice  Decimal?    @db.Decimal(10, 2)
+  type           String      @default("lawn") @db.VarChar(30)
+  description    String?     @db.Text
+  basePrice      Decimal     @db.Decimal(10, 2)
+  weekendPrice   Decimal?    @db.Decimal(10, 2)
   /// ราคาช่วงเทศกาล/วันหยุดยาว — JSON array [{name, start:"YYYY-MM-DD", end:"YYYY-MM-DD", price}]
   /// priority ตอนคิดราคา: season > weekend > base
-  seasonalRates Json?
-  maxGuests     Int         @default(4)
-  maxTents      Int         @default(1)
-  allowVehicle  Boolean     @default(false)
-  allowPet      Boolean     @default(false)
+  seasonalRates  Json?
+  maxGuests      Int         @default(4)
+  maxTents       Int         @default(1)
+  allowVehicle   Boolean     @default(false)
+  allowPet       Boolean     @default(false)
   /// โหมดคิดราคา: per_night (ต่อคืน) | per_person (basePrice/weekend/season = ราคาต่อคน คูณจำนวนคน)
-  pricingMode    String     @default("per_night") @db.VarChar(20)
+  pricingMode    String      @default("per_night") @db.VarChar(20)
   /// โซนนี้มีไฟฟ้าให้ใช้หรือไม่
-  hasElectricity Boolean    @default(false)
+  hasElectricity Boolean     @default(false)
   /// ค่าไฟเพิ่ม/คืน (คิดเมื่อ hasElectricity = true)
-  electricityFee Decimal?   @db.Decimal(10, 2)
+  electricityFee Decimal?    @db.Decimal(10, 2)
   /// อนุญาตให้ใช้แอร์เคลื่อนที่/เครื่องทำความเย็นในโซนนี้หรือไม่
-  allowAircon   Boolean     @default(false)
+  allowAircon    Boolean     @default(false)
   /// จำกัดกำลังไฟสูงสุดต่อจุด (วัตต์) — null/0 = ไม่จำกัด
-  maxWatt       Int?
+  maxWatt        Int?
   /// ข้อห้าม/กฎประจำโซน — JSON array ของ string เช่น ["ห้ามก่อกองไฟ","ห้ามส่งเสียงดัง"]
-  restrictions  Json?
+  restrictions   Json?
   /// สีของ marker บนแผนผัง (hex หรือ token)
-  color         String?     @db.VarChar(20)
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-  campground    Campground  @relation(fields: [campgroundId], references: [id], onDelete: Cascade)
-  pitches       CampPitch[]
+  color          String?     @db.VarChar(20)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  campground     Campground  @relation(fields: [campgroundId], references: [id], onDelete: Cascade)
+  pitches        CampPitch[]
 
   @@index([tenantId])
   @@index([campgroundId])

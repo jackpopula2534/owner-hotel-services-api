@@ -14,6 +14,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 export enum MessageChannel {
   LINE = 'LINE',
   FACEBOOK = 'FACEBOOK',
+  TIKTOK = 'TIKTOK',
   ALL = 'ALL',
 }
 
@@ -139,6 +140,45 @@ export class UpdateAutoReplyTemplateDto {
   priority?: number;
 }
 
+// ─── Channel Integration (per-tenant connect) ─────────────────────────────────
+
+export class ConnectLineDto {
+  @ApiProperty({ description: 'LINE Channel Access Token (long-lived)' })
+  @IsString()
+  @IsNotEmpty()
+  channelAccessToken: string;
+
+  @ApiProperty({ description: 'LINE Channel Secret (ใช้ verify webhook signature)' })
+  @IsString()
+  @IsNotEmpty()
+  channelSecret: string;
+}
+
+export class ConnectFacebookDto {
+  @ApiProperty({ description: 'Facebook Page Access Token (ระบบจะดึง Page ID จาก token เอง)' })
+  @IsString()
+  @IsNotEmpty()
+  pageAccessToken: string;
+}
+
+export class ConnectTiktokDto {
+  @ApiProperty({
+    description:
+      'TikTok Business Account Access Token (ระบบจะดึง account id/ชื่อจาก token เอง ผ่าน /v2/user/info)',
+  })
+  @IsString()
+  @IsNotEmpty()
+  accessToken: string;
+
+  @ApiPropertyOptional({
+    description:
+      'TikTok Client Secret (ใช้ verify ลายเซ็น webhook). ถ้าไม่ส่ง ระบบจะ fallback ไป ENV TIKTOK_CLIENT_SECRET',
+  })
+  @IsOptional()
+  @IsString()
+  clientSecret?: string;
+}
+
 // ─── LINE Webhook (internal types) ────────────────────────────────────────────
 
 export interface LineWebhookEvent {
@@ -153,6 +193,18 @@ export interface LineWebhookEvent {
     id: string;
     type: string;
     text?: string;
+    // LINE sticker message fields
+    stickerId?: string;
+    packageId?: string;
+    stickerResourceType?: string;
+    // LINE file message fields
+    fileName?: string;
+    fileSize?: number;
+    // LINE location message fields
+    title?: string;
+    address?: string;
+    latitude?: number;
+    longitude?: number;
   };
   replyToken?: string;
   timestamp: number;

@@ -5,7 +5,9 @@ import { MessagingController } from './messaging.controller';
 import { MessagingService } from './messaging.service';
 import { LineMessagingService } from './line-messaging.service';
 import { FacebookMessagingService } from './facebook-messaging.service';
+import { TiktokMessagingService } from './tiktok-messaging.service';
 import { AutoReplyService } from './auto-reply.service';
+import { ChannelIntegrationService } from './channel-integration.service';
 import { MessagingGateway } from './messaging.gateway';
 
 @Module({
@@ -15,9 +17,17 @@ import { MessagingGateway } from './messaging.gateway';
     MessagingService,
     LineMessagingService,
     FacebookMessagingService,
+    TiktokMessagingService,
     AutoReplyService,
+    ChannelIntegrationService,
     MessagingGateway,
   ],
-  exports: [MessagingService, LineMessagingService, FacebookMessagingService],
+  exports: [
+    MessagingService,
+    LineMessagingService,
+    FacebookMessagingService,
+    TiktokMessagingService,
+    ChannelIntegrationService,
+  ],
 })
 export class MessagingModule {}

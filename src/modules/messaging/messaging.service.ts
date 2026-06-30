@@ -4,6 +4,7 @@ import { MessagingGateway } from './messaging.gateway';
 import { ConversationQueryDto } from './dto/messaging.dto';
 import { LineMessagingService } from './line-messaging.service';
 import { FacebookMessagingService } from './facebook-messaging.service';
+import { TiktokMessagingService } from './tiktok-messaging.service';
 
 @Injectable()
 export class MessagingService {
@@ -41,9 +42,31 @@ export class MessagingService {
       this.prisma.conversation.count({ where }),
     ]);
 
+    // นับจำนวนข้อความขาเข้าที่ยังไม่ได้อ่าน (unread) ต่อ conversation ในหน้านี้
+    const ids = conversations.map((c) => c.id);
+    const unreadGroups = ids.length
+      ? await this.prisma.message.groupBy({
+          by: ['conversationId'],
+          where: {
+            conversationId: { in: ids },
+            direction: 'INBOUND',
+            readAt: null,
+          },
+          _count: { _all: true },
+        })
+      : [];
+    const unreadMap = new Map(
+      unreadGroups.map((g) => [g.conversationId, g._count._all]),
+    );
+
+    const data = conversations.map((c) => ({
+      ...c,
+      unreadCount: unreadMap.get(c.id) ?? 0,
+    }));
+
     return {
       success: true,
-      data: conversations,
+      data,
       meta: { page, limit, total },
     };
   }
@@ -57,6 +80,13 @@ export class MessagingService {
     if (!conversation) {
       return { success: false, error: { code: 'NOT_FOUND', message: 'Conversation not found' } };
     }
+
+    // เปิดห้องแชต = อ่านแล้ว → mark ข้อความขาเข้าที่ยังไม่อ่านให้เป็นอ่านแล้ว
+    // (ทำให้ unreadCount ของ conversation นี้กลับเป็น 0 และคงอยู่หลัง refresh)
+    await this.prisma.message.updateMany({
+      where: { conversationId, direction: 'INBOUND', readAt: null },
+      data: { readAt: new Date() },
+    });
 
     const [messages, total] = await Promise.all([
       this.prisma.message.findMany({
@@ -84,6 +114,7 @@ export class MessagingService {
     staffId: string,
     lineService: LineMessagingService,
     fbService: FacebookMessagingService,
+    tiktokService: TiktokMessagingService,
   ): Promise<void> {
     const conversation = await this.prisma.conversation.findFirst({
       where: { id: conversationId, tenantId },
@@ -96,6 +127,8 @@ export class MessagingService {
       await lineService.sendReply(tenantId, conversationId, content, staffId);
     } else if (conversation.channel === 'FACEBOOK') {
       await fbService.sendReply(tenantId, conversationId, content, staffId);
+    } else if (conversation.channel === 'TIKTOK') {
+      await tiktokService.sendReply(tenantId, conversationId, content, staffId);
     } else {
       throw new NotFoundException(`Unsupported channel: ${conversation.channel}`);
     }
