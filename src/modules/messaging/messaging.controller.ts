@@ -29,7 +29,6 @@ import { Request, Response } from 'express';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { LineMessagingService } from './line-messaging.service';
 import { FacebookMessagingService, FbWebhookBody } from './facebook-messaging.service';
-import { TiktokMessagingService, TtWebhookBody } from './tiktok-messaging.service';
 import { MessagingService } from './messaging.service';
 import { AutoReplyService } from './auto-reply.service';
 import { ChannelIntegrationService, ChannelKind } from './channel-integration.service';
@@ -41,7 +40,6 @@ import {
   LineWebhookBody,
   ConnectLineDto,
   ConnectFacebookDto,
-  ConnectTiktokDto,
 } from './dto/messaging.dto';
 
 interface JwtUser {
@@ -69,7 +67,6 @@ export class MessagingController {
   constructor(
     private readonly lineMessagingService: LineMessagingService,
     private readonly facebookMessagingService: FacebookMessagingService,
-    private readonly tiktokMessagingService: TiktokMessagingService,
     private readonly messagingService: MessagingService,
     private readonly autoReplyService: AutoReplyService,
     private readonly channelIntegrationService: ChannelIntegrationService,
@@ -189,58 +186,13 @@ export class MessagingController {
     return { success: true };
   }
 
-  // ─── TikTok Webhook (public — no JWT) ────────────────────────────────────────
-  //
-  // TikTok App = 1 callback URL สำหรับทุกบัญชี → ตั้งครั้งเดียวใน TikTok Developer Portal:
-  //   https://your-domain.com/api/v1/messaging/tiktok/webhook
-  //   (verify token = TIKTOK_VERIFY_TOKEN) — event ถูก map → tenant ด้วย to_user_id (open_id)
-
-  /** TikTok GET — verify webhook (single URL) */
-  @Get('tiktok/webhook')
-  @ApiOperation({ summary: 'TikTok Webhook Verification — single URL (public)' })
-  @ApiQuery({ name: 'hub.mode', required: false })
-  @ApiQuery({ name: 'hub.verify_token', required: false })
-  @ApiQuery({ name: 'hub.challenge', required: false })
-  @ApiResponse({ status: 200, description: 'Challenge string returned for verification' })
-  ttWebhookVerify(
-    @Query('hub.mode') mode: string,
-    @Query('hub.verify_token') token: string,
-    @Query('hub.challenge') challenge: string,
-    @Res() res: Response,
-  ) {
-    // ตอบ challenge เป็น text/plain ดิบ — ข้าม TransformInterceptor ที่ห่อ { success, data }
-    const result = this.tiktokMessagingService.verifyWebhook(mode, token, challenge);
-    res.status(HttpStatus.OK).type('text/plain').send(result);
-  }
-
-  /** TikTok POST — events for ALL connected accounts (mapped to tenant by to_user_id) */
-  @Post('tiktok/webhook')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'TikTok Direct Message Webhook — single URL (public)' })
-  @ApiResponse({ status: 200, description: 'OK' })
-  async ttWebhook(
-    @Headers('tiktok-signature') signature: string,
-    @Req() req: RawBodyRequest<Request>,
-    @Body() body: TtWebhookBody,
-  ) {
-    const rawBody = req.rawBody;
-    if (rawBody) {
-      const valid = this.tiktokMessagingService.verifySignature(rawBody, signature);
-      if (!valid) {
-        throw new BadRequestException('Invalid TikTok signature');
-      }
-    }
-    await this.tiktokMessagingService.handleWebhook(body);
-    return { success: true };
-  }
-
   // ─── Conversations ────────────────────────────────────────────────────────────
 
   @Get('conversations')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'ดู inbox รวมทุก conversation (LINE + Facebook)' })
-  @ApiQuery({ name: 'channel', required: false, enum: ['LINE', 'FACEBOOK', 'TIKTOK', 'ALL'] })
+  @ApiQuery({ name: 'channel', required: false, enum: ['LINE', 'FACEBOOK', 'ALL'] })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiResponse({ status: 200, description: 'List of conversations' })
@@ -289,7 +241,6 @@ export class MessagingController {
       staffId,
       this.lineMessagingService,
       this.facebookMessagingService,
-      this.tiktokMessagingService,
     );
 
     return { success: true, message: 'Message sent' };
@@ -332,23 +283,11 @@ export class MessagingController {
     return { success: true, data };
   }
 
-  @Post('integrations/tiktok')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'เชื่อมต่อ TikTok — validate access token + ดึง account id อัตโนมัติ' })
-  @ApiResponse({ status: 201, description: 'Connected' })
-  @ApiResponse({ status: 400, description: 'Invalid token' })
-  async connectTiktok(@Req() req: Request, @Body() dto: ConnectTiktokDto) {
-    const tenantId = getTenantId(req as any);
-    const data = await this.channelIntegrationService.connectTiktok(tenantId, dto);
-    return { success: true, data };
-  }
-
   @Post('integrations/:channel/test')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'ทดสอบสุขภาพการเชื่อมต่อช่องทาง (re-validate)' })
-  @ApiParam({ name: 'channel', enum: ['LINE', 'FACEBOOK', 'TIKTOK', 'INSTAGRAM'] })
+  @ApiParam({ name: 'channel', enum: ['LINE', 'FACEBOOK', 'INSTAGRAM'] })
   @ApiResponse({ status: 200, description: 'Connection status' })
   async testIntegration(@Req() req: Request, @Param('channel') channel: string) {
     const tenantId = getTenantId(req as any);
@@ -364,7 +303,7 @@ export class MessagingController {
   @ApiBearerAuth()
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'ยกเลิกการเชื่อมต่อช่องทาง — ลบ credential' })
-  @ApiParam({ name: 'channel', enum: ['LINE', 'FACEBOOK', 'TIKTOK', 'INSTAGRAM'] })
+  @ApiParam({ name: 'channel', enum: ['LINE', 'FACEBOOK', 'INSTAGRAM'] })
   @ApiResponse({ status: 204, description: 'Disconnected' })
   async disconnectIntegration(@Req() req: Request, @Param('channel') channel: string) {
     const tenantId = getTenantId(req as any);

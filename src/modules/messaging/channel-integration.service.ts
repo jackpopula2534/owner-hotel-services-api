@@ -8,18 +8,15 @@ import { ConfigService } from '@nestjs/config';
 import * as https from 'https';
 import { PrismaService } from '@/prisma/prisma.service';
 import { EncryptionService } from '@/common/services/encryption.service';
-import { ConnectLineDto, ConnectFacebookDto, ConnectTiktokDto } from './dto/messaging.dto';
+import { ConnectLineDto, ConnectFacebookDto } from './dto/messaging.dto';
 
 const LINE_INFO_URL = 'https://api.line.me/v2/bot/info';
 const LINE_WEBHOOK_ENDPOINT_URL = 'https://api.line.me/v2/bot/channel/webhook/endpoint';
 const FB_GRAPH = 'https://graph.facebook.com/v19.0';
 // fields ที่ subscribe ให้ Meta ส่ง event ของเพจมาที่ app webhook
 const FB_SUBSCRIBED_FIELDS = 'messages,messaging_postbacks,messaging_optins';
-// TikTok Open API — ใช้ validate token + ดึงข้อมูลบัญชี
-const TIKTOK_USER_INFO_URL =
-  'https://open.tiktokapis.com/v2/user/info/?fields=open_id,union_id,display_name,avatar_url';
 
-export type ChannelKind = 'LINE' | 'FACEBOOK' | 'INSTAGRAM' | 'TIKTOK';
+export type ChannelKind = 'LINE' | 'FACEBOOK' | 'INSTAGRAM';
 export type IntegrationStatus = 'CONNECTED' | 'DISCONNECTED' | 'EXPIRED' | 'ERROR';
 
 /** ค่า credential ที่ถอดรหัสแล้ว — ใช้ภายใน service เท่านั้น ห้ามส่งออก API */
@@ -33,24 +30,10 @@ export interface FacebookCredentials {
   pageAccessToken: string;
 }
 
-/** TikTok credential (ถอดรหัสแล้ว) — ใช้ภายใน service เท่านั้น */
-export interface TiktokCredentials {
-  accessToken: string;
-  /** client secret สำหรับ verify ลายเซ็น webhook (อาจ null → ใช้ ENV) */
-  clientSecret: string | null;
-}
-
 /** ผลการ map webhook (pageId → tenant) — ใช้ใน FacebookMessagingService */
 export interface FacebookRoute {
   tenantId: string;
   pageAccessToken: string;
-}
-
-/** ผลการ map webhook TikTok (accountId/open_id → tenant) — ใช้ใน TiktokMessagingService */
-export interface TiktokRoute {
-  tenantId: string;
-  accessToken: string;
-  clientSecret: string | null;
 }
 
 /** รูปแบบที่ปลอดภัยสำหรับส่งออก API — ไม่มี token ดิบ */
@@ -219,103 +202,6 @@ export class ChannelIntegrationService {
     return envToken ? { pageAccessToken: envToken } : null;
   }
 
-  // ─── TikTok ────────────────────────────────────────────────────────────────────
-
-  /**
-   * โหลด tenant + access token จาก accountId/open_id (ใช้ตอนรับ webhook ของ TikTok ที่ส่งมา URL เดียว)
-   * TikTok ส่ง event ของทุกบัญชีมาที่ callback เดียว → map ด้วย to_user_id/open_id (externalAccountId)
-   * query นี้ "ข้าม tenant" โดยตั้งใจ — ChannelIntegration ไม่ได้อยู่ใน TENANT_SCOPED_MODELS
-   */
-  async getTiktokByAccountId(accountId: string): Promise<TiktokRoute | null> {
-    const row = await this.prisma.channelIntegration.findFirst({
-      where: { channel: 'TIKTOK', externalAccountId: accountId, status: 'CONNECTED' },
-    });
-    if (!row?.accessToken) return null;
-    return {
-      tenantId: row.tenantId,
-      accessToken: (this.encryption.decrypt(row.accessToken) as string) ?? '',
-      clientSecret: row.channelSecret
-        ? (this.encryption.decrypt(row.channelSecret) as string) ?? null
-        : null,
-    };
-  }
-
-  /**
-   * โหลด TikTok credential ของ tenant (ใช้ตอน staff ตอบกลับ) — fallback ENV ถ้ายังไม่เชื่อม
-   */
-  async getTiktokCredentials(tenantId: string): Promise<TiktokCredentials | null> {
-    const row = await this.prisma.channelIntegration.findFirst({
-      where: { tenantId, channel: 'TIKTOK' },
-    });
-    if (row?.accessToken && row.status === 'CONNECTED') {
-      return {
-        accessToken: (this.encryption.decrypt(row.accessToken) as string) ?? '',
-        clientSecret: row.channelSecret
-          ? (this.encryption.decrypt(row.channelSecret) as string) ?? null
-          : this.config.get<string>('TIKTOK_CLIENT_SECRET', '') || null,
-      };
-    }
-    const envToken = this.config.get<string>('TIKTOK_ACCESS_TOKEN', '');
-    if (envToken) {
-      return {
-        accessToken: envToken,
-        clientSecret: this.config.get<string>('TIKTOK_CLIENT_SECRET', '') || null,
-      };
-    }
-    return null;
-  }
-
-  /**
-   * เชื่อมต่อ TikTok Business Account ด้วย Access Token:
-   *   1. validate token + ดึง open_id/ชื่อบัญชี (GET /v2/user/info)
-   *   2. เข้ารหัส token (+ client secret ถ้ามี) แล้ว upsert (status = CONNECTED)
-   * หมายเหตุ: TikTok ใช้ callback URL ระดับ "แอป" ตั้งครั้งเดียวใน TikTok Developer Portal
-   *           ต่อ tenant เก็บแค่ access token + (optional) client secret สำหรับ verify ลายเซ็น
-   */
-  async connectTiktok(tenantId: string, dto: ConnectTiktokDto): Promise<ChannelIntegrationView> {
-    const token = dto.accessToken.trim();
-    const secret = dto.clientSecret?.trim() || null;
-
-    // 1. Validate token + ดึงข้อมูลบัญชี
-    const info = await this.fetchTiktokUserInfo(token);
-    if (!info.openId) {
-      throw new BadRequestException('ดึง account id จาก token ไม่ได้ — ตรวจสอบ Access Token');
-    }
-
-    // 2. Encrypt + upsert
-    const encToken = this.encryption.encrypt(token) as string;
-    const encSecret = secret ? (this.encryption.encrypt(secret) as string) : null;
-
-    const row = await this.prisma.channelIntegration.upsert({
-      where: { tenantId_channel: { tenantId, channel: 'TIKTOK' } },
-      create: {
-        tenantId,
-        channel: 'TIKTOK',
-        externalAccountId: info.openId,
-        displayName: info.displayName ?? null,
-        accessToken: encToken,
-        channelSecret: encSecret,
-        status: 'CONNECTED',
-        // TikTok ใช้ callback ระดับแอป (subscribe ครั้งเดียวใน Developer Portal) → ถือว่าพร้อมเมื่อ token ผ่าน
-        webhookVerified: true,
-        connectedAt: new Date(),
-      },
-      update: {
-        externalAccountId: info.openId,
-        displayName: info.displayName ?? null,
-        accessToken: encToken,
-        channelSecret: encSecret,
-        status: 'CONNECTED',
-        webhookVerified: true,
-        statusMessage: null,
-        connectedAt: new Date(),
-      },
-    });
-
-    this.logger.log(`[TikTok connect] tenant=${tenantId} account="${info.displayName}" (${info.openId})`);
-    return this.toView(row);
-  }
-
   /**
    * เชื่อมต่อ Facebook Page ของ tenant ด้วย Page Access Token:
    *   1. validate token + ดึง pageId/ชื่อเพจ (GET /me?fields=id,name)
@@ -396,9 +282,7 @@ export class ChannelIntegrationService {
       const displayName =
         channel === 'LINE'
           ? (await this.fetchLineBotInfo(token)).displayName
-          : channel === 'TIKTOK'
-            ? (await this.fetchTiktokUserInfo(token)).displayName
-            : (await this.fetchFacebookPageInfo(token)).name;
+          : (await this.fetchFacebookPageInfo(token)).name;
       const updated = await this.prisma.channelIntegration.update({
         where: { id: row.id },
         data: {
@@ -606,63 +490,6 @@ export class ChannelIntegrationService {
     if (res.status < 200 || res.status >= 300) {
       throw new Error(`subscribed_apps API ตอบ ${res.status}: ${res.body}`);
     }
-  }
-
-  // ─── TikTok API calls ─────────────────────────────────────────────────────────
-
-  /**
-   * validate access token + ดึงข้อมูลบัญชีจาก TikTok Open API (GET /v2/user/info)
-   * คืน open_id (ใช้เป็น externalAccountId) + display_name
-   */
-  private async fetchTiktokUserInfo(
-    accessToken: string,
-  ): Promise<{ openId?: string; displayName?: string; avatarUrl?: string }> {
-    const res = await this.bearerGet(TIKTOK_USER_INFO_URL, accessToken);
-    if (res.status === 200) {
-      const parsed = JSON.parse(res.body) as {
-        data?: { user?: { open_id?: string; display_name?: string; avatar_url?: string } };
-        error?: { code?: string; message?: string };
-      };
-      const user = parsed.data?.user;
-      if (user?.open_id) {
-        return {
-          openId: user.open_id,
-          displayName: user.display_name,
-          avatarUrl: user.avatar_url,
-        };
-      }
-      // TikTok ตอบ 200 แต่มี error object (เช่น token หมดสิทธิ์)
-      const msg = parsed.error?.message;
-      throw new BadRequestException(
-        msg ? `TikTok ปฏิเสธ token: ${msg}` : 'ดึงข้อมูลบัญชี TikTok ไม่สำเร็จ',
-      );
-    }
-    if (res.status === 401) {
-      throw new BadRequestException('TikTok Access Token ไม่ถูกต้องหรือหมดอายุ');
-    }
-    throw new BadRequestException(`ตรวจสอบ token ไม่สำเร็จ (TikTok ตอบ ${res.status})`);
-  }
-
-  /** GET พร้อม Bearer token (ใช้กับ TikTok Open API) */
-  private bearerGet(url: string, accessToken: string): Promise<HttpResult> {
-    return new Promise((resolve, reject) => {
-      const parsed = new URL(url);
-      const req = https.request(
-        {
-          hostname: parsed.hostname,
-          path: parsed.pathname + parsed.search,
-          method: 'GET',
-          headers: { Authorization: `Bearer ${accessToken}` },
-        },
-        (res) => {
-          let data = '';
-          res.on('data', (chunk) => (data += chunk));
-          res.on('end', () => resolve({ status: res.statusCode ?? 0, body: data }));
-        },
-      );
-      req.on('error', reject);
-      req.end();
-    });
   }
 
   private graphRequest(method: 'GET' | 'POST', url: string): Promise<HttpResult> {

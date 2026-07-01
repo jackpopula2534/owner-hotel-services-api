@@ -14,7 +14,6 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 export enum MessageChannel {
   LINE = 'LINE',
   FACEBOOK = 'FACEBOOK',
-  TIKTOK = 'TIKTOK',
   ALL = 'ALL',
 }
 
@@ -159,24 +158,6 @@ export class ConnectFacebookDto {
   @IsString()
   @IsNotEmpty()
   pageAccessToken: string;
-}
-
-export class ConnectTiktokDto {
-  @ApiProperty({
-    description:
-      'TikTok Business Account Access Token (ระบบจะดึง account id/ชื่อจาก token เอง ผ่าน /v2/user/info)',
-  })
-  @IsString()
-  @IsNotEmpty()
-  accessToken: string;
-
-  @ApiPropertyOptional({
-    description:
-      'TikTok Client Secret (ใช้ verify ลายเซ็น webhook). ถ้าไม่ส่ง ระบบจะ fallback ไป ENV TIKTOK_CLIENT_SECRET',
-  })
-  @IsOptional()
-  @IsString()
-  clientSecret?: string;
 }
 
 // ─── LINE Webhook (internal types) ────────────────────────────────────────────

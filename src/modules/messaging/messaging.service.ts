@@ -4,7 +4,6 @@ import { MessagingGateway } from './messaging.gateway';
 import { ConversationQueryDto } from './dto/messaging.dto';
 import { LineMessagingService } from './line-messaging.service';
 import { FacebookMessagingService } from './facebook-messaging.service';
-import { TiktokMessagingService } from './tiktok-messaging.service';
 
 @Injectable()
 export class MessagingService {
@@ -114,7 +113,6 @@ export class MessagingService {
     staffId: string,
     lineService: LineMessagingService,
     fbService: FacebookMessagingService,
-    tiktokService: TiktokMessagingService,
   ): Promise<void> {
     const conversation = await this.prisma.conversation.findFirst({
       where: { id: conversationId, tenantId },
@@ -127,8 +125,6 @@ export class MessagingService {
       await lineService.sendReply(tenantId, conversationId, content, staffId);
     } else if (conversation.channel === 'FACEBOOK') {
       await fbService.sendReply(tenantId, conversationId, content, staffId);
-    } else if (conversation.channel === 'TIKTOK') {
-      await tiktokService.sendReply(tenantId, conversationId, content, staffId);
     } else {
       throw new NotFoundException(`Unsupported channel: ${conversation.channel}`);
     }
