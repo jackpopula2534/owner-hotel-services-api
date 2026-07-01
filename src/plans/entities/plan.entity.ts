@@ -10,6 +10,9 @@ export class Plan {
   @Column({ unique: true })
   code: string; // S, M, L
 
+  @Column({ type: 'varchar', length: 20, default: 'HOTEL' })
+  system: string; // HOTEL | CAMP
+
   @Column()
   name: string;
 

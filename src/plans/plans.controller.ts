@@ -109,6 +109,7 @@ export class PlansController {
     return {
       id: plan.id,
       code: plan.code,
+      system: plan.system || 'HOTEL',
       name: plan.name,
       description: plan.description,
       priceMonthly,

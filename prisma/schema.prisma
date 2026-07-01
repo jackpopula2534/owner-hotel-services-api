@@ -1854,6 +1854,8 @@ model features {
 model add_ons {
   id              String                @id @default(uuid()) @db.VarChar(36)
   code            String                @unique(map: "IDX_add_ons_code") @db.VarChar(80)
+  // Which product line this module belongs to: HOTEL | CAMP | BOTH
+  system          String                @default("BOTH") @db.VarChar(20)
   name            String                @db.VarChar(150)
   description     String?               @db.Text
   price           Decimal               @default(0.00) @db.Decimal(10, 2)
@@ -2014,6 +2016,8 @@ model plan_features {
 
 model plans {
   id                                                  String          @id @default(uuid()) @db.VarChar(36)
+  // Which product line this plan belongs to: HOTEL | CAMP
+  system                                              String          @default("HOTEL") @db.VarChar(20)
   price_monthly                                       Decimal         @db.Decimal(10, 2)
   price_yearly                                        Decimal?        @db.Decimal(10, 2)
   yearly_discount_percent                             Int             @default(0)

@@ -61,6 +61,9 @@ export class PublicPlanDto {
   @ApiProperty({ example: 'M' })
   code: string;
 
+  @ApiProperty({ example: 'HOTEL', description: 'Product line: HOTEL | CAMP' })
+  system: string;
+
   @ApiProperty({ example: 'Professional' })
   name: string;
 

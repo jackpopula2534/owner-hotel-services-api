@@ -8,7 +8,7 @@ import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
 export class SubscriptionsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  create(createSubscriptionDto: CreateSubscriptionDto) {
+  async create(createSubscriptionDto: CreateSubscriptionDto) {
     const startDate = createSubscriptionDto.startDate
       ? new Date(createSubscriptionDto.startDate)
       : undefined;
@@ -51,7 +51,7 @@ export class SubscriptionsService {
       }
     });
 
-    return this.prisma.subscriptions.create({
+    const created = await this.prisma.subscriptions.create({
       data,
       include: {
         tenants: true,
@@ -59,6 +59,30 @@ export class SubscriptionsService {
         subscription_features: { include: { features: true } },
       },
     });
+
+    // 🏕️ Auto-provision a default campground for Camp-plan tenants. This mirrors
+    // the default hotel `property` created at registration — so a tenant who
+    // subscribes to a Camp plan lands in /camp-terminal with a ready workspace
+    // instead of an empty hotel dashboard. Idempotent + non-fatal: never blocks
+    // the subscription itself if provisioning fails.
+    try {
+      const plan = (created as any).plans_subscriptions_plan_idToplans;
+      const tenantId = (created as any).tenant_id as string | undefined;
+      if (plan?.system === 'CAMP' && tenantId) {
+        const campgroundClient = (this.prisma as any).campground;
+        const existing = await campgroundClient.findFirst({ where: { tenantId } });
+        if (!existing) {
+          const tenantName = (created as any).tenants?.name || 'ลานกางเต็นท์ของฉัน';
+          await campgroundClient.create({
+            data: { tenantId, name: tenantName, status: 'active' },
+          });
+        }
+      }
+    } catch {
+      /* provisioning is best-effort — subscription creation must still succeed */
+    }
+
+    return created;
   }
 
   findAll() {

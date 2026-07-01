@@ -21,12 +21,14 @@ export class PlansService {
       subtitle?: string;
       targetAudience?: string;
       pricePerRoom?: string;
+      system?: string;
     },
   ) {
     const data: any = {
       id: createPlanDto.id,
       code: createPlanDto.code,
       name: createPlanDto.name,
+      system: createPlanDto.system,
       price_monthly: createPlanDto.priceMonthly,
       max_rooms: createPlanDto.maxRooms,
       max_users: createPlanDto.maxUsers,
@@ -106,11 +108,13 @@ export class PlansService {
       subtitle?: string;
       targetAudience?: string;
       pricePerRoom?: string;
+      system?: string;
     },
   ) {
     const data: any = {
       code: updatePlanDto.code,
       name: updatePlanDto.name,
+      system: updatePlanDto.system,
       price_monthly: updatePlanDto.priceMonthly,
       max_rooms: updatePlanDto.maxRooms,
       max_users: updatePlanDto.maxUsers,
