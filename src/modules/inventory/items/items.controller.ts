@@ -15,9 +15,8 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname, join } from 'path';
-import { existsSync, mkdirSync } from 'fs';
+import { memoryStorage } from 'multer';
+import { StorageService } from '@/common/storage/storage.service';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiQuery, ApiConsumes } from '@nestjs/swagger';
 import {
   ItemsService,
@@ -46,6 +45,7 @@ interface MulterFile {
   originalname: string;
   mimetype: string;
   size: number;
+  buffer: Buffer;
   filename: string;
 }
 
@@ -55,7 +55,10 @@ interface MulterFile {
 @RequireAddon('INVENTORY_MODULE')
 @Controller({ path: 'inventory/items', version: '1' })
 export class ItemsController {
-  constructor(private readonly itemsService: ItemsService) {}
+  constructor(
+    private readonly itemsService: ItemsService,
+    private readonly storage: StorageService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'Get all items with pagination and filters' })
@@ -387,21 +390,7 @@ export class ItemsController {
   @ApiResponse({ status: 404, description: 'Item not found' })
   @UseInterceptors(
     FileInterceptor('file', {
-      storage: diskStorage({
-        destination: (_req, _file, cb) => {
-          const uploadPath = join(process.cwd(), 'uploads', 'inventory');
-          if (!existsSync(uploadPath)) {
-            mkdirSync(uploadPath, { recursive: true });
-          }
-          cb(null, uploadPath);
-        },
-        filename: (req, file, cb) => {
-          const itemId = req.params.id;
-          const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-          const ext = extname(file.originalname);
-          cb(null, `item-${itemId}-${uniqueSuffix}${ext}`);
-        },
-      }),
+      storage: memoryStorage(),
       fileFilter: (_req, file, cb) => {
         if (!file.mimetype.match(/^image\/(jpeg|jpg|png|webp|gif)$/)) {
           return cb(
@@ -422,9 +411,12 @@ export class ItemsController {
     if (!file) {
       throw new BadRequestException('ไม่พบไฟล์รูปภาพ');
     }
-    const baseUrl =
-      process.env.API_BASE_URL || `http://localhost:${process.env.PORT || 9011}`;
-    const imageUrl = `${baseUrl}/uploads/inventory/${file.filename}`;
+    const saved = await this.storage.save({
+      folder: 'inventory',
+      file,
+      prefix: `item-${id}`,
+    });
+    const imageUrl = saved.url;
     const data = await this.itemsService.setImageUrl(id, imageUrl, user.tenantId);
     return { success: true, data };
   }

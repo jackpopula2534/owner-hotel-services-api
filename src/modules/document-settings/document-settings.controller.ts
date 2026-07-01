@@ -14,9 +14,8 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { existsSync, mkdirSync } from 'fs';
-import { join, extname } from 'path';
+import { memoryStorage } from 'multer';
+import { StorageService } from '@/common/storage/storage.service';
 import {
   ApiTags,
   ApiBearerAuth,
@@ -40,7 +39,10 @@ interface AuthUser {
 @UseGuards(JwtAuthGuard)
 @Controller('document-settings')
 export class DocumentSettingsController {
-  constructor(private readonly service: DocumentSettingsService) {}
+  constructor(
+    private readonly service: DocumentSettingsService,
+    private readonly storage: StorageService,
+  ) {}
 
   @ApiOperation({ summary: 'Get document settings for a property' })
   @ApiQuery({ name: 'propertyId', required: true, description: 'Property ID' })
@@ -76,20 +78,7 @@ export class DocumentSettingsController {
   @HttpCode(HttpStatus.OK)
   @UseInterceptors(
     FileInterceptor('logo', {
-      storage: diskStorage({
-        destination: (_req, _file, cb) => {
-          const uploadPath = join(process.cwd(), 'uploads', 'document-logos');
-          if (!existsSync(uploadPath)) {
-            mkdirSync(uploadPath, { recursive: true });
-          }
-          cb(null, uploadPath);
-        },
-        filename: (req, file, cb) => {
-          const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-          const ext = extname(file.originalname);
-          cb(null, `logo-${uniqueSuffix}${ext}`);
-        },
-      }),
+      storage: memoryStorage(),
       fileFilter: (_req, file, cb) => {
         if (!file.mimetype.match(/^image\/(jpeg|jpg|png|webp)$/)) {
           return cb(new BadRequestException('อนุญาตเฉพาะไฟล์ภาพ (JPG, PNG, WebP) เท่านั้น'), false);
@@ -108,7 +97,12 @@ export class DocumentSettingsController {
       throw new BadRequestException('กรุณาเลือกไฟล์ Logo');
     }
 
-    const logoUrl = `/uploads/document-logos/${file.filename}`;
+    const saved = await this.storage.save({
+      folder: 'document-logos',
+      file,
+      prefix: 'logo',
+    });
+    const logoUrl = saved.path;
     await this.service.updateLogo(user.tenantId, propertyId, logoUrl);
 
     return { success: true, data: { logoUrl } };

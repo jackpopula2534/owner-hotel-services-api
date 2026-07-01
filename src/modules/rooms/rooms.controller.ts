@@ -15,9 +15,8 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse, ApiConsumes } from '@nestjs/swagger';
 import { FilesInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname, join } from 'path';
-import { existsSync, mkdirSync } from 'fs';
+import { memoryStorage } from 'multer';
+import { StorageService } from '@/common/storage/storage.service';
 import { RoomsService } from './rooms.service';
 import { CreateRoomDto } from './dto/create-room.dto';
 import { UpdateRoomDto } from './dto/update-room.dto';
@@ -44,7 +43,10 @@ interface MulterFile {
 @Controller({ path: 'rooms', version: '1' })
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class RoomsController {
-  constructor(private readonly roomsService: RoomsService) {}
+  constructor(
+    private readonly roomsService: RoomsService,
+    private readonly storage: StorageService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'Get all rooms' })
@@ -135,21 +137,7 @@ export class RoomsController {
   @Roles('admin', 'manager', 'tenant_admin', 'platform_admin')
   @UseInterceptors(
     FilesInterceptor('images', 8, {
-      storage: diskStorage({
-        destination: (req, file, cb) => {
-          const uploadPath = join(process.cwd(), 'uploads', 'rooms');
-          if (!existsSync(uploadPath)) {
-            mkdirSync(uploadPath, { recursive: true });
-          }
-          cb(null, uploadPath);
-        },
-        filename: (req, file, cb) => {
-          const roomId = req.params.id;
-          const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-          const ext = extname(file.originalname);
-          cb(null, `room-${roomId}-${uniqueSuffix}${ext}`);
-        },
-      }),
+      storage: memoryStorage(),
       fileFilter: (req, file, cb) => {
         if (!file.mimetype.match(/^image\/(jpeg|jpg|png|webp|gif)$/)) {
           return cb(new BadRequestException('Only image files are allowed'), false);
@@ -168,9 +156,12 @@ export class RoomsController {
       throw new BadRequestException('No image files provided');
     }
 
-    // Build URL paths for the uploaded images
-    const baseUrl = process.env.API_BASE_URL || `http://localhost:${process.env.PORT || 9011}`;
-    const imageUrls = files.map((file) => `${baseUrl}/uploads/rooms/${file.filename}`);
+    // Upload to object storage (local/R2) and collect public URLs
+    const saved = await this.storage.saveMany(files, {
+      folder: 'rooms',
+      prefix: `room-${id}`,
+    });
+    const imageUrls = saved.map((s) => s.url);
 
     // Fetch current room and append new images to existing ones
     // Note: Prisma type doesn't reflect `images` yet — regenerate after migration

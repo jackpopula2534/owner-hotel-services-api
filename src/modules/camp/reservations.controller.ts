@@ -13,9 +13,8 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname, join } from 'path';
-import { existsSync, mkdirSync } from 'fs';
+import { memoryStorage } from 'multer';
+import { StorageService } from '@/common/storage/storage.service';
 import { ReservationsService } from './reservations.service';
 import {
   CreateReservationDto,
@@ -35,6 +34,7 @@ interface MulterFile {
   originalname: string;
   mimetype: string;
   size: number;
+  buffer: Buffer;
   filename: string;
 }
 
@@ -43,7 +43,10 @@ interface MulterFile {
 @Controller({ path: 'camp/reservations', version: '1' })
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class ReservationsController {
-  constructor(private readonly service: ReservationsService) {}
+  constructor(
+    private readonly service: ReservationsService,
+    private readonly storage: StorageService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'List reservations' })
@@ -120,21 +123,7 @@ export class ReservationsController {
   @Roles(...WRITE_ROLES)
   @UseInterceptors(
     FileInterceptor('file', {
-      storage: diskStorage({
-        destination: (_req, _file, cb) => {
-          const uploadPath = join(process.cwd(), 'uploads', 'camp');
-          if (!existsSync(uploadPath)) {
-            mkdirSync(uploadPath, { recursive: true });
-          }
-          cb(null, uploadPath);
-        },
-        filename: (req, file, cb) => {
-          const reservationId = req.params.id;
-          const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-          const ext = extname(file.originalname);
-          cb(null, `slip-${reservationId}-${uniqueSuffix}${ext}`);
-        },
-      }),
+      storage: memoryStorage(),
       fileFilter: (_req, file, cb) => {
         if (!file.mimetype.match(/^image\/(jpeg|jpg|png|webp|gif)$/)) {
           return cb(new BadRequestException('อัปโหลดได้เฉพาะไฟล์รูปภาพ (jpg, png, webp, gif)'), false);
@@ -144,7 +133,7 @@ export class ReservationsController {
       limits: { fileSize: 10 * 1024 * 1024 },
     }),
   )
-  uploadPaymentSlip(
+  async uploadPaymentSlip(
     @Param('id') id: string,
     @UploadedFile() file: MulterFile,
     @CurrentUser() user: { tenantId?: string },
@@ -152,8 +141,12 @@ export class ReservationsController {
     if (!file) {
       throw new BadRequestException('ไม่พบไฟล์สลิป');
     }
-    const baseUrl = process.env.API_BASE_URL || `http://localhost:${process.env.PORT || 9011}`;
-    const slipUrl = `${baseUrl}/uploads/camp/${file.filename}`;
+    const saved = await this.storage.save({
+      folder: 'camp',
+      file,
+      prefix: `slip-${id}`,
+    });
+    const slipUrl = saved.url;
     return this.service.attachSlipUrl(id, slipUrl, user?.tenantId);
   }
 }

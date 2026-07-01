@@ -1,6 +1,7 @@
 import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD, Reflector } from '@nestjs/core';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { StorageModule } from './common/storage/storage.module';
 import { LanguageMiddleware } from './common/middleware/language.middleware';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { EventEmitterModule } from '@nestjs/event-emitter';
@@ -112,6 +113,7 @@ import { TenantGuard } from './common/guards/tenant.guard';
       isGlobal: true,
       validate, // throws at startup if any required env var is missing
     }),
+    StorageModule,
     EventEmitterModule.forRoot({
       // Use this so event handlers don't block the emitter
       wildcard: false,

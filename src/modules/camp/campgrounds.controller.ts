@@ -21,9 +21,8 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname, join } from 'path';
-import { existsSync, mkdirSync } from 'fs';
+import { memoryStorage } from 'multer';
+import { StorageService } from '@/common/storage/storage.service';
 import { CampgroundsService } from './campgrounds.service';
 import {
   CreateCampgroundDto,
@@ -44,6 +43,7 @@ interface MulterFile {
   originalname: string;
   mimetype: string;
   size: number;
+  buffer: Buffer;
   filename: string;
 }
 
@@ -52,7 +52,10 @@ interface MulterFile {
 @Controller({ path: 'camp/campgrounds', version: '1' })
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class CampgroundsController {
-  constructor(private readonly service: CampgroundsService) {}
+  constructor(
+    private readonly service: CampgroundsService,
+    private readonly storage: StorageService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'List campgrounds' })
@@ -106,21 +109,7 @@ export class CampgroundsController {
   @Roles(...WRITE_ROLES)
   @UseInterceptors(
     FileInterceptor('file', {
-      storage: diskStorage({
-        destination: (_req, _file, cb) => {
-          const uploadPath = join(process.cwd(), 'uploads', 'camp');
-          if (!existsSync(uploadPath)) {
-            mkdirSync(uploadPath, { recursive: true });
-          }
-          cb(null, uploadPath);
-        },
-        filename: (req, file, cb) => {
-          const campId = req.params.id;
-          const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-          const ext = extname(file.originalname);
-          cb(null, `camp-${campId}-${uniqueSuffix}${ext}`);
-        },
-      }),
+      storage: memoryStorage(),
       fileFilter: (_req, file, cb) => {
         if (!file.mimetype.match(/^image\/(jpeg|jpg|png|webp|gif)$/)) {
           return cb(new BadRequestException('อัปโหลดได้เฉพาะไฟล์รูปภาพ (jpg, png, webp, gif)'), false);
@@ -130,7 +119,7 @@ export class CampgroundsController {
       limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
     }),
   )
-  uploadMap(
+  async uploadMap(
     @Param('id') id: string,
     @UploadedFile() file: MulterFile,
     @CurrentUser() user: { tenantId?: string },
@@ -138,8 +127,12 @@ export class CampgroundsController {
     if (!file) {
       throw new BadRequestException('ไม่พบไฟล์รูปภาพ');
     }
-    const baseUrl = process.env.API_BASE_URL || `http://localhost:${process.env.PORT || 9011}`;
-    const mapImageUrl = `${baseUrl}/uploads/camp/${file.filename}`;
+    const saved = await this.storage.save({
+      folder: 'camp',
+      file,
+      prefix: `camp-${id}`,
+    });
+    const mapImageUrl = saved.url;
     return this.service.setMap(id, { mapImageUrl }, user?.tenantId);
   }
 
@@ -150,21 +143,7 @@ export class CampgroundsController {
   @Roles(...WRITE_ROLES)
   @UseInterceptors(
     FilesInterceptor('images', 12, {
-      storage: diskStorage({
-        destination: (_req, _file, cb) => {
-          const uploadPath = join(process.cwd(), 'uploads', 'camp');
-          if (!existsSync(uploadPath)) {
-            mkdirSync(uploadPath, { recursive: true });
-          }
-          cb(null, uploadPath);
-        },
-        filename: (req, file, cb) => {
-          const campId = req.params.id;
-          const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-          const ext = extname(file.originalname);
-          cb(null, `camp-${campId}-img-${uniqueSuffix}${ext}`);
-        },
-      }),
+      storage: memoryStorage(),
       fileFilter: (_req, file, cb) => {
         if (!file.mimetype.match(/^image\/(jpeg|jpg|png|webp|gif)$/)) {
           return cb(new BadRequestException('อัปโหลดได้เฉพาะไฟล์รูปภาพ (jpg, png, webp, gif)'), false);
@@ -174,7 +153,7 @@ export class CampgroundsController {
       limits: { fileSize: 10 * 1024 * 1024 }, // 10MB ต่อไฟล์
     }),
   )
-  uploadImages(
+  async uploadImages(
     @Param('id') id: string,
     @UploadedFiles() files: MulterFile[],
     @CurrentUser() user: { tenantId?: string },
@@ -182,8 +161,11 @@ export class CampgroundsController {
     if (!files || files.length === 0) {
       throw new BadRequestException('ไม่พบไฟล์รูปภาพ');
     }
-    const baseUrl = process.env.API_BASE_URL || `http://localhost:${process.env.PORT || 9011}`;
-    const imageUrls = files.map((file) => `${baseUrl}/uploads/camp/${file.filename}`);
+    const saved = await this.storage.saveMany(files, {
+      folder: 'camp',
+      prefix: `camp-${id}-img`,
+    });
+    const imageUrls = saved.map((s) => s.url);
     return this.service.addImages(id, imageUrls, user?.tenantId);
   }
 

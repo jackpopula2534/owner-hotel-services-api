@@ -15,9 +15,8 @@ import {
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname, join } from 'path';
-import { existsSync, mkdirSync } from 'fs';
+import { memoryStorage } from 'multer';
+import { StorageService } from '@/common/storage/storage.service';
 import {
   ApiTags,
   ApiOperation,
@@ -39,7 +38,10 @@ import { CurrentUser } from '@/common/decorators/current-user.decorator';
 @RequireAddon('INVENTORY_MODULE')
 @Controller({ path: 'inventory/supplier-quotes', version: '1' })
 export class SupplierQuotesController {
-  constructor(private readonly supplierQuotesService: SupplierQuotesService) {}
+  constructor(
+    private readonly supplierQuotesService: SupplierQuotesService,
+    private readonly storage: StorageService,
+  ) {}
 
   // ─── Static / Collection Routes (MUST come before :id) ──────────
 
@@ -190,21 +192,7 @@ export class SupplierQuotesController {
   @ApiResponse({ status: 400, description: 'Invalid file type or size' })
   @UseInterceptors(
     FileInterceptor('file', {
-      storage: diskStorage({
-        destination: (_req, _file, cb) => {
-          const uploadPath = join(process.cwd(), 'uploads', 'supplier-quotes');
-          if (!existsSync(uploadPath)) {
-            mkdirSync(uploadPath, { recursive: true });
-          }
-          cb(null, uploadPath);
-        },
-        filename: (req, file, cb) => {
-          const quoteId = req.params.id;
-          const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-          const ext = extname(file.originalname);
-          cb(null, `quote-${quoteId}-${uniqueSuffix}${ext}`);
-        },
-      }),
+      storage: memoryStorage(),
       fileFilter: (_req, file, cb) => {
         if (
           !file.mimetype.match(
@@ -229,7 +217,12 @@ export class SupplierQuotesController {
     if (!file) {
       throw new BadRequestException('กรุณาเลือกไฟล์');
     }
-    const attachmentUrl = `/uploads/supplier-quotes/${file.filename}`;
+    const saved = await this.storage.save({
+      folder: 'supplier-quotes',
+      file,
+      prefix: `quote-${id}`,
+    });
+    const attachmentUrl = saved.path;
 
     // Update quote with attachment URL
     await this.supplierQuotesService.updateAttachment(id, attachmentUrl, user.tenantId);

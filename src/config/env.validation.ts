@@ -33,6 +33,11 @@ export enum NodeEnvironment {
   Test = 'test',
 }
 
+export enum StorageDriver {
+  Local = 'local',
+  S3 = 's3',
+}
+
 /**
  * Known-leaked / placeholder JWT secrets that MUST NOT be used in any
  * environment. The first entry is the historical value that was committed
@@ -194,6 +199,54 @@ export class EnvironmentVariables {
   @IsString()
   @IsOptional()
   PROMPTPAY_WEBHOOK_SECRET?: string;
+
+  // ── File storage (uploads) ────────────────────────────────────────────────
+  /**
+   * Storage driver สำหรับไฟล์อัพโหลด (slip, logo, รูป ฯลฯ)
+   *   - 'local' (default): เขียนลง ./uploads แล้ว serve ผ่าน /uploads — สำหรับ dev เท่านั้น
+   *   - 's3': อัพขึ้น object storage (Cloudflare R2 / AWS S3 / DO Spaces) — บังคับใช้บน prod
+   *
+   * ⚠️ บน production ห้ามใช้ 'local' — container restart/scale แล้วไฟล์หาย
+   * เมื่อ STORAGE_DRIVER=s3 ต้องระบุ S3_* ครบ (บังคับใน validate() ด้านล่าง)
+   */
+  @IsEnum(StorageDriver)
+  @IsOptional()
+  STORAGE_DRIVER: StorageDriver = StorageDriver.Local;
+
+  /** S3/R2 bucket name */
+  @IsString()
+  @IsOptional()
+  @Validate(NotPlaceholderConstraint)
+  S3_BUCKET?: string;
+
+  /** Public base URL ของไฟล์ เช่น https://cdn.example.com หรือ R2 public bucket URL */
+  @IsString()
+  @IsOptional()
+  @Validate(NotPlaceholderConstraint)
+  S3_PUBLIC_URL?: string;
+
+  /** S3-compatible endpoint — R2/Spaces ต้องระบุ, AWS S3 เว้นว่างได้ */
+  @IsString()
+  @IsOptional()
+  S3_ENDPOINT?: string;
+
+  @IsString()
+  @IsOptional()
+  S3_REGION?: string;
+
+  @IsString()
+  @IsOptional()
+  @Validate(NotPlaceholderConstraint)
+  S3_ACCESS_KEY_ID?: string;
+
+  @IsString()
+  @IsOptional()
+  @Validate(NotPlaceholderConstraint)
+  S3_SECRET_ACCESS_KEY?: string;
+
+  @IsString()
+  @IsOptional()
+  S3_FORCE_PATH_STYLE?: string;
 }
 
 /**
@@ -242,6 +295,39 @@ export function validate(config: Record<string, unknown>): EnvironmentVariables 
         `  • Generate one with: openssl rand -hex 32\n` +
         `  • Add to your production .env: ENCRYPTION_KEY=<64-hex-chars>\n` +
         `  • Without this, PDPA-sensitive fields ship to MySQL UNENCRYPTED.\n`,
+    );
+  }
+
+  // ── Conditional rule: STORAGE_DRIVER=s3 requires full S3/R2 credentials ──
+  // ไฟล์อัพโหลดต้องไปอยู่บน object storage บน production. ถ้าตั้ง driver=s3
+  // แต่ใส่ creds ไม่ครบ จะ fail-fast แทนที่จะ silently เขียนลง local disk.
+  if (validated.STORAGE_DRIVER === StorageDriver.S3) {
+    const missing: string[] = [];
+    if (!validated.S3_BUCKET) missing.push('S3_BUCKET');
+    if (!validated.S3_PUBLIC_URL) missing.push('S3_PUBLIC_URL');
+    if (!validated.S3_ACCESS_KEY_ID) missing.push('S3_ACCESS_KEY_ID');
+    if (!validated.S3_SECRET_ACCESS_KEY) missing.push('S3_SECRET_ACCESS_KEY');
+    if (missing.length > 0) {
+      throw new Error(
+        `\n┌────────────────────────────────────────────────────────────────┐\n` +
+          `│  [Config] STORAGE_DRIVER=s3 but required S3/R2 vars are missing │\n` +
+          `└────────────────────────────────────────────────────────────────┘\n` +
+          missing.map((m) => `  • ${m} is required`).join('\n') +
+          `\n  • For Cloudflare R2 also set S3_ENDPOINT + S3_FORCE_PATH_STYLE=true\n`,
+      );
+    }
+  }
+
+  // Warn (don't fail) if running production on local disk storage — ไฟล์จะหายตอน redeploy
+  if (
+    validated.NODE_ENV === NodeEnvironment.Production &&
+    validated.STORAGE_DRIVER === StorageDriver.Local
+  ) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      '[Config] ⚠️  NODE_ENV=production but STORAGE_DRIVER=local — ' +
+        'uploaded files will be LOST on container restart/redeploy and cannot ' +
+        'scale across instances. Set STORAGE_DRIVER=s3 with R2/S3 credentials.',
     );
   }
 

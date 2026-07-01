@@ -15,9 +15,8 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { FilesInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname, join } from 'path';
-import { existsSync, mkdirSync } from 'fs';
+import { memoryStorage } from 'multer';
+import { StorageService } from '@/common/storage/storage.service';
 import { PitchesService } from './pitches.service';
 import {
   BulkCreatePitchDto,
@@ -39,6 +38,7 @@ interface MulterFile {
   originalname: string;
   mimetype: string;
   size: number;
+  buffer: Buffer;
   filename: string;
 }
 
@@ -47,7 +47,10 @@ interface MulterFile {
 @Controller({ path: 'camp/pitches', version: '1' })
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class PitchesController {
-  constructor(private readonly service: PitchesService) {}
+  constructor(
+    private readonly service: PitchesService,
+    private readonly storage: StorageService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'List pitches by campgroundId' })
@@ -125,21 +128,7 @@ export class PitchesController {
   @Roles(...WRITE_ROLES)
   @UseInterceptors(
     FilesInterceptor('images', 12, {
-      storage: diskStorage({
-        destination: (_req, _file, cb) => {
-          const uploadPath = join(process.cwd(), 'uploads', 'camp');
-          if (!existsSync(uploadPath)) {
-            mkdirSync(uploadPath, { recursive: true });
-          }
-          cb(null, uploadPath);
-        },
-        filename: (req, file, cb) => {
-          const pitchId = req.params.id;
-          const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-          const ext = extname(file.originalname);
-          cb(null, `pitch-${pitchId}-img-${uniqueSuffix}${ext}`);
-        },
-      }),
+      storage: memoryStorage(),
       fileFilter: (_req, file, cb) => {
         if (!file.mimetype.match(/^image\/(jpeg|jpg|png|webp|gif)$/)) {
           return cb(new BadRequestException('อัปโหลดได้เฉพาะไฟล์รูปภาพ (jpg, png, webp, gif)'), false);
@@ -149,7 +138,7 @@ export class PitchesController {
       limits: { fileSize: 10 * 1024 * 1024 },
     }),
   )
-  uploadImages(
+  async uploadImages(
     @Param('id') id: string,
     @UploadedFiles() files: MulterFile[],
     @CurrentUser() user: { tenantId?: string },
@@ -157,8 +146,11 @@ export class PitchesController {
     if (!files || files.length === 0) {
       throw new BadRequestException('ไม่พบไฟล์รูปภาพ');
     }
-    const baseUrl = process.env.API_BASE_URL || `http://localhost:${process.env.PORT || 9011}`;
-    const imageUrls = files.map((file) => `${baseUrl}/uploads/camp/${file.filename}`);
+    const saved = await this.storage.saveMany(files, {
+      folder: 'camp',
+      prefix: `pitch-${id}-img`,
+    });
+    const imageUrls = saved.map((s) => s.url);
     return this.service.addImages(id, imageUrls, user?.tenantId);
   }
 

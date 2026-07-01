@@ -15,14 +15,20 @@ async function bootstrap() {
     rawBody: true,
   });
 
-  // Ensure uploads directory exists
-  const uploadsPath = join(process.cwd(), 'uploads');
-  if (!existsSync(uploadsPath)) {
-    mkdirSync(uploadsPath, { recursive: true });
+  // Serve local uploads only when using the local storage driver.
+  // On production (STORAGE_DRIVER=s3) files live on object storage (R2/S3) and
+  // are served from the bucket's public URL — no local disk serving needed.
+  const storageDriver = process.env.STORAGE_DRIVER || 'local';
+  if (storageDriver !== 's3') {
+    const uploadsPath = join(process.cwd(), 'uploads');
+    if (!existsSync(uploadsPath)) {
+      mkdirSync(uploadsPath, { recursive: true });
+    }
+    app.useStaticAssets(uploadsPath, { prefix: '/uploads' });
+    logger.log('Serving local uploads at /uploads (STORAGE_DRIVER=local)');
+  } else {
+    logger.log('STORAGE_DRIVER=s3 — uploads served from object storage');
   }
-
-  // Serve static files from uploads directory
-  app.useStaticAssets(uploadsPath, { prefix: '/uploads' });
 
   // Increase body parser limit to 10 MB to support QC submissions that include
   // base64-encoded photos (up to 5 images) and inspector signature data URLs.

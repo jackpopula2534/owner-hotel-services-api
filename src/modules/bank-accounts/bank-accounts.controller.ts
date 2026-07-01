@@ -14,9 +14,8 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { diskStorage } from 'multer';
-import { extname, join } from 'path';
-import { existsSync, mkdirSync } from 'fs';
+import { memoryStorage } from 'multer';
+import { StorageService } from '@/common/storage/storage.service';
 import { Public } from '@/common/decorators/public.decorator';
 import { Roles } from '@/common/decorators/roles.decorator';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
@@ -31,6 +30,7 @@ interface MulterFile {
   encoding: string;
   mimetype: string;
   size: number;
+  buffer: Buffer;
   filename: string;
   path: string;
 }
@@ -38,7 +38,10 @@ interface MulterFile {
 @ApiTags('Bank Accounts')
 @Controller('bank-accounts')
 export class BankAccountsController {
-  constructor(private readonly bankAccountsService: BankAccountsService) {}
+  constructor(
+    private readonly bankAccountsService: BankAccountsService,
+    private readonly storage: StorageService,
+  ) {}
 
   // ─── Public endpoint (แสดงรายการบัญชีที่ active สำหรับหน้า billing) ─────────
 
@@ -118,17 +121,7 @@ export class BankAccountsController {
   @ApiResponse({ status: 201, description: 'Logo uploaded, returns { url }' })
   @UseInterceptors(
     FileInterceptor('logo', {
-      storage: diskStorage({
-        destination: (_req, _file, cb) => {
-          const uploadPath = join(process.cwd(), 'uploads', 'banks');
-          if (!existsSync(uploadPath)) mkdirSync(uploadPath, { recursive: true });
-          cb(null, uploadPath);
-        },
-        filename: (_req, file, cb) => {
-          const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-          cb(null, `bank-${unique}${extname(file.originalname)}`);
-        },
-      }),
+      storage: memoryStorage(),
       fileFilter: (_req, file, cb) => {
         if (!file.mimetype.match(/^image\/(jpeg|jpg|png|webp|gif|svg\+xml)$/)) {
           return cb(new BadRequestException('Only image files are allowed'), false);
@@ -138,9 +131,13 @@ export class BankAccountsController {
       limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
     }),
   )
-  uploadLogo(@UploadedFile() file: MulterFile) {
+  async uploadLogo(@UploadedFile() file: MulterFile) {
     if (!file) throw new BadRequestException('No file provided');
-    const baseUrl = process.env.API_BASE_URL || `http://localhost:${process.env.PORT || 9011}`;
-    return { url: `${baseUrl}/uploads/banks/${file.filename}` };
+    const saved = await this.storage.save({
+      folder: 'banks',
+      file,
+      prefix: 'bank',
+    });
+    return { url: saved.url };
   }
 }

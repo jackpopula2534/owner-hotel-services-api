@@ -16,9 +16,8 @@ import {
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiParam, ApiConsumes } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { FilesInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname, join } from 'path';
-import { existsSync, mkdirSync } from 'fs';
+import { memoryStorage } from 'multer';
+import { StorageService } from '@/common/storage/storage.service';
 import { JobPostingService } from './job-posting.service';
 import { UpsertJobPostingDto, PublicApplicationDto } from './dto/recruitment.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -34,6 +33,7 @@ type AuthUser = { tenantId?: string; id?: string };
 interface MulterFile {
   originalname: string;
   mimetype: string;
+  buffer: Buffer;
   filename: string;
 }
 
@@ -92,7 +92,10 @@ export class JobPostingController {
 @ApiTags('public / jobs')
 @Controller({ path: 'public/jobs', version: '1' })
 export class PublicJobController {
-  constructor(private readonly service: JobPostingService) {}
+  constructor(
+    private readonly service: JobPostingService,
+    private readonly storage: StorageService,
+  ) {}
 
   @Public()
   @Get(':token')
@@ -122,18 +125,7 @@ export class PublicJobController {
   @Throttle({ default: { limit: 15, ttl: 60 } })
   @UseInterceptors(
     FilesInterceptor('files', 5, {
-      storage: diskStorage({
-        destination: (_req, _file, cb) => {
-          const uploadPath = join(process.cwd(), 'uploads', 'applications');
-          if (!existsSync(uploadPath)) mkdirSync(uploadPath, { recursive: true });
-          cb(null, uploadPath);
-        },
-        filename: (req, file, cb) => {
-          const token = req.params.token;
-          const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-          cb(null, `app-${token}-${unique}${extname(file.originalname)}`);
-        },
-      }),
+      storage: memoryStorage(),
       fileFilter: (_req, file, cb) => {
         if (!file.mimetype.match(/^(image\/(jpeg|jpg|png|webp)|application\/(pdf|msword|vnd\.openxmlformats-officedocument\.wordprocessingml\.document))$/)) {
           return cb(new BadRequestException('รองรับเฉพาะไฟล์ PDF, DOC/DOCX, รูปภาพ'), false);
@@ -153,11 +145,14 @@ export class PublicJobController {
     if (!files || files.length === 0) throw new BadRequestException('ไม่พบไฟล์ที่อัปโหลด');
 
     const safeKind = (APPLICATION_UPLOAD_KINDS as readonly string[]).includes(kind) ? kind : 'document';
-    const baseUrl = process.env.API_BASE_URL || `http://localhost:${process.env.PORT || 9011}`;
-    const urls = files.map((file) => ({
+    const saved = await this.storage.saveMany(files, {
+      folder: 'applications',
+      prefix: `app-${token}`,
+    });
+    const urls = saved.map((s, i) => ({
       kind: safeKind,
-      url: `${baseUrl}/uploads/applications/${file.filename}`,
-      name: file.originalname,
+      url: s.url,
+      name: files[i].originalname,
     }));
     return { urls };
   }

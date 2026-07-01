@@ -22,10 +22,9 @@ import {
   ApiTags,
   ApiBearerAuth,
 } from '@nestjs/swagger';
-import { diskStorage } from 'multer';
-import { existsSync, mkdirSync } from 'fs';
-import { extname, join } from 'path';
+import { memoryStorage } from 'multer';
 import { PaymentsService } from './payments.service';
+import { StorageService } from '../common/storage/storage.service';
 import { SkipSubscriptionCheck } from '../common/decorators/skip-subscription-check.decorator';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
@@ -35,22 +34,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 
-// ── slip upload storage (consistent with other upload modules) ──
-const slipStorage = diskStorage({
-  destination: (_req, _file, cb) => {
-    const uploadPath = join(process.cwd(), 'uploads', 'payment-slips');
-    if (!existsSync(uploadPath)) {
-      mkdirSync(uploadPath, { recursive: true });
-    }
-    cb(null, uploadPath);
-  },
-  filename: (_req, file, cb) => {
-    const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-    const ext = extname(file.originalname);
-    cb(null, `slip-${uniqueSuffix}${ext}`);
-  },
-});
-
+// ── slip upload: เก็บไฟล์ใน memory แล้วส่งต่อให้ StorageService (local/R2) ──
 const slipFileFilter = (
   _req: any,
   file: { mimetype: string },
@@ -74,7 +58,10 @@ const slipFileFilter = (
 @SkipSubscriptionCheck()
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class PaymentsController {
-  constructor(private readonly paymentsService: PaymentsService) {}
+  constructor(
+    private readonly paymentsService: PaymentsService,
+    private readonly storage: StorageService,
+  ) {}
 
   // ─────────────────────────────────────────────────────────────────
   // POST /payments — รองรับทั้ง multipart/form-data (slip upload)
@@ -107,21 +94,34 @@ export class PaymentsController {
   @Roles('admin', 'manager', 'tenant_admin', 'platform_admin')
   @UseInterceptors(
     FileInterceptor('slip', {
-      storage: slipStorage,
+      storage: memoryStorage(),
       fileFilter: slipFileFilter,
       limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
     }),
   )
   async create(
     @Body() body: any,
-    @UploadedFile() slip: { filename: string } | undefined,
+    @UploadedFile()
+    slip:
+      | { buffer: Buffer; originalname: string; mimetype: string }
+      | undefined,
     @CurrentUser() user: { tenantId?: string },
   ) {
+    let slipUrl: string | undefined = body.slipUrl;
+    if (slip) {
+      const saved = await this.storage.save({
+        folder: 'payment-slips',
+        file: slip,
+        prefix: 'slip',
+      });
+      slipUrl = saved.path;
+    }
+
     // build DTO from multipart body fields (all values come as strings in FormData)
     const dto: CreatePaymentDto = {
       invoiceId: body.invoiceId,
       method: body.method,
-      slipUrl: slip ? `/uploads/payment-slips/${slip.filename}` : body.slipUrl,
+      slipUrl,
       status: body.status,
     };
 

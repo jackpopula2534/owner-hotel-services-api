@@ -20,9 +20,8 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { FilesInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname, join } from 'path';
-import { existsSync, mkdirSync } from 'fs';
+import { memoryStorage } from 'multer';
+import { StorageService } from '@/common/storage/storage.service';
 import { AddonsService } from './addons.service';
 import { CreateAddonDto, UpdateAddonDto } from './dto/addon.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -38,6 +37,7 @@ interface MulterFile {
   originalname: string;
   mimetype: string;
   size: number;
+  buffer: Buffer;
   filename: string;
 }
 
@@ -46,7 +46,10 @@ interface MulterFile {
 @Controller({ path: 'camp/addons', version: '1' })
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class AddonsController {
-  constructor(private readonly service: AddonsService) {}
+  constructor(
+    private readonly service: AddonsService,
+    private readonly storage: StorageService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'List rental addons by campgroundId' })
@@ -90,21 +93,7 @@ export class AddonsController {
   @Roles(...WRITE_ROLES)
   @UseInterceptors(
     FilesInterceptor('images', 10, {
-      storage: diskStorage({
-        destination: (_req, _file, cb) => {
-          const uploadPath = join(process.cwd(), 'uploads', 'camp');
-          if (!existsSync(uploadPath)) {
-            mkdirSync(uploadPath, { recursive: true });
-          }
-          cb(null, uploadPath);
-        },
-        filename: (req, file, cb) => {
-          const addonId = req.params.id;
-          const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-          const ext = extname(file.originalname);
-          cb(null, `addon-${addonId}-${uniqueSuffix}${ext}`);
-        },
-      }),
+      storage: memoryStorage(),
       fileFilter: (_req, file, cb) => {
         if (!file.mimetype.match(/^image\/(jpeg|jpg|png|webp|gif)$/)) {
           return cb(new BadRequestException('อัปโหลดได้เฉพาะไฟล์รูปภาพ (jpg, png, webp, gif)'), false);
@@ -114,7 +103,7 @@ export class AddonsController {
       limits: { fileSize: 10 * 1024 * 1024 }, // 10MB ต่อไฟล์
     }),
   )
-  uploadImages(
+  async uploadImages(
     @Param('id') id: string,
     @UploadedFiles() files: MulterFile[],
     @CurrentUser() user: { tenantId?: string },
@@ -122,8 +111,11 @@ export class AddonsController {
     if (!files || files.length === 0) {
       throw new BadRequestException('ไม่พบไฟล์รูปภาพ');
     }
-    const baseUrl = process.env.API_BASE_URL || `http://localhost:${process.env.PORT || 9011}`;
-    const imageUrls = files.map((file) => `${baseUrl}/uploads/camp/${file.filename}`);
+    const saved = await this.storage.saveMany(files, {
+      folder: 'camp',
+      prefix: `addon-${id}`,
+    });
+    const imageUrls = saved.map((s) => s.url);
     return this.service.addImages(id, imageUrls, user?.tenantId);
   }
 
