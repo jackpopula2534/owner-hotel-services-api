@@ -104,19 +104,20 @@ export class SeederService {
       {
         code: 'FREE',
         name: 'ทดลองฟรี',
+        system: 'HOTEL',
         priceMonthly: 0,
         yearlyDiscountPercent: 0,
         maxRooms: 5,
         maxUsers: 2,
         maxProperties: 2,
         isActive: true,
-        description: 'ลองใช้ทุกฟีเจอร์ได้เต็มที่ 14 วัน ไม่ต้องผูกบัตรเครดิต',
+        description: 'ลองใช้ทุกฟีเจอร์ได้เต็มที่ 15 วัน ไม่ต้องผูกบัตรเครดิต',
         subtitle: 'เริ่มต้นใน 2 นาที ไม่มีค่าใช้จ่าย',
         targetAudience: 'สำหรับทุกโรงแรมที่อยากลองก่อนตัดสินใจ',
         pricePerRoom: null,
         displayOrder: 0,
         isPopular: false,
-        badge: 'ฟรี 14 วัน',
+        badge: 'ฟรี 15 วัน',
         highlightColor: null,
         features: JSON.stringify([
           'ฟีเจอร์ครบทุกระบบ ไม่มีกั๊ก',
@@ -131,6 +132,7 @@ export class SeederService {
       {
         code: 'S',
         name: 'Starter',
+        system: 'HOTEL',
         priceMonthly: 590,
         yearlyDiscountPercent: 15,
         maxRooms: 20,
@@ -158,6 +160,7 @@ export class SeederService {
       {
         code: 'M',
         name: 'Professional',
+        system: 'HOTEL',
         priceMonthly: 1290,
         yearlyDiscountPercent: 15,
         maxRooms: 80,
@@ -175,10 +178,8 @@ export class SeederService {
         features: JSON.stringify([
           'ทุกฟีเจอร์ของ Starter +',
           'Housekeeping + Maintenance',
-          'ระบบร้านอาหาร (F&B)',
-          'Analytics & Revenue Reports',
-          'เชื่อม OTA Channel Manager',
-          'Loyalty Program สะสมแต้ม',
+          'ระบบร้านอาหาร (F&B) + POS + Kitchen',
+          'CRM & Guest 360 + Loyalty สะสมแต้ม',
           'Priority Support ตอบภายใน 4 ชม.',
         ]),
         buttonText: 'เริ่มใช้งาน Professional',
@@ -186,6 +187,7 @@ export class SeederService {
       {
         code: 'L',
         name: 'Business',
+        system: 'HOTEL',
         priceMonthly: 2490,
         yearlyDiscountPercent: 15,
         maxRooms: 200,
@@ -202,14 +204,71 @@ export class SeederService {
         highlightColor: null,
         features: JSON.stringify([
           'ทุกฟีเจอร์ของ Professional +',
+          'Inventory + จัดซื้อ + คลังสินค้า',
+          'ระบบ HR ครบวงจร',
+          'ระบบบัญชี + Cost Accounting (USALI)',
           'Multi-property Dashboard รวมศูนย์',
-          'Promotions & Campaigns',
-          'Loyalty Program ขั้นสูง',
-          'Unlimited Users',
-          'Audit Log + Security ระดับองค์กร',
+          'Audit Log + API + Security ระดับองค์กร',
           '24/7 Priority Support โทร + แชท',
         ]),
         buttonText: 'เริ่มใช้งาน Business',
+      },
+      // ─── ระบบลานกางเต็นท์ (CAMP) ──────────────────────────────
+      {
+        code: 'CAMP_FREE',
+        name: 'ทดลองฟรี (ลานกางเต็นท์)',
+        system: 'CAMP',
+        priceMonthly: 0,
+        yearlyDiscountPercent: 0,
+        maxRooms: 10,
+        maxUsers: 2,
+        maxProperties: 1,
+        isActive: true,
+        description: 'ลองใช้ระบบจัดการลานกางเต็นท์ได้เต็มที่ 15 วัน ไม่ต้องผูกบัตรเครดิต',
+        subtitle: 'เริ่มต้นใน 2 นาที ไม่มีค่าใช้จ่าย',
+        targetAudience: 'สำหรับลานกางเต็นท์ที่อยากลองก่อนตัดสินใจ',
+        pricePerRoom: null,
+        displayOrder: 0,
+        isPopular: false,
+        badge: 'ฟรี 15 วัน',
+        highlightColor: null,
+        features: JSON.stringify([
+          'จัดการลาน / โซน / จุดกางเต็นท์',
+          'จอง + แผนผังลาน 2D',
+          'อุปกรณ์ให้เช่า (เต็นท์/ถุงนอน/เก้าอี้)',
+          'Retail POS หน้าลาน',
+          'รับชำระด้วย PromptPay QR',
+          'ยกเลิกได้ตลอดเวลา',
+        ]),
+        buttonText: 'เริ่มทดลองฟรี — ไม่มีค่าใช้จ่าย',
+      },
+      {
+        code: 'CAMP',
+        name: 'Camp',
+        system: 'CAMP',
+        priceMonthly: 199,
+        yearlyDiscountPercent: 15,
+        maxRooms: 100,
+        maxUsers: 5,
+        maxProperties: 1,
+        isActive: true,
+        description: 'ระบบจัดการลานกางเต็นท์ครบวงจร ราคาเดียวจบ',
+        subtitle: 'คุ้มที่สุดสำหรับลานกางเต็นท์',
+        targetAudience: 'ลานกางเต็นท์ · แคมป์ไซต์ · กลามปิ้ง',
+        pricePerRoom: null,
+        displayOrder: 1,
+        isPopular: true,
+        badge: 'ราคาเดียวจบ',
+        highlightColor: '#10B981',
+        features: JSON.stringify([
+          'จัดการลาน / โซน / จุดกางเต็นท์',
+          'จอง + แผนผังลาน 2D',
+          'อุปกรณ์ให้เช่า (เต็นท์/ถุงนอน/เก้าอี้)',
+          'Retail POS หน้าลาน',
+          'รับชำระด้วย PromptPay QR',
+          'รายงานรายได้รายวัน',
+        ]),
+        buttonText: 'เริ่มใช้งาน Camp',
       },
     ];
 
@@ -358,6 +417,20 @@ export class SeederService {
         priceMonthly: 990,
         isActive: true,
       },
+
+      // ─── COMMUNICATION ────────────────────────────────────
+      {
+        code: 'messaging_inbox',
+        name: 'แชทรวม FB/LINE (Omnichannel Inbox)',
+        description:
+          'กล่องข้อความรวมจาก Facebook Messenger และ LINE ในที่เดียว — ตอบแชทลูกค้าได้ครบทุกช่องทาง ขายแยก ไม่รวมในแพ็กใด',
+        type: FeatureType.TOGGLE,
+        category: 'COMMUNICATION',
+        icon: 'MessageCircle',
+        displayOrder: 10,
+        priceMonthly: 390,
+        isActive: true,
+      },
     ];
 
     for (const featureData of features) {
@@ -400,11 +473,13 @@ export class SeederService {
      *   ADVANCED, REPORTING (7 หมวด — ไม่ทับ Features)
      */
     const addons = [
-      // ─── RESTAURANT ───────────────────────────────────────
+      // ─── RESTAURANT (รวม POS + Kitchen) ────────────────────
       {
         code: 'RESTAURANT_MODULE',
         name: 'Restaurant & F&B Module',
-        description: 'ระบบจัดการร้านอาหาร F&B: เมนู หมวดหมู่ จองโต๊ะ และเชื่อม Folio แขก',
+        system: 'BOTH',
+        description:
+          'ระบบจัดการร้านอาหาร F&B ครบวงจร: Restaurant POS, Kitchen Display (KDS), จัดการโต๊ะ, จองโต๊ะ, จัดการเมนู และเชื่อม Folio แขก',
         price: 990,
         billingCycle: AddonBillingCycle.MONTHLY,
         category: 'RESTAURANT',
@@ -414,46 +489,18 @@ export class SeederService {
         maxQuantity: 1,
         isActive: true,
       },
-      {
-        code: 'POS_MODULE',
-        name: 'POS System',
-        description: 'ระบบ POS ครบวงจร: รับออเดอร์ ส่งครัว (KDS) ชำระเงิน และจัดการ User POS',
-        price: 790,
-        billingCycle: AddonBillingCycle.MONTHLY,
-        category: 'RESTAURANT',
-        icon: 'ShoppingCart',
-        displayOrder: 120,
-        minQuantity: 1,
-        maxQuantity: 1,
-        isActive: true,
-      },
 
-      // ─── HR ───────────────────────────────────────────────
-      {
-        code: 'HR_MODULE',
-        name: 'HR Module',
-        description:
-          'ระบบ HR ครบวงจร: จัดการพนักงาน เงินเดือน การลา และเชื่อมข้อมูลทีมแม่บ้าน/ช่าง',
-        price: 1200,
-        billingCycle: AddonBillingCycle.MONTHLY,
-        category: 'HR',
-        icon: 'Briefcase',
-        displayOrder: 210,
-        minQuantity: 1,
-        maxQuantity: 1,
-        isActive: true,
-      },
-
-      // ─── HOUSEKEEPING ─────────────────────────────────────
+      // ─── HOUSEKEEPING (โรงแรมเท่านั้น) ─────────────────────
       {
         code: 'HOUSEKEEPING_MODULE',
         name: 'Housekeeping Module',
+        system: 'HOTEL',
         description: 'ระบบจัดการแม่บ้าน: มอบหมายงาน, ตรวจห้อง, รายงานสภาพห้องแบบ real-time',
         price: 590,
         billingCycle: AddonBillingCycle.MONTHLY,
         category: 'HOUSEKEEPING',
         icon: 'Sparkles',
-        displayOrder: 310,
+        displayOrder: 210,
         minQuantity: 1,
         maxQuantity: 1,
         isActive: true,
@@ -463,161 +510,129 @@ export class SeederService {
       {
         code: 'MAINTENANCE_MODULE',
         name: 'Maintenance Module',
+        system: 'BOTH',
         description: 'ระบบบำรุงรักษา: ใบแจ้งซ่อม, preventive schedule, asset register, QR code',
         price: 490,
         billingCycle: AddonBillingCycle.MONTHLY,
         category: 'MAINTENANCE',
         icon: 'Sparkles',
+        displayOrder: 310,
+        minQuantity: 1,
+        maxQuantity: 1,
+        isActive: true,
+      },
+
+      // ─── INVENTORY (รวม จัดซื้อ + คลัง + Retail POS) ───────
+      {
+        code: 'INVENTORY_MODULE',
+        name: 'Inventory Management',
+        system: 'BOTH',
+        description:
+          'ระบบคลังสินค้าครบวงจร: จัดซื้อ (PR/RFQ/PO), คลังสินค้า (Warehouse), Retail POS หน้าร้าน, คุมสต็อก นับสต็อก และแจ้งเตือนสต็อกต่ำ',
+        price: 990,
+        billingCycle: AddonBillingCycle.MONTHLY,
+        category: 'INVENTORY',
+        icon: 'Package',
         displayOrder: 410,
         minQuantity: 1,
         maxQuantity: 1,
         isActive: true,
       },
 
-      // ─── INTEGRATION ──────────────────────────────────────
+      // ─── HR ───────────────────────────────────────────────
       {
-        code: 'CHANNEL_MANAGER',
-        name: 'Channel Manager',
-        description: 'เชื่อมต่อกับ OTA อัตโนมัติ sync ราคาและห้องพักแบบ real-time',
-        price: 1490,
+        code: 'HR_MODULE',
+        name: 'HR Module',
+        system: 'BOTH',
+        description:
+          'ระบบ HR ครบวงจร: จัดการพนักงาน เงินเดือน การลา KPI เอกสารราชการ และเชื่อมข้อมูลทีมแม่บ้าน/ช่าง',
+        price: 1200,
         billingCycle: AddonBillingCycle.MONTHLY,
-        category: 'INTEGRATION',
-        icon: 'Network',
+        category: 'HR',
+        icon: 'Briefcase',
         displayOrder: 510,
         minQuantity: 1,
         maxQuantity: 1,
         isActive: true,
       },
-      {
-        code: 'OTA_INTEGRATION',
-        name: 'OTA Booking Integration',
-        description: 'เชื่อมต่อกับ Booking.com, Agoda, Expedia, และ OTA อื่นๆ',
-        price: 990,
-        billingCycle: AddonBillingCycle.MONTHLY,
-        category: 'INTEGRATION',
-        icon: 'Globe',
-        displayOrder: 520,
-        minQuantity: 1,
-        maxQuantity: 1,
-        isActive: true,
-      },
 
-      // ─── REPORTING ────────────────────────────────────────
+      // ─── CRM (รวม Loyalty) ────────────────────────────────
       {
-        code: 'EXTRA_ANALYTICS',
-        name: 'Extra Analytics',
-        description: 'รายงานและ Analytics ขั้นสูง พร้อม custom dashboards และ ML forecasting',
-        price: 990,
+        code: 'CRM_MODULE',
+        name: 'CRM & Guest 360',
+        system: 'BOTH',
+        description:
+          'ระบบ CRM ครบวงจร: Guest 360, Campaign, Sales Pipeline, Service Desk, Loyalty & Rewards (สะสมแต้ม) และ NPS/CSAT',
+        price: 890,
         billingCycle: AddonBillingCycle.MONTHLY,
-        category: 'REPORTING',
-        icon: 'TrendingUp',
+        category: 'CRM',
+        icon: 'Users',
         displayOrder: 610,
         minQuantity: 1,
         maxQuantity: 1,
         isActive: true,
       },
 
-      // ─── ACCOUNTING ───────────────────────────────────────
+      // ─── ACCOUNTING (รวม Cost Accounting USALI) ────────────
       {
         code: 'ACCOUNTING_MODULE',
         name: 'Accounting Module',
+        system: 'BOTH',
         description:
-          'ระบบบัญชีโรงแรมครบวงจร: double-entry, ผังบัญชี, สมุดรายวัน, AR/AP, Night Audit, สินทรัพย์ถาวร และภาษี',
+          'ระบบบัญชีครบวงจร: ผังบัญชี, สมุดรายวัน, AR/AP, Night Audit, งบการเงิน, สินทรัพย์ถาวร, ภาษี และ Cost Accounting (USALI) ต้นทุนรายแผนก P&L',
         price: 1990,
         billingCycle: AddonBillingCycle.MONTHLY,
         category: 'ACCOUNTING',
         icon: 'BookOpen',
-        displayOrder: 810,
-        minQuantity: 1,
-        maxQuantity: 1,
-        isActive: true,
-      },
-
-      // ─── ADVANCED ─────────────────────────────────────────
-      {
-        code: 'LOYALTY_MODULE',
-        name: 'Loyalty & Rewards',
-        description: 'โปรแกรมสะสมแต้มแขกประจำ ส่วนลด และ reward tiers',
-        price: 590,
-        billingCycle: AddonBillingCycle.MONTHLY,
-        category: 'ADVANCED',
-        icon: 'Gift',
         displayOrder: 710,
         minQuantity: 1,
         maxQuantity: 1,
         isActive: true,
       },
-      {
-        code: 'INVENTORY_MODULE',
-        name: 'Inventory Management',
-        description:
-          'ระบบคลังสินค้าครบวงจร: คุมสต็อก เบิก-รับสินค้า สั่งซื้อ นับสต็อก และแจ้งเตือนสต็อกต่ำ',
-        price: 990,
-        billingCycle: AddonBillingCycle.MONTHLY,
-        category: 'ADVANCED',
-        icon: 'Package',
-        displayOrder: 720,
-        minQuantity: 1,
-        maxQuantity: 1,
-        isActive: true,
-      },
-      {
-        code: 'COST_ACCOUNTING_MODULE',
-        name: 'Cost Accounting (USALI)',
-        description:
-          'ระบบบัญชีต้นทุน USALI: ติดตามต้นทุนรายแผนก P&L ปิดงวดรายเดือน วิเคราะห์ food cost และ dashboard KPI',
-        price: 1490,
-        billingCycle: AddonBillingCycle.MONTHLY,
-        category: 'ADVANCED',
-        icon: 'Calculator',
-        displayOrder: 730,
-        minQuantity: 1,
-        maxQuantity: 1,
-        isActive: true,
-      },
-      {
-        code: 'AUTOMATION_MODULE',
-        name: 'Automation System',
-        description: 'ระบบอัตโนมัติสำหรับจัดการ booking workflow และ task scheduler',
-        price: 990,
-        billingCycle: AddonBillingCycle.MONTHLY,
-        category: 'ADVANCED',
-        icon: 'Zap',
-        displayOrder: 740,
-        minQuantity: 1,
-        maxQuantity: 1,
-        isActive: true,
-      },
-      {
-        code: 'CUSTOM_BRANDING',
-        name: 'Custom Branding',
-        description: 'กำหนด branding และ logo ของโรงแรมในทุก touchpoint (white-label)',
-        price: 1490,
-        billingCycle: AddonBillingCycle.MONTHLY,
-        category: 'ADVANCED',
-        icon: 'Palette',
-        displayOrder: 750,
-        minQuantity: 1,
-        maxQuantity: 1,
-        isActive: true,
-      },
 
-      // ─── CRM ──────────────────────────────────────────────
+      // ─── CAMP (ลานกางเต็นท์) ────────────────────────────────
       {
-        code: 'CRM_MODULE',
-        name: 'CRM & Guest 360',
+        code: 'CAMP_MODULE',
+        name: 'Campground Module',
+        system: 'BOTH',
         description:
-          'ระบบ CRM ครบวงจร: Guest 360 view, RFM segmentation, LTV tracking, service-desk tickets และ loyalty integration',
-        price: 890,
+          'ระบบจัดการลานกางเต็นท์ครบวงจร: จัดการลาน โซน จุดกางเต็นท์ ผังแผนที่ 2D อุปกรณ์ให้เช่า และการจอง — bundled กับแผน CAMP โดยอัตโนมัติ หรือซื้อเสริมบนแผนโรงแรมได้',
+        price: 590,
         billingCycle: AddonBillingCycle.MONTHLY,
-        category: 'CRM',
-        icon: 'Users',
+        category: 'CAMP',
+        icon: 'Tent',
         displayOrder: 810,
         minQuantity: 1,
         maxQuantity: 1,
         isActive: true,
       },
     ];
+
+    // Add-on codes ที่เลิกขายแล้ว (placeholder ยังไม่มีของจริง หรือถูกยุบเป็น
+    // feature ใต้ module อื่น) — deactivate ใน DB เพื่อไม่ให้โผล่ใน catalog อีก
+    //   • OTA/Channel Manager : ระบบ OTA ยังไม่พร้อม
+    //   • Extra Analytics/Automation/Custom Branding : placeholder
+    //   • POS → Restaurant, Loyalty → CRM, Cost Accounting → Accounting (fold)
+    const RETIRED_ADDON_CODES = [
+      'OTA_INTEGRATION',
+      'CHANNEL_MANAGER',
+      'EXTRA_ANALYTICS',
+      'AUTOMATION_MODULE',
+      'CUSTOM_BRANDING',
+      'POS_MODULE',
+      'LOYALTY_MODULE',
+      'COST_ACCOUNTING_MODULE',
+    ];
+    const addOnsClientForRetire = (
+      this.prisma as unknown as {
+        add_ons: { updateMany: (a: Record<string, unknown>) => Promise<{ count: number }> };
+      }
+    ).add_ons;
+    const retired = await addOnsClientForRetire.updateMany({
+      where: { code: { in: RETIRED_ADDON_CODES } },
+      data: { is_active: 0 },
+    });
+    this.logger.log(`  ⊘ Deactivated ${retired.count} retired add-on(s)`);
 
     for (const addonData of addons) {
       // Flag Sub-System (Terminal) add-ons + attach their card metadata so the
@@ -635,7 +650,7 @@ export class SeederService {
       );
     }
 
-    this.logger.log(`  ✅ Seeded ${addons.length} add-ons across 9 categories (modules only)`);
+    this.logger.log(`  ✅ Seeded ${addons.length} sellable module add-ons (HOTEL/CAMP)`);
   }
 
   /**
@@ -651,6 +666,8 @@ export class SeederService {
     const planS = await this.plansService.findByCode('S');
     const planM = await this.plansService.findByCode('M');
     const planL = await this.plansService.findByCode('L');
+    const planCampFree = await this.plansService.findByCode('CAMP_FREE');
+    const planCamp = await this.plansService.findByCode('CAMP');
 
     const basicReport = await this.featuresService.findByCode('basic_report');
     const taxInvoice = await this.featuresService.findByCode('tax_invoice');
@@ -658,6 +675,7 @@ export class SeederService {
     const auditLog = await this.featuresService.findByCode('audit_log');
     const dailyManagerReport = await this.featuresService.findByCode('daily_manager_report');
     const apiAccess = await this.featuresService.findByCode('api_access');
+    const multiProperty = await this.featuresService.findByCode('multi_property');
 
     // Plan FREE — ลองใช้ฟรี: basic report
     await this.assignPlanFeatures(planFree?.id, [basicReport]);
@@ -668,7 +686,7 @@ export class SeederService {
     // Plan M — basic + tax + advanced + audit log
     await this.assignPlanFeatures(planM?.id, [basicReport, taxInvoice, advancedReport, auditLog]);
 
-    // Plan L — ทุก toggle/limit features
+    // Plan L (Business) — ทุก toggle/limit features (รวม multi-property + audit + API)
     await this.assignPlanFeatures(planL?.id, [
       basicReport,
       taxInvoice,
@@ -676,7 +694,14 @@ export class SeederService {
       auditLog,
       dailyManagerReport,
       apiAccess,
+      multiProperty,
     ]);
+
+    // ── ลานกางเต็นท์ ────────────────────────────────────────
+    // CAMP_FREE — ทดลอง: basic + advanced report
+    await this.assignPlanFeatures(planCampFree?.id, [basicReport, advancedReport]);
+    // CAMP ฿199 — basic report (แชท FB/LINE ขายแยก ไม่รวมในแพ็ก)
+    await this.assignPlanFeatures(planCamp?.id, [basicReport]);
   }
 
   private async assignPlanFeatures(
@@ -710,6 +735,8 @@ export class SeederService {
     const planS = await this.plansService.findByCode('S');
     const planM = await this.plansService.findByCode('M');
     const planL = await this.plansService.findByCode('L');
+    const planCampFree = await this.plansService.findByCode('CAMP_FREE');
+    const planCamp = await this.plansService.findByCode('CAMP');
 
     // Resolve add-ons by code through Prisma since AddonService.findByCode
     // does not exist; the catalog was just upserted in seedAddOns.
@@ -720,74 +747,66 @@ export class SeederService {
     ).add_ons;
     const findAddon = async (code: string) => addOnsClient.findUnique({ where: { code } });
 
+    // 7 sellable modules (POS/Loyalty/USALI ถูกยุบเข้า Restaurant/CRM/Accounting แล้ว)
     const restaurantModule = await findAddon('RESTAURANT_MODULE');
-    const posModule = await findAddon('POS_MODULE');
     const hrModule = await findAddon('HR_MODULE');
     const housekeepingModule = await findAddon('HOUSEKEEPING_MODULE');
     const maintenanceModule = await findAddon('MAINTENANCE_MODULE');
-    const channelManager = await findAddon('CHANNEL_MANAGER');
-    const otaIntegration = await findAddon('OTA_INTEGRATION');
-    const extraAnalytics = await findAddon('EXTRA_ANALYTICS');
-    const loyaltyModule = await findAddon('LOYALTY_MODULE');
     const inventoryModule = await findAddon('INVENTORY_MODULE');
-    const costAccountingModule = await findAddon('COST_ACCOUNTING_MODULE');
     const accountingModule = await findAddon('ACCOUNTING_MODULE');
-    const automationModule = await findAddon('AUTOMATION_MODULE');
-    const customBranding = await findAddon('CUSTOM_BRANDING');
     const crmModule = await findAddon('CRM_MODULE');
+    const campModule = await findAddon('CAMP_MODULE');
 
-    // Plan FREE — Trial: include every module so tenants can evaluate full
-    // surface area for 14 days. Matches the "Full Access" trial policy.
-    await this.assignPlanAddons(planFree?.id, [
+    const allHotelModules = [
       restaurantModule,
-      posModule,
       hrModule,
       housekeepingModule,
       maintenanceModule,
-      channelManager,
-      otaIntegration,
-      extraAnalytics,
-      loyaltyModule,
       inventoryModule,
-      costAccountingModule,
       accountingModule,
-      automationModule,
-      customBranding,
       crmModule,
-    ]);
+    ];
+    // โมดูลที่ใช้กับลานได้ (ไม่รวม Housekeeping ซึ่งเป็นของโรงแรมล้วน)
+    const campApplicableModules = [
+      restaurantModule,
+      hrModule,
+      maintenanceModule,
+      inventoryModule,
+      accountingModule,
+      crmModule,
+    ];
 
-    // Plan S (Starter) — small hotel essentials
-    await this.assignPlanAddons(planS?.id, [housekeepingModule, otaIntegration]);
+    // ── โรงแรม ──────────────────────────────────────────────
+    // FREE — ทดลอง 15 วัน: เปิดครบทุก module ("ฟีเจอร์ครบทุกระบบ ไม่มีกั๊ก" ตาม
+    // คำโฆษณาของแผนนี้ใน seedPlans) รวม CAMP_MODULE ด้วย เพื่อให้ trial user
+    // เห็น/ลองระบบลานกางเต็นท์ได้เต็มที่เหมือนระบบอื่น ๆ ในช่วงทดลอง 15 วัน
+    await this.assignPlanAddons(planFree?.id, [...allHotelModules, campModule]);
 
-    // Plan M (Professional) — adds restaurant ops + analytics
+    // Starter — Housekeeping
+    await this.assignPlanAddons(planS?.id, [housekeepingModule]);
+
+    // Professional — Housekeeping + Maintenance + Restaurant (POS+Kitchen) + CRM (รวม Loyalty)
     await this.assignPlanAddons(planM?.id, [
       housekeepingModule,
       maintenanceModule,
       restaurantModule,
-      posModule,
-      otaIntegration,
-      extraAnalytics,
-      loyaltyModule,
       crmModule,
     ]);
 
-    // Plan L (Enterprise) — everything except CUSTOM_BRANDING (sold à la carte)
-    await this.assignPlanAddons(planL?.id, [
-      restaurantModule,
-      posModule,
-      hrModule,
-      housekeepingModule,
-      maintenanceModule,
-      channelManager,
-      otaIntegration,
-      extraAnalytics,
-      loyaltyModule,
-      inventoryModule,
-      costAccountingModule,
-      accountingModule,
-      automationModule,
-      crmModule,
-    ]);
+    // Business — ครบทั้ง 7 module (รวม Inventory + HR + Accounting/USALI) + Campground
+    // (planL ปัจจุบันใช้กับ premium.test@email.com เป็น VIP demo account เท่านั้น —
+    // bundle CAMP_MODULE ให้ด้วยเพื่อโชว์ Sub System "ลานกางเต็นท์" + เมนู Sidebar
+    // ครบทุกระบบตามที่ทดสอบ ถ้ามี tenant โรงแรมจริงใช้แผนนี้ในอนาคตควรแยกซื้อ
+    // CAMP_MODULE เป็น add-on ต่างหากแทนการผูกกับ plan)
+    await this.assignPlanAddons(planL?.id, [...allHotelModules, campModule]);
+
+    // ── ลานกางเต็นท์ ────────────────────────────────────────
+    // CAMP_FREE — ทดลอง 15 วัน: เปิดทุก module ที่ใช้กับลานได้ (รวม CAMP_MODULE เอง)
+    await this.assignPlanAddons(planCampFree?.id, [campModule, ...campApplicableModules]);
+
+    // CAMP ฿199 "ราคาเดียวจบ · ครบวงจร" — bundle ทุก module ที่ใช้กับลานได้
+    // (เหมือน trial) เพื่อให้จ่ายเงินแล้วได้ครบ ไม่น้อยกว่าตัวทดลอง
+    await this.assignPlanAddons(planCamp?.id, [campModule, ...campApplicableModules]);
   }
 
   private async assignPlanAddons(

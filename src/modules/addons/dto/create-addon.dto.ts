@@ -62,6 +62,15 @@ export class CreateAddonDto {
   @MaxLength(80)
   category?: string;
 
+  @ApiPropertyOptional({
+    example: 'HOTEL',
+    description: 'Product line: HOTEL | CAMP | BOTH (which system this module is sold for)',
+  })
+  @IsString()
+  @IsOptional()
+  @MaxLength(20)
+  system?: string;
+
   @ApiPropertyOptional({ example: 'bar-chart', description: 'ชื่อ icon (lucide-react)' })
   @IsString()
   @IsOptional()

@@ -46,24 +46,6 @@ export const CORE_SUB_SYSTEMS: SubSystemCard[] = [
     status: 'ready',
     displayOrder: 0,
   },
-  {
-    key: 'camp-terminal',
-    name: 'ระบบจัดการลานแคมป์',
-    subtitle: 'Campground Management Terminal',
-    description:
-      'Terminal สำหรับลานกางแคมป์ — ลานของฉัน · จัดการโซน · จุดกางเต็นท์ · แผนผังลาน 2D · การจอง · ผู้เข้าพัก',
-    tags: ['ลานของฉัน', 'จัดการโซน', 'จุดกางเต็นท์', 'แผนผังลาน 2D', 'การจอง', 'ผู้เข้าพัก'],
-    icon: 'Tent',
-    color: 'emerald',
-    badge: 'ใหม่',
-    launchPath: '/camp-terminal',
-    launchEndpoint: '/auth/hotel-terminal-launch',
-    loginEndpoint: '/auth/hotel-terminal/login',
-    requiredAddon: null,
-    available: true,
-    status: 'ready',
-    displayOrder: 1,
-  },
 ];
 
 /**
@@ -180,6 +162,23 @@ export const SUB_SYSTEM_ADDON_META: Record<string, SubSystemCardMeta[]> = {
       launchEndpoint: '/auth/hr-launch',
       loginEndpoint: '/auth/hr/login',
       displayOrder: 510,
+    },
+  ],
+  [ADDON_CODES.CAMP_MODULE]: [
+    {
+      key: 'camp-terminal',
+      name: 'ระบบจัดการลานแคมป์',
+      subtitle: 'Campground Management Terminal',
+      description:
+        'Terminal สำหรับลานกางแคมป์ — ลานของฉัน · จัดการโซน · จุดกางเต็นท์ · แผนผังลาน 2D · การจอง · ผู้เข้าพัก',
+      tags: ['ลานของฉัน', 'จัดการโซน', 'จุดกางเต็นท์', 'แผนผังลาน 2D', 'การจอง', 'ผู้เข้าพัก'],
+      icon: 'Tent',
+      color: 'emerald',
+      badge: 'ใหม่',
+      launchPath: '/camp-terminal',
+      launchEndpoint: '/auth/hotel-terminal-launch',
+      loginEndpoint: '/auth/hotel-terminal/login',
+      displayOrder: 810,
     },
   ],
 };

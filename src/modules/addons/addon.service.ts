@@ -17,9 +17,29 @@ export const ADDON_CODES = {
   COST_ACCOUNTING_MODULE: 'COST_ACCOUNTING_MODULE',
   ACCOUNTING_MODULE: 'ACCOUNTING_MODULE',
   CRM_MODULE: 'CRM_MODULE',
+  CAMP_MODULE: 'CAMP_MODULE',
 } as const;
 
 export type AddonCode = (typeof ADDON_CODES)[keyof typeof ADDON_CODES];
+
+/**
+ * Parent → child entitlement map.
+ *
+ * Some legacy add-on codes were folded into a parent module (they are no longer
+ * sold standalone) but their controller guards still use the child code via
+ * `@RequireAddon('COST_ACCOUNTING_MODULE')`. Owning the parent module now
+ * auto-grants every child code, so we don't have to touch dozens of controllers
+ * or the frontend gating. Children are NOT seeded into the sellable catalog.
+ *
+ *   ACCOUNTING_MODULE  → COST_ACCOUNTING_MODULE (USALI)
+ *   CRM_MODULE         → LOYALTY_MODULE
+ *   RESTAURANT_MODULE  → POS_MODULE
+ */
+export const CHILD_ADDON_GRANTS: Record<string, string[]> = {
+  ACCOUNTING_MODULE: ['COST_ACCOUNTING_MODULE'],
+  CRM_MODULE: ['LOYALTY_MODULE'],
+  RESTAURANT_MODULE: ['POS_MODULE'],
+};
 
 export type AddonSource = 'plan' | 'subscription';
 
@@ -43,6 +63,7 @@ export interface AddonStatus {
 export interface AddonEntity {
   id: string;
   code: string;
+  system: string;
   name: string;
   description: string | null;
   price: number;
@@ -203,6 +224,24 @@ export class AddonService {
             expiresAt: null,
             source: 'subscription',
           });
+        }
+
+        // 4) Parent → child entitlement expansion. Owning a parent module
+        //    auto-grants its folded child codes (e.g. ACCOUNTING_MODULE grants
+        //    COST_ACCOUNTING_MODULE) so legacy controller guards keep working.
+        for (const parent of Array.from(merged.values())) {
+          const children = CHILD_ADDON_GRANTS[parent.code];
+          if (!children) continue;
+          for (const childCode of children) {
+            if (merged.has(childCode)) continue;
+            merged.set(childCode, {
+              code: childCode,
+              name: childCode,
+              isActive: true,
+              expiresAt: null,
+              source: parent.source,
+            });
+          }
         }
 
         return Array.from(merged.values());
@@ -385,6 +424,7 @@ export class AddonService {
       price: new Prisma.Decimal(dto.price),
       billing_cycle: dto.billingCycle ?? AddonBillingCycle.MONTHLY,
       category: dto.category ?? null,
+      system: dto.system ?? 'BOTH',
       icon: dto.icon ?? null,
       display_order: dto.displayOrder ?? 0,
       min_quantity: dto.minQuantity ?? 1,
@@ -447,6 +487,7 @@ export class AddonService {
   private toEntity = (record: AddonRecord): AddonEntity => ({
     id: record.id,
     code: record.code,
+    system: record.system ?? 'BOTH',
     name: record.name,
     description: record.description,
     price: Number(record.price),
@@ -489,6 +530,7 @@ export class AddonService {
 interface AddonRecord {
   id: string;
   code: string;
+  system?: string;
   name: string;
   description: string | null;
   price: Prisma.Decimal | number;
