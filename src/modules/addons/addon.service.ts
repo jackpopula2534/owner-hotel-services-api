@@ -89,6 +89,28 @@ export interface PaginatedAddons {
   };
 }
 
+/**
+ * A feature nested under its parent module in the public catalog. Sourced from
+ * the `features` table where `module_code` matches the module's code.
+ */
+export interface PublicAddonFeature {
+  code: string;
+  name: string;
+  description: string | null;
+  icon: string | null;
+  priceMonthly: number;
+  displayOrder: number;
+}
+
+/**
+ * Public catalog module = an active add-on plus the features that belong to it
+ * (module ▸ feature tree). Used by the pricing page to show what each module
+ * unlocks.
+ */
+export interface PublicCatalogAddon extends AddonEntity {
+  features: PublicAddonFeature[];
+}
+
 @Injectable()
 export class AddonService {
   private readonly logger = new Logger(AddonService.name);
@@ -342,6 +364,58 @@ export class AddonService {
       },
       { ttl: this.CACHE_TTL, namespace: this.CATALOG_CACHE_NS },
     );
+  }
+
+  /**
+   * Public pricing catalog: active modules (optionally filtered to one product
+   * line) with their features nested underneath (module ▸ feature).
+   *
+   * @param system  'HOTEL' | 'CAMP' — keep modules for that product line only.
+   *                Modules flagged 'BOTH' are always included. Anything else
+   *                (undefined/invalid) returns every active module.
+   *
+   * The active-module list is reused from `listActive()` (cached). Features are
+   * queried fresh so an admin edit to a feature's `module_code` is reflected
+   * immediately without waiting for the module catalog cache to expire.
+   */
+  async listPublicCatalog(system?: string): Promise<PublicCatalogAddon[]> {
+    const normalized = this.normalizeSystemFilter(system);
+
+    const modules = await this.listActive();
+    const filtered = normalized
+      ? modules.filter((m) => m.system === normalized || m.system === 'BOTH')
+      : modules;
+
+    const featureRows = await this.prisma.features.findMany({
+      where: { is_active: 1, module_code: { not: null } },
+      orderBy: [{ display_order: 'asc' }, { name: 'asc' }],
+    });
+
+    const featuresByModule = new Map<string, PublicAddonFeature[]>();
+    for (const f of featureRows) {
+      const key = f.module_code as string;
+      const list = featuresByModule.get(key) ?? [];
+      list.push({
+        code: f.code,
+        name: f.name,
+        description: f.description ?? null,
+        icon: f.icon ?? null,
+        priceMonthly: Number(f.price_monthly ?? 0),
+        displayOrder: f.display_order ?? 0,
+      });
+      featuresByModule.set(key, list);
+    }
+
+    return filtered.map((m) => ({ ...m, features: featuresByModule.get(m.code) ?? [] }));
+  }
+
+  /**
+   * Accept only the two real product lines; ignore blanks/garbage so a bad
+   * query string degrades to "show everything" rather than an empty catalog.
+   */
+  private normalizeSystemFilter(system?: string): 'HOTEL' | 'CAMP' | null {
+    const upper = system?.trim().toUpperCase();
+    return upper === 'HOTEL' || upper === 'CAMP' ? upper : null;
   }
 
   async findOne(id: string): Promise<AddonEntity> {

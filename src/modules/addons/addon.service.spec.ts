@@ -36,6 +36,7 @@ describe('AddonService - Catalog CRUD', () => {
       update: jest.fn(),
       delete: jest.fn(),
     },
+    features: { findMany: jest.fn() },
     subscription_features: { findFirst: jest.fn(), findMany: jest.fn() },
     $transaction: jest.fn(),
   };
@@ -56,6 +57,75 @@ describe('AddonService - Catalog CRUD', () => {
 
     service = module.get(AddonService);
     jest.clearAllMocks();
+  });
+
+  describe('listPublicCatalog', () => {
+    const feature = (code: string, moduleCode: string, over: Record<string, unknown> = {}) => ({
+      code,
+      name: code,
+      description: null,
+      icon: null,
+      price_monthly: new Prisma.Decimal(0),
+      display_order: 0,
+      module_code: moduleCode,
+      ...over,
+    });
+
+    it('nests active features under their parent module by module_code', async () => {
+      prismaMock.add_ons.findMany.mockResolvedValue([
+        buildRecord({ id: 'a1', code: 'RESTAURANT_MODULE', system: 'HOTEL' }),
+        buildRecord({ id: 'a2', code: 'HR_MODULE', system: 'BOTH' }),
+      ]);
+      prismaMock.features.findMany.mockResolvedValue([
+        feature('restaurant_pos', 'RESTAURANT_MODULE', { name: 'Restaurant POS' }),
+      ]);
+
+      const result = await service.listPublicCatalog();
+
+      const restaurant = result.find((m) => m.code === 'RESTAURANT_MODULE');
+      const hr = result.find((m) => m.code === 'HR_MODULE');
+      expect(restaurant?.features).toEqual([
+        {
+          code: 'restaurant_pos',
+          name: 'Restaurant POS',
+          description: null,
+          icon: null,
+          priceMonthly: 0,
+          displayOrder: 0,
+        },
+      ]);
+      // A module with no matching feature rows still returns an empty array.
+      expect(hr?.features).toEqual([]);
+      // Only features that declare a module are queried.
+      expect(prismaMock.features.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { is_active: 1, module_code: { not: null } } }),
+      );
+    });
+
+    it('filters to one product line, always keeping BOTH modules', async () => {
+      prismaMock.add_ons.findMany.mockResolvedValue([
+        buildRecord({ id: 'a1', code: 'RESTAURANT_MODULE', system: 'HOTEL' }),
+        buildRecord({ id: 'a2', code: 'CAMP_MODULE', system: 'CAMP' }),
+        buildRecord({ id: 'a3', code: 'HR_MODULE', system: 'BOTH' }),
+      ]);
+      prismaMock.features.findMany.mockResolvedValue([]);
+
+      const camp = await service.listPublicCatalog('camp');
+
+      expect(camp.map((m) => m.code).sort()).toEqual(['CAMP_MODULE', 'HR_MODULE']);
+    });
+
+    it('returns every active module when the system filter is blank/invalid', async () => {
+      prismaMock.add_ons.findMany.mockResolvedValue([
+        buildRecord({ id: 'a1', code: 'RESTAURANT_MODULE', system: 'HOTEL' }),
+        buildRecord({ id: 'a2', code: 'CAMP_MODULE', system: 'CAMP' }),
+      ]);
+      prismaMock.features.findMany.mockResolvedValue([]);
+
+      const result = await service.listPublicCatalog('garbage');
+
+      expect(result).toHaveLength(2);
+    });
   });
 
   describe('list', () => {

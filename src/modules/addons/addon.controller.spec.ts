@@ -29,6 +29,7 @@ describe('AddonController', () => {
   const serviceMock = {
     list: jest.fn().mockResolvedValue({ items: [sample], meta: { page: 1, limit: 20, total: 1 } }),
     listActive: jest.fn().mockResolvedValue([sample]),
+    listPublicCatalog: jest.fn().mockResolvedValue([{ ...sample, features: [] }]),
     findOne: jest.fn().mockResolvedValue(sample),
     create: jest.fn().mockResolvedValue(sample),
     update: jest.fn().mockResolvedValue(sample),
@@ -56,10 +57,17 @@ describe('AddonController', () => {
     expect(res.meta.total).toBe(1);
   });
 
-  it('GET /addons/public returns active list', async () => {
+  it('GET /addons/public returns active modules with nested features', async () => {
     const res = await controller.listPublic();
     expect(res.success).toBe(true);
     expect(res.data[0].code).toBe('BASIC_REPORT');
+    expect(res.data[0].features).toEqual([]);
+    expect(serviceMock.listPublicCatalog).toHaveBeenCalledWith(undefined);
+  });
+
+  it('GET /addons/public?system=HOTEL passes the filter through', async () => {
+    await controller.listPublic('HOTEL');
+    expect(serviceMock.listPublicCatalog).toHaveBeenCalledWith('HOTEL');
   });
 
   it('GET /addons/status returns tenant addons', async () => {

@@ -14,12 +14,18 @@ import {
   Request,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { RolesGuard } from '@/common/guards/roles.guard';
 import { Roles } from '@/common/decorators/roles.decorator';
 import { Public } from '@/common/decorators/public.decorator';
-import { AddonEntity, AddonService, AddonStatus, PaginatedAddons } from './addon.service';
+import {
+  AddonEntity,
+  AddonService,
+  AddonStatus,
+  PaginatedAddons,
+  PublicCatalogAddon,
+} from './addon.service';
 import { CreateAddonDto } from './dto/create-addon.dto';
 import { UpdateAddonDto } from './dto/update-addon.dto';
 import { QueryAddonDto } from './dto/query-addon.dto';
@@ -35,11 +41,20 @@ export class AddonController {
   // -------------------------------------------------------------------------
 
   @Public()
-  @ApiOperation({ summary: 'Public list of active add-ons (for subscription page)' })
-  @ApiResponse({ status: 200, description: 'List of active add-ons' })
+  @ApiOperation({
+    summary: 'Public list of active add-ons/modules (for subscription & pricing pages)',
+    description:
+      'Returns active modules with their features nested underneath (module ▸ feature). ' +
+      'Pass ?system=HOTEL|CAMP to return only that product line (modules flagged BOTH are ' +
+      'always included); omit it to return every active module.',
+  })
+  @ApiQuery({ name: 'system', required: false, enum: ['HOTEL', 'CAMP'] })
+  @ApiResponse({ status: 200, description: 'List of active modules with nested features' })
   @Get('public')
-  async listPublic(): Promise<{ success: true; data: AddonEntity[] }> {
-    const data = await this.addonService.listActive();
+  async listPublic(
+    @Query('system') system?: string,
+  ): Promise<{ success: true; data: PublicCatalogAddon[] }> {
+    const data = await this.addonService.listPublicCatalog(system);
     return { success: true, data };
   }
 

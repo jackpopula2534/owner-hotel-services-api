@@ -1,5 +1,5 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
+import { Controller, Get, Post, Body, Patch, Param, Delete, Query } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { PlansService } from './plans.service';
 import { SkipSubscriptionCheck } from '../common/decorators/skip-subscription-check.decorator';
 import { CreatePlanDto } from './dto/create-plan.dto';
@@ -30,20 +30,36 @@ export class PlansController {
   @ApiOperation({
     summary: 'Get all active plans for Sales Page',
     description:
-      'Public endpoint that returns all active subscription plans with sales page information. No authentication required.',
+      'Public endpoint that returns all active subscription plans with sales page information. ' +
+      'Pass ?system=HOTEL|CAMP to return only that product line; omit it to return every plan. ' +
+      'No authentication required.',
   })
+  @ApiQuery({ name: 'system', required: false, enum: ['HOTEL', 'CAMP'] })
   @ApiResponse({
     status: 200,
     description: 'Plans retrieved successfully',
     type: PublicPlansListDto,
   })
-  async findAll(): Promise<PublicPlansListDto> {
+  async findAll(@Query('system') system?: string): Promise<PublicPlansListDto> {
     const plans = await this.plansService.findAll();
-    const data: PublicPlanDto[] = plans.map((plan) => this.toPublicPlanDto(plan));
+    const normalized = this.normalizeSystemFilter(system);
+    const data: PublicPlanDto[] = plans
+      .map((plan) => this.toPublicPlanDto(plan))
+      .filter((plan) => !normalized || plan.system === normalized);
     return {
       data,
       total: data.length,
     };
+  }
+
+  /**
+   * Accept only the two real product lines; ignore blanks/garbage so a bad
+   * query string degrades to "show all plans" rather than an empty list.
+   * Plans are always HOTEL or CAMP (never BOTH), so no BOTH pass-through here.
+   */
+  private normalizeSystemFilter(system?: string): 'HOTEL' | 'CAMP' | null {
+    const upper = system?.trim().toUpperCase();
+    return upper === 'HOTEL' || upper === 'CAMP' ? upper : null;
   }
 
   /**
