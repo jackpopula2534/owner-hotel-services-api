@@ -42,6 +42,15 @@ export class CreateFeatureDto {
   category?: string;
 
   @ApiPropertyOptional({
+    example: 'RESTAURANT_MODULE',
+    description:
+      'Parent module code (add_ons.code). Omit/null for a standalone feature sold on its own (ขายแยก ไม่มี module แม่).',
+  })
+  @IsString()
+  @IsOptional()
+  moduleCode?: string | null;
+
+  @ApiPropertyOptional({
     example: 'Plug',
     description: 'Lucide-react icon name to render in the admin UI',
   })

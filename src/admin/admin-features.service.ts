@@ -36,6 +36,7 @@ export class AdminFeaturesService {
       description: feature.description || '',
       type: feature.type,
       category: feature.category ?? null,
+      moduleCode: feature.moduleCode ?? null,
       icon: feature.icon ?? null,
       displayOrder: feature.displayOrder ?? 0,
       priceMonthly: Number(feature.priceMonthly || 0),
@@ -69,6 +70,7 @@ export class AdminFeaturesService {
       description: feature.description || '',
       type: feature.type,
       category: feature.category ?? null,
+      moduleCode: feature.moduleCode ?? null,
       icon: feature.icon ?? null,
       displayOrder: feature.displayOrder ?? 0,
       priceMonthly: Number(feature.priceMonthly || 0),
@@ -90,6 +92,7 @@ export class AdminFeaturesService {
       description: dto.description,
       type: dto.type as any,
       category: dto.category ?? null,
+      moduleCode: dto.moduleCode ?? null,
       icon: dto.icon ?? null,
       displayOrder: dto.displayOrder ?? 0,
       priceMonthly: dto.priceMonthly,
@@ -119,6 +122,7 @@ export class AdminFeaturesService {
     if (dto.description !== undefined) feature.description = dto.description;
     if (dto.type !== undefined) feature.type = dto.type as any;
     if (dto.category !== undefined) feature.category = dto.category ?? null;
+    if (dto.moduleCode !== undefined) feature.moduleCode = dto.moduleCode ?? null;
     if (dto.icon !== undefined) feature.icon = dto.icon ?? null;
     if (dto.displayOrder !== undefined) feature.displayOrder = dto.displayOrder;
     if (dto.priceMonthly !== undefined) feature.priceMonthly = dto.priceMonthly;

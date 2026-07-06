@@ -40,6 +40,15 @@ export class Feature {
   @Column({ type: 'varchar', length: 80, nullable: true })
   category: string | null;
 
+  /**
+   * Parent module code (references add_ons.code). NULL for standalone/general
+   * features sold on their own. When set, the pricing tree nests this feature
+   * under its module (module ▸ feature).
+   */
+  @Index('IDX_features_module_code')
+  @Column({ name: 'module_code', type: 'varchar', length: 80, nullable: true })
+  moduleCode: string | null;
+
   @Column({ type: 'varchar', length: 80, nullable: true })
   icon: string | null;
 

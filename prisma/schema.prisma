@@ -1839,6 +1839,10 @@ model features {
   description           String?                 @db.Text
   type                  features_type
   category              String?                 @db.VarChar(80)
+  // Parent module this feature belongs to (references add_ons.code). NULL = a
+  // standalone/general feature sold on its own (ขายแยก ไม่มี module แม่). When
+  // set, the pricing tree + public API nest this feature under its module.
+  module_code           String?                 @db.VarChar(80)
   icon                  String?                 @db.VarChar(80)
   display_order         Int                     @default(0)
   price_monthly         Decimal                 @default(0.00) @db.Decimal(10, 2)
@@ -1849,6 +1853,7 @@ model features {
   subscription_features subscription_features[]
 
   @@index([category], map: "IDX_features_category")
+  @@index([module_code], map: "IDX_features_module_code")
 }
 
 model add_ons {

@@ -294,10 +294,20 @@ describe('AddonService - Tenant entitlements', () => {
 
       const result = await service.getActiveAddons('tenant-1');
 
+      // Owning RESTAURANT_MODULE auto-grants its folded child POS_MODULE via
+      // CHILD_ADDON_GRANTS so legacy `@RequireAddon('POS_MODULE')` guards keep
+      // working without touching controllers.
       expect(result).toEqual([
         {
           code: 'RESTAURANT_MODULE',
           name: 'Restaurant',
+          isActive: true,
+          expiresAt: null,
+          source: 'plan',
+        },
+        {
+          code: 'POS_MODULE',
+          name: 'POS_MODULE',
           isActive: true,
           expiresAt: null,
           source: 'plan',

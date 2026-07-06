@@ -14,6 +14,7 @@ export class FeaturesService {
       description: createFeatureDto.description,
       type: createFeatureDto.type,
       category: createFeatureDto.category,
+      module_code: createFeatureDto.moduleCode,
       icon: createFeatureDto.icon,
       display_order: createFeatureDto.displayOrder,
       price_monthly: createFeatureDto.priceMonthly,
@@ -71,6 +72,7 @@ export class FeaturesService {
       description: updateFeatureDto.description,
       type: updateFeatureDto.type,
       category: updateFeatureDto.category,
+      module_code: updateFeatureDto.moduleCode,
       icon: updateFeatureDto.icon,
       display_order: updateFeatureDto.displayOrder,
       price_monthly: updateFeatureDto.priceMonthly,
@@ -102,6 +104,10 @@ export class FeaturesService {
       description: createFeatureDto.description,
       type: createFeatureDto.type,
       category: createFeatureDto.category,
+      // Normalize to null (not undefined) so a re-seed reasserts the seeder as
+      // the source of truth — clearing module_code back to null for a feature
+      // that no longer declares a parent module.
+      module_code: createFeatureDto.moduleCode ?? null,
       icon: createFeatureDto.icon,
       display_order: createFeatureDto.displayOrder,
       price_monthly: createFeatureDto.priceMonthly,

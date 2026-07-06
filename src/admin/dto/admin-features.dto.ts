@@ -63,6 +63,15 @@ export class CreateFeatureDto {
   category?: string;
 
   @ApiPropertyOptional({
+    description:
+      'Parent module code (add_ons.code). Null/omitted for a standalone feature (ขายแยก ไม่มี module แม่).',
+    example: 'RESTAURANT_MODULE',
+  })
+  @IsOptional()
+  @IsString()
+  moduleCode?: string | null;
+
+  @ApiPropertyOptional({
     description: 'Lucide-react icon name to render in the admin UI',
     example: 'Plug',
   })
@@ -132,6 +141,13 @@ export class UpdateFeatureDto {
   @IsString()
   category?: string;
 
+  @ApiPropertyOptional({
+    description: 'Parent module code (add_ons.code); null to detach from a module',
+  })
+  @IsOptional()
+  @IsString()
+  moduleCode?: string | null;
+
   @ApiPropertyOptional({ description: 'Lucide-react icon name' })
   @IsOptional()
   @IsString()
@@ -192,6 +208,9 @@ export class AdminFeatureItemDto {
   @ApiPropertyOptional({ example: 'INTEGRATION' })
   category?: string | null;
 
+  @ApiPropertyOptional({ example: 'RESTAURANT_MODULE', nullable: true })
+  moduleCode?: string | null;
+
   @ApiPropertyOptional({ example: 'Plug' })
   icon?: string | null;
 
@@ -237,6 +256,9 @@ export class FeatureResponseDto {
 
   @ApiPropertyOptional({ example: 'INTEGRATION' })
   category?: string | null;
+
+  @ApiPropertyOptional({ example: 'RESTAURANT_MODULE', nullable: true })
+  moduleCode?: string | null;
 
   @ApiPropertyOptional({ example: 'Plug' })
   icon?: string | null;

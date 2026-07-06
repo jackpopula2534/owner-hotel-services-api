@@ -9,6 +9,7 @@ describe('AddonController', () => {
   const sample: AddonEntity = {
     id: 'addon-1',
     code: 'BASIC_REPORT',
+    system: 'BOTH',
     name: 'Basic Report',
     description: null,
     price: 0,
