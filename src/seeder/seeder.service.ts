@@ -63,6 +63,7 @@ export class SeederService {
       await this.seedPlans();
       await this.seedFeatures();
       await this.seedAddOns();
+      await this.seedModuleFeatures();
       await this.seedPlanFeatures();
       await this.seedPlanAddons();
       await this.seedAdmins();
@@ -442,6 +443,150 @@ export class SeederService {
 
     this.logger.log(
       `  ✅ Seeded ${features.length} features across 4 categories (toggle/limit only)`,
+    );
+  }
+
+  /**
+   * 2️⃣A′ Seed Module Sub-Features (feature ย่อยที่อยู่ "ใต้" module แม่)
+   *
+   * ตาม pricing restructure: **ซื้อ module = ได้ครบทุก feature ในนั้น**
+   * feature กลุ่มนี้จึง priceMonthly = 0 (แถมมากับ module) และผูก `moduleCode`
+   * ชี้ไปที่ `add_ons.code` ของ module แม่ เพื่อให้ `/addons/public`
+   * (listPublicCatalog) group เป็น tree `module ▸ feature` ได้จริง
+   *
+   * ต่างจาก seedFeatures() ที่เก็บ feature ทั่วไป "ขายแยก" (moduleCode = null)
+   * — ที่นี่เก็บเฉพาะ capability ภายในแต่ละ module (ดู Bundle Matrix ในแผน)
+   */
+  private async seedModuleFeatures(): Promise<void> {
+    this.logger.log('🌳 Seeding Module Sub-Features (feature ย่อยใต้ module แม่)...');
+
+    // spec แบบกระชับ: [moduleCode, category, icon, [ {code,name,description} ... ]]
+    // ทุกตัว type = TOGGLE, priceMonthly = 0 (รวมอยู่ในราคา module แม่)
+    const moduleFeatureGroups: Array<{
+      moduleCode: string;
+      category: string;
+      icon: string;
+      features: Array<{ code: string; name: string; description: string }>;
+    }> = [
+      {
+        moduleCode: 'RESTAURANT_MODULE',
+        category: 'RESTAURANT',
+        icon: 'UtensilsCrossed',
+        features: [
+          { code: 'restaurant_pos', name: 'Restaurant POS', description: 'ระบบขายหน้าร้านอาหาร (POS) สั่งอาหาร เปิดโต๊ะ เก็บเงิน เชื่อม Folio แขก' },
+          { code: 'kitchen_display', name: 'Kitchen Display (KDS)', description: 'จอครัวแสดงออร์เดอร์ real-time จัดคิวทำอาหารตามลำดับ' },
+          { code: 'table_management', name: 'จัดการโต๊ะ', description: 'ผังโต๊ะ สถานะโต๊ะ ว่าง/ไม่ว่าง ย้าย/รวมโต๊ะ' },
+          { code: 'table_reservation', name: 'จองโต๊ะ', description: 'รับจองโต๊ะล่วงหน้า จัดการรอบ และแจ้งเตือน' },
+          { code: 'menu_management', name: 'จัดการเมนู', description: 'สร้าง/แก้ไขเมนู หมวดหมู่ ราคา ตัวเลือกเสริม (modifier)' },
+        ],
+      },
+      {
+        moduleCode: 'HOUSEKEEPING_MODULE',
+        category: 'HOUSEKEEPING',
+        icon: 'Sparkles',
+        features: [
+          { code: 'hk_task_assignment', name: 'มอบหมายงานแม่บ้าน', description: 'สร้างและมอบหมายงานทำความสะอาดห้องให้ทีมแม่บ้าน' },
+          { code: 'room_inspection', name: 'ตรวจห้อง', description: 'เช็กลิสต์ตรวจห้องหลังทำความสะอาด อนุมัติห้องพร้อมขาย' },
+          { code: 'room_status_realtime', name: 'สถานะห้อง real-time', description: 'ติดตามสถานะห้อง (ว่าง/กำลังทำ/พร้อมขาย/ซ่อม) แบบ real-time' },
+        ],
+      },
+      {
+        moduleCode: 'MAINTENANCE_MODULE',
+        category: 'MAINTENANCE',
+        icon: 'Wrench',
+        features: [
+          { code: 'maintenance_ticket', name: 'ใบแจ้งซ่อม', description: 'แจ้งซ่อม/งานบำรุงรักษา ติดตามสถานะ มอบหมายช่าง' },
+          { code: 'preventive_schedule', name: 'Preventive Schedule', description: 'ตารางบำรุงรักษาเชิงป้องกันตามรอบเวลา แจ้งเตือนล่วงหน้า' },
+          { code: 'asset_register', name: 'Asset Register', description: 'ทะเบียนสินทรัพย์/อุปกรณ์ พร้อม QR code และประวัติการซ่อม' },
+        ],
+      },
+      {
+        moduleCode: 'INVENTORY_MODULE',
+        category: 'INVENTORY',
+        icon: 'Package',
+        features: [
+          { code: 'purchasing_pr_po', name: 'จัดซื้อ (PR/RFQ/PO)', description: 'ใบขอซื้อ (PR) ขอราคา (RFQ) และใบสั่งซื้อ (PO) ครบวงจร' },
+          { code: 'warehouse_stock', name: 'คลังสินค้า (Warehouse)', description: 'จัดการสต็อก รับ/จ่าย นับสต็อก โอนย้าย และแจ้งเตือนสต็อกต่ำ' },
+          { code: 'retail_pos', name: 'Retail POS', description: 'ระบบขายหน้าร้านค้าปลีก (มินิมาร์ท/ของที่ระลึก) ตัดสต็อกอัตโนมัติ' },
+        ],
+      },
+      {
+        moduleCode: 'HR_MODULE',
+        category: 'HR',
+        icon: 'Briefcase',
+        features: [
+          { code: 'hr_payroll', name: 'พนักงาน/เงินเดือน', description: 'จัดการข้อมูลพนักงานและคำนวณเงินเดือน หัก/เพิ่ม รายการต่าง ๆ' },
+          { code: 'leave_management', name: 'การลา', description: 'ระบบขอลา อนุมัติลา และยอดวันลาคงเหลือ' },
+          { code: 'hr_kpi', name: 'KPI', description: 'ประเมินผลงานพนักงานด้วย KPI template' },
+          { code: 'gov_documents', name: 'เอกสารราชการ', description: 'จัดทำเอกสารราชการ (ภ.ง.ด. ประกันสังคม ฯลฯ)' },
+        ],
+      },
+      {
+        moduleCode: 'CRM_MODULE',
+        category: 'CRM',
+        icon: 'Users',
+        features: [
+          { code: 'guest_360', name: 'Guest 360', description: 'มุมมองลูกค้า 360 องศา ประวัติเข้าพัก การใช้จ่าย และ preference' },
+          { code: 'crm_campaign', name: 'Campaign', description: 'สร้างและส่งแคมเปญการตลาดถึงลูกค้าตาม segment' },
+          { code: 'sales_pipeline', name: 'Sales Pipeline', description: 'จัดการดีลการขาย (MICE/กรุ๊ป) ตาม stage แบบ pipeline' },
+          { code: 'service_desk', name: 'Service Desk', description: 'รับเรื่องร้องเรียน/คำขอบริการจากแขก ติดตามจนปิดงาน' },
+          { code: 'loyalty_rewards', name: 'Loyalty & Rewards', description: 'โปรแกรมสะสมแต้ม ระดับสมาชิก และแลกรางวัล' },
+          { code: 'nps_csat', name: 'NPS / CSAT', description: 'สำรวจความพึงพอใจแขก (NPS/CSAT) และวิเคราะห์คะแนน' },
+        ],
+      },
+      {
+        moduleCode: 'ACCOUNTING_MODULE',
+        category: 'ACCOUNTING',
+        icon: 'BookOpen',
+        features: [
+          { code: 'chart_of_accounts', name: 'ผังบัญชี', description: 'จัดการผังบัญชี (Chart of Accounts) ตามมาตรฐาน' },
+          { code: 'general_journal', name: 'สมุดรายวัน', description: 'บันทึกรายการบัญชีในสมุดรายวันทั่วไป (GL/Journal)' },
+          { code: 'ar_ap', name: 'AR / AP', description: 'ลูกหนี้ (AR) และเจ้าหนี้ (AP) ติดตามยอดค้างและกำหนดชำระ' },
+          { code: 'financial_statements', name: 'งบการเงิน', description: 'ออกงบการเงิน งบดุล งบกำไรขาดทุน และกระแสเงินสด' },
+          { code: 'night_audit', name: 'Night Audit', description: 'ปิดยอดประจำวัน ตรวจสอบรายได้และกระทบยอดอัตโนมัติ' },
+          { code: 'cost_accounting_usali', name: 'Cost Accounting (USALI)', description: 'บัญชีต้นทุนรายแผนกตามมาตรฐาน USALI พร้อม P&L รายแผนก' },
+        ],
+      },
+      {
+        moduleCode: 'CAMP_MODULE',
+        category: 'CAMP',
+        icon: 'Tent',
+        features: [
+          { code: 'camp_zone_management', name: 'จัดการลาน/โซน', description: 'จัดการลานกางเต็นท์ โซน และจุดกางเต็นท์' },
+          { code: 'camp_booking_map2d', name: 'จอง + แผนผัง 2D', description: 'รับจองจุดกางเต็นท์ผ่านผังแผนที่ 2D แบบเห็นภาพ' },
+          { code: 'camp_equipment_rental', name: 'อุปกรณ์ให้เช่า', description: 'จัดการอุปกรณ์แคมป์ปิ้งให้เช่า ติดตามสต็อกและการคืน' },
+          { code: 'camp_retail_pos', name: 'Retail POS หน้าลาน', description: 'ระบบขายหน้าลาน (ของกิน/ของใช้/ของที่ระลึก)' },
+          { code: 'camp_promptpay', name: 'PromptPay', description: 'รับชำระเงินผ่าน PromptPay QR หน้าลาน' },
+        ],
+      },
+    ];
+
+    let count = 0;
+    for (const group of moduleFeatureGroups) {
+      let displayOrder = 10;
+      for (const feature of group.features) {
+        await this.featuresService.upsertByCode({
+          code: feature.code,
+          name: feature.name,
+          description: feature.description,
+          type: FeatureType.TOGGLE,
+          category: group.category,
+          icon: group.icon,
+          displayOrder,
+          priceMonthly: 0,
+          isActive: true,
+          moduleCode: group.moduleCode,
+        });
+        displayOrder += 10;
+        count += 1;
+      }
+      this.logger.log(
+        `  ✓ ${group.moduleCode} ← ${group.features.length} sub-features`,
+      );
+    }
+
+    this.logger.log(
+      `  ✅ Seeded ${count} module sub-features across ${moduleFeatureGroups.length} modules (moduleCode set)`,
     );
   }
 
@@ -970,10 +1115,10 @@ export class SeederService {
     const vipEnd = new Date(now);
     vipEnd.setFullYear(vipEnd.getFullYear() + 1);
 
-    // TRIAL: started today, expires in 14 days
+    // TRIAL: started today, expires in 15 days (StaySync trial = 15 วัน)
     const trialStart = new Date(now);
     const trialEnd = new Date(now);
-    trialEnd.setDate(trialEnd.getDate() + 14);
+    trialEnd.setDate(trialEnd.getDate() + 15);
 
     // PENDING: starts today, cycle ends in 1 month
     const pendingStart = new Date(now);
@@ -1118,7 +1263,7 @@ export class SeederService {
         // สร้าง tenant
         const trialEndsAt = new Date();
         if (hotelData.status === TenantStatus.TRIAL) {
-          trialEndsAt.setDate(trialEndsAt.getDate() + 14);
+          trialEndsAt.setDate(trialEndsAt.getDate() + 15);
         } else {
           trialEndsAt.setDate(trialEndsAt.getDate() - 30);
         }
