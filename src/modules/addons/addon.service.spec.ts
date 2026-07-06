@@ -385,6 +385,73 @@ describe('AddonService - Tenant entitlements', () => {
       ]);
     });
 
+    it('auto-grants COST_ACCOUNTING_MODULE when the tenant owns ACCOUNTING_MODULE', async () => {
+      // Regression guard for the 10 cost-accounting controllers, which gate on
+      // @RequireAddon('COST_ACCOUNTING_MODULE'). Cost Accounting (USALI) was
+      // folded into ACCOUNTING_MODULE, so owning the parent must grant the child
+      // — otherwise every cost-accounting endpoint would 403 for paid tenants.
+      subscriptionsClient.findFirst.mockResolvedValue({
+        id: 'sub-acc',
+        plans_subscriptions_plan_idToplans: {
+          plan_features: [
+            {
+              features: {
+                code: 'ACCOUNTING_MODULE',
+                name: 'Accounting',
+                type: 'module',
+                is_active: 1,
+              },
+            },
+          ],
+        },
+        subscription_features: [],
+      });
+
+      const result = await service.getActiveAddons('tenant-acc');
+
+      expect(result).toEqual([
+        {
+          code: 'ACCOUNTING_MODULE',
+          name: 'Accounting',
+          isActive: true,
+          expiresAt: null,
+          source: 'plan',
+        },
+        {
+          code: 'COST_ACCOUNTING_MODULE',
+          name: 'COST_ACCOUNTING_MODULE',
+          isActive: true,
+          expiresAt: null,
+          source: 'plan',
+        },
+      ]);
+    });
+
+    it('hasActiveAddon(COST_ACCOUNTING_MODULE) is true via the ACCOUNTING_MODULE parent grant', async () => {
+      // Mirrors AddonGuard.canActivate → hasActiveAddon(requiredAddon) for a
+      // paid tenant hitting a cost-accounting controller.
+      subscriptionsClient.findFirst.mockResolvedValue({
+        id: 'sub-acc-2',
+        plans_subscriptions_plan_idToplans: {
+          plan_features: [
+            {
+              features: {
+                code: 'ACCOUNTING_MODULE',
+                name: 'Accounting',
+                type: 'module',
+                is_active: 1,
+              },
+            },
+          ],
+        },
+        subscription_features: [],
+      });
+
+      await expect(
+        service.hasActiveAddon('tenant-acc-2', 'COST_ACCOUNTING_MODULE'),
+      ).resolves.toBe(true);
+    });
+
     it('includes per-tenant subscription_feature add-ons', async () => {
       subscriptionsClient.findFirst.mockResolvedValue({
         id: 'sub-2',
