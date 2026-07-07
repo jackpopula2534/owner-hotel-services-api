@@ -83,6 +83,37 @@ export class ItemsService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
+   * Resolve a category id to itself plus every descendant id (any depth),
+   * scoped to the tenant. Used so a parent-category filter includes items that
+   * live on child categories. Returns [rootId] when the category has no
+   * children (or is unknown), keeping leaf-category filters unchanged.
+   */
+  private async resolveCategoryTree(tenantId: string, rootId: string): Promise<string[]> {
+    const cats = await this.prisma.itemCategory.findMany({
+      where: { tenantId },
+      select: { id: true, parentId: true },
+    });
+    const childrenOf = new Map<string, string[]>();
+    for (const c of cats) {
+      if (!c.parentId) continue;
+      const list = childrenOf.get(c.parentId) ?? [];
+      list.push(c.id);
+      childrenOf.set(c.parentId, list);
+    }
+    const ids: string[] = [];
+    const seen = new Set<string>();
+    const stack = [rootId];
+    while (stack.length > 0) {
+      const id = stack.pop() as string;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      ids.push(id);
+      for (const child of childrenOf.get(id) ?? []) stack.push(child);
+    }
+    return ids;
+  }
+
+  /**
    * Find all items with pagination and filters
    * Include category name, total stock across warehouses, and low stock flag
    */
@@ -107,7 +138,12 @@ export class ItemsService {
       }
 
       if (query.categoryId) {
-        where.categoryId = query.categoryId;
+        // Categories form a tree (e.g. "F&B วัตถุดิบ" → ผักและผลไม้ / ของแห้ง /
+        // เนื้อสัตว์ …). Items sit on the leaf categories, so an exact match on a
+        // parent returns nothing. Expand the selected category to itself + all
+        // descendants so picking a parent shows every item beneath it.
+        const categoryIds = await this.resolveCategoryTree(tenantId, query.categoryId);
+        where.categoryId = categoryIds.length > 1 ? { in: categoryIds } : query.categoryId;
       }
 
       if (query.isActive !== undefined) {

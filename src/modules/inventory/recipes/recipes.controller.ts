@@ -20,6 +20,7 @@ import {
   ApiQuery,
 } from '@nestjs/swagger';
 import { RecipesService } from './recipes.service';
+import { RecipeReadinessService } from './recipe-readiness.service';
 import { CreateRecipeDto } from './dto/create-recipe.dto';
 import { UpdateRecipeDto } from './dto/update-recipe.dto';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
@@ -33,7 +34,41 @@ import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 @UseGuards(JwtAuthGuard, AddonGuard)
 @RequireAddon('INVENTORY_MODULE')
 export class RecipesController {
-  constructor(private readonly recipesService: RecipesService) {}
+  constructor(
+    private readonly recipesService: RecipesService,
+    private readonly readinessService: RecipeReadinessService,
+  ) {}
+
+  // Readiness is a KITCHEN feature (reads menuItemRecipe, not InventoryRecipe), so it is
+  // gated by RESTAURANT_MODULE — overriding the controller-level INVENTORY_MODULE. This lets
+  // a restaurant/kitchen tenant with NO inventory sub-system still view their recipes; the
+  // service degrades to "unknown" plate counts (no kitchen warehouse → no stock data) instead
+  // of a 403. When inventory IS present, stock-based plate counts light up automatically.
+  @Get('readiness')
+  @RequireAddon('RESTAURANT_MODULE')
+  @ApiOperation({
+    summary: 'Kitchen readiness — how many plates each menu can make from current stock',
+    description:
+      'Cross-references every menu-item recipe (defined in Menu → Recipe tab) with the ' +
+      'kitchen warehouse stock. Returns plates makeable, the bottleneck ingredient, and ' +
+      'low-stock flags. Read-only — recipes are edited on the menu, not here. ' +
+      'Works standalone without the inventory module (plate counts show as unknown).',
+  })
+  @ApiQuery({ name: 'search', required: false, type: String })
+  @ApiQuery({ name: 'restaurantId', required: false, type: String })
+  @ApiResponse({ status: 200, description: 'Readiness list + summary counts' })
+  async readiness(
+    @Query('search') search?: string,
+    @Query('restaurantId') restaurantId?: string,
+    @CurrentUser() user?: any,
+  ): Promise<any> {
+    const result = await this.readinessService.getReadiness(user?.tenantId, {
+      search,
+      restaurantId,
+    });
+
+    return { success: true, data: result.menus, meta: { summary: result.summary } };
+  }
 
   @Get()
   @ApiOperation({ summary: 'Get all recipes' })

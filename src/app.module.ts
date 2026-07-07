@@ -89,6 +89,7 @@ import { AccountingUsersModule } from './modules/accounting-users/accounting-use
 import { HotelTerminalUsersModule } from './modules/hotel-terminal-users/hotel-terminal-users.module';
 import { HrTerminalUsersModule } from './modules/hr-terminal-users/hr-terminal-users.module';
 import { SubSystemsModule } from './modules/sub-systems/sub-systems.module';
+import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { CostAccountingModule } from './modules/cost-accounting/cost-accounting.module';
 import { DocumentSettingsModule } from './modules/document-settings/document-settings.module';
 // ─── Accounting System ────────────────────────────────────────────────────────
@@ -203,6 +204,7 @@ import { TenantGuard } from './common/guards/tenant.guard';
     HotelTerminalUsersModule,
     HrTerminalUsersModule,
     SubSystemsModule,
+    IntegrationsModule,
     CostAccountingModule,
     DocumentSettingsModule,
     // ─── Accounting System ──────────────────────────────────────────────────

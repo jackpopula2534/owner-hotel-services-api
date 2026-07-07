@@ -133,13 +133,49 @@ export class RestaurantAnalyticsService {
 
   // ─── Daily Summary ────────────────────────────────────────────────────────
 
+  /** Zeroed daily-summary payload — returned for empty days and as a safe fallback. */
+  private emptyDailySummary(targetDate: Date) {
+    return {
+      date: targetDate.toISOString().split('T')[0],
+      revenue: { total: 0, averageOrderValue: 0 },
+      orders: { total: 0, completed: 0, cancelled: 0, active: 0 },
+      guests: { total: 0, averagePartySize: 0 },
+      kitchen: { ordersCompleted: 0, avgPrepTimeSeconds: 0, avgPrepTimeMinutes: 0 },
+      tables: { total: 0, occupied: 0, available: 0, cleaning: 0, totalCapacity: 0 },
+    };
+  }
+
   async getDailySummary(restaurantId: string, tenantId: string, date?: string) {
-    const targetDate = date ? new Date(date) : new Date();
+    // Guard against an invalid ?date= string — `new Date('bad').toISOString()`
+    // throws a RangeError which would otherwise bubble up as a 500.
+    const parsed = date ? new Date(date) : new Date();
+    const targetDate = Number.isNaN(parsed.getTime()) ? new Date() : parsed;
     const dayStart = new Date(targetDate);
     dayStart.setHours(0, 0, 0, 0);
     const dayEnd = new Date(targetDate);
     dayEnd.setHours(23, 59, 59, 999);
 
+    try {
+      return await this.buildDailySummary(restaurantId, tenantId, targetDate, dayStart, dayEnd);
+    } catch (error) {
+      // This is a best-effort overview widget — never fail the whole page with a 500.
+      this.logger.error(
+        `getDailySummary failed for restaurant ${restaurantId} (tenant ${tenantId}): ${
+          error instanceof Error ? error.message : error
+        }`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      return this.emptyDailySummary(targetDate);
+    }
+  }
+
+  private async buildDailySummary(
+    restaurantId: string,
+    tenantId: string,
+    targetDate: Date,
+    dayStart: Date,
+    dayEnd: Date,
+  ) {
     const [orders, kitchenStats, tableStats] = await Promise.all([
       this.prisma.order.findMany({
         where: {

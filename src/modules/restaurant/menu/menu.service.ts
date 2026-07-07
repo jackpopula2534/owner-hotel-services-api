@@ -394,7 +394,10 @@ export class MenuService {
     return this.prisma.menuItemRecipe.findUnique({
       where: { menuItemId: itemId },
       include: {
-        ingredients: { orderBy: { displayOrder: 'asc' } },
+        ingredients: {
+          orderBy: { displayOrder: 'asc' },
+          include: { item: { select: { id: true, name: true, unit: true, sku: true } } },
+        },
       },
     });
   }
@@ -426,8 +429,10 @@ export class MenuService {
             data: ingredients.map((ing, idx) => ({
               recipeId: recipe.id,
               name: ing.name,
+              itemId: ing.itemId ?? null,
               quantity: ing.quantity ?? null,
               unit: ing.unit ?? null,
+              wastagePercent: ing.wastagePercent ?? 0,
               notes: ing.notes ?? null,
               displayOrder: ing.displayOrder ?? idx,
             })),
@@ -437,7 +442,12 @@ export class MenuService {
 
       return tx.menuItemRecipe.findUnique({
         where: { id: recipe.id },
-        include: { ingredients: { orderBy: { displayOrder: 'asc' } } },
+        include: {
+          ingredients: {
+            orderBy: { displayOrder: 'asc' },
+            include: { item: { select: { id: true, name: true, unit: true, sku: true } } },
+          },
+        },
       });
     });
 

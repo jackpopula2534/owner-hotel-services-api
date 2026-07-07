@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '@/prisma/prisma.service';
 import { AddonService } from '@/modules/addons/addon.service';
+import { IntegrationsService } from '@/modules/integrations/integrations.service';
 import {
   INVENTORY_EVENTS,
   HousekeepingTaskCompletedEvent,
@@ -22,6 +23,7 @@ export class InventoryEventListener {
   constructor(
     private readonly prisma: PrismaService,
     private readonly addonService: AddonService,
+    private readonly integrationsService: IntegrationsService,
   ) {}
 
   /**
@@ -33,6 +35,13 @@ export class InventoryEventListener {
       // Check if tenant has inventory addon
       const hasAddon = await this.addonService.hasActiveAddon(event.tenantId, 'INVENTORY_MODULE');
       if (!hasAddon) return; // silently skip — inventory not enabled
+
+      // Integration Hub: honour the tenant's on/off switch for this connection
+      const connected = await this.integrationsService.isEnabled(
+        event.tenantId,
+        'housekeeping-inventory-autodeduct',
+      );
+      if (!connected) return; // connection turned off in the Integration Hub
 
       this.logger.log(
         `Processing housekeeping completion: task=${event.taskId}, room=${event.roomId}, type=${event.taskType}`,
@@ -137,6 +146,12 @@ export class InventoryEventListener {
       const hasAddon = await this.addonService.hasActiveAddon(event.tenantId, 'INVENTORY_MODULE');
       if (!hasAddon) return;
 
+      const connected = await this.integrationsService.isEnabled(
+        event.tenantId,
+        'maintenance-inventory-autodeduct',
+      );
+      if (!connected) return; // connection turned off in the Integration Hub
+
       if (!event.partsUsed || event.partsUsed.length === 0) return;
 
       this.logger.log(
@@ -230,6 +245,12 @@ export class InventoryEventListener {
       const hasAddon = await this.addonService.hasActiveAddon(event.tenantId, 'INVENTORY_MODULE');
       if (!hasAddon) return;
 
+      const connected = await this.integrationsService.isEnabled(
+        event.tenantId,
+        'restaurant-inventory-autodeduct',
+      );
+      if (!connected) return; // connection turned off in the Integration Hub
+
       if (!event.items || event.items.length === 0) return;
 
       this.logger.log(
@@ -243,16 +264,19 @@ export class InventoryEventListener {
         return;
       }
 
-      // Get recipes for all menu items in the order
+      // Get recipes for all menu items in the order. The menu-item recipe (edited
+      // in Menu → Recipe tab) is the single source of truth; only ingredients
+      // linked to an inventory item (itemId set) are stock-tracked. Quantities are
+      // stored for the whole `servings` batch, so per-plate = quantity / servings.
       const menuItemIds = event.items.map((i) => i.menuItemId);
-      const recipes = await this.prisma.inventoryRecipe.findMany({
+      const recipes = await this.prisma.menuItemRecipe.findMany({
         where: {
-          tenantId: event.tenantId,
           menuItemId: { in: menuItemIds },
-          isActive: true,
+          ingredients: { some: { itemId: { not: null } } },
         },
         include: {
           ingredients: {
+            where: { itemId: { not: null } },
             include: {
               item: { select: { id: true, name: true, sku: true } },
             },
@@ -261,7 +285,7 @@ export class InventoryEventListener {
       });
 
       if (recipes.length === 0) {
-        this.logger.debug(`No recipes found for ordered menu items — no deduction`);
+        this.logger.debug(`No stock-tracked recipes for ordered menu items — no deduction`);
         return;
       }
 
@@ -272,12 +296,17 @@ export class InventoryEventListener {
           const recipe = recipeMap.get(orderItem.menuItemId);
           if (!recipe) continue;
 
+          const servings = recipe.servings && recipe.servings > 0 ? recipe.servings : 1;
+
           for (const ingredient of recipe.ingredients) {
-            // Calculate quantity: (ingredient qty per serving) * order quantity * (1 + wastage%)
+            if (!ingredient.itemId) continue;
+
+            // per-plate qty = (batch qty / servings), then scale by order qty and wastage
+            const perPlate = Number(ingredient.quantity ?? 0) / servings;
             const wastageMultiplier = 1 + Number(ingredient.wastagePercent) / 100;
-            const totalQty = Math.ceil(
-              Number(ingredient.quantity) * orderItem.quantity * wastageMultiplier,
-            );
+            const totalQty = Math.ceil(perPlate * orderItem.quantity * wastageMultiplier);
+
+            if (totalQty <= 0) continue;
 
             const stock = await tx.warehouseStock.findUnique({
               where: {
@@ -303,7 +332,7 @@ export class InventoryEventListener {
                 totalCost: deductQty * avgCost,
                 referenceType: 'restaurant_order',
                 referenceId: event.orderId,
-                notes: `Auto-deduct: ${ingredient.item.name} x${deductQty} for order ${event.orderId}`,
+                notes: `Auto-deduct: ${ingredient.item?.name ?? ingredient.name} x${deductQty} for order ${event.orderId}`,
                 createdBy: event.completedBy,
               },
             });

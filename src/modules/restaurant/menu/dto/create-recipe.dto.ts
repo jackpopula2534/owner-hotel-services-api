@@ -18,7 +18,16 @@ export class CreateRecipeIngredientDto {
   @IsNotEmpty()
   name: string;
 
-  @ApiPropertyOptional({ example: 200, description: 'Quantity amount' })
+  @ApiPropertyOptional({
+    example: '550e8400-e29b-41d4-a716-446655440002',
+    description:
+      'Inventory item ID. When set, this ingredient is stock-tracked (counts toward stock deduction and "plates makeable"). Omit for free-text ingredients not kept in stock.',
+  })
+  @IsString()
+  @IsOptional()
+  itemId?: string;
+
+  @ApiPropertyOptional({ example: 200, description: 'Quantity amount (for the whole recipe batch)' })
   @IsNumber({ maxDecimalPlaces: 3 })
   @IsOptional()
   @Type(() => Number)
@@ -31,6 +40,17 @@ export class CreateRecipeIngredientDto {
   @IsString()
   @IsOptional()
   unit?: string;
+
+  @ApiPropertyOptional({
+    example: 5,
+    description: 'Wastage buffer % applied on top of quantity when deducting stock (0–100)',
+  })
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100)
+  @IsOptional()
+  @Type(() => Number)
+  wastagePercent?: number;
 
   @ApiPropertyOptional({
     example: 'Full-fat preferred',

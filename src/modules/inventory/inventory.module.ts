@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bull';
 import { AddonModule } from '@/modules/addons/addon.module';
+import { IntegrationsModule } from '@/modules/integrations/integrations.module';
 import { CategoriesModule } from './categories/categories.module';
 import { ItemsModule } from './items/items.module';
 import { WarehousesModule } from './warehouses/warehouses.module';
@@ -40,6 +41,7 @@ import { PrismaModule } from '@/prisma/prisma.module';
 @Module({
   imports: [
     AddonModule,
+    IntegrationsModule,
     PrismaModule,
     CategoriesModule,
     ItemsModule,

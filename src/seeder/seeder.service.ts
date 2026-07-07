@@ -80,6 +80,7 @@ export class SeederService {
       await this.seedHrPerformanceData();
       await this.seedRestaurantData();
       await this.seedInventoryData();
+      await this.seedRestaurantRecipes();
       await this.seedProcurementUsersAndFlows();
       await this.seedPurchaseRequisitionData();
       await this.seedCostAccountingData();
@@ -5373,6 +5374,481 @@ export class SeederService {
    * Creates: item categories, inventory items, suppliers, warehouses,
    * room-type amenity templates, and demo stock balances.
    */
+  /**
+   * Canonical cooking-ingredient catalogue for the premium demo tenant.
+   * These become tracked InventoryItems (kitchen warehouse) and are the ONLY
+   * ingredients recipes/the mockup button may reference — so every ingredient
+   * shows as in-stock ("นับสต๊อก") rather than free-text ("นอกคลัง").
+   * Names intentionally match the frontend mock-recipe ingredient names so the
+   * "Mockup Recipe" button links them automatically.
+   */
+  private cookingIngredientCatalog(): Array<{
+    sku: string;
+    name: string;
+    catCode: string;
+    unit: string;
+    reorderPoint: number;
+    reorderQty: number;
+    minStock: number;
+    isPerishable: boolean;
+    shelfLifeDays: number | null;
+    qty: number;
+    avgCost: number;
+  }> {
+    const veg = 'CAT-FB-VEG';
+    const dry = 'CAT-FB-DRY';
+    const meat = 'CAT-FB-MEAT';
+    const dairy = 'CAT-FB-DAIRY';
+    // [sku, name, catCode, unit, reorderPoint, reorderQty, minStock, perishable, shelfLifeDays, qty, avgCost]
+    const rows: Array<
+      [string, string, string, string, number, number, number, boolean, number | null, number, number]
+    > = [
+      // — ผักและผลไม้ (CAT-FB-VEG) —
+      ['ING-PAPAYA', 'มะละกอดิบ', veg, 'KG', 3, 8, 2, true, 14, 8, 25],
+      ['ING-TOMATO-CHERRY', 'มะเขือเทศราชินี', veg, 'KG', 2, 5, 1, true, 10, 5, 40],
+      ['ING-LONGBEAN', 'ถั่วฝักยาว', veg, 'KG', 2, 4, 1, true, 7, 4, 30],
+      ['ING-GARLIC', 'กระเทียม', veg, 'KG', 2, 6, 1, false, 60, 6, 90],
+      ['ING-CHILI', 'พริกขี้หนู', veg, 'KG', 1, 3, 0.5, true, 10, 3, 120],
+      ['ING-CHILI-SUAN', 'พริกขี้หนูสวน', veg, 'KG', 1, 2, 0.5, true, 10, 2, 150],
+      ['ING-LIME', 'มะนาว', veg, 'KG', 2, 5, 1, true, 14, 5, 60],
+      ['ING-SPRING-ONION', 'ต้นหอม', veg, 'KG', 1, 3, 0.5, true, 7, 3, 40],
+      ['ING-BEANSPROUT', 'ถั่วงอก', veg, 'KG', 2, 4, 1, true, 3, 4, 25],
+      ['ING-LEMONGRASS', 'ตะไคร้', veg, 'KG', 1, 3, 0.5, true, 14, 3, 35],
+      ['ING-GALANGAL', 'ข่า', veg, 'KG', 1, 2, 0.5, true, 21, 2, 45],
+      ['ING-KAFFIR-LEAF', 'ใบมะกรูด', veg, 'KG', 0.5, 1, 0.2, true, 14, 1, 120],
+      ['ING-EGGPLANT-THAI', 'มะเขือไทย', veg, 'KG', 1, 3, 0.5, true, 10, 3, 35],
+      ['ING-EGGPLANT-PEA', 'มะเขือพวง', veg, 'KG', 0.5, 1, 0.2, true, 7, 1, 80],
+      ['ING-BASIL-SWEET', 'ใบโหระพา', veg, 'KG', 0.5, 1, 0.2, true, 5, 1, 60],
+      ['ING-BASIL-HOLY', 'ใบกะเพรา', veg, 'KG', 0.5, 1, 0.2, true, 5, 1, 70],
+      ['ING-BELLPEPPER', 'พริกหยวก', veg, 'KG', 1, 3, 0.5, true, 14, 3, 60],
+      ['ING-MANGO-RIPE', 'มะม่วงสุก', veg, 'KG', 3, 6, 1, true, 7, 6, 80],
+      ['ING-ONION', 'หัวหอมใหญ่', veg, 'KG', 2, 5, 1, false, 30, 5, 35],
+      ['ING-POTATO', 'มันฝรั่ง', veg, 'KG', 3, 6, 1, false, 30, 6, 40],
+      ['ING-MUSHROOM-STRAW', 'เห็ดฟาง', veg, 'KG', 1, 3, 0.5, true, 4, 3, 90],
+      ['ING-GINGER', 'ขิง', veg, 'KG', 1, 3, 0.5, false, 21, 3, 50],
+      ['ING-CORIANDER', 'ผักชี', veg, 'KG', 0.5, 1, 0.2, true, 5, 1, 80],
+      ['ING-SHALLOT', 'หอมแดง', veg, 'KG', 2, 4, 1, false, 30, 4, 60],
+      // — ของแห้ง / เครื่องปรุง (CAT-FB-DRY) —
+      ['ING-NOODLE-CHAN', 'เส้นจันท์', dry, 'KG', 4, 10, 2, false, 180, 10, 55],
+      ['ING-STICKY-RICE', 'ข้าวเหนียว', dry, 'KG', 8, 20, 4, false, 365, 20, 40],
+      ['ING-JASMINE-RICE', 'ข้าวสาร', dry, 'KG', 10, 30, 5, false, 365, 30, 45],
+      ['ING-PEANUT-ROASTED', 'ถั่วลิสงคั่ว', dry, 'KG', 2, 5, 1, false, 120, 5, 90],
+      ['ING-DRIED-SHRIMP', 'กุ้งแห้ง', dry, 'KG', 1, 3, 0.5, false, 120, 3, 320],
+      ['ING-SESAME-WHITE', 'งาขาวคั่ว', dry, 'KG', 1, 2, 0.5, false, 120, 2, 150],
+      ['ING-SUGAR-WHITE', 'น้ำตาลทราย', dry, 'KG', 5, 15, 3, false, 365, 15, 28],
+      ['ING-PALM-SUGAR', 'น้ำตาลปี๊บ', dry, 'KG', 3, 8, 2, false, 365, 8, 55],
+      ['ING-SALT', 'เกลือ', dry, 'KG', 4, 10, 2, false, 730, 10, 15],
+      ['ING-PEPPER-BLACK', 'พริกไทยดำ', dry, 'KG', 1, 2, 0.5, false, 365, 2, 400],
+      ['ING-FISH-SAUCE', 'น้ำปลา', dry, 'L', 4, 12, 2, false, 365, 12, 45],
+      ['ING-SOY-LIGHT', 'ซีอิ๊วขาว', dry, 'L', 3, 8, 2, false, 365, 8, 40],
+      ['ING-SOY-DARK', 'ซีอิ๊วดำ', dry, 'L', 2, 6, 1, false, 365, 6, 45],
+      ['ING-OYSTER-SAUCE', 'น้ำมันหอย', dry, 'L', 2, 6, 1, false, 365, 6, 90],
+      ['ING-VEG-OIL', 'น้ำมันพืช', dry, 'L', 5, 15, 3, false, 365, 15, 55],
+      ['ING-TAMARIND', 'น้ำมะขามเปียก', dry, 'KG', 2, 4, 1, false, 180, 4, 70],
+      ['ING-CURRY-GREEN', 'พริกแกงเขียวหวาน', dry, 'KG', 1, 3, 0.5, false, 120, 3, 120],
+      ['ING-CURRY-MASSAMAN', 'พริกแกงมัสมั่น', dry, 'KG', 1, 3, 0.5, false, 120, 3, 130],
+      ['ING-COCONUT-MILK', 'กะทิ', dry, 'L', 8, 20, 4, false, 180, 20, 45],
+      ['ING-COFFEE-ROAST', 'กาแฟคั่วบด', dry, 'KG', 2, 4, 1, false, 180, 4, 350],
+      ['ING-THAI-TEA', 'ชาไทย', dry, 'KG', 2, 4, 1, false, 180, 4, 180],
+      // — เนื้อสัตว์และอาหารทะเล (CAT-FB-MEAT) —
+      ['ING-SHRIMP-RIVER', 'กุ้งแม่น้ำ', meat, 'KG', 3, 6, 1, true, 3, 6, 450],
+      ['ING-CHICKEN', 'เนื้อไก่', meat, 'KG', 4, 8, 2, true, 3, 8, 85],
+      ['ING-PORK-MINCED', 'หมูสับ', meat, 'KG', 3, 6, 1, true, 3, 6, 120],
+      ['ING-FISH-FILLET', 'เนื้อปลา', meat, 'KG', 2, 5, 1, true, 3, 5, 150],
+      ['ING-SQUID', 'ปลาหมึก', meat, 'KG', 2, 4, 1, true, 3, 4, 220],
+      ['ING-MUSSEL', 'หอยแมลงภู่', meat, 'KG', 2, 4, 1, true, 2, 4, 120],
+      ['ING-TOFU-FIRM', 'เต้าหู้แข็ง', meat, 'KG', 2, 5, 1, true, 7, 5, 45],
+      ['ING-LAMB-SHOULDER', 'เนื้อแกะ', meat, 'KG', 2, 4, 1, true, 3, 4, 480],
+      // — ผลิตภัณฑ์นมและไข่ (CAT-FB-DAIRY) —
+      ['ING-EGG', 'ไข่ไก่', dairy, 'PIECE', 48, 120, 24, true, 21, 120, 4],
+      ['ING-BUTTER', 'เนย', dairy, 'KG', 2, 4, 1, true, 60, 4, 220],
+      ['ING-MILK-FRESH', 'นมสด', dairy, 'L', 4, 12, 2, true, 10, 12, 35],
+      ['ING-CONDENSED-MILK', 'นมข้นหวาน', dairy, 'L', 3, 9, 1.5, false, 365, 9, 58],
+    ];
+    return rows.map((r) => ({
+      sku: r[0],
+      name: r[1],
+      catCode: r[2],
+      unit: r[3],
+      reorderPoint: r[4],
+      reorderQty: r[5],
+      minStock: r[6],
+      isPerishable: r[7],
+      shelfLifeDays: r[8],
+      qty: r[9],
+      avgCost: r[10],
+    }));
+  }
+
+  /**
+   * Seed MenuItemRecipe + RecipeIngredient for the premium demo tenant's menu,
+   * linking every ingredient to a tracked InventoryItem (itemId) seeded by
+   * seedInventoryData. Runs AFTER seedInventoryData so the items exist. Scoped
+   * strictly to premium.test@email.com. Idempotent (skips menu items that
+   * already have a recipe).
+   */
+  private async seedRestaurantRecipes(): Promise<void> {
+    this.logger.log('🍳 Seeding restaurant recipes (inventory-linked)...');
+
+    const ownerUser = await this.prisma.user.findFirst({
+      where: { email: 'premium.test@email.com' },
+    });
+    if (!ownerUser?.tenantId) {
+      this.logger.warn('  ⚠️  premium.test@email.com not found, skipping recipe seed');
+      return;
+    }
+    const tenantId = ownerUser.tenantId;
+
+    const mainRestaurant = await this.prisma.restaurant.findFirst({
+      where: { tenantId, code: 'MVR-MAIN' },
+    });
+    if (!mainRestaurant) {
+      this.logger.warn('  ⚠️  Main restaurant (MVR-MAIN) not found, skipping recipe seed');
+      return;
+    }
+
+    // Inventory item lookup by SKU (the source of truth for itemId links).
+    const invItems = await this.prisma.inventoryItem.findMany({
+      where: { tenantId },
+      select: { id: true, sku: true, name: true, unit: true },
+    });
+    const itemBySku = new Map(invItems.map((it) => [it.sku, it]));
+
+    // menuName → recipe. Every ingredient references a cooking-ingredient SKU so
+    // it is inventory-backed. Menu names must match seedRestaurantData exactly.
+    type Ing = { sku: string; quantity: number; unit: string; notes?: string };
+    const recipes: Array<{
+      menu: string;
+      servings: number;
+      instructions: string;
+      notes: string;
+      ingredients: Ing[];
+    }> = [
+      {
+        menu: 'ผัดไทยกุ้งสด',
+        servings: 2,
+        instructions:
+          '1. แช่เส้นจันท์ในน้ำอุ่นจนนุ่ม สะเด็ดน้ำ\n2. ผัดกุ้งจนสุก ตักพัก\n3. ผัดเส้นกับน้ำผัดไท (มะขาม+น้ำตาล+ซีอิ๊ว)\n4. เขี่ยเส้น ทอดไข่แล้วคลุก\n5. ใส่ถั่วงอก ต้นหอม โรยถั่วลิสง',
+        notes: 'ใช้เส้นจันท์เบอร์ 3 ไฟแรงได้ wok hei',
+        ingredients: [
+          { sku: 'ING-NOODLE-CHAN', quantity: 200, unit: 'กรัม', notes: 'แช่น้ำอุ่นก่อนผัด' },
+          { sku: 'ING-SHRIMP-RIVER', quantity: 150, unit: 'กรัม', notes: 'ปอกเปลือก ผ่าหลัง' },
+          { sku: 'ING-EGG', quantity: 2, unit: 'ฟอง' },
+          { sku: 'ING-BEANSPROUT', quantity: 80, unit: 'กรัม' },
+          { sku: 'ING-SPRING-ONION', quantity: 20, unit: 'กรัม', notes: 'หั่นท่อน' },
+          { sku: 'ING-PEANUT-ROASTED', quantity: 30, unit: 'กรัม', notes: 'ป่น' },
+          { sku: 'ING-TAMARIND', quantity: 45, unit: 'กรัม' },
+          { sku: 'ING-SUGAR-WHITE', quantity: 15, unit: 'กรัม' },
+          { sku: 'ING-SOY-LIGHT', quantity: 30, unit: 'มล.' },
+          { sku: 'ING-VEG-OIL', quantity: 45, unit: 'มล.' },
+        ],
+      },
+      {
+        menu: 'ต้มยำกุ้ง',
+        servings: 2,
+        instructions:
+          '1. ต้มน้ำใส่ตะไคร้ ข่า ใบมะกรูด\n2. ใส่กุ้ง เคี่ยวจนสุก\n3. ใส่เห็ดฟาง\n4. ปรุงรสน้ำปลา มะนาว พริก\n5. ปิดไฟ โรยผักชี',
+        notes: 'ใส่มะนาวตอนปิดไฟ กันขม',
+        ingredients: [
+          { sku: 'ING-SHRIMP-RIVER', quantity: 200, unit: 'กรัม' },
+          { sku: 'ING-LEMONGRASS', quantity: 20, unit: 'กรัม', notes: 'ทุบ หั่นท่อน' },
+          { sku: 'ING-GALANGAL', quantity: 15, unit: 'กรัม' },
+          { sku: 'ING-KAFFIR-LEAF', quantity: 3, unit: 'กรัม', notes: 'ฉีก' },
+          { sku: 'ING-MUSHROOM-STRAW', quantity: 100, unit: 'กรัม', notes: 'ผ่าครึ่ง' },
+          { sku: 'ING-CHILI-SUAN', quantity: 10, unit: 'กรัม', notes: 'ทุบ' },
+          { sku: 'ING-FISH-SAUCE', quantity: 30, unit: 'มล.' },
+          { sku: 'ING-LIME', quantity: 40, unit: 'มล.', notes: 'คั้นน้ำ' },
+          { sku: 'ING-CORIANDER', quantity: 5, unit: 'กรัม' },
+        ],
+      },
+      {
+        menu: 'แกงเขียวหวานไก่',
+        servings: 3,
+        instructions:
+          '1. เคี่ยวกะทิจนแตกมัน ผัดพริกแกง\n2. ใส่ไก่ ผัดจนสุก\n3. เติมกะทิ+น้ำ เคี่ยว 10 นาที\n4. ใส่มะเขือ เคี่ยวต่อ\n5. ปรุงรส ใส่ใบโหระพา',
+        notes: 'ใส่ใบโหระพาหลังปิดไฟ',
+        ingredients: [
+          { sku: 'ING-CHICKEN', quantity: 300, unit: 'กรัม', notes: 'หั่นพอดีคำ' },
+          { sku: 'ING-CURRY-GREEN', quantity: 45, unit: 'กรัม' },
+          { sku: 'ING-COCONUT-MILK', quantity: 400, unit: 'มล.', notes: 'แบ่ง 2 ส่วน' },
+          { sku: 'ING-EGGPLANT-THAI', quantity: 100, unit: 'กรัม', notes: 'หั่นครึ่ง' },
+          { sku: 'ING-EGGPLANT-PEA', quantity: 50, unit: 'กรัม' },
+          { sku: 'ING-BASIL-SWEET', quantity: 10, unit: 'กรัม' },
+          { sku: 'ING-FISH-SAUCE', quantity: 30, unit: 'มล.' },
+          { sku: 'ING-PALM-SUGAR', quantity: 10, unit: 'กรัม' },
+        ],
+      },
+      {
+        menu: 'ข้าวมันไก่',
+        servings: 2,
+        instructions:
+          '1. หุงข้าวกับน้ำมันไก่ กระเทียม ขิง\n2. ต้มไก่จนสุก แช่น้ำเย็น\n3. สับไก่ จัดจานคู่ข้าว\n4. เสิร์ฟพร้อมน้ำจิ้มและซุป',
+        notes: 'ข้าวต้องหอมมันแต่ไม่เละ',
+        ingredients: [
+          { sku: 'ING-JASMINE-RICE', quantity: 300, unit: 'กรัม' },
+          { sku: 'ING-CHICKEN', quantity: 350, unit: 'กรัม' },
+          { sku: 'ING-GARLIC', quantity: 20, unit: 'กรัม' },
+          { sku: 'ING-GINGER', quantity: 20, unit: 'กรัม' },
+          { sku: 'ING-VEG-OIL', quantity: 30, unit: 'มล.' },
+          { sku: 'ING-SOY-LIGHT', quantity: 30, unit: 'มล.' },
+          { sku: 'ING-CORIANDER', quantity: 5, unit: 'กรัม' },
+        ],
+      },
+      {
+        menu: 'ข้าวต้มปลา',
+        servings: 1,
+        instructions:
+          '1. ต้มข้าวสวยกับน้ำซุปจนเดือด\n2. ใส่เนื้อปลา ขิงซอย\n3. ปรุงรสน้ำปลา\n4. โรยต้นหอม ผักชี พริกไทย',
+        notes: 'ปลาสดลวกพอสุก เนื้อไม่แข็ง',
+        ingredients: [
+          { sku: 'ING-JASMINE-RICE', quantity: 150, unit: 'กรัม', notes: 'ข้าวสวย' },
+          { sku: 'ING-FISH-FILLET', quantity: 150, unit: 'กรัม', notes: 'หั่นชิ้น' },
+          { sku: 'ING-GINGER', quantity: 15, unit: 'กรัม', notes: 'ซอย' },
+          { sku: 'ING-GARLIC', quantity: 10, unit: 'กรัม', notes: 'เจียว' },
+          { sku: 'ING-SPRING-ONION', quantity: 10, unit: 'กรัม' },
+          { sku: 'ING-CORIANDER', quantity: 5, unit: 'กรัม' },
+          { sku: 'ING-FISH-SAUCE', quantity: 15, unit: 'มล.' },
+        ],
+      },
+      {
+        menu: 'โจ๊กหมูสับ',
+        servings: 1,
+        instructions:
+          '1. เคี่ยวข้าวจนเป็นโจ๊กเนียน\n2. ปั้นหมูสับหยอดลงต้ม\n3. ตอกไข่\n4. โรยขิงซอย ต้นหอม พริกไทย',
+        notes: 'คนบ่อย ๆ กันข้าวติดก้นหม้อ',
+        ingredients: [
+          { sku: 'ING-JASMINE-RICE', quantity: 120, unit: 'กรัม' },
+          { sku: 'ING-PORK-MINCED', quantity: 150, unit: 'กรัม' },
+          { sku: 'ING-EGG', quantity: 1, unit: 'ฟอง' },
+          { sku: 'ING-GINGER', quantity: 15, unit: 'กรัม', notes: 'ซอย' },
+          { sku: 'ING-SPRING-ONION', quantity: 10, unit: 'กรัม' },
+          { sku: 'ING-SOY-LIGHT', quantity: 15, unit: 'มล.' },
+          { sku: 'ING-PEPPER-BLACK', quantity: 1, unit: 'กรัม' },
+        ],
+      },
+      {
+        menu: 'ไข่กระทะ',
+        servings: 1,
+        instructions:
+          '1. ตั้งกระทะร้อน ใส่น้ำมัน\n2. ตอกไข่ ใส่หมูสับ\n3. ปรุงรส โรยต้นหอม พริกไทย\n4. เสิร์ฟร้อนในกระทะ',
+        notes: 'ไข่แดงเยิ้มกำลังดี',
+        ingredients: [
+          { sku: 'ING-EGG', quantity: 2, unit: 'ฟอง' },
+          { sku: 'ING-PORK-MINCED', quantity: 50, unit: 'กรัม' },
+          { sku: 'ING-SPRING-ONION', quantity: 10, unit: 'กรัม' },
+          { sku: 'ING-VEG-OIL', quantity: 15, unit: 'มล.' },
+          { sku: 'ING-PEPPER-BLACK', quantity: 0.5, unit: 'กรัม' },
+        ],
+      },
+      {
+        // English-named variant present in some seeded menus (demo parity).
+        menu: 'Som Tum Thai',
+        servings: 1,
+        instructions:
+          '1. โขลกกระเทียม พริก\n2. ใส่มะเขือเทศ ถั่วฝักยาว โขลกเบา ๆ\n3. ใส่มะละกอขูด คลุกเคล้า\n4. ปรุงรสน้ำปลา มะนาว น้ำตาลปี๊บ กุ้งแห้ง\n5. โรยถั่วลิสงคั่ว',
+        notes: 'มะละกอสดกรอบ ใส่มะนาวท้ายสุดรักษาสี',
+        ingredients: [
+          { sku: 'ING-PAPAYA', quantity: 200, unit: 'กรัม', notes: 'ขูดเส้น' },
+          { sku: 'ING-TOMATO-CHERRY', quantity: 50, unit: 'กรัม', notes: 'ผ่าครึ่ง' },
+          { sku: 'ING-LONGBEAN', quantity: 30, unit: 'กรัม', notes: 'หั่นท่อน' },
+          { sku: 'ING-DRIED-SHRIMP', quantity: 15, unit: 'กรัม' },
+          { sku: 'ING-PEANUT-ROASTED', quantity: 20, unit: 'กรัม' },
+          { sku: 'ING-GARLIC', quantity: 10, unit: 'กรัม' },
+          { sku: 'ING-CHILI', quantity: 5, unit: 'กรัม', notes: 'ปรับตามชอบ' },
+          { sku: 'ING-FISH-SAUCE', quantity: 22, unit: 'มล.' },
+          { sku: 'ING-PALM-SUGAR', quantity: 15, unit: 'กรัม' },
+          { sku: 'ING-LIME', quantity: 30, unit: 'มล.', notes: 'คั้นน้ำ' },
+        ],
+      },
+      {
+        // English-named variant present in some seeded menus (demo parity).
+        menu: 'Massaman Lamb',
+        servings: 4,
+        instructions:
+          '1. ผัดพริกแกงมัสมั่นกับกะทิจนหอม\n2. ใส่เนื้อแกะ ผัดจนผิวเหลือง\n3. เติมกะทิ+น้ำ เคี่ยวไฟอ่อน 45 นาที\n4. ใส่มันฝรั่ง หัวหอม ถั่วลิสง เคี่ยวต่อ\n5. ปรุงรสน้ำปลา น้ำตาลปี๊บ น้ำมะขาม จนซอสข้น',
+        notes: 'เคี่ยวไฟอ่อนนาน ๆ เนื้อนุ่มละลาย',
+        ingredients: [
+          { sku: 'ING-LAMB-SHOULDER', quantity: 600, unit: 'กรัม', notes: 'หั่นชิ้นใหญ่' },
+          { sku: 'ING-CURRY-MASSAMAN', quantity: 60, unit: 'กรัม' },
+          { sku: 'ING-COCONUT-MILK', quantity: 400, unit: 'มล.' },
+          { sku: 'ING-POTATO', quantity: 200, unit: 'กรัม', notes: 'หั่นสี่เหลี่ยม' },
+          { sku: 'ING-ONION', quantity: 100, unit: 'กรัม', notes: 'หั่น 4 ส่วน' },
+          { sku: 'ING-PEANUT-ROASTED', quantity: 50, unit: 'กรัม' },
+          { sku: 'ING-TAMARIND', quantity: 30, unit: 'กรัม' },
+          { sku: 'ING-PALM-SUGAR', quantity: 22, unit: 'กรัม' },
+          { sku: 'ING-FISH-SAUCE', quantity: 30, unit: 'มล.' },
+        ],
+      },
+      {
+        menu: 'ข้าวเหนียวมะม่วง',
+        servings: 2,
+        instructions:
+          '1. แช่ข้าวเหนียวข้ามคืน แล้วนึ่ง\n2. ต้มกะทิ+เกลือ+น้ำตาล\n3. ราดกะทิลงข้าวเหนียวร้อน พัก 15 นาที\n4. จัดจานคู่มะม่วง โรยงา',
+        notes: 'มะม่วงน้ำดอกไม้สุกกำลังดี',
+        ingredients: [
+          { sku: 'ING-STICKY-RICE', quantity: 200, unit: 'กรัม', notes: 'แช่น้ำข้ามคืน' },
+          { sku: 'ING-MANGO-RIPE', quantity: 200, unit: 'กรัม', notes: 'หั่นชิ้น' },
+          { sku: 'ING-COCONUT-MILK', quantity: 250, unit: 'มล.' },
+          { sku: 'ING-SUGAR-WHITE', quantity: 45, unit: 'กรัม' },
+          { sku: 'ING-SALT', quantity: 3, unit: 'กรัม' },
+          { sku: 'ING-SESAME-WHITE', quantity: 5, unit: 'กรัม', notes: 'โรยหน้า' },
+        ],
+      },
+      {
+        menu: 'ชาไทยเย็น',
+        servings: 1,
+        instructions:
+          '1. ชงชาไทยกับน้ำร้อน กรองใบชา\n2. เติมน้ำตาลและนมข้น คนละลาย\n3. ใส่น้ำแข็ง ราดนมสด',
+        notes: 'ชาเข้มข้นก่อนใส่น้ำแข็ง',
+        ingredients: [
+          { sku: 'ING-THAI-TEA', quantity: 20, unit: 'กรัม' },
+          { sku: 'ING-SUGAR-WHITE', quantity: 30, unit: 'กรัม' },
+          { sku: 'ING-CONDENSED-MILK', quantity: 30, unit: 'มล.' },
+          { sku: 'ING-MILK-FRESH', quantity: 50, unit: 'มล.', notes: 'ราดหน้า' },
+        ],
+      },
+      {
+        menu: 'กาแฟดำร้อน',
+        servings: 1,
+        instructions: '1. บดกาแฟ ชงกับน้ำร้อน\n2. เติมน้ำตาลตามชอบ',
+        notes: 'อัตราส่วน 1:15 กาแฟต่อน้ำ',
+        ingredients: [
+          { sku: 'ING-COFFEE-ROAST', quantity: 18, unit: 'กรัม' },
+          { sku: 'ING-SUGAR-WHITE', quantity: 5, unit: 'กรัม', notes: 'ตามชอบ' },
+        ],
+      },
+      {
+        menu: 'Latte',
+        servings: 1,
+        instructions:
+          '1. สกัดช็อตเอสเพรสโซ่จากกาแฟบด\n2. สตีมนมสดให้เป็นไมโครโฟม\n3. เทนมลงบนช็อต',
+        notes: 'นมสดเย็นสตีมฟองละเอียด',
+        ingredients: [
+          { sku: 'ING-COFFEE-ROAST', quantity: 18, unit: 'กรัม' },
+          { sku: 'ING-MILK-FRESH', quantity: 200, unit: 'มล.' },
+        ],
+      },
+    ];
+
+    let recipeCount = 0;
+    let relinkedCount = 0;
+    let ingredientCount = 0;
+    let missingItemWarnings = 0;
+    for (const rec of recipes) {
+      const menuItem = await this.prisma.menuItem.findFirst({
+        where: { tenantId, restaurantId: mainRestaurant.id, name: rec.menu },
+      });
+      if (!menuItem) {
+        this.logger.warn(`  ⚠️  Menu item "${rec.menu}" not found, skipping recipe`);
+        continue;
+      }
+
+      const existingRecipe = await this.prisma.menuItemRecipe.findUnique({
+        where: { menuItemId: menuItem.id },
+        include: { ingredients: { select: { itemId: true } } },
+      });
+
+      let recipeId: string;
+      if (existingRecipe) {
+        // Leave a fully inventory-linked recipe alone (may be curated/edited).
+        // Upgrade a stale free-text one ("นอกคลัง", e.g. old FE mockup) to be
+        // inventory-linked so nothing stays untracked for the demo tenant.
+        const fullyLinked =
+          existingRecipe.ingredients.length > 0 &&
+          existingRecipe.ingredients.every((i) => i.itemId);
+        if (fullyLinked) {
+          continue;
+        }
+        await this.prisma.recipeIngredient.deleteMany({
+          where: { recipeId: existingRecipe.id },
+        });
+        await this.prisma.menuItemRecipe.update({
+          where: { id: existingRecipe.id },
+          data: {
+            servings: rec.servings,
+            instructions: rec.instructions,
+            notes: rec.notes,
+          },
+        });
+        recipeId = existingRecipe.id;
+        relinkedCount++;
+      } else {
+        const created = await this.prisma.menuItemRecipe.create({
+          data: {
+            menuItemId: menuItem.id,
+            servings: rec.servings,
+            instructions: rec.instructions,
+            notes: rec.notes,
+          },
+        });
+        recipeId = created.id;
+        recipeCount++;
+      }
+
+      const rows = rec.ingredients
+        .map((ing, idx) => {
+          const item = itemBySku.get(ing.sku);
+          if (!item) {
+            missingItemWarnings++;
+            this.logger.warn(
+              `  ⚠️  Ingredient SKU ${ing.sku} for "${rec.menu}" has no inventory item`,
+            );
+            return null;
+          }
+          // The readiness calc (recipe-readiness.service) divides raw stock qty
+          // by raw recipe qty WITHOUT any unit conversion, so both must share the
+          // item's stocking unit. Recipes are authored in culinary units
+          // (กรัม/มล.); convert to the item's base unit (KG/L → ÷1000) and label
+          // it with that unit so "ทำได้กี่จาน" and stock deduction are correct.
+          const conv = this.toStockUnit(ing.quantity, ing.unit, item.unit ?? '');
+          return {
+            recipeId,
+            name: item.name,
+            itemId: item.id,
+            quantity: conv.quantity,
+            unit: conv.unit,
+            wastagePercent: 0,
+            notes: ing.notes ?? null,
+            displayOrder: idx + 1,
+          };
+        })
+        .filter((r): r is NonNullable<typeof r> => r !== null);
+
+      if (rows.length > 0) {
+        await this.prisma.recipeIngredient.createMany({ data: rows });
+        ingredientCount += rows.length;
+      }
+    }
+
+    this.logger.log(
+      `  ✓ ${recipeCount} new + ${relinkedCount} re-linked recipes / ` +
+        `${ingredientCount} inventory-linked ingredients seeded` +
+        (missingItemWarnings ? ` (${missingItemWarnings} missing item warnings)` : ''),
+    );
+  }
+
+  /**
+   * Convert a culinary recipe quantity into the item's stocking unit so the
+   * readiness calc (which does no unit conversion) stays correct.
+   *   กรัม → KG, มล. → L : ÷1000, labelled with the item's unit.
+   *   Anything already in the item's base (ฟอง↔PIECE, matching unit) is kept
+   *   as-is with the recipe's own label for readability.
+   * Quantities are rounded to 3 decimals (RecipeIngredient.quantity is
+   * Decimal(10,3)).
+   */
+  private toStockUnit(
+    qty: number,
+    recipeUnit: string,
+    itemUnit: string,
+  ): { quantity: number; unit: string } {
+    const u = (itemUnit || '').toUpperCase();
+    const r = recipeUnit || '';
+    if ((u === 'KG' || u === 'L') && (r === 'กรัม' || r === 'มล.')) {
+      return { quantity: Math.round((qty / 1000) * 1000) / 1000, unit: u };
+    }
+    return { quantity: qty, unit: recipeUnit || itemUnit };
+  }
+
   private async seedInventoryData(): Promise<void> {
     this.logger.log('📦 Seeding Inventory data...');
 
@@ -5406,6 +5882,8 @@ export class SeederService {
       { code: 'CAT-FB-DRY', name: 'ของแห้ง', parentCode: 'CAT-FB' },
       { code: 'CAT-FB-VEG', name: 'ผักและผลไม้', parentCode: 'CAT-FB' },
       { code: 'CAT-FB-BEV', name: 'เครื่องดื่ม', parentCode: 'CAT-FB' },
+      { code: 'CAT-FB-MEAT', name: 'เนื้อสัตว์และอาหารทะเล', parentCode: 'CAT-FB' },
+      { code: 'CAT-FB-DAIRY', name: 'ผลิตภัณฑ์นมและไข่', parentCode: 'CAT-FB' },
       { code: 'CAT-RETAIL', name: 'สินค้าร้านค้า / Mini Mart', parentCode: null },
       { code: 'CAT-RETAIL-DRINK', name: 'เครื่องดื่มร้านค้า', parentCode: 'CAT-RETAIL' },
       { code: 'CAT-RETAIL-SNACK', name: 'ขนมและของทานเล่น', parentCode: 'CAT-RETAIL' },
@@ -5535,7 +6013,29 @@ export class SeederService {
     }
 
     // ── 4. Inventory Items ────────────────────────────────────────────────────
+    // Cooking raw materials (วัตถุดิบปรุงอาหาร) — the single source of truth that
+    // recipe ingredients (seedRestaurantRecipes) link to via itemId, and that the
+    // menu-detail "Mockup Recipe" button draws from so every ingredient is
+    // in-stock ("นับสต๊อก") instead of free-text ("นอกคลัง"). Premium tenant only.
+    const cookingIngredients = this.cookingIngredientCatalog();
     const itemDefs = [
+      // — Cooking raw ingredients (kitchen) —
+      ...cookingIngredients.map((c) => ({
+        sku: c.sku,
+        name: c.name,
+        catCode: c.catCode,
+        unit: c.unit,
+        reorderPoint: c.reorderPoint,
+        reorderQty: c.reorderQty,
+        minStock: c.minStock,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: c.isPerishable,
+        supplierCode: 'SUP-MAKRO',
+        unitPrice: c.avgCost,
+        defaultShelfLifeDays: c.shelfLifeDays,
+        barcode: null as string | null,
+        brand: null as string | null,
+      })),
       // Room Amenities
       {
         sku: 'SOAP-75G',
@@ -6277,6 +6777,14 @@ export class SeederService {
 
     // ── 5. Warehouse Stocks (initial balances) ────────────────────────────────
     const stockDefs: Array<{ sku: string; whCode: string; qty: number; avgCost: number }> = [
+      // Cooking raw ingredients — all stocked in the kitchen warehouse so recipes
+      // can deduct + compute "ทำได้กี่จาน".
+      ...cookingIngredients.map((c) => ({
+        sku: c.sku,
+        whCode: 'WH-KITCH',
+        qty: c.qty,
+        avgCost: c.avgCost,
+      })),
       // Housekeeping warehouse stocks
       { sku: 'SOAP-75G', whCode: 'WH-HK', qty: 320, avgCost: 18 },
       { sku: 'SHAMP-30ML', whCode: 'WH-HK', qty: 280, avgCost: 22 },

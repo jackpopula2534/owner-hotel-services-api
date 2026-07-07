@@ -1,8 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { OrderService } from '../modules/restaurant/order/order.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { KitchenGateway } from '../modules/restaurant/kitchen/kitchen.gateway';
+import { MenuService } from '../modules/restaurant/menu/menu.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
+import { INVENTORY_EVENTS } from '../modules/inventory/events/inventory.events';
 
 // ─── Shared mock helpers ──────────────────────────────────────────────────────
 
@@ -36,6 +41,15 @@ const makeGatewayMock = () => ({
   emitItemStatusChanged: jest.fn(),
   emitOrderStatusToGuest: jest.fn(),
 });
+
+const makeAuditMock = () => ({
+  logOrderCreate: jest.fn(),
+  logOrderUpdate: jest.fn(),
+});
+
+const makeMenuServiceMock = () => ({});
+
+const makeConfigMock = () => ({ get: jest.fn().mockReturnValue('http://localhost:9010') });
 
 // ─── Test fixtures ────────────────────────────────────────────────────────────
 
@@ -100,17 +114,24 @@ describe('OrderService', () => {
   let prismaMock: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let gatewayMock: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let eventEmitterMock: any;
   let orderService: OrderService;
 
   beforeEach(async () => {
     prismaMock = makePrismaMock();
     gatewayMock = makeGatewayMock();
+    eventEmitterMock = { emit: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OrderService,
         { provide: PrismaService, useValue: prismaMock },
         { provide: KitchenGateway, useValue: gatewayMock },
+        { provide: MenuService, useValue: makeMenuServiceMock() },
+        { provide: AuditLogService, useValue: makeAuditMock() },
+        { provide: ConfigService, useValue: makeConfigMock() },
+        { provide: EventEmitter2, useValue: eventEmitterMock },
       ],
     }).compile();
 
@@ -448,6 +469,68 @@ describe('OrderService', () => {
         expect.any(String),
         expect.objectContaining({ status: 'CONFIRMED' }),
       );
+    });
+
+    it('emits restaurant.order.completed with ordered items when COMPLETED (drives stock deduction)', async () => {
+      prismaMock.order.findFirst.mockResolvedValue(
+        makeOrder({ status: 'SERVED', tableId: null }),
+      );
+      prismaMock.order.update.mockResolvedValue(
+        makeOrder({
+          status: 'COMPLETED',
+          items: [
+            { menuItemId: 'mi-1', quantity: 2 },
+            { menuItemId: 'mi-2', quantity: 1 },
+          ],
+        }),
+      );
+      prismaMock.restaurant.findFirst.mockResolvedValue({ propertyId: 'prop-1' });
+
+      await orderService.updateStatus(RESTAURANT_ID, ORDER_ID, 'COMPLETED' as any, TENANT_ID, 'user-1');
+
+      expect(eventEmitterMock.emit).toHaveBeenCalledWith(
+        INVENTORY_EVENTS.RESTAURANT_ORDER_COMPLETED,
+        expect.objectContaining({
+          orderId: ORDER_ID,
+          tenantId: TENANT_ID,
+          restaurantId: RESTAURANT_ID,
+          propertyId: 'prop-1',
+          completedBy: 'user-1',
+          items: [
+            { menuItemId: 'mi-1', quantity: 2 },
+            { menuItemId: 'mi-2', quantity: 1 },
+          ],
+        }),
+      );
+    });
+
+    it('does NOT emit restaurant.order.completed for non-COMPLETED transitions', async () => {
+      prismaMock.order.findFirst.mockResolvedValue(makeOrder({ status: 'PENDING' }));
+      prismaMock.order.update.mockResolvedValue(makeOrder({ status: 'CONFIRMED' }));
+
+      await orderService.updateStatus(RESTAURANT_ID, ORDER_ID, 'CONFIRMED' as any, TENANT_ID);
+
+      expect(eventEmitterMock.emit).not.toHaveBeenCalled();
+    });
+
+    it('completes the order even if propertyId is missing (no emit, no throw)', async () => {
+      prismaMock.order.findFirst.mockResolvedValue(
+        makeOrder({ status: 'SERVED', tableId: null }),
+      );
+      prismaMock.order.update.mockResolvedValue(
+        makeOrder({ status: 'COMPLETED', items: [{ menuItemId: 'mi-1', quantity: 1 }] }),
+      );
+      prismaMock.restaurant.findFirst.mockResolvedValue(null);
+
+      const result = await orderService.updateStatus(
+        RESTAURANT_ID,
+        ORDER_ID,
+        'COMPLETED' as any,
+        TENANT_ID,
+      );
+
+      expect(result.status).toBe('COMPLETED');
+      expect(eventEmitterMock.emit).not.toHaveBeenCalled();
     });
   });
 

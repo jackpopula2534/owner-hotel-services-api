@@ -519,16 +519,23 @@ model MenuItemRecipe {
 }
 
 model RecipeIngredient {
-  id           String         @id @default(uuid())
-  recipeId     String
-  name         String
-  quantity     Decimal?       @db.Decimal(10, 3)
-  unit         String?
-  notes        String?
-  displayOrder Int            @default(0)
-  recipe       MenuItemRecipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  id             String         @id @default(uuid())
+  recipeId       String
+  name           String
+  // itemId links this ingredient to a tracked inventory item. When set, the
+  // ingredient counts toward stock deduction + "how many plates can we make".
+  // When null the ingredient is free-text only (e.g. herbs not kept in stock).
+  itemId         String?
+  quantity       Decimal?       @db.Decimal(10, 3)
+  unit           String?
+  wastagePercent Decimal        @default(0.00) @db.Decimal(5, 2)
+  notes          String?
+  displayOrder   Int            @default(0)
+  recipe         MenuItemRecipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  item           InventoryItem? @relation(fields: [itemId], references: [id])
 
   @@index([recipeId])
+  @@index([itemId])
   @@map("recipe_ingredients")
 }
 
@@ -3080,6 +3087,7 @@ model InventoryItem {
   category                   ItemCategory?               @relation(fields: [categoryId], references: [id])
   inventoryLots              InventoryLot[]
   inventoryRecipeIngredients InventoryRecipeIngredient[]
+  recipeIngredients          RecipeIngredient[]
   itemSuppliers              ItemSupplier[]
   purchaseOrderItems         PurchaseOrderItem[]
   purchaseRequisitionItems   PurchaseRequisitionItem[]
@@ -7341,4 +7349,23 @@ model CampRequisitionItem {
   @@index([inventoryItemId])
   @@index([addonId])
   @@map("camp_requisition_items")
+}
+
+/// Integration Hub — การเชื่อมต่อระหว่าง Sub-System ที่ tenant เปิด/ปิดใช้งานเอง
+/// integrationKey = key จาก integrations.catalog.ts (เช่น restaurant-inventory-autodeduct)
+/// ไม่มีแถว = ใช้ค่า defaultEnabled ของ catalog (คงพฤติกรรมเดิม); enabled=false = ปิดการเชื่อมต่อ
+model TenantIntegration {
+  id             String    @id @default(uuid()) @db.VarChar(36)
+  tenantId       String    @db.VarChar(36)
+  integrationKey String    @db.VarChar(80)
+  enabled        Boolean   @default(true)
+  /// ตัวเลือกเสริมของการเชื่อมต่อ (เผื่ออนาคต เช่น เจาะจง warehouseId ปลายทาง)
+  config         Json?
+  connectedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([tenantId, integrationKey])
+  @@index([tenantId])
+  @@map("tenant_integrations")
 }

@@ -6,6 +6,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as QRCode from 'qrcode';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { OrderStatus } from '@prisma/client';
@@ -15,6 +16,10 @@ import { ProcessPaymentDto, PaymentMethodEnum } from './dto/process-payment.dto'
 import { MenuService } from '../menu/menu.service';
 import { KitchenGateway } from '../kitchen/kitchen.gateway';
 import { AuditLogService } from '../../../audit-log/audit-log.service';
+import {
+  INVENTORY_EVENTS,
+  RestaurantOrderCompletedEvent,
+} from '../../inventory/events/inventory.events';
 
 @Injectable()
 export class OrderService {
@@ -26,6 +31,7 @@ export class OrderService {
     private readonly menuService: MenuService,
     private readonly auditLogService: AuditLogService,
     @Optional() private readonly kitchenGateway?: KitchenGateway,
+    @Optional() private readonly eventEmitter?: EventEmitter2,
   ) {}
 
   // ─── Booked Rooms (for Room Service lookup) ────────────────────────────
@@ -475,7 +481,58 @@ export class OrderService {
       updatedAt: new Date(),
     });
 
+    // When an order is completed, tell the inventory module to deduct recipe
+    // ingredients from the kitchen warehouse. The listener is gated by the
+    // INVENTORY_MODULE add-on and only touches stock-linked ingredients, so
+    // tenants without inventory (or without linked recipes) are unaffected.
+    if (status === 'COMPLETED') {
+      await this.emitOrderCompleted(updatedOrder, restaurantId, tenantId, userId);
+    }
+
     return updatedOrder;
+  }
+
+  /**
+   * Emit `restaurant.order.completed` for the inventory listener to auto-deduct
+   * ingredients. Never throws — a failure here must not roll back the completed
+   * order (the deduction listener is best-effort and idempotency-safe).
+   */
+  private async emitOrderCompleted(
+    order: { id: string; orderNumber: string; items?: { menuItemId: string; quantity: number }[] },
+    restaurantId: string,
+    tenantId: string,
+    userId?: string,
+  ): Promise<void> {
+    if (!this.eventEmitter) return;
+    try {
+      const items = (order.items ?? [])
+        .filter((i) => i.menuItemId && i.quantity > 0)
+        .map((i) => ({ menuItemId: i.menuItemId, quantity: i.quantity }));
+      if (items.length === 0) return;
+
+      // The listener resolves the kitchen warehouse by propertyId, which lives
+      // on the restaurant (orders don't carry it directly).
+      const restaurant = await this.prisma.restaurant.findFirst({
+        where: { id: restaurantId, tenantId },
+        select: { propertyId: true },
+      });
+      if (!restaurant?.propertyId) return;
+
+      const payload: RestaurantOrderCompletedEvent = {
+        orderId: order.id,
+        tenantId,
+        restaurantId,
+        propertyId: restaurant.propertyId,
+        items,
+        completedBy: userId ?? 'system',
+      };
+      this.eventEmitter.emit(INVENTORY_EVENTS.RESTAURANT_ORDER_COMPLETED, payload);
+    } catch (error) {
+      this.logger.error(
+        `Failed to emit order-completed event for order ${order.id}: ${(error as Error).message}`,
+        (error as Error).stack,
+      );
+    }
   }
 
   async processPayment(
