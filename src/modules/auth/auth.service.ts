@@ -269,7 +269,7 @@ export class AuthService {
   }
 
   // Roles ที่ห้ามเข้าผ่าน /auth/login (ต้องใช้ /auth/admin/login เท่านั้น)
-  private readonly ADMIN_ONLY_ROLES = ['platform_admin', 'super_admin', 'admin'];
+  private readonly ADMIN_ONLY_ROLES = ['platform_admin', 'admin'];
 
   async login(
     loginDto: LoginDto,
@@ -431,7 +431,14 @@ export class AuthService {
    */
   private async buildLoginResponse(
     user: any,
-    systemContext: 'main' | 'pos' | 'procurement' | 'warehouse' | 'hotel-terminal' | 'accounting' | 'hr',
+    systemContext:
+      | 'main'
+      | 'pos'
+      | 'procurement'
+      | 'warehouse'
+      | 'hotel-terminal'
+      | 'accounting'
+      | 'hr',
     deviceInfo?: { ipAddress?: string; userAgent?: string },
   ) {
     // Determine tenantId: prefer user.tenantId, fallback to default from UserTenant table
@@ -692,7 +699,14 @@ export class AuthService {
   async logout(
     userIdOrAdminId: string,
     refreshToken?: string,
-    systemContext?: 'main' | 'pos' | 'procurement' | 'warehouse' | 'hotel-terminal' | 'accounting' | 'hr',
+    systemContext?:
+      | 'main'
+      | 'pos'
+      | 'procurement'
+      | 'warehouse'
+      | 'hotel-terminal'
+      | 'accounting'
+      | 'hr',
   ) {
     if (refreshToken) {
       // Revoke the specific refresh token
@@ -1185,7 +1199,14 @@ export class AuthService {
   private generateTempToken(
     userId: string,
     email: string,
-    systemContext: 'main' | 'pos' | 'procurement' | 'warehouse' | 'hotel-terminal' | 'accounting' | 'hr',
+    systemContext:
+      | 'main'
+      | 'pos'
+      | 'procurement'
+      | 'warehouse'
+      | 'hotel-terminal'
+      | 'accounting'
+      | 'hr',
   ): string {
     return this.jwtService.sign(
       { sub: userId, email, type: '2fa_pending', systemContext },
@@ -1199,7 +1220,14 @@ export class AuthService {
   verifyTempToken(token: string): {
     userId: string;
     email: string;
-    systemContext: 'main' | 'pos' | 'procurement' | 'warehouse' | 'hotel-terminal' | 'accounting' | 'hr';
+    systemContext:
+      | 'main'
+      | 'pos'
+      | 'procurement'
+      | 'warehouse'
+      | 'hotel-terminal'
+      | 'accounting'
+      | 'hr';
   } | null {
     try {
       const payload = this.jwtService.verify(token) as {

@@ -43,7 +43,6 @@ export type UserRole =
   | 'crm_agent'
   | 'sales_rep'
   | 'owner'
-  | 'super_admin'
   | 'cashier'
   | 'system';
 

@@ -317,18 +317,9 @@ describe('AuthService', () => {
       await expect(service.login(loginDto)).rejects.toThrow(UnauthorizedException);
     });
 
-    it('should block super_admin from login via /auth/login', async () => {
-      mockPrismaService.user.findUnique.mockResolvedValue({
-        id: '4',
-        email: loginDto.email,
-        password: 'hashedPassword',
-        role: 'super_admin',
-        status: 'active',
-      });
-
-      await expect(service.login(loginDto)).rejects.toThrow(UnauthorizedException);
-    });
-
+    // 'super_admin' used to be blocked here too. It is retired — migration
+    // 20260709120000_drop_super_admin_role rewrites any such users row to
+    // 'admin', which the next test covers.
     it('should block admin from login via /auth/login', async () => {
       mockPrismaService.user.findUnique.mockResolvedValue({
         id: '5',

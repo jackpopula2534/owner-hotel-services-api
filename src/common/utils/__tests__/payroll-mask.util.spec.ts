@@ -56,7 +56,7 @@ const mockPayroll = {
 // maskEmployeePayroll
 // ──────────────────────────────────────────────────────────────
 describe('maskEmployeePayroll()', () => {
-  const PRIVILEGED_ROLES = ['platform_admin', 'super_admin', 'tenant_admin', 'admin', 'hr'];
+  const PRIVILEGED_ROLES = ['platform_admin', 'tenant_admin', 'admin', 'hr'];
   const NON_PRIVILEGED_ROLES = ['manager', 'receptionist', 'staff', 'kitchen'];
 
   describe('privileged roles — should see full data', () => {
@@ -130,11 +130,10 @@ describe('maskEmployeePayroll()', () => {
       expect(maskEmployeePayroll(mockEmployee, 'hr').baseSalary).toBe(mockEmployee.baseSalary);
     });
 
-    it('gives super_admin (level 100) at least what admin (level 90) sees', () => {
-      // super_admin is platform-level: ADMIN_ONLY_ROLES sends it to
-      // /auth/admin/login, so it always arrives with isPlatformAdmin: true.
-      // It used to be missing here alone, so it saw less than admin.
-      expect(maskEmployeePayroll(mockEmployee, 'super_admin')).toEqual(mockEmployee);
+    it('masks super_admin, a role that no longer exists', () => {
+      // Retired in migration 20260709120000_drop_super_admin_role. It is now
+      // just an unrecognised string, and an unrecognised string sees nothing.
+      expect(maskEmployeePayroll(mockEmployee, 'super_admin').baseSalary).toBe(MASKED);
     });
   });
 
@@ -233,11 +232,6 @@ describe('maskPayrollRecord()', () => {
 
   it('should return full data for tenant_admin role', () => {
     const result = maskPayrollRecord(mockPayroll, 'tenant_admin');
-    expect(result).toEqual(mockPayroll);
-  });
-
-  it('should return full data for super_admin role', () => {
-    const result = maskPayrollRecord(mockPayroll, 'super_admin');
     expect(result).toEqual(mockPayroll);
   });
 

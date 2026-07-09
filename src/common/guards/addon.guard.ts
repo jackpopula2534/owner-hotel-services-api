@@ -89,7 +89,6 @@ export class AddonGuard implements CanActivate {
     const role = request.user?.role ?? '';
     const BYPASS_ROLES = [
       'platform_admin',
-      'super_admin',
       'admin',
       'procurement_manager',
       'buyer',

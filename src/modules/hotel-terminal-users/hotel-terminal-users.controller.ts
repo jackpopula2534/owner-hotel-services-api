@@ -37,7 +37,6 @@ const ADMIN_ROLES = new Set([
   'MANAGER',
   'platform_admin',
   'admin',
-  'super_admin',
   'hotel_manager',
 ]);
 

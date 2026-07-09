@@ -60,7 +60,7 @@ describe('TenantContextInterceptor', () => {
     // no matter what their (free-text, DB-controlled) role column says.
     it.each([
       ['admin', 'legacy tenant-admin alias — the original vulnerability'],
-      ['super_admin', 'never a real role in UserRole; must not be privileged'],
+      ['super_admin', 'a retired role — an unknown string must not be privileged'],
       ['tenant_admin', 'hotel owner — highest tenant role, still tenant-bound'],
       ['owner', 'tenant owner'],
       ['manager', 'ordinary staff role'],

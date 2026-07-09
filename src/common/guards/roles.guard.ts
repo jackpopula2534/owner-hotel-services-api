@@ -9,7 +9,6 @@ import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
  */
 const ROLE_LEVELS: Record<string, number> = {
   platform_admin: 1000,
-  super_admin: 100,
   admin: 90,
   tenant_admin: 85,
   manager: 80,
