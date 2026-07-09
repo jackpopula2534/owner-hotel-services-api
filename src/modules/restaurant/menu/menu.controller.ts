@@ -34,11 +34,13 @@ import { AddonGuard } from '../../../common/guards/addon.guard';
 import { Roles } from '../../../common/decorators/roles.decorator';
 import { RequireAddon } from '../../../common/decorators/require-addon.decorator';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 
 @ApiTags('restaurant / menu')
 @ApiBearerAuth('JWT-auth')
 @UseGuards(JwtAuthGuard, RolesGuard, AddonGuard)
 @RequireAddon('RESTAURANT_MODULE')
+@AllowSystems('pos')
 @Controller({ path: 'restaurants/:restaurantId', version: '1' })
 export class MenuController {
   constructor(private readonly menuService: MenuService) {}
@@ -62,7 +64,17 @@ export class MenuController {
   @Get('menu-categories')
   @ApiOperation({ summary: 'Get all menu categories' })
   @ApiParam({ name: 'restaurantId' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'waiter', 'staff', 'cashier', 'bartender')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'chef',
+    'waiter',
+    'staff',
+    'cashier',
+    'bartender',
+  )
   async findAllCategories(
     @Param('restaurantId') restaurantId: string,
     @CurrentUser() user: { tenantId: string },
@@ -151,7 +163,17 @@ export class MenuController {
   @ApiQuery({ name: 'search', required: false })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'waiter', 'staff', 'cashier', 'bartender')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'chef',
+    'waiter',
+    'staff',
+    'cashier',
+    'bartender',
+  )
   async findAllItems(
     @Param('restaurantId') restaurantId: string,
     @Query()

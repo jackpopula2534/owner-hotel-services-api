@@ -6,7 +6,9 @@ import { LanguageMiddleware } from './common/middleware/language.middleware';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { SubscriptionGuard } from './subscription/subscription.guard';
-import { ConfigModule } from '@nestjs/config';
+import { SystemGuard } from './common/guards/system.guard';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { JwtModule } from '@nestjs/jwt';
 import { validate } from './config/env.validation';
 import { DatabaseModule } from './database/database.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -113,6 +115,15 @@ import { TenantGuard } from './common/guards/tenant.guard';
     ConfigModule.forRoot({
       isGlobal: true,
       validate, // throws at startup if any required env var is missing
+    }),
+    // Registered here, not taken from AuthModule's re-export, so the global
+    // SystemGuard can decode a bearer token without AppModule depending on a
+    // feature module for it. Verify-only: this instance never signs anything.
+    JwtModule.registerAsync({
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        secret: configService.getOrThrow<string>('JWT_SECRET'),
+      }),
     }),
     StorageModule,
     EventEmitterModule.forRoot({
@@ -245,6 +256,15 @@ import { TenantGuard } from './common/guards/tenant.guard';
     {
       provide: APP_GUARD,
       useClass: SubscriptionGuard,
+    },
+    {
+      // SystemGuard keeps a token minted by a sub-system inside that sub-system.
+      // Registered globally so the default is DENY: a POS token reaches only the
+      // endpoints that carry @AllowSystems('pos'). It reads the bearer token
+      // itself rather than request.user, because a global guard runs before the
+      // controller's JwtAuthGuard — same constraint TenantGuard documents.
+      provide: APP_GUARD,
+      useClass: SystemGuard,
     },
     {
       // Register the global exception filter as a DI-managed provider so it

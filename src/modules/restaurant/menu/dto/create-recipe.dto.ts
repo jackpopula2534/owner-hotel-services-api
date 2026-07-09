@@ -27,7 +27,10 @@ export class CreateRecipeIngredientDto {
   @IsOptional()
   itemId?: string;
 
-  @ApiPropertyOptional({ example: 200, description: 'Quantity amount (for the whole recipe batch)' })
+  @ApiPropertyOptional({
+    example: 200,
+    description: 'Quantity amount (for the whole recipe batch)',
+  })
   @IsNumber({ maxDecimalPlaces: 3 })
   @IsOptional()
   @Type(() => Number)

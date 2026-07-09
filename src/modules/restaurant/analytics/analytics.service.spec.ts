@@ -25,10 +25,7 @@ describe('RestaurantAnalyticsService.getDailySummary', () => {
   beforeEach(async () => {
     prisma = makePrismaMock();
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        RestaurantAnalyticsService,
-        { provide: PrismaService, useValue: prisma },
-      ],
+      providers: [RestaurantAnalyticsService, { provide: PrismaService, useValue: prisma }],
     }).compile();
     service = module.get(RestaurantAnalyticsService);
     // Silence the expected error log from the fallback path.
@@ -37,8 +34,22 @@ describe('RestaurantAnalyticsService.getDailySummary', () => {
 
   it('aggregates a normal day', async () => {
     prisma.order.findMany.mockResolvedValue([
-      { status: 'COMPLETED', paymentStatus: 'PAID', total: '250.00', orderType: 'DINE_IN', partySize: 2, paymentMethod: 'CASH' },
-      { status: 'PENDING', paymentStatus: 'UNPAID', total: '100.00', orderType: 'DINE_IN', partySize: 1, paymentMethod: null },
+      {
+        status: 'COMPLETED',
+        paymentStatus: 'PAID',
+        total: '250.00',
+        orderType: 'DINE_IN',
+        partySize: 2,
+        paymentMethod: 'CASH',
+      },
+      {
+        status: 'PENDING',
+        paymentStatus: 'UNPAID',
+        total: '100.00',
+        orderType: 'DINE_IN',
+        partySize: 1,
+        paymentMethod: null,
+      },
     ]);
     prisma.kitchenOrder.findMany.mockResolvedValue([]);
     prisma.restaurantTable.findMany.mockResolvedValue([

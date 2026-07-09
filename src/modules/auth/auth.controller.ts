@@ -24,6 +24,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { SkipSubscriptionCheck } from '../../common/decorators/skip-subscription-check.decorator';
 import { Throttle } from '@nestjs/throttler';
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 
 @ApiTags('auth')
 @Controller({ path: 'auth', version: '1' })
@@ -132,7 +133,9 @@ export class AuthController {
     return { success: true, message: 'Logged out from hotel management dashboard' };
   }
 
+  // The one endpoint a POS terminal must reach outside the restaurant module.
   @Post('pos/logout')
+  @AllowSystems('pos')
   @UseGuards(JwtAuthGuard)
   @Throttle({ default: { limit: 50, ttl: 60 } })
   @ApiBearerAuth('JWT-auth')

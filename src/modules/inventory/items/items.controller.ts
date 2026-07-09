@@ -17,7 +17,14 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { StorageService } from '@/common/storage/storage.service';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiQuery, ApiConsumes } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiQuery,
+  ApiConsumes,
+} from '@nestjs/swagger';
 import {
   ItemsService,
   ItemWithStock,
@@ -33,6 +40,7 @@ import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AddonGuard } from '@/common/guards/addon.guard';
 import { RequireAddon } from '@/common/decorators/require-addon.decorator';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 
 interface JwtPayload {
   sub: string;
@@ -60,6 +68,10 @@ export class ItemsController {
     private readonly storage: StorageService,
   ) {}
 
+  // The POS menu-management view (manager/tenant_admin only) lists inventory items to
+  // attach them to a recipe. Reading the catalogue is all it needs — the rest of this
+  // controller stays closed to POS tokens.
+  @AllowSystems('pos')
   @Get()
   @ApiOperation({ summary: 'Get all items with pagination and filters' })
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })

@@ -20,9 +20,11 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { AddonGuard } from '../../common/guards/addon.guard';
 import { RequireAddon } from '../../common/decorators/require-addon.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 
 @ApiTags('restaurant')
 @ApiBearerAuth('JWT-auth')
+@AllowSystems('pos')
 @Controller({ path: 'restaurants', version: '1' })
 @UseGuards(JwtAuthGuard, RolesGuard, AddonGuard)
 @RequireAddon('RESTAURANT_MODULE')

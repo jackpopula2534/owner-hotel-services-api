@@ -31,11 +31,13 @@ import { Roles } from '../../../common/decorators/roles.decorator';
 import { RequireAddon } from '../../../common/decorators/require-addon.decorator';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import { OrderStatus } from '@prisma/client';
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 
 @ApiTags('restaurant / orders')
 @ApiBearerAuth('JWT-auth')
 @UseGuards(JwtAuthGuard, RolesGuard, AddonGuard)
 @RequireAddon('RESTAURANT_MODULE')
+@AllowSystems('pos')
 @Controller({ path: 'restaurants/:restaurantId/orders', version: '1' })
 export class OrderController {
   constructor(private readonly orderService: OrderService) {}

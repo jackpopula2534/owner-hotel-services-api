@@ -14,10 +14,12 @@ import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { StaffCallService } from './staff-call.service';
 import { CreateStaffCallDto, CallSourceDto } from './dto/create-staff-call.dto';
 import { AcknowledgeCallDto, ResolveCallDto } from './dto/update-staff-call.dto';
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 
 @ApiTags('Staff Calls')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
+@AllowSystems('pos')
 @Controller({ path: 'restaurants/:restaurantId/staff-calls', version: '1' })
 export class StaffCallController {
   constructor(private readonly staffCallService: StaffCallService) {}

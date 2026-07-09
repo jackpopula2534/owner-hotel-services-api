@@ -28,11 +28,13 @@ import { AddonGuard } from '../../../common/guards/addon.guard';
 import { Roles } from '../../../common/decorators/roles.decorator';
 import { RequireAddon } from '../../../common/decorators/require-addon.decorator';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 
 @ApiTags('restaurant / reservations')
 @ApiBearerAuth('JWT-auth')
 @UseGuards(JwtAuthGuard, RolesGuard, AddonGuard)
 @RequireAddon('RESTAURANT_MODULE')
+@AllowSystems('pos')
 @Controller({ path: 'restaurants/:restaurantId/reservations', version: '1' })
 export class ReservationController {
   constructor(private readonly reservationService: ReservationService) {}

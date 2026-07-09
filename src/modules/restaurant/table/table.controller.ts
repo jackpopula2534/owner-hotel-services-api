@@ -30,11 +30,13 @@ import { AddonGuard } from '../../../common/guards/addon.guard';
 import { Roles } from '../../../common/decorators/roles.decorator';
 import { RequireAddon } from '../../../common/decorators/require-addon.decorator';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 
 @ApiTags('restaurant / tables')
 @ApiBearerAuth('JWT-auth')
 @UseGuards(JwtAuthGuard, RolesGuard, AddonGuard)
 @RequireAddon('RESTAURANT_MODULE')
+@AllowSystems('pos')
 @Controller({ path: 'restaurants/:restaurantId/tables', version: '1' })
 export class TableController {
   constructor(private readonly tableService: TableService) {}

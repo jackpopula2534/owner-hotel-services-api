@@ -15,11 +15,13 @@ import { AddonGuard } from '../../../common/guards/addon.guard';
 import { Roles } from '../../../common/decorators/roles.decorator';
 import { RequireAddon } from '../../../common/decorators/require-addon.decorator';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 
 @ApiTags('restaurant / kitchen')
 @ApiBearerAuth('JWT-auth')
 @UseGuards(JwtAuthGuard, RolesGuard, AddonGuard)
 @RequireAddon('RESTAURANT_MODULE')
+@AllowSystems('pos')
 @Controller({ path: 'restaurants/:restaurantId/kitchen', version: '1' })
 export class KitchenController {
   constructor(private readonly kitchenService: KitchenService) {}
@@ -88,7 +90,16 @@ export class KitchenController {
       },
     },
   })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'staff', 'cashier', 'bartender')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'chef',
+    'staff',
+    'cashier',
+    'bartender',
+  )
   async updateItemStatus(
     @Param('restaurantId') restaurantId: string,
     @Param('itemId') itemId: string,
