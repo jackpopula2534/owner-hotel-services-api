@@ -658,7 +658,7 @@ export class EmailService implements OnModuleInit {
   }
 
   async resendEmail(emailLogId: string): Promise<{ success: boolean }> {
-    const emailLog = await this.prisma.emailLog.findUnique({
+    const emailLog = await this.prisma.emailLog.findFirst({
       where: { id: emailLogId },
     });
 

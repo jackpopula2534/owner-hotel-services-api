@@ -162,8 +162,8 @@ export class ArInvoicesService {
     // LEGAL-03: a Thai full tax invoice (ใบกำกับภาษีเต็มรูป) is invalid without the
     // SELLER's tax ID. Block issuance until Document Settings for this property
     // carries a Tax ID — otherwise we'd emit a non-compliant document.
-    const settings = await this.prisma.documentSettings.findUnique({
-      where: { tenantId_propertyId: { tenantId, propertyId: invoice.propertyId } },
+    const settings = await this.prisma.documentSettings.findFirst({
+      where: { tenantId, propertyId: invoice.propertyId },
       select: { taxId: true },
     });
     if (!settings?.taxId || settings.taxId.trim() === '') {

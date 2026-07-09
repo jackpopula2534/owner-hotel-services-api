@@ -80,7 +80,7 @@ export class GuestFolioService {
 
     const folioNo = await this.generateFolioNo(tenantId);
 
-    const booking = await this.prisma.booking.findUnique({ where: { id: bookingId } });
+    const booking = await this.prisma.booking.findFirst({ where: { id: bookingId } });
     const checkInDate = booking?.checkIn ?? new Date();
 
     const folio = await this.prisma.guestFolio.create({

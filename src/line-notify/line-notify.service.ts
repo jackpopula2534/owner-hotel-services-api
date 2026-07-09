@@ -159,12 +159,10 @@ export class LineNotifyService {
    * Get connection status for a user
    */
   async getStatus(tenantId: string, userId: string): Promise<LineNotifyStatusDto> {
-    const token = await this.prisma.lineNotifyToken.findUnique({
+    const token = await this.prisma.lineNotifyToken.findFirst({
       where: {
-        tenantId_userId: {
-          tenantId,
-          userId,
-        },
+        tenantId,
+        userId,
       },
     });
 
@@ -207,12 +205,10 @@ export class LineNotifyService {
    * Disconnect Line Notify
    */
   async disconnect(tenantId: string, userId: string): Promise<void> {
-    const token = await this.prisma.lineNotifyToken.findUnique({
+    const token = await this.prisma.lineNotifyToken.findFirst({
       where: {
-        tenantId_userId: {
-          tenantId,
-          userId,
-        },
+        tenantId,
+        userId,
       },
     });
 
@@ -245,12 +241,10 @@ export class LineNotifyService {
     userId: string,
     dto: SendLineNotifyDto,
   ): Promise<boolean> {
-    const token = await this.prisma.lineNotifyToken.findUnique({
+    const token = await this.prisma.lineNotifyToken.findFirst({
       where: {
-        tenantId_userId: {
-          tenantId,
-          userId,
-        },
+        tenantId,
+        userId,
       },
     });
 

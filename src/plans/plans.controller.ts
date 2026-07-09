@@ -1,7 +1,11 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { PlansService } from './plans.service';
 import { SkipSubscriptionCheck } from '../common/decorators/skip-subscription-check.decorator';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+import { Public } from '../common/decorators/public.decorator';
 import { CreatePlanDto } from './dto/create-plan.dto';
 import { UpdatePlanDto } from './dto/update-plan.dto';
 import {
@@ -14,6 +18,8 @@ import {
 @ApiTags('Public - Plans (Sales Page)')
 @Controller({ path: 'plans', version: '1' })
 @SkipSubscriptionCheck()
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('platform_admin')
 export class PlansController {
   constructor(private readonly plansService: PlansService) {}
 
@@ -27,6 +33,7 @@ export class PlansController {
    * Public endpoint for Sales Page - No authentication required
    */
   @Get()
+  @Public()
   @ApiOperation({
     summary: 'Get all active plans for Sales Page',
     description:
@@ -153,6 +160,7 @@ export class PlansController {
    * Public endpoint to get a single plan - No authentication required
    */
   @Get(':id')
+  @Public()
   @ApiOperation({
     summary: 'Get plan by ID',
     description: 'Public endpoint to get a single plan details',
@@ -176,6 +184,7 @@ export class PlansController {
   }
 
   @Get('code/:code')
+  @Public()
   findByCode(@Param('code') code: string) {
     return this.plansService.findByCode(code);
   }

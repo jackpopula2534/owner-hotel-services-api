@@ -1,8 +1,13 @@
-import { Controller, Get, Post, Body, Param, Delete } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Delete, UseGuards } from '@nestjs/common';
 import { SubscriptionFeaturesService } from './subscription-features.service';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
 import { CreateSubscriptionFeatureDto } from './dto/create-subscription-feature.dto';
 
 @Controller('subscription-features')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('platform_admin')
 export class SubscriptionFeaturesController {
   constructor(private readonly subscriptionFeaturesService: SubscriptionFeaturesService) {}
 

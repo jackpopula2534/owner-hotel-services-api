@@ -1,6 +1,19 @@
-import { Controller, Get, Post, Body, Query, Param, HttpStatus, HttpCode } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Query,
+  Param,
+  HttpStatus,
+  HttpCode,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiParam } from '@nestjs/swagger';
 import { I18nService } from './i18n.service';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
 import {
   SupportedLanguage,
   TranslateDto,
@@ -149,6 +162,8 @@ export class I18nController {
    * Reload translations from files (admin only)
    */
   @Post('reload')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('platform_admin')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Reload translations from files' })
   @ApiResponse({ status: 200 })

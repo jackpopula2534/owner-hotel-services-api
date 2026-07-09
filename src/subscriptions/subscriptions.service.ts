@@ -98,7 +98,7 @@ export class SubscriptionsService {
   }
 
   findOne(id: string) {
-    return this.prisma.subscriptions.findUnique({
+    return this.prisma.subscriptions.findFirst({
       where: { id },
       include: {
         tenants: true,

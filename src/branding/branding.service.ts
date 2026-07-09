@@ -20,7 +20,7 @@ export class BrandingService {
   constructor(private readonly prisma: PrismaService) {}
 
   async getForTenant(tenantId: string) {
-    const row = await (this.prisma as any).tenant_brandings.findUnique({
+    const row = await (this.prisma as any).tenant_brandings.findFirst({
       where: { tenant_id: tenantId },
     });
     return row || null;
@@ -111,7 +111,7 @@ export class BrandingService {
    * records the result.
    */
   async setDomainStatus(tenantId: string, status: DomainStatus): Promise<void> {
-    const row = await (this.prisma as any).tenant_brandings.findUnique({
+    const row = await (this.prisma as any).tenant_brandings.findFirst({
       where: { tenant_id: tenantId },
     });
     if (!row) throw new NotFoundException('Branding row not found');

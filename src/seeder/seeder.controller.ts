@@ -1,9 +1,14 @@
-import { Controller, Post } from '@nestjs/common';
+import { Controller, Post, UseGuards } from '@nestjs/common';
 import { SeederService } from './seeder.service';
 import { SkipSubscriptionCheck } from '../common/decorators/skip-subscription-check.decorator';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
 
 @Controller('seeder')
 @SkipSubscriptionCheck()
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('platform_admin')
 export class SeederController {
   constructor(private readonly seederService: SeederService) {}
 

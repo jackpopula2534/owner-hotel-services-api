@@ -264,38 +264,39 @@ export class TenantsService {
    * Validates that user has access to the tenant via user_tenants
    */
   async switchTenant(userId: string, tenantId: string) {
-    // Verify user has access to this tenant
-    const userTenant = await this.prisma.userTenant.findUnique({
-      where: {
-        userId_tenantId: {
-          userId,
-          tenantId,
+    // Switching the active tenant is inherently cross-tenant: the userTenant
+    // access row and the user's activeTenantId live outside the caller's
+    // currently-active scope. Run unscoped and set tenantId explicitly.
+    return this.tenantContext.runUnscoped(async () => {
+      // Verify user has access to this tenant (findFirst — findUnique is blocked
+      // on tenant-scoped models by the TenantScope middleware)
+      const userTenant = await this.prisma.userTenant.findFirst({
+        where: { userId, tenantId },
+      });
+
+      if (!userTenant) {
+        throw new ForbiddenException('You do not have access to this tenant');
+      }
+
+      // Update user's activeTenantId
+      const updatedUser = await this.prisma.user.update({
+        where: { id: userId },
+        data: { tenantId },
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          role: true,
+          tenantId: true,
         },
-      },
+      });
+
+      return {
+        user: updatedUser,
+        message: 'Tenant switched successfully',
+      };
     });
-
-    if (!userTenant) {
-      throw new ForbiddenException('You do not have access to this tenant');
-    }
-
-    // Update user's activeTenantId
-    const updatedUser = await this.prisma.user.update({
-      where: { id: userId },
-      data: { tenantId },
-      select: {
-        id: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-        role: true,
-        tenantId: true,
-      },
-    });
-
-    return {
-      user: updatedUser,
-      message: 'Tenant switched successfully',
-    };
   }
 
   /**
@@ -304,68 +305,64 @@ export class TenantsService {
   async inviteUserToTenant(invitedByUserId: string, inviteDto: InviteUserDto) {
     const { email, role, tenantId } = inviteDto;
 
-    // Verify that the inviter has owner/admin role on this tenant
-    const inviterTenant = await this.prisma.userTenant.findUnique({
-      where: {
-        userId_tenantId: {
-          userId: invitedByUserId,
-          tenantId,
-        },
-      },
-    });
+    // Inviting spans tenants: the inviter's access row, the invitee lookup by
+    // global email, and the new access row all sit outside the caller's active
+    // scope. Run unscoped and set tenantId explicitly on the write.
+    return this.tenantContext.runUnscoped(async () => {
+      // Verify that the inviter has owner/admin role on this tenant (findFirst —
+      // findUnique is blocked on tenant-scoped models by the TenantScope middleware)
+      const inviterTenant = await this.prisma.userTenant.findFirst({
+        where: { userId: invitedByUserId, tenantId },
+      });
 
-    if (!inviterTenant || !['owner', 'admin'].includes(inviterTenant.role)) {
-      throw new ForbiddenException('You do not have permission to invite users to this tenant');
-    }
+      if (!inviterTenant || !['owner', 'admin'].includes(inviterTenant.role)) {
+        throw new ForbiddenException('You do not have permission to invite users to this tenant');
+      }
 
-    // Find or create user by email
-    const user = await this.prisma.user.findUnique({
-      where: { email },
-    });
+      // Find user by global email
+      const user = await this.prisma.user.findFirst({
+        where: { email },
+      });
 
-    if (!user) {
-      throw new NotFoundException(`User with email ${email} not found. They must register first.`);
-    }
+      if (!user) {
+        throw new NotFoundException(`User with email ${email} not found. They must register first.`);
+      }
 
-    // Check if user already has access to this tenant
-    const existingAccess = await this.prisma.userTenant.findUnique({
-      where: {
-        userId_tenantId: {
+      // Check if user already has access to this tenant
+      const existingAccess = await this.prisma.userTenant.findFirst({
+        where: { userId: user.id, tenantId },
+      });
+
+      if (existingAccess) {
+        throw new BadRequestException('User already has access to this tenant');
+      }
+
+      // Create UserTenant record
+      const userTenant = await this.prisma.userTenant.create({
+        data: {
           userId: user.id,
           tenantId,
+          role: role || 'member',
         },
-      },
-    });
-
-    if (existingAccess) {
-      throw new BadRequestException('User already has access to this tenant');
-    }
-
-    // Create UserTenant record
-    const userTenant = await this.prisma.userTenant.create({
-      data: {
-        userId: user.id,
-        tenantId,
-        role: role || 'member',
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            email: true,
-            firstName: true,
-            lastName: true,
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              firstName: true,
+              lastName: true,
+            },
+          },
+          tenant: {
+            select: {
+              id: true,
+              name: true,
+            },
           },
         },
-        tenant: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-      },
-    });
+      });
 
-    return userTenant;
+      return userTenant;
+    });
   }
 }

@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import * as bcrypt from 'bcrypt';
 import type { Prisma } from '@prisma/client';
 import {
@@ -48,15 +49,18 @@ interface UserLike {
 export class HrTerminalUsersService {
   private readonly logger = new Logger(HrTerminalUsersService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly tenantContext: TenantContextService,
+  ) {}
 
   async create(
     dto: CreateHrTerminalUserDto,
     tenantId: string,
   ): Promise<{ success: true; data: HrTerminalUserResponse }> {
-    const existing = await this.prisma.user.findUnique({
-      where: { email: dto.email },
-    });
+    const existing = await this.tenantContext.runUnscoped(() =>
+      this.prisma.user.findFirst({ where: { email: dto.email } }),
+    );
     if (existing) {
       throw new ConflictException(`A user with email "${dto.email}" already exists`);
     }

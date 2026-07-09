@@ -1,7 +1,9 @@
-import { Controller, Get, Param, Query, ForbiddenException } from '@nestjs/common';
+import { Controller, Get, Param, Query, ForbiddenException, UseGuards } from '@nestjs/common';
 import { FeatureAccessService } from './feature-access.service';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 
 @Controller('feature-access')
+@UseGuards(JwtAuthGuard)
 export class FeatureAccessController {
   constructor(private readonly featureAccessService: FeatureAccessService) {}
 

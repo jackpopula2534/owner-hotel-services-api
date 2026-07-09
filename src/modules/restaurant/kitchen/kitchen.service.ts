@@ -137,7 +137,7 @@ export class KitchenService {
       description: 'ออเดอร์ครัวเสร็จสิ้น',
     });
 
-    return this.prisma.kitchenOrder.findUnique({ where: { id: kitchenOrderId } });
+    return this.prisma.kitchenOrder.findFirst({ where: { id: kitchenOrderId } });
   }
 
   async updateItemStatus(

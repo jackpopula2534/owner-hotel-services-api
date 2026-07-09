@@ -270,7 +270,7 @@ export class StaffCallService {
 
   // ─── Public create (resolves tenantId from restaurant) ────────────────────────
   async createPublic(restaurantId: string, dto: CreateStaffCallDto) {
-    const restaurant = await this.prisma.restaurant.findUnique({
+    const restaurant = await this.prisma.restaurant.findFirst({
       where: { id: restaurantId },
       select: { tenantId: true },
     });

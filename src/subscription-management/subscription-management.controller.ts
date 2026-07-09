@@ -1,12 +1,17 @@
-import { Controller, Post, Body, Param } from '@nestjs/common';
+import { Controller, Post, Body, Param, UseGuards } from '@nestjs/common';
 import { SubscriptionManagementService } from './subscription-management.service';
 import { SkipSubscriptionCheck } from '../common/decorators/skip-subscription-check.decorator';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
 import { UpgradePlanDto } from './dto/upgrade-plan.dto';
 import { AddFeatureDto } from './dto/add-feature.dto';
 import { DowngradePlanDto } from './dto/downgrade-plan.dto';
 
 @Controller('subscription-management')
 @SkipSubscriptionCheck()
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('platform_admin')
 export class SubscriptionManagementController {
   constructor(private readonly subscriptionManagementService: SubscriptionManagementService) {}
 

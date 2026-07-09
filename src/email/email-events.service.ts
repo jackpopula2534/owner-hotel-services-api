@@ -39,7 +39,7 @@ export class EmailEventsService {
       // Get property details for hotel name
       const property =
         booking.property ||
-        (await this.prisma.property.findUnique({
+        (await this.prisma.property.findFirst({
           where: { id: booking.propertyId },
         }));
 
@@ -72,7 +72,7 @@ export class EmailEventsService {
 
       const property =
         booking.property ||
-        (await this.prisma.property.findUnique({
+        (await this.prisma.property.findFirst({
           where: { id: booking.propertyId },
         }));
 
@@ -163,7 +163,7 @@ export class EmailEventsService {
 
       const property =
         booking.property ||
-        (await this.prisma.property.findUnique({
+        (await this.prisma.property.findFirst({
           where: { id: booking.propertyId },
         }));
 
@@ -323,7 +323,7 @@ export class EmailEventsService {
 
       const property =
         booking.property ||
-        (await this.prisma.property.findUnique({
+        (await this.prisma.property.findFirst({
           where: { id: booking.propertyId },
         }));
 
@@ -381,7 +381,7 @@ export class EmailEventsService {
 
       const property =
         booking.property ||
-        (await this.prisma.property.findUnique({
+        (await this.prisma.property.findFirst({
           where: { id: booking.propertyId },
         }));
 

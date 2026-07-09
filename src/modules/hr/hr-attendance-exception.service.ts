@@ -178,8 +178,8 @@ export class HrAttendanceExceptionService {
       ? await (this.prisma as any).hrAttendance.findFirst({
           where: { id: exception.attendanceId, tenantId },
         })
-      : await (this.prisma as any).hrAttendance.findUnique({
-          where: { employeeId_date: { employeeId: exception.employeeId, date } },
+      : await (this.prisma as any).hrAttendance.findFirst({
+          where: { employeeId: exception.employeeId, date },
         });
 
     const checkIn = exception.requestedCheckIn ?? attendance?.checkIn ?? null;

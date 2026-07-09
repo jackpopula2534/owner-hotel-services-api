@@ -1,9 +1,14 @@
-import { Controller, Get, Post, Body, Param } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, UseGuards } from '@nestjs/common';
 import { AdminApprovalService } from './admin-approval.service';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
 import { ApprovePaymentDto } from './dto/approve-payment.dto';
 import { RejectPaymentDto } from './dto/reject-payment.dto';
 
 @Controller('admin-approval')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('platform_admin')
 export class AdminApprovalController {
   constructor(private readonly adminApprovalService: AdminApprovalService) {}
 

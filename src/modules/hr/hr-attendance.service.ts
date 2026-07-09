@@ -155,8 +155,8 @@ export class HrAttendanceService {
     dateOnly.setUTCHours(0, 0, 0, 0);
 
     // Guard: prevent duplicate check-in for the same day
-    const existing = await (this.prisma as any).hrAttendance.findUnique({
-      where: { employeeId_date: { employeeId: dto.employeeId, date: dateOnly } },
+    const existing = await (this.prisma as any).hrAttendance.findFirst({
+      where: { employeeId: dto.employeeId, date: dateOnly },
     });
     if (existing) {
       throw new ConflictException(

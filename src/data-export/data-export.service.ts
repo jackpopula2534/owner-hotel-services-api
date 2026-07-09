@@ -117,7 +117,7 @@ export class DataExportService {
    * the cleanup cron can stop offering it after 7 days.
    */
   async complete(requestId: string, downloadUrl: string, byteSize: number, expiresAt: Date) {
-    const r = await (this.prisma as any).data_export_requests.findUnique({
+    const r = await (this.prisma as any).data_export_requests.findFirst({
       where: { id: requestId },
     });
     if (!r) throw new NotFoundException('Request not found');
@@ -145,7 +145,7 @@ export class DataExportService {
    * Tenant downloads — returns the signed URL if still valid.
    */
   async getDownloadUrl(requestId: string, tenantId: string): Promise<string> {
-    const r = await (this.prisma as any).data_export_requests.findUnique({
+    const r = await (this.prisma as any).data_export_requests.findFirst({
       where: { id: requestId },
     });
     if (!r) throw new NotFoundException('Request not found');

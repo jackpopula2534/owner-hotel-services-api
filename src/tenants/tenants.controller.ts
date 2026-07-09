@@ -23,6 +23,7 @@ import { TenantsService, TenantWithUserRole } from './tenants.service';
 import { HotelDetailService } from './hotel-detail.service';
 import { HotelManagementService } from './hotel-management.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { TenantContextService } from '../common/tenant/tenant-context.service';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { CreateHotelDto } from './dto/create-hotel.dto';
@@ -42,6 +43,7 @@ export class TenantsController {
     private readonly hotelDetailService: HotelDetailService,
     private readonly hotelManagementService: HotelManagementService,
     private readonly prisma: PrismaService,
+    private readonly tenantContext: TenantContextService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
   ) {}
@@ -259,10 +261,16 @@ export class TenantsController {
     // We resolve (b) → tenantId by looking up the property table first.
     let resolvedTenantId = id;
 
-    const property = await this.prisma.property.findUnique({
-      where: { id },
-      select: { tenantId: true },
-    });
+    // Cross-tenant resolution: the property may belong to a tenant the caller
+    // reaches via user_tenants, not their active scope. Look it up unscoped
+    // (findFirst — findUnique is blocked on scoped models); access is still
+    // verified by Check 1/2 below before any data is returned.
+    const property = await this.tenantContext.runUnscoped(() =>
+      this.prisma.property.findFirst({
+        where: { id },
+        select: { tenantId: true },
+      }),
+    );
     if (property?.tenantId) {
       resolvedTenantId = property.tenantId;
     }

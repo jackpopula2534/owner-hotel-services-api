@@ -99,7 +99,7 @@ export class ApiKeysService {
   }
 
   async revoke(keyId: string, tenantId: string): Promise<void> {
-    const k = await (this.prisma as any).api_keys.findUnique({ where: { id: keyId } });
+    const k = await (this.prisma as any).api_keys.findFirst({ where: { id: keyId } });
     if (!k) throw new NotFoundException('API key not found');
     if (k.tenant_id !== tenantId) {
       throw new ForbiddenException("Cannot revoke another tenant's key");

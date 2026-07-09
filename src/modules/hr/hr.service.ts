@@ -127,7 +127,7 @@ export class HrService {
       try {
         let departmentCode = '';
         if (createEmployeeDto.departmentId) {
-          const dept = await (this.prisma as any).hrDepartment.findUnique({
+          const dept = await (this.prisma as any).hrDepartment.findFirst({
             where: { id: createEmployeeDto.departmentId },
             select: { code: true, name: true },
           });

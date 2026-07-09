@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import * as bcrypt from 'bcrypt';
 import type { Prisma } from '@prisma/client';
 import {
@@ -89,7 +90,10 @@ const DEFAULT_ROLE_PERMISSIONS: Record<HotelTerminalRole, string[]> = {
 export class HotelTerminalUsersService {
   private readonly logger = new Logger(HotelTerminalUsersService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly tenantContext: TenantContextService,
+  ) {}
 
   private allowedSystemsFor(_role: HotelTerminalRole): string {
     // Hotel terminal users keep access to the main dashboard so admins can
@@ -118,9 +122,9 @@ export class HotelTerminalUsersService {
     dto: CreateHotelTerminalUserDto,
     tenantId: string,
   ): Promise<{ success: true; data: HotelTerminalUserResponse }> {
-    const existing = await this.prisma.user.findUnique({
-      where: { email: dto.email },
-    });
+    const existing = await this.tenantContext.runUnscoped(() =>
+      this.prisma.user.findFirst({ where: { email: dto.email } }),
+    );
     if (existing) {
       throw new ConflictException(`A user with email "${dto.email}" already exists`);
     }
@@ -166,7 +170,7 @@ export class HotelTerminalUsersService {
       throw new NotFoundException('Employee not found or does not belong to your tenant');
     }
 
-    if (await this.prisma.user.findUnique({ where: { email: employee.email } })) {
+    if (await this.tenantContext.runUnscoped(() => this.prisma.user.findFirst({ where: { email: employee.email } }))) {
       throw new ConflictException(
         `A user with email "${employee.email}" already exists. Use the regular flow to update it.`,
       );
@@ -230,9 +234,9 @@ export class HotelTerminalUsersService {
         skipped.push({ employeeId: item.employeeId, reason: 'ไม่พบในระบบ HR' });
         continue;
       }
-      const existing = await this.prisma.user.findUnique({
-        where: { email: employee.email },
-      });
+      const existing = await this.tenantContext.runUnscoped(() =>
+        this.prisma.user.findFirst({ where: { email: employee.email } }),
+      );
       if (existing) {
         skipped.push({
           employeeId: item.employeeId,
@@ -701,7 +705,7 @@ export class HotelTerminalUsersService {
     const meta = this.parseMetadata(user.metadata);
     let propertyName: string | null = null;
     if (meta.propertyId) {
-      const property = await this.prisma.property.findUnique({
+      const property = await this.prisma.property.findFirst({
         where: { id: meta.propertyId },
         select: { name: true },
       });
