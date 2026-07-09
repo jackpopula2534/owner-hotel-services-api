@@ -1,30 +1,26 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { PlansService } from '../plans/plans.service';
-import { FeaturesService } from '../features/features.service';
-import { SubscriptionFeaturesService } from '../subscription-features/subscription-features.service';
 import { InvoicesService } from '../invoices/invoices.service';
-import { SubscriptionStatus } from '../subscriptions/entities/subscription.entity';
 import { InvoiceStatus } from '../invoices/entities/invoice.entity';
+import { SubscriptionActor } from './subscription-actor';
 
 @Injectable()
 export class SubscriptionManagementService {
   constructor(
     private subscriptionsService: SubscriptionsService,
     private plansService: PlansService,
-    private featuresService: FeaturesService,
-    private subscriptionFeaturesService: SubscriptionFeaturesService,
     private invoicesService: InvoicesService,
   ) {}
 
   /**
-   * 8️⃣ ต่ออายุ / Upgrade / Downgrade
-   * Owner ทำเองได้
-   * Upgrade plan → prorate
-   * Add feature → immediate
-   * Downgrade → มีผลรอบหน้า
+   * Upgrade a subscription's plan, charging the prorated difference.
+   *
+   * The subscription is addressed by id supplied in the request body, so the
+   * caller's right to touch it must be established explicitly.
    */
   async upgradePlan(
+    actor: SubscriptionActor,
     subscriptionId: string,
     newPlanId: string,
     options: { createInvoice?: boolean } = {},
@@ -37,12 +33,14 @@ export class SubscriptionManagementService {
 
     const subscription = await this.subscriptionsService.findOne(subscriptionId);
     if (!subscription) {
-      throw new Error('Subscription not found');
+      throw new NotFoundException('Subscription not found');
     }
+
+    this.assertCanManage(actor, subscription.tenant_id);
 
     const newPlan = await this.plansService.findOne(newPlanId);
     if (!newPlan) {
-      throw new Error('Plan not found');
+      throw new NotFoundException('Plan not found');
     }
 
     // คำนวณ prorate
@@ -81,77 +79,19 @@ export class SubscriptionManagementService {
   }
 
   /**
-   * Add feature → immediate
+   * A tenant may only manage its own subscription; a platform admin may manage
+   * any. Tenant scoping in TenantScopeMiddleware already hides other tenants'
+   * rows from `findOne()`, so this is a second, explicit barrier — and the only
+   * one that applies to platform admins, whose requests skip that middleware.
    */
-  async addFeature(
-    subscriptionId: string,
-    featureId: string,
-  ): Promise<{
-    subscriptionFeature: any;
-    invoice: any;
-  }> {
-    const subscription = await this.subscriptionsService.findOne(subscriptionId);
-    if (!subscription) {
-      throw new Error('Subscription not found');
+  private assertCanManage(actor: SubscriptionActor, ownerTenantId: string): void {
+    if (actor?.isPlatformAdmin) {
+      return;
     }
 
-    const feature = await this.featuresService.findOne(featureId);
-    if (!feature) {
-      throw new Error('Feature not found');
+    if (!actor?.tenantId || actor.tenantId !== ownerTenantId) {
+      throw new ForbiddenException('You do not have permission to manage this subscription.');
     }
-
-    // เพิ่ม feature ทันที
-    const subscriptionFeature = await this.subscriptionFeaturesService.create({
-      subscriptionId: subscriptionId,
-      featureId: featureId,
-      price: Number(feature.price_monthly),
-    });
-
-    // สร้าง invoice
-    const invoice = await this.invoicesService.create({
-      tenantId: subscription.tenant_id,
-      subscriptionId: subscription.id,
-      invoiceNo: `FEAT-${Date.now()}`,
-      amount: Number(feature.price_monthly),
-      status: InvoiceStatus.PENDING,
-      dueDate: new Date().toISOString(),
-    });
-
-    return {
-      subscriptionFeature,
-      invoice,
-    };
-  }
-
-  /**
-   * Downgrade → มีผลรอบหน้า
-   */
-  async scheduleDowngrade(
-    subscriptionId: string,
-    newPlanId: string,
-  ): Promise<{
-    subscription: any;
-    effectiveDate: Date;
-    message: string;
-  }> {
-    const subscription = await this.subscriptionsService.findOne(subscriptionId);
-    if (!subscription) {
-      throw new Error('Subscription not found');
-    }
-
-    // Downgrade มีผลเมื่อ subscription หมดอายุ
-    // เก็บไว้ใน metadata หรือสร้าง record ใหม่
-    // ในที่นี้เราจะ update ทันที แต่จะบอกว่า effective วันที่ subscription หมดอายุ
-
-    await this.subscriptionsService.update(subscriptionId, {
-      planId: newPlanId,
-    });
-
-    return {
-      subscription: await this.subscriptionsService.findOne(subscriptionId),
-      effectiveDate: subscription.end_date,
-      message: 'Downgrade scheduled. Will take effect on subscription renewal.',
-    };
   }
 
   /**
