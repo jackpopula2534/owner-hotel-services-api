@@ -23,6 +23,18 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!payload) {
       throw new UnauthorizedException();
     }
+
+    // Only a full access token may authenticate a request. The 2FA hand-off
+    // token (`type: '2fa_pending'`, auth.service.generateTempToken) is signed
+    // with the same JWT_SECRET and would otherwise pass this strategy — letting
+    // a caller who knows the password but not the 2FA code use it as a bearer
+    // token on any route that has no @Roles (its payload carries no `role`, so
+    // RolesGuard would reject the guarded ones but nothing stops the rest).
+    // Access tokens carry no `type` claim; every typed token is a hand-off.
+    if (payload.type) {
+      throw new UnauthorizedException('Invalid token type');
+    }
+
     let tenantStatus: string | undefined = undefined;
 
     // ── Live status check ──────────────────────────────────────────────────────

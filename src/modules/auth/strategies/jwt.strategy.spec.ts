@@ -57,6 +57,30 @@ describe('JwtStrategy', () => {
       await expect(strategy.validate(undefined)).rejects.toBeInstanceOf(UnauthorizedException);
     });
 
+    it('rejects the 2FA hand-off token used as a bearer token', async () => {
+      // auth.service.generateTempToken() signs this with the same JWT_SECRET.
+      // A caller who knows the password but not the 2FA code receives it from
+      // POST /auth/login — if this strategy accepts it, every route that has
+      // JwtAuthGuard but no @Roles is reachable without completing 2FA.
+      const tempTokenPayload = {
+        sub: 'user-1',
+        email: 'user@example.com',
+        type: '2fa_pending',
+        systemContext: 'main',
+      };
+
+      await expect(strategy.validate(tempTokenPayload)).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
+      expect(userFindUnique).not.toHaveBeenCalled();
+    });
+
+    it('rejects any typed token, not just 2fa_pending', async () => {
+      await expect(
+        strategy.validate({ sub: 'user-1', type: 'password_reset' }),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+
     it('returns claims for platform admin without hitting DB', async () => {
       const payload = {
         sub: 'platform-1',
