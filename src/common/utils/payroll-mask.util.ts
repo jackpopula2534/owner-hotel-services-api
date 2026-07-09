@@ -6,7 +6,7 @@
  * PDPA + RBAC Policy:
  *   - bankAccount, taxId, socialSecurity, baseSalary, initialSalary,
  *     allowance, overtime, positionBonus, netSalary, nationalId
- *   → เปิดเผยได้เฉพาะ: platform_admin, tenant_admin, admin, hr
+ *   → เปิดเผยได้เฉพาะ: platform_admin, super_admin, tenant_admin, admin, hr
  *   → role อื่น (manager, receptionist, etc.) จะเห็น "***MASKED***"
  *
  * นี่คือ RBAC **ภายใน tenant เดียวกัน** ไม่ใช่ด่านกัน cross-tenant
@@ -18,8 +18,20 @@
  *   const safe = maskEmployeePayroll(employee, user.role);
  */
 
-/** Roles ที่มีสิทธิ์เห็นข้อมูลการเงินแบบ full */
-const PRIVILEGED_ROLES = new Set(['platform_admin', 'tenant_admin', 'admin', 'hr']);
+/**
+ * Roles ที่มีสิทธิ์เห็นข้อมูลการเงินแบบ full
+ *
+ * **ลิสต์นี้ derive จาก ROLE_LEVELS ไม่ได้** และห้ามพยายามทำ:
+ * `manager` (80) อยู่เหนือ `hr` (70) ในลำดับชั้น แต่ต้องถูก mask ส่วน `hr` ต้องเห็น
+ * ROLE_LEVELS เป็นลำดับของ "อำนาจสั่งการ" ไม่ใช่ "สิทธิ์เห็นข้อมูลเงินเดือน"
+ * สองอย่างนี้ไม่ได้เรียงตรงกัน การ mask จึงต้องเป็น allowlist ตามชื่อ role
+ *
+ * `super_admin` เป็น platform-level เหมือน `platform_admin` (อยู่ใน
+ * `ADMIN_ONLY_ROLES` → login ได้ทาง `/auth/admin/login` เท่านั้น → มาจากตาราง
+ * `Admin` → `isPlatformAdmin: true` เสมอ) และ addon.guard ก็ bypass ให้คู่กัน
+ * เดิมมันหายไปจากลิสต์นี้ที่เดียว ทำให้ role level 100 เห็นน้อยกว่า level 90
+ */
+const PRIVILEGED_ROLES = new Set(['platform_admin', 'super_admin', 'tenant_admin', 'admin', 'hr']);
 
 /**
  * ไม่มี role = ไม่มีสิทธิ์ (fail closed)

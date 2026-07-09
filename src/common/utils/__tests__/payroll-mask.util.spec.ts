@@ -56,7 +56,7 @@ const mockPayroll = {
 // maskEmployeePayroll
 // ──────────────────────────────────────────────────────────────
 describe('maskEmployeePayroll()', () => {
-  const PRIVILEGED_ROLES = ['platform_admin', 'tenant_admin', 'admin', 'hr'];
+  const PRIVILEGED_ROLES = ['platform_admin', 'super_admin', 'tenant_admin', 'admin', 'hr'];
   const NON_PRIVILEGED_ROLES = ['manager', 'receptionist', 'staff', 'kitchen'];
 
   describe('privileged roles — should see full data', () => {
@@ -116,6 +116,26 @@ describe('maskEmployeePayroll()', () => {
     maskEmployeePayroll(mockEmployee, 'manager');
     expect(mockEmployee.bankAccount).toBe(original.bankAccount);
     expect(mockEmployee.nationalId).toBe(original.nationalId);
+  });
+
+  describe('privilege is an allowlist, not a rank', () => {
+    // ROLE_LEVELS orders command authority, not payroll visibility. Anyone who
+    // "simplifies" this util into `getRoleLevel(role) >= getRoleLevel('hr')`
+    // hands every manager the salary book. These two cases pin that down.
+    it('masks manager (level 80) even though it outranks hr (level 70)', () => {
+      expect(maskEmployeePayroll(mockEmployee, 'manager').baseSalary).toBe(MASKED);
+    });
+
+    it('gives hr (level 70) full data even though manager outranks it', () => {
+      expect(maskEmployeePayroll(mockEmployee, 'hr').baseSalary).toBe(mockEmployee.baseSalary);
+    });
+
+    it('gives super_admin (level 100) at least what admin (level 90) sees', () => {
+      // super_admin is platform-level: ADMIN_ONLY_ROLES sends it to
+      // /auth/admin/login, so it always arrives with isPlatformAdmin: true.
+      // It used to be missing here alone, so it saw less than admin.
+      expect(maskEmployeePayroll(mockEmployee, 'super_admin')).toEqual(mockEmployee);
+    });
   });
 
   it('should skip masking null/undefined sensitive fields', () => {
@@ -213,6 +233,11 @@ describe('maskPayrollRecord()', () => {
 
   it('should return full data for tenant_admin role', () => {
     const result = maskPayrollRecord(mockPayroll, 'tenant_admin');
+    expect(result).toEqual(mockPayroll);
+  });
+
+  it('should return full data for super_admin role', () => {
+    const result = maskPayrollRecord(mockPayroll, 'super_admin');
     expect(result).toEqual(mockPayroll);
   });
 
