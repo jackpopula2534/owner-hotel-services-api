@@ -11,7 +11,7 @@
  *   • WRITE-where — update, updateMany, delete, deleteMany
  *   • CREATE      — create, createMany, upsert
  *   • findUnique  — should throw (cannot be auto-scoped)
- *   • Caller-supplied tenantId — preserved, never overwritten
+ *   • Caller-supplied tenantId — same tenant preserved, a different one rejected
  *   • Platform-global model    — pass-through
  *   • Scope opt-out (runUnscoped) — pass-through
  *   • Missing context (no tenantId in ALS) — pass-through (cron / seed)
@@ -192,11 +192,8 @@ describe('tenant-scope middleware', () => {
     });
   });
 
-  describe('caller-supplied tenantId is honoured', () => {
-    it('does NOT overwrite an existing where.tenantId', async () => {
-      // Caller may already have filtered by the same tenant explicitly —
-      // we trust them and leave it alone (no double-filter risk because
-      // the value is identical).
+  describe('caller-supplied tenantId', () => {
+    it('leaves an existing where.tenantId alone when it names the same tenant', async () => {
       const called = await runAsTenant(
         makeParams('Booking', 'findFirst', {
           where: { id: 'b1', tenantId: TENANT_A },
@@ -205,13 +202,51 @@ describe('tenant-scope middleware', () => {
       expect(called.args.where).toEqual({ id: 'b1', tenantId: TENANT_A });
     });
 
-    it('does NOT overwrite an existing data.tenantId on create', async () => {
+    it('REJECTS a read pinned to a different tenant', async () => {
+      // Prisma does not throw on a mismatch — it runs the query the caller asked
+      // for. So `findMany({ where: { tenantId: req.params.tenantId } })` used to
+      // make this middleware step aside on exactly the value an attacker controls.
+      await expect(
+        runAsTenant(makeParams('Booking', 'findMany', { where: { tenantId: TENANT_B } })),
+      ).rejects.toThrow(/refusing to query "tenantId" = "tenant-bbbb"/);
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    it('REJECTS a write pinned to a different tenant', async () => {
+      await expect(
+        runAsTenant(makeParams('Booking', 'create', { data: { id: 'b1', tenantId: TENANT_B } })),
+      ).rejects.toThrow(/refusing to write "tenantId" = "tenant-bbbb"/);
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    it('REJECTS a cross-tenant update, delete and upsert', async () => {
+      for (const action of ['update', 'delete', 'updateMany'] as const) {
+        await expect(
+          runAsTenant(makeParams('Booking', action, { where: { tenantId: TENANT_B } })),
+        ).rejects.toThrow(/refusing to query/);
+      }
+      await expect(
+        runAsTenant(makeParams('Booking', 'upsert', { where: { tenantId: TENANT_B }, create: {} })),
+      ).rejects.toThrow(/refusing to query/);
+    });
+
+    it('passes a non-literal filter through — only platform admins build those, and they skip scope', async () => {
+      // `{ tenantId: { in: [...] } }` cannot be produced by a route parameter.
       const called = await runAsTenant(
-        makeParams('Booking', 'create', {
-          data: { id: 'b1', tenantId: 'manually-set' },
-        }),
+        makeParams('Booking', 'findMany', { where: { tenantId: { in: [TENANT_A, TENANT_B] } } }),
       );
-      expect(called.args.data).toEqual({ id: 'b1', tenantId: 'manually-set' });
+      expect(called.args.where).toEqual({ tenantId: { in: [TENANT_A, TENANT_B] } });
+    });
+
+    it('still lets an intentional cross-tenant query through runUnscoped()', async () => {
+      const called = await context.runUnscoped(async () => {
+        await middleware(
+          makeParams('Booking', 'findMany', { where: { tenantId: TENANT_B } }),
+          next,
+        );
+        return next.mock.calls[0][0];
+      });
+      expect(called.args.where).toEqual({ tenantId: TENANT_B });
     });
   });
 

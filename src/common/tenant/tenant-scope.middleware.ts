@@ -61,13 +61,24 @@ const WRITE_OPS_WITH_WHERE = new Set<Prisma.PrismaAction>([
 ]);
 
 /**
- * Inject `field = tenantId` into a Prisma `where` clause. Preserves whatever
- * the caller already supplied; treats user-provided `field` as authoritative
- * (Prisma will throw if mismatched — fail closed).
+ * Inject `field = tenantId` into a Prisma `where` clause.
+ *
+ * A caller-supplied literal tenantId that disagrees with the request's tenant is
+ * REJECTED, not honoured. Prisma does not throw on a mismatch — it just runs the
+ * query the caller asked for — so a controller doing
+ * `findMany({ where: { tenantId: req.params.tenantId } })` used to make this
+ * middleware step aside on exactly the value an attacker controls. Cross-tenant
+ * reads must go through `runUnscoped()` / `@SkipTenantScope()`, which are checked
+ * before we ever get here.
+ *
+ * A non-literal filter (`{ tenantId: { in: [...] } }`) is passed through: the only
+ * callers are platform-admin services, which already run with `skipScope` set, and
+ * no route parameter can produce that shape.
  *
  * @param where - existing where (may be undefined / null)
  * @param field - column to set (`tenantId` or `tenant_id`)
  * @param tenantId - value to require
+ * @throws Error when the caller pinned a different tenant
  */
 function injectTenantWhere(
   where: Record<string, unknown> | undefined | null,
@@ -75,24 +86,50 @@ function injectTenantWhere(
   tenantId: string,
 ): Record<string, unknown> {
   if (!where) return { [field]: tenantId };
-  if (where[field] !== undefined) return where;
-  return { ...where, [field]: tenantId };
+
+  const supplied = where[field];
+  if (supplied === undefined) return { ...where, [field]: tenantId };
+
+  if (typeof supplied === 'string' && supplied !== tenantId) {
+    throw new Error(
+      `[TenantScope] refusing to query "${field}" = "${supplied}" while the request ` +
+        `belongs to tenant "${tenantId}". Drop the explicit ${field} and let the ` +
+        `middleware scope the query, or wrap an intentionally cross-tenant call in ` +
+        `TenantContextService.runUnscoped() / annotate the route with @SkipTenantScope().`,
+    );
+  }
+
+  return where;
 }
 
 /**
- * Set `tenantId` on a create payload unless the caller explicitly supplied it.
+ * Set `tenantId` on a create payload. A caller-supplied literal that names a
+ * different tenant is rejected — writing into someone else's tenant is the
+ * mirror image of reading from it. Intentional cross-tenant writes belong in
+ * `runUnscoped()` (seeders and the tenants module already use it).
  *
  * @param data - create payload
  * @param field - column name
  * @param tenantId - default value
+ * @throws Error when the caller pinned a different tenant
  */
 function injectTenantCreate<T extends Record<string, unknown>>(
   data: T,
   field: TenantScopeField,
   tenantId: string,
 ): T {
-  if (data[field] !== undefined) return data;
-  return { ...data, [field]: tenantId };
+  const supplied = data[field];
+  if (supplied === undefined) return { ...data, [field]: tenantId };
+
+  if (typeof supplied === 'string' && supplied !== tenantId) {
+    throw new Error(
+      `[TenantScope] refusing to write "${field}" = "${supplied}" while the request ` +
+        `belongs to tenant "${tenantId}". Drop the explicit ${field}, or wrap an ` +
+        `intentionally cross-tenant write in TenantContextService.runUnscoped().`,
+    );
+  }
+
+  return data;
 }
 
 /**

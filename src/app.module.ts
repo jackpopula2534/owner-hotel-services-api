@@ -248,8 +248,10 @@ import { TenantGuard } from './common/guards/tenant.guard';
       // depth on top of the Prisma `$use` tenant-scope middleware
       // (which patches `where` clauses on every query).
       //
-      // The guard skips routes annotated with @Public and is a no-op for
-      // platform-admin roles — see TenantGuard for details.
+      // It reads the bearer token itself rather than request.user, because a
+      // global guard runs before the controller's JwtAuthGuard — reading
+      // request.user made it a silent no-op. Skips @Public routes; the
+      // isPlatformAdmin claim is the only bypass. See TenantGuard.
       provide: APP_GUARD,
       useClass: TenantGuard,
     },
