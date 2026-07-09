@@ -27,10 +27,19 @@ import { SKIP_TENANT_SCOPE_KEY } from './skip-tenant-scope.decorator';
 import { TenantContextStore } from './tenant-context.service';
 
 /**
- * Roles that are allowed to operate across tenants (e.g. platform support).
- * These roles get `skipScope = true` even when they have a tenantId in JWT.
+ * Cross-tenant access is granted by the `isPlatformAdmin` JWT claim ONLY.
+ *
+ * That claim is derived from which table the account authenticated against
+ * (`userType: 'admin'` → the Admin table), never from `User.role` — which is
+ * an unconstrained `String` column that tenant-level users control values in.
+ * Trusting a role name here once let any tenant user whose row happened to say
+ * `role = 'admin'` (a documented legacy alias, see UserRole in
+ * common/decorators/roles.decorator.ts) turn off tenant scoping for their whole
+ * request, which also bypassed the findUnique guard in TenantScopeMiddleware.
+ *
+ * Do not reintroduce a role-name allowlist. Role checks belong in RolesGuard,
+ * where they gate a route — not here, where they gate the tenant filter itself.
  */
-const PLATFORM_ROLES = new Set(['platform_admin', 'super_admin', 'admin']);
 
 @Injectable()
 export class TenantContextInterceptor implements NestInterceptor {
@@ -50,7 +59,7 @@ export class TenantContextInterceptor implements NestInterceptor {
     }
 
     const req = context.switchToHttp().getRequest<{
-      user?: { tenantId?: string | null; role?: string; isPlatformAdmin?: boolean };
+      user?: { tenantId?: string | null; isPlatformAdmin?: boolean };
       __tenantStore?: TenantContextStore;
     }>();
 
@@ -66,8 +75,7 @@ export class TenantContextInterceptor implements NestInterceptor {
       context.getClass(),
     ]);
 
-    const userRole = req.user?.role ?? '';
-    const isPlatformUser = Boolean(req.user?.isPlatformAdmin) || PLATFORM_ROLES.has(userRole);
+    const isPlatformUser = Boolean(req.user?.isPlatformAdmin);
 
     // Mutate the SAME object the middleware put in ALS. References held by
     // downstream code see the update immediately.

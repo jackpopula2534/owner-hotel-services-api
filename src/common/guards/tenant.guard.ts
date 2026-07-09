@@ -22,7 +22,7 @@ import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
  *
  * Behavior:
  *  - If the route has no :tenantId param AND no tenantId query → skip (no cross-tenant risk)
- *  - Platform admins (platform_admin, super_admin, admin) bypass all checks
+ *  - Platform admins (`isPlatformAdmin` claim) bypass all checks
  *  - If JWT tenantId ≠ param/query tenantId → 403 FORBIDDEN
  *
  * Usage (apply globally or per-controller):
@@ -33,8 +33,6 @@ import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 @Injectable()
 export class TenantGuard implements CanActivate {
   private readonly logger = new Logger(TenantGuard.name);
-
-  private readonly PLATFORM_ROLES = ['platform_admin', 'super_admin', 'admin'];
 
   constructor(private readonly reflector: Reflector) {}
 
@@ -47,7 +45,7 @@ export class TenantGuard implements CanActivate {
     if (isPublic) return true;
 
     const request = context.switchToHttp().getRequest<{
-      user?: { tenantId?: string; role?: string };
+      user?: { tenantId?: string; role?: string; isPlatformAdmin?: boolean };
       params?: Record<string, string>;
       query?: Record<string, string>;
     }>();
@@ -55,8 +53,13 @@ export class TenantGuard implements CanActivate {
     const userRole = request.user?.role ?? '';
     const jwtTenantId = request.user?.tenantId;
 
-    // Platform admins can access any tenant's data
-    if (this.PLATFORM_ROLES.includes(userRole)) return true;
+    // Platform admins can access any tenant's data.
+    //
+    // Keyed on `isPlatformAdmin` (set from which table the account logged in
+    // against), never on a role name: `User.role` is an unconstrained String
+    // column and `'admin'` is a legacy TENANT-level alias, so a role allowlist
+    // let ordinary hotel users walk straight past this guard.
+    if (request.user?.isPlatformAdmin) return true;
 
     // Extract tenantId from route params or query string
     const paramTenantId = request.params?.['tenantId'] ?? request.params?.['tenant_id'];
