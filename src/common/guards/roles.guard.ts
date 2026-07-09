@@ -6,6 +6,15 @@ import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 /**
  * Role Hierarchy - Level System
  * Higher level roles automatically inherit access to lower level endpoints
+ *
+ * **ไม่ใช่ทุก role ใน `UserRole` จะอยู่ที่นี่ และนั่นตั้งใจ**
+ * role ที่ไม่อยู่ที่นี่ = ไม่สืบทอดอะไรเลย เข้าได้เฉพาะ endpoint ที่ **เอ่ยชื่อมันตรงๆ**
+ * ใน `@Roles(...)` (ดู `inheritanceFloor` ว่าทำไมต้องเป็นแบบนั้น)
+ * ปัจจุบัน: crm_manager, crm_agent, sales_rep, hotel_manager, warehouse_manager,
+ * accounting_manager, owner, cashier, system
+ *
+ * การ "เติมให้ครบ" คือกับดัก — ให้ level กับ role หนึ่ง = เปิด endpoint **ทุกอัน**
+ * ที่พื้นต่ำกว่านั้นทั้งระบบให้มันทันที ไม่ใช่แค่ endpoint ของโดเมนตัวเอง
  */
 const ROLE_LEVELS: Record<string, number> = {
   platform_admin: 1000,
@@ -30,6 +39,28 @@ const ROLE_LEVELS: Record<string, number> = {
 
 function getRoleLevel(role: string): number {
   return ROLE_LEVELS[role] ?? 0;
+}
+
+/**
+ * ระดับต่ำสุดที่ "สืบทอด" เข้า endpoint นี้ได้
+ *
+ * ต้องคิดจาก **เฉพาะ role ที่มีอันดับใน ROLE_LEVELS** เท่านั้น
+ * role ที่ไม่มีอันดับ (เช่น `crm_manager`, `crm_agent`, `sales_rep` ซึ่งประกาศใน
+ * `UserRole` แต่ไม่เคยถูกใส่ใน ROLE_LEVELS) จะได้ `getRoleLevel()` = 0 ถ้านับรวม
+ * เข้ามาใน `Math.min` **พื้นจะตกเป็น 0 ทันที** แล้ว `userLevel >= 0` ก็จริงเสมอ
+ * = ลิสต์ @Roles ทั้งอันเลิกกันใครทั้งสิ้น (แม่บ้านลบ CRM contact ได้)
+ *
+ * role ที่ไม่มีอันดับไม่เสียอะไรจากการถูกตัดออกตรงนี้ เพราะมันผ่านด่าน
+ * exact match ซึ่งรันก่อนอยู่แล้ว การให้มันมีส่วนใน `Math.min` มีผลอย่างเดียวคือ
+ * เปิดประตูให้ **คนอื่น**
+ *
+ * ถ้าไม่มี role ที่มีอันดับเลย → คืน Infinity = ไม่มีใครสืบทอดเข้าได้ (fail closed)
+ * ลิสต์แบบนั้นถือว่าตั้งใจปิด inheritance ไม่ใช่เปิดให้ทุกคน
+ */
+function inheritanceFloor(requiredRoles: UserRole[]): number {
+  const rankedLevels = requiredRoles.filter((r) => r in ROLE_LEVELS).map((r) => ROLE_LEVELS[r]);
+
+  return rankedLevels.length > 0 ? Math.min(...rankedLevels) : Infinity;
 }
 
 @Injectable()
@@ -69,9 +100,9 @@ export class RolesGuard implements CanActivate {
       return true;
     }
 
-    // Check hierarchy: user's level >= highest required role level
+    // Check hierarchy: user's level >= lowest RANKED required role level
     const userLevel = getRoleLevel(user.role);
-    const minRequiredLevel = Math.min(...requiredRoles.map((r) => getRoleLevel(r)));
+    const minRequiredLevel = inheritanceFloor(requiredRoles);
 
     const hasHierarchyAccess = userLevel >= minRequiredLevel;
 
