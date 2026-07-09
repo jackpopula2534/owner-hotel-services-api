@@ -24,14 +24,21 @@ import { KitchenController } from '../kitchen/kitchen.controller';
 const rolesOf = (controller: object, handler: string): string[] =>
   Reflect.getMetadata(ROLES_KEY, (controller as { prototype: object }).prototype[handler]) ?? [];
 
-/** Every route app/pos/page.tsx and app/pos/kitchen/page.tsx call. */
+/**
+ * Routes both POS floor roles call. `app/pos/page.tsx` loads restaurants, orders,
+ * categories, items, tables and the staff-call badge on mount for every role, and
+ * its `overview`/`orders`/`tables`/`staff-calls` views are ungated in the sidebar.
+ * (Staff-call routes carry no `@Roles` at all, so they need no entry here.)
+ */
 const POS_ROUTES: Array<[string, object, string]> = [
   ['GET /restaurants', RestaurantController, 'findAll'],
   ['GET /restaurants/:id/orders', OrderController, 'findAll'],
   ['POST /restaurants/:id/orders', OrderController, 'create'],
   ['POST /restaurants/:id/orders/:orderId/send-to-kitchen', OrderController, 'sendToKitchen'],
   ['PATCH /restaurants/:id/orders/:orderId/status', OrderController, 'updateStatus'],
+  ['GET /restaurants/:id/orders/booked-rooms', OrderController, 'getBookedRooms'],
   ['GET /restaurants/:id/tables', TableController, 'findAll'],
+  ['PATCH /restaurants/:id/tables/:tableId/status', TableController, 'updateStatus'],
   ['GET /restaurants/:id/menu-categories', MenuController, 'findAllCategories'],
   ['GET /restaurants/:id/menu-items', MenuController, 'findAllItems'],
   ['PATCH /restaurants/:id/kitchen/items/:itemId/status', KitchenController, 'updateItemStatus'],
@@ -44,6 +51,19 @@ describe('POS floor roles reach every route the POS screens call', () => {
 
   it.each(POS_ROUTES)('%s admits bartender', (_route, controller, handler) => {
     expect(rolesOf(controller, handler)).toContain('bartender');
+  });
+
+  // The POS sidebar shows the `payments` view to cashier/waiter/manager/tenant_admin,
+  // and PaymentModal is the only caller of this route. A cashier who cannot settle a
+  // bill has no job left.
+  it('POST /restaurants/:id/orders/:orderId/payment admits cashier', () => {
+    expect(rolesOf(OrderController, 'processPayment')).toContain('cashier');
+  });
+
+  it('POST /restaurants/:id/orders/:orderId/payment does not admit bartender', () => {
+    // Not an oversight: the sidebar hides `payments` from bartender. If that ever
+    // changes, change it here too rather than letting the two drift.
+    expect(rolesOf(OrderController, 'processPayment')).not.toContain('bartender');
   });
 
   it('does not silently promote them — they stay unranked, exact-match only', () => {

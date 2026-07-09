@@ -45,7 +45,17 @@ export class TableController {
   @ApiQuery({ name: 'status', required: false })
   @ApiQuery({ name: 'zone', required: false })
   @ApiQuery({ name: 'isActive', required: false, type: Boolean })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'waiter', 'staff', 'cashier', 'bartender')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'chef',
+    'waiter',
+    'staff',
+    'cashier',
+    'bartender',
+  )
   async findAll(
     @Param('restaurantId') restaurantId: string,
     @Query() query: { status?: string; zone?: string; isActive?: string },
@@ -125,7 +135,18 @@ export class TableController {
   @ApiOperation({ summary: 'Update table status' })
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'tableId' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'waiter', 'staff')
+  // The POS floor plan (TableView) is visible to every POS role and lets anyone flip a
+  // table's status; only create/edit/delete are gated to managers in the UI.
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'waiter',
+    'staff',
+    'cashier',
+    'bartender',
+  )
   async updateStatus(
     @Param('restaurantId') restaurantId: string,
     @Param('tableId') tableId: string,
