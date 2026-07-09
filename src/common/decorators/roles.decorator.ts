@@ -43,7 +43,11 @@ export type UserRole =
   | 'crm_agent'
   | 'sales_rep'
   | 'owner'
+  // POS floor roles. `create-pos-user.dto.ts` lets a tenant create these, so they
+  // are real. Neither is in ROLE_LEVELS: they reach POS endpoints by exact match
+  // only and inherit nothing else. See ROLE_LEVELS in guards/roles.guard.ts.
   | 'cashier'
+  | 'bartender'
   | 'system';
 
 export const Roles = (...roles: UserRole[]) => SetMetadata(ROLES_KEY, roles);

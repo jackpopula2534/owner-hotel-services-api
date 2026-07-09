@@ -62,7 +62,7 @@ export class MenuController {
   @Get('menu-categories')
   @ApiOperation({ summary: 'Get all menu categories' })
   @ApiParam({ name: 'restaurantId' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'waiter', 'staff')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'waiter', 'staff', 'cashier', 'bartender')
   async findAllCategories(
     @Param('restaurantId') restaurantId: string,
     @CurrentUser() user: { tenantId: string },
@@ -151,7 +151,7 @@ export class MenuController {
   @ApiQuery({ name: 'search', required: false })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'waiter', 'staff')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'waiter', 'staff', 'cashier', 'bartender')
   async findAllItems(
     @Param('restaurantId') restaurantId: string,
     @Query()

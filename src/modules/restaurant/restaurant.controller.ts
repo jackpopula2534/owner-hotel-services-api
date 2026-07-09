@@ -41,6 +41,8 @@ export class RestaurantController {
     'waiter',
     'receptionist',
     'staff',
+    'cashier',
+    'bartender',
   )
   async findAll(@Query() query: any, @CurrentUser() user: { tenantId?: string }) {
     return this.restaurantService.findAll(query, user?.tenantId);

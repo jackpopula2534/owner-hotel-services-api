@@ -45,7 +45,7 @@ export class TableController {
   @ApiQuery({ name: 'status', required: false })
   @ApiQuery({ name: 'zone', required: false })
   @ApiQuery({ name: 'isActive', required: false, type: Boolean })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'waiter', 'staff')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'waiter', 'staff', 'cashier', 'bartender')
   async findAll(
     @Param('restaurantId') restaurantId: string,
     @Query() query: { status?: string; zone?: string; isActive?: string },

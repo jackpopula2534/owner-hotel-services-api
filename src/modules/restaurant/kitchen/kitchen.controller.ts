@@ -88,7 +88,7 @@ export class KitchenController {
       },
     },
   })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'staff')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'staff', 'cashier', 'bartender')
   async updateItemStatus(
     @Param('restaurantId') restaurantId: string,
     @Param('itemId') itemId: string,

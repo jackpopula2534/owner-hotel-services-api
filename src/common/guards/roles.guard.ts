@@ -11,7 +11,7 @@ import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
  * role ที่ไม่อยู่ที่นี่ = ไม่สืบทอดอะไรเลย เข้าได้เฉพาะ endpoint ที่ **เอ่ยชื่อมันตรงๆ**
  * ใน `@Roles(...)` (ดู `inheritanceFloor` ว่าทำไมต้องเป็นแบบนั้น)
  * ปัจจุบัน: crm_manager, crm_agent, sales_rep, hotel_manager, warehouse_manager,
- * accounting_manager, owner, cashier, system
+ * accounting_manager, owner, cashier, bartender, system
  *
  * การ "เติมให้ครบ" คือกับดัก — ให้ level กับ role หนึ่ง = เปิด endpoint **ทุกอัน**
  * ที่พื้นต่ำกว่านั้นทั้งระบบให้มันทันที ไม่ใช่แค่ endpoint ของโดเมนตัวเอง
