@@ -9,6 +9,10 @@
  *   → เปิดเผยได้เฉพาะ: platform_admin, tenant_admin, admin, hr
  *   → role อื่น (manager, receptionist, etc.) จะเห็น "***MASKED***"
  *
+ * นี่คือ RBAC **ภายใน tenant เดียวกัน** ไม่ใช่ด่านกัน cross-tenant
+ * (tenant scoping จัดการชั้นนั้นแล้ว) — `'admin'` จึงอยู่ในลิสต์นี้ได้อย่างถูกต้อง
+ * ต่างจาก tenant-context.interceptor ที่ห้ามมี allowlist ชื่อ role เด็ดขาด
+ *
  * Usage:
  *   import { maskEmployeePayroll } from '@/common/utils/payroll-mask.util';
  *   const safe = maskEmployeePayroll(employee, user.role);
@@ -16,6 +20,17 @@
 
 /** Roles ที่มีสิทธิ์เห็นข้อมูลการเงินแบบ full */
 const PRIVILEGED_ROLES = new Set(['platform_admin', 'tenant_admin', 'admin', 'hr']);
+
+/**
+ * ไม่มี role = ไม่มีสิทธิ์ (fail closed)
+ *
+ * เดิมฟังก์ชันเหล่านี้เขียน `if (!role || PRIVILEGED_ROLES.has(role))` คือ
+ * **token ที่ไม่มี `role` claim จะเห็นข้อมูลเงินเดือนแบบไม่ mask** ตอนนี้ RolesGuard
+ * ยังกันไว้ให้ (คืน false เมื่อ `!user.role`) แต่การพึ่งด่านอื่นทั้งที่ตัวเองเป็น
+ * ด่านสุดท้ายก่อน serialize ออกไปหา client เป็นค่า default ที่กลับหัว
+ */
+const isPrivileged = (role: string | undefined): boolean =>
+  role ? PRIVILEGED_ROLES.has(role) : false;
 
 const MASKED = '***MASKED***';
 
@@ -42,7 +57,7 @@ export function maskEmployeePayroll<T extends Record<string, unknown>>(
   employee: T,
   role: string | undefined,
 ): T {
-  if (!role || PRIVILEGED_ROLES.has(role)) {
+  if (isPrivileged(role)) {
     // HR / Admin → เห็นข้อมูลได้ทั้งหมด
     return employee;
   }
@@ -64,7 +79,7 @@ export function maskEmployeeListPayroll<T extends Record<string, unknown>>(
   employees: T[],
   role: string | undefined,
 ): T[] {
-  if (!role || PRIVILEGED_ROLES.has(role)) return employees;
+  if (isPrivileged(role)) return employees;
   return employees.map((emp) => maskEmployeePayroll(emp, role));
 }
 
@@ -85,7 +100,7 @@ export function maskPayrollRecord<T extends Record<string, unknown>>(
   payroll: T,
   role: string | undefined,
 ): T {
-  if (!role || PRIVILEGED_ROLES.has(role)) return payroll;
+  if (isPrivileged(role)) return payroll;
 
   const masked = { ...payroll };
   for (const field of SENSITIVE_PAYROLL_FIELDS) {
@@ -95,10 +110,22 @@ export function maskPayrollRecord<T extends Record<string, unknown>>(
   }
   // ซ่อน bankAccount ของ employee ที่ embed มาใน payroll record
   if (masked['employee'] && typeof masked['employee'] === 'object') {
-    const emp = masked['employee'] as Record<string, unknown>;
+    const emp = { ...(masked['employee'] as Record<string, unknown>) };
     if ('bankAccount' in emp) {
-      (masked['employee'] as Record<string, unknown>)['bankAccount'] = MASKED;
+      emp['bankAccount'] = MASKED;
     }
+    (masked as Record<string, unknown>)['employee'] = emp;
+  }
+
+  // hr_payroll_items คือ breakdown รายบรรทัด (base, allowance, ot, deduction…)
+  // ถ้าปล่อยผ่าน manager จะบวก items[].amount กลับมาเป็น netSalary ได้ทั้งที่
+  // field netSalary ถูก mask ไปแล้ว — การ mask scalar อย่างเดียวจึงไร้ผล
+  if (Array.isArray(masked['items'])) {
+    (masked as Record<string, unknown>)['items'] = (
+      masked['items'] as Record<string, unknown>[]
+    ).map((item) =>
+      item && typeof item === 'object' && 'amount' in item ? { ...item, amount: MASKED } : item,
+    );
   }
 
   return masked as T;
@@ -108,6 +135,6 @@ export function maskPayrollList<T extends Record<string, unknown>>(
   payrolls: T[],
   role: string | undefined,
 ): T[] {
-  if (!role || PRIVILEGED_ROLES.has(role)) return payrolls;
+  if (isPrivileged(role)) return payrolls;
   return payrolls.map((p) => maskPayrollRecord(p, role));
 }

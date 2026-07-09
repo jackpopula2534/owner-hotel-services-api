@@ -102,10 +102,13 @@ describe('maskEmployeePayroll()', () => {
     }
   });
 
-  it('should return employee unchanged when role is undefined', () => {
-    // undefined role = no restriction (super internal call)
+  it('should mask when role is undefined (fail closed)', () => {
+    // A token with no `role` claim proves nothing. Returning the record intact
+    // made "no role" the most privileged caller of all.
     const result = maskEmployeePayroll(mockEmployee, undefined);
-    expect(result).toEqual(mockEmployee);
+    expect(result.bankAccount).toBe(MASKED);
+    expect(result.nationalId).toBe(MASKED);
+    expect(result.baseSalary).toBe(MASKED);
   });
 
   it('should NOT mutate the original employee object', () => {
@@ -167,9 +170,9 @@ describe('maskEmployeeListPayroll()', () => {
     expect(maskEmployeeListPayroll([], 'manager')).toEqual([]);
   });
 
-  it('should handle undefined role', () => {
+  it('should mask every row when role is undefined (fail closed)', () => {
     const result = maskEmployeeListPayroll(employees, undefined);
-    expect(result).toBe(employees);
+    expect(result.every((e) => e.bankAccount === MASKED)).toBe(true);
   });
 });
 
@@ -220,11 +223,62 @@ describe('maskPayrollRecord()', () => {
     expect(mockPayroll.netSalary).toBe(original.netSalary);
   });
 
+  it('should NOT mutate the embedded employee object', () => {
+    // shallow copy ของ payroll ยังชี้ employee ก้อนเดิม การเขียน MASKED ทับ
+    // จึงไปแก้ record ที่ caller ถืออยู่ (และ cache ของ Prisma) ด้วย
+    maskPayrollRecord(mockPayroll, 'manager');
+    expect(mockPayroll.employee.bankAccount).toBe('1234567890');
+  });
+
   it('should handle payroll without embedded employee', () => {
     const payrollNoEmp = { ...mockPayroll, employee: undefined };
     const result = maskPayrollRecord(payrollNoEmp as any, 'receptionist');
     expect(result.baseSalary).toBe(MASKED);
     // ไม่ crash เมื่อไม่มี employee embed
+  });
+
+  describe('hr_payroll_items breakdown', () => {
+    // hr-payroll.service includes `items: true` on findAll/findOne. Every line
+    // item carries an `amount`, so a manager could sum them back into the
+    // netSalary that the scalar masking pretends to hide.
+    const payrollWithItems = {
+      ...mockPayroll,
+      items: [
+        { id: 'i1', type: 'base', name: 'เงินเดือน', amount: 25000 },
+        { id: 'i2', type: 'ot', name: 'ค่าล่วงเวลา', amount: 1500 },
+        { id: 'i3', type: 'deduction', name: 'ประกันสังคม', amount: 750 },
+      ],
+    };
+
+    it('masks every item amount for a non-privileged role', () => {
+      const result = maskPayrollRecord(payrollWithItems, 'manager');
+
+      expect((result.items as any[]).map((i) => i.amount)).toEqual([MASKED, MASKED, MASKED]);
+    });
+
+    it('keeps the non-financial item fields readable', () => {
+      const result = maskPayrollRecord(payrollWithItems, 'manager');
+
+      expect((result.items as any[])[0]).toMatchObject({ type: 'base', name: 'เงินเดือน' });
+    });
+
+    it('leaves item amounts intact for hr', () => {
+      const result = maskPayrollRecord(payrollWithItems, 'hr');
+
+      expect((result.items as any[])[0].amount).toBe(25000);
+    });
+
+    it('masks item amounts when the role is missing', () => {
+      const result = maskPayrollRecord(payrollWithItems, undefined);
+
+      expect((result.items as any[])[1].amount).toBe(MASKED);
+    });
+
+    it('does not mutate the original items', () => {
+      maskPayrollRecord(payrollWithItems, 'manager');
+
+      expect(payrollWithItems.items[0].amount).toBe(25000);
+    });
   });
 });
 
