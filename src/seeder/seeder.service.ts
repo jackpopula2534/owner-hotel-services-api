@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PlansService } from '../plans/plans.service';
 import { FeaturesService } from '../features/features.service';
 import { PlanFeaturesService } from '../plan-features/plan-features.service';
-import { AddonService } from '../modules/addons/addon.service';
+import { AddonService, isAddonAvailableForSystem } from '../modules/addons/addon.service';
 import { AddonBillingCycle } from '../modules/addons/dto/create-addon.dto';
 import { AdminsService } from '../admins/admins.service';
 import { TenantsService } from '../tenants/tenants.service';
@@ -737,12 +737,15 @@ export class SeederService {
       },
 
       // ─── CAMP (ลานกางเต็นท์) ────────────────────────────────
+      // system: 'CAMP' — โมดูลนี้เป็นของ product line ลานกางเต็นท์ล้วน ไม่ใช่
+      // add-on ที่แผนโรงแรมซื้อเสริมได้ ค่านี้คือสิ่งที่ทำให้ CAMP_MODULE หายไป
+      // จาก /addons/public?system=HOTEL และจากตัวเลือก add-on ของแผนโรงแรม
       {
         code: 'CAMP_MODULE',
         name: 'Campground Module',
-        system: 'BOTH',
+        system: 'CAMP',
         description:
-          'ระบบจัดการลานกางเต็นท์ครบวงจร: จัดการลาน โซน จุดกางเต็นท์ ผังแผนที่ 2D อุปกรณ์ให้เช่า และการจอง — bundled กับแผน CAMP โดยอัตโนมัติ หรือซื้อเสริมบนแผนโรงแรมได้',
+          'ระบบจัดการลานกางเต็นท์ครบวงจร: จัดการลาน โซน จุดกางเต็นท์ ผังแผนที่ 2D อุปกรณ์ให้เช่า และการจอง — รวมอยู่ในแผนลานกางเต็นท์ (CAMP) โดยอัตโนมัติ',
         price: 590,
         billingCycle: AddonBillingCycle.MONTHLY,
         category: 'CAMP',
@@ -923,10 +926,10 @@ export class SeederService {
     ];
 
     // ── โรงแรม ──────────────────────────────────────────────
-    // FREE — ทดลอง 15 วัน: เปิดครบทุก module ("ฟีเจอร์ครบทุกระบบ ไม่มีกั๊ก" ตาม
-    // คำโฆษณาของแผนนี้ใน seedPlans) รวม CAMP_MODULE ด้วย เพื่อให้ trial user
-    // เห็น/ลองระบบลานกางเต็นท์ได้เต็มที่เหมือนระบบอื่น ๆ ในช่วงทดลอง 15 วัน
-    await this.assignPlanAddons(planFree?.id, [...allHotelModules, campModule]);
+    // แผนโรงแรมไม่มี CAMP_MODULE ทุกระดับ — ลานกางเต็นท์เป็นคนละ product line
+    // ขายแยกด้วยแผน CAMP ของตัวเอง ไม่ใช่ add-on ที่แถมหรือซื้อเสริมบนแผนโรงแรม
+    // ("ฟีเจอร์ครบทุกระบบ" ของแผน FREE หมายถึงครบทุกระบบ *ของโรงแรม*)
+    await this.assignPlanAddons(planFree?.id, allHotelModules);
 
     // Starter — Housekeeping
     await this.assignPlanAddons(planS?.id, [housekeepingModule]);
@@ -939,12 +942,8 @@ export class SeederService {
       crmModule,
     ]);
 
-    // Business — ครบทั้ง 7 module (รวม Inventory + HR + Accounting/USALI) + Campground
-    // (planL ปัจจุบันใช้กับ premium.test@email.com เป็น VIP demo account เท่านั้น —
-    // bundle CAMP_MODULE ให้ด้วยเพื่อโชว์ Sub System "ลานกางเต็นท์" + เมนู Sidebar
-    // ครบทุกระบบตามที่ทดสอบ ถ้ามี tenant โรงแรมจริงใช้แผนนี้ในอนาคตควรแยกซื้อ
-    // CAMP_MODULE เป็น add-on ต่างหากแทนการผูกกับ plan)
-    await this.assignPlanAddons(planL?.id, [...allHotelModules, campModule]);
+    // Business — ครบทั้ง 7 module ของโรงแรม (รวม Inventory + HR + Accounting/USALI)
+    await this.assignPlanAddons(planL?.id, allHotelModules);
 
     // ── ลานกางเต็นท์ ────────────────────────────────────────
     // CAMP_FREE — ทดลอง 15 วัน: เปิดทุก module ที่ใช้กับลานได้ (รวม CAMP_MODULE เอง)
@@ -953,6 +952,48 @@ export class SeederService {
     // CAMP ฿199 "ราคาเดียวจบ · ครบวงจร" — bundle ทุก module ที่ใช้กับลานได้
     // (เหมือน trial) เพื่อให้จ่ายเงินแล้วได้ครบ ไม่น้อยกว่าตัวทดลอง
     await this.assignPlanAddons(planCamp?.id, [campModule, ...campApplicableModules]);
+
+    await this.pruneCrossSystemPlanAddons();
+  }
+
+  /**
+   * `assignPlanAddons` only ever inserts, so a DB seeded before Campground was
+   * split out still carries `plan_addons` rows tying CAMP_MODULE to the hotel
+   * FREE/Business plans — the tenants in those plans would keep the entitlement
+   * forever. Drop every row whose add-on belongs to a different product line
+   * than its plan, which both cleans up that legacy bundling and enforces the
+   * invariant on any future mis-assignment.
+   */
+  private async pruneCrossSystemPlanAddons(): Promise<void> {
+    const rows = (await (this.prisma as unknown as { plan_addons: any }).plan_addons.findMany({
+      include: { plans: { select: { code: true, system: true } }, add_ons: { select: { code: true, system: true } } },
+    })) as Array<{
+      plan_id: string;
+      addon_id: string;
+      plans?: { code: string; system: string } | null;
+      add_ons?: { code: string; system: string } | null;
+    }>;
+
+    const stale = rows.filter(
+      (row) =>
+        row.plans &&
+        row.add_ons &&
+        !isAddonAvailableForSystem(row.add_ons.system, row.plans.system),
+    );
+
+    for (const row of stale) {
+      await (this.prisma as unknown as { plan_addons: any }).plan_addons.deleteMany({
+        where: { plan_id: row.plan_id, addon_id: row.addon_id },
+      });
+      this.logger.log(
+        `  ⊘ plan_addons: removed ${row.add_ons?.code} (${row.add_ons?.system}) from plan ` +
+          `${row.plans?.code} (${row.plans?.system}) — cross product line`,
+      );
+    }
+
+    if (stale.length === 0) {
+      this.logger.log('  ✓ plan_addons: no cross-product-line bundling found');
+    }
   }
 
   private async assignPlanAddons(

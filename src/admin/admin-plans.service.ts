@@ -10,7 +10,7 @@ import { Repository } from 'typeorm';
 import { Plan } from '../plans/entities/plan.entity';
 import { PlanFeature } from '../plan-features/entities/plan-feature.entity';
 import { Feature } from '../features/entities/feature.entity';
-import { AddonService } from '../modules/addons/addon.service';
+import { AddonService, isAddonAvailableForSystem } from '../modules/addons/addon.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   AdminPlansListDto,
@@ -95,6 +95,7 @@ export class AdminPlansService {
     const data: AdminPlanItemDto[] = plans.map((plan) => ({
       id: plan.id,
       code: plan.code,
+      system: plan.system ?? 'HOTEL',
       name: plan.name,
       priceMonthly: Number(plan.priceMonthly || 0),
       priceYearly: plan.priceYearly ? Number(plan.priceYearly) : undefined,
@@ -148,6 +149,7 @@ export class AdminPlansService {
     return {
       id: plan.id,
       code: plan.code,
+      system: plan.system ?? 'HOTEL',
       name: plan.name,
       priceMonthly: Number(plan.priceMonthly || 0),
       priceYearly: plan.priceYearly ? Number(plan.priceYearly) : undefined,
@@ -205,6 +207,8 @@ export class AdminPlansService {
 
     const plan = this.plansRepository.create({
       code: dto.code,
+      // แผนใหม่เป็นของสายธุรกิจโรงแรมโดย default — ระบุ CAMP เพื่อสร้างแผนลานกางเต็นท์
+      system: dto.system ?? 'HOTEL',
       name: dto.name,
       priceMonthly: dto.priceMonthly,
       priceYearly: yearlyPrice,
@@ -269,6 +273,10 @@ export class AdminPlansService {
 
     // Update fields
     if (dto.name !== undefined) plan.name = dto.name;
+    // Switching a plan's business line invalidates any add-on bundled from the
+    // old line — see the prune after save().
+    const systemChanged = dto.system !== undefined && dto.system !== plan.system;
+    if (dto.system !== undefined) plan.system = dto.system;
     if (dto.priceMonthly !== undefined) plan.priceMonthly = dto.priceMonthly;
     if (dto.maxRooms !== undefined) plan.maxRooms = dto.maxRooms;
     if (dto.maxUsers !== undefined) plan.maxUsers = dto.maxUsers;
@@ -296,9 +304,47 @@ export class AdminPlansService {
 
     await this.plansRepository.save(plan);
 
+    if (systemChanged) {
+      await this.unbundleCrossSystemAddons(plan.id, plan.code, plan.system);
+    }
+
     this.logger.log(`Updated plan: ${plan.name} (${plan.code})`);
 
     return this.findOne(plan.id);
+  }
+
+  /**
+   * A plan that moves to the other business line keeps its old `plan_addons`
+   * rows, which would silently entitle every tenant on it to modules from the
+   * line it just left (a hotel plan flipped to CAMP would still hand out
+   * Housekeeping). Drop those rows and clear the tenants' entitlement cache.
+   */
+  private async unbundleCrossSystemAddons(
+    planId: string,
+    planCode: string,
+    planSystem: string,
+  ): Promise<void> {
+    const planAddonsClient = (this.prisma as unknown as { plan_addons: any }).plan_addons;
+    const rows: Array<{ addon_id: string; add_ons?: { code: string; system: string } | null }> =
+      await planAddonsClient.findMany({
+        where: { plan_id: planId },
+        include: { add_ons: { select: { code: true, system: true } } },
+      });
+
+    const stale = rows.filter(
+      (row) => row.add_ons && !isAddonAvailableForSystem(row.add_ons.system, planSystem),
+    );
+    if (stale.length === 0) return;
+
+    await planAddonsClient.deleteMany({
+      where: { plan_id: planId, addon_id: { in: stale.map((row) => row.addon_id) } },
+    });
+    await this.addonService.invalidateAddonCacheForPlan(planId);
+
+    this.logger.log(
+      `Plan ${planCode} moved to ${planSystem} — unbundled ` +
+        `${stale.map((row) => row.add_ons?.code).join(', ')} (cross product line)`,
+    );
   }
 
   /**

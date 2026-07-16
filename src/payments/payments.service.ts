@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailEventsService } from '../email/email-events.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { AddonService } from '@/modules/addons/addon.service';
 import { PaymentStatus } from './entities/payment.entity';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
@@ -15,6 +16,7 @@ export class PaymentsService {
     private readonly prisma: PrismaService,
     private readonly emailEventsService: EmailEventsService,
     private readonly auditLogService: AuditLogService,
+    private readonly addonService: AddonService,
   ) {}
 
   create(createPaymentDto: CreatePaymentDto) {
@@ -160,6 +162,17 @@ export class PaymentsService {
     if (!approvedPayment) {
       this.logger.warn(`Payment ${id} approved concurrently — idempotent no-op`);
       return this.findOne(id, tenantId);
+    }
+
+    // Approval flips the subscription to `active` (and extends it), which is
+    // what turns a `pending` subscription into an entitlement — so the tenant's
+    // cached add-on status is now stale. Post-commit on purpose: dropping the
+    // cache mid-transaction lets a concurrent read re-warm it from uncommitted
+    // state and we end up stale all over again.
+    if (payment.tenant_id) {
+      await this.addonService.invalidateAddonCache(payment.tenant_id).catch((err) => {
+        this.logger.error(`Failed to invalidate addon cache: ${err.message}`);
+      });
     }
 
     // Update related booking status to confirmed (idempotent; runs post-commit)

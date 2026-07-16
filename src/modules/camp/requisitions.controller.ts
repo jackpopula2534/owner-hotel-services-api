@@ -17,6 +17,8 @@ import { RequisitionsService } from './requisitions.service';
 import { CreateCampRequisitionDto } from './dto/requisition.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { AddonGuard } from '../../common/guards/addon.guard';
+import { RequireAddon } from '../../common/decorators/require-addon.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import type { UserRole } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -45,7 +47,8 @@ interface AuthUser {
 @ApiTags('camp-requisitions')
 @ApiBearerAuth('JWT-auth')
 @Controller({ path: 'camp/requisitions', version: '1' })
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, AddonGuard)
+@RequireAddon('CAMP_MODULE')
 export class RequisitionsController {
   constructor(private readonly service: RequisitionsService) {}
 

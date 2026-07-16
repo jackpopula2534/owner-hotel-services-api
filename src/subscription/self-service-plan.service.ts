@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { AddonService } from '@/modules/addons/addon.service';
 
 export type ChangePlanIntent = 'upgrade' | 'downgrade' | 'same';
 
@@ -45,7 +46,10 @@ export interface ChangePlanPreview {
 export class SelfServicePlanService {
   private readonly logger = new Logger(SelfServicePlanService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly addonService: AddonService,
+  ) {}
 
   async preview(input: PreviewChangePlanInput): Promise<ChangePlanPreview> {
     const { subscription, currentPlan, newPlan, effectiveDate } = await this.loadContext(input);
@@ -163,6 +167,21 @@ export class SelfServicePlanService {
 
       return { subscription: updated, invoiceId };
     });
+
+    // The new plan carries a different module set (and possibly a different
+    // product line), so the tenant's cached entitlements are now wrong. Drop
+    // them here rather than waiting out the 5-minute TTL — otherwise the tenant
+    // pays for an upgrade and still sees "ADD-ON REQUIRED". Best-effort: the
+    // plan change itself is already committed.
+    try {
+      await this.addonService.invalidateAddonCache(input.tenantId);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to invalidate addon cache for tenant ${input.tenantId}: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
+    }
 
     this.logger.log(
       `Tenant ${input.tenantId}: ${preview.currentPlan.name} → ${preview.newPlan.name} ` +

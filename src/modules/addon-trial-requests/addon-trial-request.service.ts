@@ -59,12 +59,20 @@ export class AddonTrialRequestService {
       throw new NotFoundException(`Add-on "${dto.addonCode}" not found or inactive`);
     }
 
+    // โมดูลคนละสายธุรกิจขอทดลองใช้ไม่ได้ (โรงแรมขอ CAMP_MODULE ไม่ได้ และกลับกัน)
+    await this.addonService.assertAddonAllowedForTenant(tenantId, dto.addonCode);
+
     // ตรวจสอบว่ายังไม่มี pending/approved request สำหรับ addon นี้
+    // approved ที่ "หมดอายุแล้วแต่ cron ยังไม่ได้ปั๊ม expired" ต้องไม่บล็อกคำขอใหม่
+    // (เงื่อนไขคือวันหมดอายุ ไม่ใช่สถานะ — ตรงกับ getActiveAddons)
     const existing = await this.db().findFirst({
       where: {
         tenant_id: tenantId,
         addon_code: dto.addonCode,
-        status: { in: ['pending', 'approved'] },
+        OR: [
+          { status: 'pending' },
+          { status: 'approved', expires_at: { gt: new Date() } },
+        ],
       },
     });
 
@@ -148,11 +156,18 @@ export class AddonTrialRequestService {
       throw new BadRequestException(`Request is already ${request.status}`);
     }
 
+    // ผู้เช่าอาจย้ายแผนหลังยื่นคำขอ — เช็คสายธุรกิจอีกครั้งตอนอนุมัติ ไม่ใช่เชื่อ
+    // ว่าตอนสร้างคำขอเคยผ่านแล้ว
+    await this.addonService.assertAddonAllowedForTenant(request.tenant_id, request.addon_code);
+
     const trialDays = dto.trialDays ?? 14;
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + trialDays);
 
-    // 1) อัพเดต request status
+    // 1) อัพเดต request status — แถวนี้ "คือ" ตัว entitlement เลย ไม่ได้เป็นแค่ใบคำขอ:
+    //    AddonService.getActiveAddons() อ่าน approved + expires_at > now โดยตรง
+    //    จึงไม่ต้องคัดลอกไปที่ subscription_features (ตารางนั้นไม่มีคอลัมน์วันหมดอายุ
+    //    และถูกใช้ออกใบแจ้งหนี้ — ของทดลองใช้ลงไปแล้วจะกลายเป็นถาวรและโดนเก็บเงิน)
     const updated = await this.db().update({
       where: { id: requestId },
       data: {
@@ -164,13 +179,11 @@ export class AddonTrialRequestService {
       },
     });
 
-    // 2) เปิด addon ให้ tenant — ผ่าน subscription_features
-    await this.activateTrialAddon(request.tenant_id, request.addon_code, expiresAt);
-
-    // 3) ล้าง addon cache
+    // 2) ล้าง addon cache — ถ้าพลาดตรงนี้ต้องโยน error ออกไป ห้ามกลืน:
+    //    tenant จะเห็นสิทธิ์ใหม่ช้าไปถึง 5 นาที (TTL) ทั้งที่ admin เห็นว่า "อนุมัติแล้ว"
     await this.addonService.invalidateAddonCache(request.tenant_id);
 
-    // 4) สร้าง in-app notification ให้ tenant
+    // 3) สร้าง in-app notification ให้ tenant
     await this.sendApprovalNotification(
       request.tenant_id,
       request.addon_name ?? request.addon_code,
@@ -222,64 +235,6 @@ export class AddonTrialRequestService {
   }
 
   // ─── Private helpers ────────────────────────────────────────────────────────
-
-  /**
-   * เปิด addon ให้ tenant โดย upsert subscription_features
-   * หา feature by code แล้วเพิ่มเข้า subscription ของ tenant
-   */
-  private async activateTrialAddon(
-    tenantId: string,
-    addonCode: string,
-    expiresAt: Date,
-  ): Promise<void> {
-    try {
-      // หา feature record จาก code
-      const feature = await (this.prisma as any).features.findFirst({
-        where: { code: addonCode, is_active: 1 },
-      });
-      if (!feature) {
-        this.logger.warn(
-          `Feature code "${addonCode}" not found in features table — skipping activation`,
-        );
-        return;
-      }
-
-      // หา subscription ของ tenant
-      const subscription = await this.prisma.subscriptions.findFirst({
-        where: { tenant_id: tenantId },
-        orderBy: { created_at: 'desc' },
-      });
-      if (!subscription) {
-        this.logger.warn(`No subscription found for tenant ${tenantId} — skipping activation`);
-        return;
-      }
-
-      // Upsert subscription_feature
-      const sfClient = (this.prisma as any).subscription_features;
-      await sfClient.upsert({
-        where: {
-          subscription_id_feature_id: {
-            subscription_id: subscription.id,
-            feature_id: feature.id,
-          },
-        },
-        create: {
-          subscription_id: subscription.id,
-          feature_id: feature.id,
-          is_active: 1,
-        },
-        update: {
-          is_active: 1,
-        },
-      });
-
-      this.logger.log(
-        `Addon ${addonCode} activated for tenant ${tenantId} until ${expiresAt.toISOString()}`,
-      );
-    } catch (error) {
-      this.logger.error(`Failed to activate addon ${addonCode} for tenant ${tenantId}:`, error);
-    }
-  }
 
   private async sendApprovalNotification(
     tenantId: string,

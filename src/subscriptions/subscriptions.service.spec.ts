@@ -1,14 +1,17 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { SubscriptionsService } from './subscriptions.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { AddonService } from '@/modules/addons/addon.service';
 import { SubscriptionStatus } from './entities/subscription.entity';
 
 describe('SubscriptionsService.create - billing date defaults', () => {
   let service: SubscriptionsService;
   let prismaCreate: jest.Mock;
+  let invalidateAddonCache: jest.Mock;
 
   beforeEach(async () => {
-    prismaCreate = jest.fn().mockResolvedValue({});
+    prismaCreate = jest.fn().mockResolvedValue({ tenant_id: 'tenant-1' });
+    invalidateAddonCache = jest.fn().mockResolvedValue(undefined);
     const mockPrisma = {
       subscriptions: {
         create: prismaCreate,
@@ -21,10 +24,26 @@ describe('SubscriptionsService.create - billing date defaults', () => {
     };
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [SubscriptionsService, { provide: PrismaService, useValue: mockPrisma }],
+      providers: [
+        SubscriptionsService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: AddonService, useValue: { invalidateAddonCache } },
+      ],
     }).compile();
 
     service = module.get(SubscriptionsService);
+  });
+
+  it('drops the tenant entitlement cache so a new plan is visible immediately', async () => {
+    await service.create({
+      tenantId: 'tenant-1',
+      planId: 'plan-1',
+      status: SubscriptionStatus.ACTIVE,
+      startDate: new Date('2026-04-01') as any,
+      endDate: new Date('2026-05-01') as any,
+    });
+
+    expect(invalidateAddonCache).toHaveBeenCalledWith('tenant-1');
   });
 
   it('defaults next_billing_date to endDate and billing_anchor_date to startDate when omitted', async () => {
@@ -83,23 +102,35 @@ describe('SubscriptionsService.create - billing date defaults', () => {
 describe('SubscriptionsService.update - camelCase → snake_case mapping', () => {
   let service: SubscriptionsService;
   let prismaUpdate: jest.Mock;
+  let invalidateAddonCache: jest.Mock;
 
   beforeEach(async () => {
-    prismaUpdate = jest.fn().mockResolvedValue({});
+    prismaUpdate = jest.fn().mockResolvedValue({ tenant_id: 'tenant-1' });
+    invalidateAddonCache = jest.fn().mockResolvedValue(undefined);
     const mockPrisma = {
       subscriptions: {
         create: jest.fn(),
         findMany: jest.fn(),
         findUnique: jest.fn(),
-        findFirst: jest.fn(),
+        findFirst: jest.fn().mockResolvedValue({ tenant_id: 'tenant-1' }),
         update: prismaUpdate,
         delete: jest.fn(),
       },
     };
     const module: TestingModule = await Test.createTestingModule({
-      providers: [SubscriptionsService, { provide: PrismaService, useValue: mockPrisma }],
+      providers: [
+        SubscriptionsService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: AddonService, useValue: { invalidateAddonCache } },
+      ],
     }).compile();
     service = module.get(SubscriptionsService);
+  });
+
+  it('drops the entitlement cache after a plan change (stale modules would gate the new plan)', async () => {
+    await service.update('sub-1', { planId: 'plan-2' } as any);
+
+    expect(invalidateAddonCache).toHaveBeenCalledWith('tenant-1');
   });
 
   it('maps planId → plan_id so a plan change does not throw "Unknown argument planId"', async () => {

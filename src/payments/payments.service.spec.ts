@@ -15,6 +15,7 @@ import { PaymentsService } from './payments.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailEventsService } from '../email/email-events.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { AddonService } from '@/modules/addons/addon.service';
 import { withPrismaFallback } from '../common/test/mock-prisma';
 import { mockAuditLogService } from '../common/test/mock-providers';
 
@@ -48,6 +49,7 @@ describe('PaymentsService', () => {
     sendPaymentReceiptEmail: jest.fn().mockResolvedValue(undefined),
     onPaymentApproved: jest.fn().mockResolvedValue(undefined),
   };
+  const addonMock = { invalidateAddonCache: jest.fn().mockResolvedValue(undefined) };
 
   beforeEach(async () => {
     const moduleRef: TestingModule = await Test.createTestingModule({
@@ -56,6 +58,7 @@ describe('PaymentsService', () => {
         { provide: PrismaService, useValue: prismaMock },
         { provide: EmailEventsService, useValue: emailMock },
         { provide: AuditLogService, useValue: auditMock },
+        { provide: AddonService, useValue: addonMock },
       ],
     }).compile();
     service = moduleRef.get(PaymentsService);

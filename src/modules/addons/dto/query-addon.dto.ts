@@ -28,6 +28,15 @@ export class QueryAddonDto {
   @IsOptional()
   category?: string;
 
+  /**
+   * กรองตามสายธุรกิจ: 'HOTEL' คืนโมดูลของโรงแรม + โมดูลกลาง (BOTH), 'CAMP' ก็เช่นกัน
+   * ค่าที่ไม่รู้จักถูกมองข้าม (คืนทุกสาย) เหมือน /addons/public
+   */
+  @ApiPropertyOptional({ enum: ['HOTEL', 'CAMP'], description: 'สายธุรกิจ (โรงแรม / ลานกางเต็นท์)' })
+  @IsString()
+  @IsOptional()
+  system?: string;
+
   @ApiPropertyOptional({ default: 1, minimum: 1 })
   @Type(() => Number)
   @IsInt()

@@ -19,6 +19,8 @@ import {
 } from './dto/facility.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { AddonGuard } from '../../common/guards/addon.guard';
+import { RequireAddon } from '../../common/decorators/require-addon.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import type { UserRole } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -29,7 +31,8 @@ const WRITE_ROLES: UserRole[] = ['admin', 'manager', 'tenant_admin', 'platform_a
 @ApiTags('camp-facilities')
 @ApiBearerAuth('JWT-auth')
 @Controller({ path: 'camp/facilities', version: '1' })
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, AddonGuard)
+@RequireAddon('CAMP_MODULE')
 export class FacilitiesController {
   constructor(private readonly service: FacilitiesService) {}
 

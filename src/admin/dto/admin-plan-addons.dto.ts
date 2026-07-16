@@ -29,6 +29,9 @@ export class PlanAddonItemDto {
 
   @ApiProperty({ example: 'Restaurant', required: false })
   category?: string | null;
+
+  @ApiProperty({ example: 'BOTH', enum: ['HOTEL', 'CAMP', 'BOTH'], description: 'Product line' })
+  system: string;
 }
 
 export class AvailableAddonItemDto {
@@ -52,6 +55,9 @@ export class AvailableAddonItemDto {
 
   @ApiProperty({ example: 'Restaurant', required: false })
   category?: string | null;
+
+  @ApiProperty({ example: 'BOTH', enum: ['HOTEL', 'CAMP', 'BOTH'], description: 'Product line' })
+  system: string;
 
   @ApiProperty({ example: true })
   isActive: boolean;

@@ -2,12 +2,14 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { SelfServicePlanService } from './self-service-plan.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { AddonService } from '@/modules/addons/addon.service';
 
 describe('SelfServicePlanService', () => {
   let service: SelfServicePlanService;
   let mockSubscriptionFindFirst: jest.Mock;
   let mockPlansFindUnique: jest.Mock;
   let mockTransaction: jest.Mock;
+  let mockInvalidateAddonCache: jest.Mock;
 
   const subBase = {
     id: 'sub-1',
@@ -22,6 +24,7 @@ describe('SelfServicePlanService', () => {
     mockSubscriptionFindFirst = jest.fn();
     mockPlansFindUnique = jest.fn();
     mockTransaction = jest.fn();
+    mockInvalidateAddonCache = jest.fn().mockResolvedValue(undefined);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -40,6 +43,7 @@ describe('SelfServicePlanService', () => {
             property: { count: jest.fn().mockResolvedValue(0) },
           },
         },
+        { provide: AddonService, useValue: { invalidateAddonCache: mockInvalidateAddonCache } },
       ],
     }).compile();
 
@@ -234,6 +238,9 @@ describe('SelfServicePlanService', () => {
       expect(txCalls[0].subscriptions.update).toHaveBeenCalled();
       expect(txCalls[0].invoices.create).toHaveBeenCalled();
       expect(txCalls[0].billing_history.create).toHaveBeenCalled();
+      // The new plan's modules must be visible at once — not after the 5-minute
+      // entitlement-cache TTL.
+      expect(mockInvalidateAddonCache).toHaveBeenCalledWith('tenant-1');
     });
 
     it('reuses an existing pending invoice instead of creating a duplicate (idempotent)', async () => {

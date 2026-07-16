@@ -21,6 +21,9 @@ import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
  * Behavior:
  *  - If endpoint has no @RequireAddon() → allow (not an add-on gated route)
  *  - If endpoint is @Public() → allow
+ *  - If the add-on belongs to the OTHER business line (hotel vs campground)
+ *    → 403, before any bypass: no tenant may reach a module their line does
+ *    not sell, however they are subscribed
  *  - If tenant is on TRIAL → allow full access (matches UI "Full Access" trial)
  *  - If tenant has the required add-on active → allow
  *  - Otherwise → 403 with structured error body for frontend upgrade redirect
@@ -64,7 +67,7 @@ export class AddonGuard implements CanActivate {
 
     // 3) Extract tenant from JWT (populated by JwtAuthGuard)
     const request = context.switchToHttp().getRequest<{
-      user?: { tenantId?: string; role?: string };
+      user?: { tenantId?: string; role?: string; isPlatformAdmin?: boolean };
     }>();
     const tenantId = request.user?.tenantId;
 
@@ -81,7 +84,34 @@ export class AddonGuard implements CanActivate {
       });
     }
 
-    // 4) Platform admins and dedicated procurement roles bypass add-on checks.
+    // 4) Product line first — before every bypass below. A module that belongs
+    // to the other business line (a hotel tenant reaching CampSync, or the
+    // reverse) must be unreachable full stop: not for a tenant "admin" user,
+    // not during a trial. Both of those bypass the entitlement check further
+    // down, so putting this check after them would leave the door open.
+    // Only platform users, who operate across tenants, are exempt.
+    const isPlatformUser =
+      request.user?.isPlatformAdmin === true || request.user?.role === 'platform_admin';
+
+    if (!isPlatformUser) {
+      const allowedForLine = await this.addonService.isAddonAllowedForTenant(
+        tenantId,
+        requiredAddon,
+      );
+      if (!allowedForLine) {
+        this.logger.warn(
+          `Tenant ${tenantId} attempted access to ${requiredAddon}-gated endpoint ` +
+            `"${context.getHandler().name}" from the other product line`,
+        );
+        throw new ForbiddenException({
+          code: `${requiredAddon}_WRONG_PRODUCT_LINE`,
+          message: `โมดูลนี้เป็นของอีกสายธุรกิจหนึ่ง — แผนปัจจุบันของคุณใช้งานไม่ได้`,
+          addon: requiredAddon,
+        });
+      }
+    }
+
+    // 5) Platform admins and dedicated procurement roles bypass add-on checks.
     // Procurement users (procurement_manager, buyer, approver, receiver) authenticate
     // via /auth/purchasing/login specifically to use the inventory/procurement system,
     // so gating them behind a per-tenant addon check is incorrect — their access
@@ -99,7 +129,7 @@ export class AddonGuard implements CanActivate {
       return true;
     }
 
-    // 5) Trial tenants get full access
+    // 6) Trial tenants get full access
     const subscription = await this.prisma.subscriptions.findFirst({
       where: { tenant_id: tenantId },
       select: { status: true },
@@ -110,7 +140,7 @@ export class AddonGuard implements CanActivate {
       return true;
     }
 
-    // 6) Paid tenants: enforce add-on check
+    // 7) Paid tenants: enforce add-on check
     const hasAddon = await this.addonService.hasActiveAddon(tenantId, requiredAddon);
 
     if (!hasAddon) {

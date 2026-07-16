@@ -4,6 +4,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from '../prisma/prisma.module';
 import { EmailModule } from '../email/email.module';
+import { AddonModule } from '@/modules/addons/addon.module';
 import { SubscriptionsService } from './subscriptions.service';
 import { SubscriptionsController } from './subscriptions.controller';
 import { SubscriptionExpiryService } from './subscription-expiry.service';
@@ -17,6 +18,7 @@ import { BillingHistory } from './entities/billing-history.entity';
     PrismaModule,
     ConfigModule,
     EmailModule,
+    AddonModule, // entitlement cache — dropped on every subscription write
     ScheduleModule.forRoot(),
   ],
   controllers: [SubscriptionsController],

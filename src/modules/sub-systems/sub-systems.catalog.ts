@@ -22,14 +22,22 @@ export interface SubSystemCard extends SubSystemCardMeta {
   icon: string;
   /** Add-on that unlocks this card (null = core terminal). */
   requiredAddon: string | null;
+  /** Product line this core terminal belongs to ('BOTH' = every tenant). */
+  system?: 'HOTEL' | 'CAMP' | 'BOTH';
   available: boolean;
   status: 'ready' | 'locked';
 }
 
-/** Core terminals (no add-on required) — always shown as available. */
+/**
+ * Core terminals (no add-on required) — available to every tenant on the
+ * matching product line. The Hotel Terminal is HOTEL-only: a campground tenant
+ * has no hotel to run, and the campground terminal is likewise reached through
+ * the CAMP-only CAMP_MODULE add-on rather than from here.
+ */
 export const CORE_SUB_SYSTEMS: SubSystemCard[] = [
   {
     key: 'hotel-terminal',
+    system: 'HOTEL',
     name: 'ระบบจัดการโรงแรม',
     subtitle: 'Hotel Management Terminal',
     description:

@@ -14,6 +14,8 @@ import { ZonesService } from './zones.service';
 import { CreateZoneDto, UpdateZoneDto } from './dto/zone.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { AddonGuard } from '../../common/guards/addon.guard';
+import { RequireAddon } from '../../common/decorators/require-addon.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import type { UserRole } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -24,7 +26,8 @@ const WRITE_ROLES: UserRole[] = ['admin', 'manager', 'tenant_admin', 'platform_a
 @ApiTags('camp-zones')
 @ApiBearerAuth('JWT-auth')
 @Controller({ path: 'camp/zones', version: '1' })
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, AddonGuard)
+@RequireAddon('CAMP_MODULE')
 export class ZonesController {
   constructor(private readonly service: ZonesService) {}
 

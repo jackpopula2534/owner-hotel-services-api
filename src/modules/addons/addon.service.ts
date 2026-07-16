@@ -1,8 +1,19 @@
-import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
 import { CacheService } from '@/cache/cache.service';
-import { CreateAddonDto, AddonBillingCycle, SubSystemCardMeta } from './dto/create-addon.dto';
+import {
+  CreateAddonDto,
+  AddonBillingCycle,
+  SubSystemCardMeta,
+  ADDON_SYSTEM_VALUES,
+} from './dto/create-addon.dto';
 import { UpdateAddonDto } from './dto/update-addon.dto';
 import { QueryAddonDto } from './dto/query-addon.dto';
 
@@ -41,20 +52,57 @@ export const CHILD_ADDON_GRANTS: Record<string, string[]> = {
   RESTAURANT_MODULE: ['POS_MODULE'],
 };
 
-export type AddonSource = 'plan' | 'subscription';
+/**
+ * Product lines. `plans.system` is HOTEL | CAMP; `add_ons.system` adds BOTH for
+ * modules that work on either line (Restaurant, HR, Inventory, …).
+ */
+export type ProductSystem = 'HOTEL' | 'CAMP';
+export type AddonSystem = ProductSystem | 'BOTH';
+
+/** ค่าที่ `add_ons.system` รับได้ — BOTH = โมดูลกลางที่ขายได้ทั้งสองสาย (นิยามที่ DTO) */
+export const ADDON_SYSTEMS: readonly AddonSystem[] = ADDON_SYSTEM_VALUES;
+
+/**
+ * Product-line compatibility — the one rule that keeps Hotel and Campground
+ * apart. A module tagged for a single line (e.g. CAMP_MODULE → 'CAMP') may only
+ * ever be bundled into, sold with, or surfaced on a plan of that same line; a
+ * 'BOTH' module fits either. Enforced at every point where an add-on can attach
+ * to a plan (seeder, Admin plan-addons endpoint) and everywhere we render a
+ * catalog, so a hotel tenant can neither receive nor buy the campground module.
+ */
+export function isAddonAvailableForSystem(
+  addonSystem: string | null | undefined,
+  planSystem: string | null | undefined,
+): boolean {
+  const addon = (addonSystem ?? 'BOTH').trim().toUpperCase();
+  const plan = (planSystem ?? 'HOTEL').trim().toUpperCase();
+  return addon === 'BOTH' || addon === plan;
+}
+
+export type AddonSource = 'plan' | 'subscription' | 'trial';
 
 export interface AddonStatus {
   code: string;
   name: string;
   isActive: boolean;
+  /** ISO timestamp; only 'trial' entitlements expire — plan/subscription ones are null. */
   expiresAt: string | null;
   /**
    * Where the entitlement comes from:
    * - 'plan'         → feature included in the tenant's current plan (set by Admin in Plans → Features)
    * - 'subscription' → standalone add-on attached to the subscription (set by Admin/Tenant in Add-ons)
-   * Both sources unlock the same UI; this field is only for diagnostics/analytics.
+   * - 'trial'        → an approved, unexpired addon_trial_request (time-boxed, not billed)
+   * All three unlock the same UI; this field is for diagnostics and for the
+   * frontend to show "trial ends in N days" banners.
    */
   source: AddonSource;
+}
+
+/** The slice of an approved `addon_trial_requests` row that grants entitlement. */
+interface TrialGrantRow {
+  addon_code: string;
+  addon_name: string | null;
+  expires_at: Date;
 }
 
 /**
@@ -150,19 +198,97 @@ export class AddonService {
   }
 
   /**
-   * Returns every "module"-type entitlement the tenant currently has,
-   * unioning two sources:
-   *   1) plan_features  → modules included in the tenant's plan (Admin-controlled)
-   *   2) subscription_features → standalone add-ons attached to the subscription
+   * The tenant's product line, taken from the plan they subscribe to. Tenants
+   * with no entitling subscription fall back to HOTEL (the default line), which
+   * simply means they never see campground-only modules.
+   */
+  async getTenantSystem(tenantId: string): Promise<ProductSystem> {
+    const cacheKey = `${tenantId}:system`;
+    return this.cacheService.getOrSet<ProductSystem>(
+      cacheKey,
+      async () => {
+        const subscription = await this.prisma.subscriptions.findFirst({
+          where: {
+            tenant_id: tenantId,
+            status: { in: [...this.ENTITLEMENT_STATUSES] },
+          },
+          orderBy: { created_at: 'desc' },
+          include: { plans_subscriptions_plan_idToplans: { select: { system: true } } },
+        });
+        const system = subscription?.plans_subscriptions_plan_idToplans?.system;
+        return system?.trim().toUpperCase() === 'CAMP' ? 'CAMP' : 'HOTEL';
+      },
+      { ttl: this.CACHE_TTL, namespace: this.CACHE_NS },
+    );
+  }
+
+  /**
+   * Gate every path that grants a module to a tenant (trial approval, admin
+   * "add add-on to subscription", …) on the tenant's product line.
    *
-   * Deduplicates by feature code; `source: 'plan'` wins when both sides match
-   * because plan-level entitlements typically don't expire mid-cycle.
+   * `plan_addons` is guarded by the plan's own system, but subscription-level
+   * grants key off the `features` table, which has no product line of its own —
+   * so the check has to be made here, against the module catalog, or a hotel
+   * tenant can still end up entitled to the campground module.
+   *
+   * Unknown codes pass through: they are not sellable modules, so the caller's
+   * own not-found handling (or the feature/child-grant machinery) owns them.
+   */
+  async assertAddonAllowedForTenant(tenantId: string, addonCode: string): Promise<void> {
+    const catalog = await this.listActive();
+    const addon = catalog.find((a) => a.code === addonCode);
+    if (!addon) return;
+
+    const tenantSystem = await this.getTenantSystem(tenantId);
+    if (isAddonAvailableForSystem(addon.system, tenantSystem)) return;
+
+    throw new BadRequestException(
+      `โมดูล "${addon.name}" เป็นของธุรกิจ ${addon.system} — ` +
+        `เพิ่มให้ผู้เช่าที่ใช้แผน ${tenantSystem} ไม่ได้ (คนละสายธุรกิจ)`,
+    );
+  }
+
+  /**
+   * The same product-line rule as `assertAddonAllowedForTenant`, as a predicate.
+   * AddonGuard needs the answer (to raise a 403 with its own structured body)
+   * rather than the 400 the grant paths want, so both share this one lookup.
+   *
+   * Unknown codes are "allowed" here: they are not sellable modules, so the
+   * product line has nothing to say about them.
+   */
+  async isAddonAllowedForTenant(tenantId: string, addonCode: string): Promise<boolean> {
+    const catalog = await this.listActive();
+    const addon = catalog.find((a) => a.code === addonCode);
+    if (!addon) return true;
+
+    const tenantSystem = await this.getTenantSystem(tenantId);
+    return isAddonAvailableForSystem(addon.system, tenantSystem);
+  }
+
+  /**
+   * Returns every "module"-type entitlement the tenant currently has,
+   * unioning four sources:
+   *   1) plan_features        → modules included in the tenant's plan (Admin-controlled)
+   *   2) plan_addons          → add-ons curated onto the plan by Admin
+   *   3) subscription_features → standalone add-ons attached to the subscription
+   *   4) addon_trial_requests  → approved, not-yet-expired free trials
+   *
+   * Deduplicates by code, in that order: a permanent entitlement always wins
+   * over an expiring one, so an approved trial never shadows a module the
+   * tenant already pays for (which would hand it a bogus expiry date).
+   *
+   * Trials are read straight from the request rows rather than being copied into
+   * `subscription_features` on approval: that table has no expiry column and
+   * feeds billing, so a trial written there would be both permanent and
+   * invoiced. Filtering on `expires_at > now` here means a trial simply stops
+   * granting access the moment it lapses, with no write path to go wrong.
    */
   async getActiveAddons(tenantId: string): Promise<AddonStatus[]> {
     const cacheKey = `${tenantId}:all`;
     return this.cacheService.getOrSet<AddonStatus[]>(
       cacheKey,
       async () => {
+        const now = new Date();
         const subscription = await this.prisma.subscriptions.findFirst({
           where: {
             tenant_id: tenantId,
@@ -197,10 +323,8 @@ export class AddonService {
           },
         });
 
-        if (!subscription) return [];
-
         const merged = new Map<string, AddonStatus>();
-        const plan = subscription.plans_subscriptions_plan_idToplans as any;
+        const plan = (subscription?.plans_subscriptions_plan_idToplans ?? null) as any;
 
         // 1) Plan-level features set by Admin in the Plans page (highest priority).
         const planFeatures = (plan?.plan_features ?? []) as any[];
@@ -235,7 +359,7 @@ export class AddonService {
         }
 
         // 3) Standalone add-ons attached to the subscription.
-        for (const sf of subscription.subscription_features) {
+        for (const sf of subscription?.subscription_features ?? []) {
           const f = sf.features;
           if (!f || f.type !== 'module' || f.is_active !== 1) continue;
           if (merged.has(f.code)) continue; // plan source wins
@@ -248,9 +372,27 @@ export class AddonService {
           });
         }
 
-        // 4) Parent → child entitlement expansion. Owning a parent module
+        // 4) Free trials the Admin approved and that haven't lapsed yet. These
+        //    stand on their own — a tenant can be granted a trial before they
+        //    ever hold a paid subscription, so this source is read even when the
+        //    lookup above found nothing.
+        const trials = await this.findActiveTrialGrants(tenantId, now);
+        for (const trial of trials) {
+          if (merged.has(trial.addon_code)) continue; // a paid entitlement outranks a trial
+          merged.set(trial.addon_code, {
+            code: trial.addon_code,
+            name: trial.addon_name ?? trial.addon_code,
+            isActive: true,
+            expiresAt: trial.expires_at.toISOString(),
+            source: 'trial',
+          });
+        }
+
+        // 5) Parent → child entitlement expansion. Owning a parent module
         //    auto-grants its folded child codes (e.g. ACCOUNTING_MODULE grants
         //    COST_ACCOUNTING_MODULE) so legacy controller guards keep working.
+        //    The child inherits the parent's expiry too — a trialled parent must
+        //    not hand out children that outlive it.
         for (const parent of Array.from(merged.values())) {
           const children = CHILD_ADDON_GRANTS[parent.code];
           if (!children) continue;
@@ -260,7 +402,7 @@ export class AddonService {
               code: childCode,
               name: childCode,
               isActive: true,
-              expiresAt: null,
+              expiresAt: parent.expiresAt,
               source: parent.source,
             });
           }
@@ -272,16 +414,51 @@ export class AddonService {
     );
   }
 
+  /**
+   * Approved trials that are still running. `expires_at > now` is what actually
+   * ends a trial, so an approved row whose date has passed — or one with no date
+   * at all — grants nothing, whether or not the hourly expiry job has gotten
+   * around to stamping it `expired`.
+   */
+  private async findActiveTrialGrants(tenantId: string, now: Date): Promise<TrialGrantRow[]> {
+    const rows = await this.trialRequestsDb().findMany({
+      where: {
+        tenant_id: tenantId,
+        status: 'approved',
+        expires_at: { gt: now },
+      },
+      select: { addon_code: true, addon_name: true, expires_at: true },
+    });
+    return rows as TrialGrantRow[];
+  }
+
+  /**
+   * `addon_trial_requests` was added after the checked-in Prisma client was
+   * generated, so it is reached through a cast the way the other late models are.
+   */
+  private trialRequestsDb(): any {
+    return (this.prisma as unknown as { addon_trial_requests: any }).addon_trial_requests;
+  }
+
+  /**
+   * Drops every cached entitlement answer for one tenant — the per-code
+   * `hasActiveAddon` keys, the `:all` list behind /addons/status, and the
+   * `:system` product line. The product line has to go with them: a tenant who
+   * switches between a HOTEL and a CAMP plan keeps the old line otherwise, and
+   * AddonGuard turns that into a 403 (`*_WRONG_PRODUCT_LINE`) on a module the
+   * new plan does grant.
+   */
   async invalidateAddonCache(tenantId: string): Promise<void> {
     const allCodes = Object.values(ADDON_CODES);
     const delKeys = [
       ...allCodes.map((code) => ({ key: `${tenantId}:${code}`, ns: this.CACHE_NS })),
       { key: `${tenantId}:all`, ns: this.CACHE_NS },
+      { key: `${tenantId}:system`, ns: this.CACHE_NS },
     ];
     for (const { key, ns } of delKeys) {
       await this.cacheService.del(key, ns);
     }
-    this.logger.log(`Addon cache invalidated for tenant ${tenantId} (${allCodes.length + 1} keys)`);
+    this.logger.log(`Addon cache invalidated for tenant ${tenantId} (${delKeys.length} keys)`);
   }
 
   /**
@@ -330,6 +507,12 @@ export class AddonService {
     }
     if (query.category) {
       where.category = query.category;
+    }
+    // Business-line tab in the Admin catalog: "โรงแรม" lists what a hotel plan
+    // can sell — its own modules plus the BOTH modules — and likewise for camp.
+    const system = this.normalizeSystemFilter(query.system);
+    if (system) {
+      where.system = { in: [system, 'BOTH'] };
     }
 
     const addOnsClient = (this.prisma as unknown as { add_ons: any }).add_ons;
@@ -383,7 +566,7 @@ export class AddonService {
 
     const modules = await this.listActive();
     const filtered = normalized
-      ? modules.filter((m) => m.system === normalized || m.system === 'BOTH')
+      ? modules.filter((m) => isAddonAvailableForSystem(m.system, normalized))
       : modules;
 
     const featureRows = await this.prisma.features.findMany({
@@ -440,11 +623,17 @@ export class AddonService {
         price: new Prisma.Decimal(dto.price),
         billing_cycle: dto.billingCycle ?? AddonBillingCycle.MONTHLY,
         category: dto.category ?? null,
+        // Product line. Defaults to BOTH (sellable on either line) — the same
+        // default the column carries — but an admin creating e.g. a campground
+        // module must be able to pin it to CAMP, so the value is persisted here.
+        system: dto.system ?? 'BOTH',
         icon: dto.icon ?? null,
         display_order: dto.displayOrder ?? 0,
         min_quantity: dto.minQuantity ?? 1,
         max_quantity: dto.maxQuantity ?? 1,
         is_active: dto.isActive === false ? 0 : 1,
+        is_sub_system: dto.isSubSystem ? 1 : 0,
+        sub_system_meta: dto.subSystemMeta ? JSON.stringify(dto.subSystemMeta) : null,
       },
     });
 
@@ -473,13 +662,26 @@ export class AddonService {
     if (dto.price !== undefined) data.price = new Prisma.Decimal(dto.price);
     if (dto.billingCycle !== undefined) data.billing_cycle = dto.billingCycle;
     if (dto.category !== undefined) data.category = dto.category ?? null;
+    if (dto.system !== undefined) data.system = dto.system;
     if (dto.icon !== undefined) data.icon = dto.icon ?? null;
     if (dto.displayOrder !== undefined) data.display_order = dto.displayOrder;
     if (dto.minQuantity !== undefined) data.min_quantity = dto.minQuantity;
     if (dto.maxQuantity !== undefined) data.max_quantity = dto.maxQuantity;
     if (dto.isActive !== undefined) data.is_active = dto.isActive ? 1 : 0;
+    if (dto.isSubSystem !== undefined) data.is_sub_system = dto.isSubSystem ? 1 : 0;
+    if (dto.subSystemMeta !== undefined) {
+      data.sub_system_meta = dto.subSystemMeta ? JSON.stringify(dto.subSystemMeta) : null;
+    }
 
     const updated = await this.addOnsClient().update({ where: { id }, data });
+
+    // Moving a module between product lines can strip it from plans on the other
+    // line, so drop any now-invalid bundling instead of leaving those tenants
+    // entitled to a module their plan may no longer sell.
+    if (dto.system !== undefined && dto.system !== existing.system) {
+      await this.pruneCrossSystemPlanAddons(id);
+    }
+
     await this.invalidateCatalogCache();
     this.logger.log(`Add-on updated: ${updated.code}`);
     return this.toEntity(updated);
@@ -547,6 +749,40 @@ export class AddonService {
 
   private async invalidateCatalogCache(): Promise<void> {
     await this.cacheService.del('active-list', this.CATALOG_CACHE_NS);
+  }
+
+  /**
+   * Remove every `plan_addons` row that bundles this add-on into a plan of the
+   * other product line. Called after an admin retags a module (e.g. BOTH → CAMP)
+   * so hotel plans stop granting a campground-only module to their tenants.
+   */
+  private async pruneCrossSystemPlanAddons(addonId: string): Promise<void> {
+    const planAddonsClient = (this.prisma as unknown as { plan_addons: any }).plan_addons;
+    const rows = (await planAddonsClient.findMany({
+      where: { addon_id: addonId },
+      include: {
+        plans: { select: { id: true, code: true, system: true } },
+        add_ons: { select: { code: true, system: true } },
+      },
+    })) as Array<{
+      plan_id: string;
+      plans?: { id: string; code: string; system: string } | null;
+      add_ons?: { code: string; system: string } | null;
+    }>;
+
+    const stale = rows.filter(
+      (row) =>
+        row.plans && row.add_ons && !isAddonAvailableForSystem(row.add_ons.system, row.plans.system),
+    );
+
+    for (const row of stale) {
+      await planAddonsClient.deleteMany({ where: { plan_id: row.plan_id, addon_id: addonId } });
+      await this.invalidateAddonCacheForPlan(row.plan_id);
+      this.logger.log(
+        `Unbundled ${row.add_ons?.code} (${row.add_ons?.system}) from plan ` +
+          `${row.plans?.code} (${row.plans?.system}) — cross product line`,
+      );
+    }
   }
 
   /**

@@ -15,6 +15,7 @@ import {
 import { Subscription } from '../subscriptions/entities/subscription.entity';
 import { Feature } from '../features/entities/feature.entity';
 import { Invoice, InvoiceStatus } from '../invoices/entities/invoice.entity';
+import { AddonService } from '../modules/addons/addon.service';
 import {
   UpdateSubscriptionFeatureDto,
   RemoveSubscriptionFeatureDto,
@@ -45,6 +46,7 @@ export class AdminSubscriptionFeaturesService {
     private invoicesRepository: Repository<Invoice>,
     @InjectDataSource()
     private dataSource: DataSource,
+    private readonly addonService: AddonService,
   ) {}
 
   /**
@@ -334,6 +336,17 @@ export class AdminSubscriptionFeaturesService {
 
     if (!feature) {
       throw new NotFoundException(`Feature with ID "${dto.featureId}" not found`);
+    }
+
+    // Product-line separation. `subscription_features` points at `features`, which
+    // carries no product line of its own, so the check runs against the module
+    // catalog: both the feature's own code (module-type features share the add-on
+    // code) and its parent module. Without it, "Add add-on" in Admin is a way to
+    // hand a hotel tenant the campground module — exactly the coupling we removed
+    // from the plans.
+    await this.addonService.assertAddonAllowedForTenant(subscription.tenantId, feature.code);
+    if (feature.moduleCode) {
+      await this.addonService.assertAddonAllowedForTenant(subscription.tenantId, feature.moduleCode);
     }
 
     // Check if already exists and is active

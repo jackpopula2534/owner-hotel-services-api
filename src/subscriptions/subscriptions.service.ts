@@ -1,12 +1,43 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { AddonService } from '@/modules/addons/addon.service';
 import { SubscriptionStatus } from './entities/subscription.entity';
 import { CreateSubscriptionDto } from './dto/create-subscription.dto';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
 
 @Injectable()
 export class SubscriptionsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(SubscriptionsService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly addonService: AddonService,
+  ) {}
+
+  /**
+   * A subscription row IS the tenant's entitlement: the plan it points at
+   * decides which modules and which product line (HOTEL | CAMP) they own, and
+   * AddonService caches both answers for 5 minutes. Every write here therefore
+   * has to drop that cache, or the tenant keeps their previous plan's modules
+   * until the TTL lapses — which is exactly what made a fresh Camp subscriber
+   * stare at "ADD-ON REQUIRED" (and a 403) on the campground pages: checkout
+   * swaps the plan milliseconds after registration warms the cache with the
+   * default hotel plan.
+   *
+   * Non-fatal: a cache that failed to clear must not fail the billing write.
+   */
+  private async invalidateEntitlements(tenantId: string | null | undefined): Promise<void> {
+    if (!tenantId) return;
+    try {
+      await this.addonService.invalidateAddonCache(tenantId);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to invalidate addon cache for tenant ${tenantId}: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
+    }
+  }
 
   async create(createSubscriptionDto: CreateSubscriptionDto) {
     const startDate = createSubscriptionDto.startDate
@@ -82,6 +113,8 @@ export class SubscriptionsService {
       /* provisioning is best-effort — subscription creation must still succeed */
     }
 
+    await this.invalidateEntitlements((created as any).tenant_id);
+
     return created;
   }
 
@@ -122,7 +155,7 @@ export class SubscriptionsService {
     });
   }
 
-  update(id: string, updateSubscriptionDto: UpdateSubscriptionDto) {
+  async update(id: string, updateSubscriptionDto: UpdateSubscriptionDto) {
     // Map the camelCase DTO to the snake_case Prisma columns (same as create()).
     // Passing the DTO straight through fails — e.g. the plan upgrade/downgrade
     // flow sends `planId`, but the column is `plan_id` (Prisma: "Unknown
@@ -158,7 +191,14 @@ export class SubscriptionsService {
       }
     });
 
-    return this.prisma.subscriptions.update({
+    // Read the current owner first: a subscription can be re-pointed at another
+    // tenant, and the tenant losing it needs its entitlements dropped too.
+    const before = await this.prisma.subscriptions.findFirst({
+      where: { id },
+      select: { tenant_id: true },
+    });
+
+    const updated = await this.prisma.subscriptions.update({
       where: { id },
       data,
       include: {
@@ -167,12 +207,25 @@ export class SubscriptionsService {
         subscription_features: { include: { features: true } },
       },
     });
+
+    const affected = new Set(
+      [before?.tenant_id, (updated as any).tenant_id].filter(Boolean) as string[],
+    );
+    for (const tenantId of affected) {
+      await this.invalidateEntitlements(tenantId);
+    }
+
+    return updated;
   }
 
-  remove(id: string) {
-    return this.prisma.subscriptions.delete({
+  async remove(id: string) {
+    const deleted = await this.prisma.subscriptions.delete({
       where: { id },
     });
+
+    await this.invalidateEntitlements((deleted as any).tenant_id);
+
+    return deleted;
   }
 
   async checkSubscriptionActive(tenantId: string): Promise<boolean> {

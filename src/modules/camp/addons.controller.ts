@@ -26,6 +26,8 @@ import { AddonsService } from './addons.service';
 import { CreateAddonDto, UpdateAddonDto } from './dto/addon.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { AddonGuard } from '../../common/guards/addon.guard';
+import { RequireAddon } from '../../common/decorators/require-addon.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import type { UserRole } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -44,7 +46,8 @@ interface MulterFile {
 @ApiTags('camp-addons')
 @ApiBearerAuth('JWT-auth')
 @Controller({ path: 'camp/addons', version: '1' })
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, AddonGuard)
+@RequireAddon('CAMP_MODULE')
 export class AddonsController {
   constructor(
     private readonly service: AddonsService,

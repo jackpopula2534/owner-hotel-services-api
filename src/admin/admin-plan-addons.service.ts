@@ -1,6 +1,12 @@
-import { Injectable, Logger, NotFoundException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  ConflictException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { AddonService } from '../modules/addons/addon.service';
+import { AddonService, isAddonAvailableForSystem } from '../modules/addons/addon.service';
 import {
   PlanAddonsResponseDto,
   PlanAddonItemDto,
@@ -51,18 +57,24 @@ export class AdminPlanAddonsService {
    * assigned (so the UI can show two lists side-by-side).
    */
   async getPlanAddons(planId: string): Promise<PlanAddonsResponseDto> {
-    await this.assertPlanExists(planId);
+    const plan = await this.getPlan(planId);
 
-    const [assignedRows, allActiveAddons] = await Promise.all([
+    const [assignedRows, activeAddonsForLine] = await Promise.all([
       this.planAddonsClient.findMany({
         where: { plan_id: planId },
         include: { add_ons: true },
         orderBy: [{ created_at: 'asc' }],
       }),
-      this.addOnsClient.findMany({
-        where: { is_active: 1 },
-        orderBy: [{ display_order: 'asc' }, { name: 'asc' }],
-      }),
+      this.addOnsClient
+        .findMany({
+          where: { is_active: 1 },
+          orderBy: [{ display_order: 'asc' }, { name: 'asc' }],
+        })
+        // Only offer modules that belong to this plan's product line, so the
+        // Admin UI can't put the Campground module on a hotel plan.
+        .then((addons) =>
+          addons.filter((addon) => isAddonAvailableForSystem(addon.system, plan.system)),
+        ),
     ]);
 
     const assignedAddons: PlanAddonItemDto[] = assignedRows
@@ -75,11 +87,12 @@ export class AdminPlanAddonsService {
         price: Number(row.add_ons.price ?? 0),
         billingCycle: row.add_ons.billing_cycle,
         category: row.add_ons.category ?? null,
+        system: row.add_ons.system ?? 'BOTH',
       }));
 
     const assignedAddonIds = new Set(assignedAddons.map((a) => a.id));
 
-    const availableAddons: AvailableAddonItemDto[] = allActiveAddons
+    const availableAddons: AvailableAddonItemDto[] = activeAddonsForLine
       .filter((addon) => !assignedAddonIds.has(addon.id))
       .map((addon) => ({
         id: addon.id,
@@ -89,6 +102,7 @@ export class AdminPlanAddonsService {
         price: Number(addon.price ?? 0),
         billingCycle: addon.billing_cycle,
         category: addon.category ?? null,
+        system: addon.system ?? 'BOTH',
         isActive: Number(addon.is_active) === 1,
       }));
 
@@ -104,11 +118,21 @@ export class AdminPlanAddonsService {
     planId: string,
     dto: AssignAddonToPlanDto,
   ): Promise<PlanAddonsResponseDto> {
-    await this.assertPlanExists(planId);
+    const plan = await this.getPlan(planId);
 
     const addon = await this.addOnsClient.findUnique({ where: { id: dto.addonId } });
     if (!addon) {
       throw new NotFoundException(`Add-on with ID "${dto.addonId}" not found`);
+    }
+
+    // Product-line separation: a CAMP-only module (e.g. CAMP_MODULE) must never
+    // be bundled into a HOTEL plan, and vice versa. Without this a single admin
+    // click re-grants every tenant on that plan a module from the other line.
+    if (!isAddonAvailableForSystem(addon.system, plan.system)) {
+      throw new BadRequestException(
+        `Add-on "${addon.name}" belongs to the ${addon.system} product line and cannot be ` +
+          `assigned to plan "${plan.code}" (${plan.system})`,
+      );
     }
 
     const existing = await this.planAddonsClient.findUnique({
@@ -139,7 +163,7 @@ export class AdminPlanAddonsService {
    * Remove an add-on from a plan.
    */
   async removeAddonFromPlan(planId: string, addonId: string): Promise<{ message: string }> {
-    await this.assertPlanExists(planId);
+    await this.getPlan(planId);
 
     const addon = await this.addOnsClient.findUnique({ where: { id: addonId } });
     if (!addon) {
@@ -167,7 +191,7 @@ export class AdminPlanAddonsService {
   // helpers
   // ---------------------------------------------------------------------------
 
-  private async assertPlanExists(planId: string): Promise<void> {
+  private async getPlan(planId: string): Promise<{ id: string; code: string; system: string }> {
     const plansClient = (
       this.prisma as unknown as {
         plans: { findUnique: (args: Record<string, unknown>) => Promise<any | null> };
@@ -178,5 +202,6 @@ export class AdminPlanAddonsService {
     if (!plan) {
       throw new NotFoundException(`Plan with ID "${planId}" not found`);
     }
+    return plan;
   }
 }

@@ -2,6 +2,7 @@ import {
   IsArray,
   IsBoolean,
   IsEnum,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsNumber,
@@ -20,6 +21,13 @@ export enum AddonBillingCycle {
   YEARLY = 'yearly',
   ONE_TIME = 'one_time',
 }
+
+/**
+ * ค่าที่ `add_ons.system` รับได้ (product line ของโมดูล)
+ * HOTEL = ขายเฉพาะธุรกิจโรงแรม, CAMP = เฉพาะลานกางเต็นท์, BOTH = ขายได้ทั้งสอง
+ * นิยามไว้ที่ DTO เพราะเป็น leaf module — `AddonService` re-export ต่อเป็น ADDON_SYSTEMS
+ */
+export const ADDON_SYSTEM_VALUES = ['HOTEL', 'CAMP', 'BOTH'] as const;
 
 /**
  * DTO สำหรับสร้าง Add-on ใหม่จากหน้า Admin Panel
@@ -62,13 +70,17 @@ export class CreateAddonDto {
   @MaxLength(80)
   category?: string;
 
+  /**
+   * สายธุรกิจที่ขายโมดูลนี้ — โรงแรม (HOTEL), ลานกางเต็นท์ (CAMP) หรือขายได้ทั้งสอง (BOTH)
+   * ต้องเป็น 1 ใน 3 ค่านี้เท่านั้น: ค่าที่พิมพ์ผิดจะทำให้โมดูลหลุดจาก catalog ของทั้งสองสาย
+   */
   @ApiPropertyOptional({
-    example: 'HOTEL',
-    description: 'Product line: HOTEL | CAMP | BOTH (which system this module is sold for)',
+    enum: ADDON_SYSTEM_VALUES,
+    default: 'BOTH',
+    description: 'Product line: HOTEL | CAMP | BOTH (which business this module is sold for)',
   })
-  @IsString()
+  @IsIn(ADDON_SYSTEM_VALUES, { message: `system must be one of: ${ADDON_SYSTEM_VALUES.join(', ')}` })
   @IsOptional()
-  @MaxLength(20)
   system?: string;
 
   @ApiPropertyOptional({ example: 'bar-chart', description: 'ชื่อ icon (lucide-react)' })
