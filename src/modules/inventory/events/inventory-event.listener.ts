@@ -284,15 +284,87 @@ export class InventoryEventListener {
         },
       });
 
-      if (recipes.length === 0) {
+      // Ready-made (retail) menu items — e.g. bottled water — are linked 1:1 to
+      // an inventory item via MenuItem.inventoryItemId and deduct that item
+      // directly (1 stock unit per menu qty) instead of going through a recipe.
+      const directItems = await this.prisma.menuItem.findMany({
+        where: {
+          id: { in: menuItemIds },
+          tenantId: event.tenantId,
+          inventoryItemId: { not: null },
+        },
+        select: {
+          id: true,
+          name: true,
+          inventoryItemId: true,
+          inventoryItem: { select: { id: true, name: true, sku: true } },
+        },
+      });
+
+      if (recipes.length === 0 && directItems.length === 0) {
         this.logger.debug(`No stock-tracked recipes for ordered menu items — no deduction`);
         return;
       }
 
       const recipeMap = new Map(recipes.map((r) => [r.menuItemId, r]));
+      const directMap = new Map(directItems.map((m) => [m.id, m]));
 
       await this.prisma.$transaction(async (tx) => {
         for (const orderItem of event.items) {
+          // Direct-linked retail item takes precedence — deduct the linked
+          // inventory item 1:1 with the ordered quantity and skip recipe math.
+          const direct = directMap.get(orderItem.menuItemId);
+          if (direct?.inventoryItemId) {
+            const totalQty = orderItem.quantity;
+            if (totalQty <= 0) continue;
+
+            const stock = await tx.warehouseStock.findUnique({
+              where: {
+                warehouseId_itemId: {
+                  warehouseId: warehouse.id,
+                  itemId: direct.inventoryItemId,
+                },
+              },
+            });
+
+            const currentQty = stock?.quantity || 0;
+            const deductQty = Math.min(totalQty, currentQty);
+            if (deductQty <= 0) continue;
+
+            const avgCost = stock ? Number(stock.avgCost) : 0;
+
+            await tx.stockMovement.create({
+              data: {
+                tenantId: event.tenantId,
+                warehouseId: warehouse.id,
+                itemId: direct.inventoryItemId,
+                type: 'GOODS_ISSUE',
+                quantity: deductQty,
+                unitCost: avgCost,
+                totalCost: deductQty * avgCost,
+                referenceType: 'restaurant_order',
+                referenceId: event.orderId,
+                notes: `Auto-deduct (retail): ${direct.inventoryItem?.name ?? direct.name} x${deductQty} for order ${event.orderId}`,
+                createdBy: event.completedBy,
+              },
+            });
+
+            const newQty = currentQty - deductQty;
+            await tx.warehouseStock.update({
+              where: {
+                warehouseId_itemId: {
+                  warehouseId: warehouse.id,
+                  itemId: direct.inventoryItemId,
+                },
+              },
+              data: {
+                quantity: newQty,
+                totalValue: newQty * avgCost,
+              },
+            });
+            continue;
+          }
+
           const recipe = recipeMap.get(orderItem.menuItemId);
           if (!recipe) continue;
 

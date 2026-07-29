@@ -6,12 +6,20 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '@/prisma/prisma.service';
 import { AddonService } from '@/modules/addons/addon.service';
-import { INTEGRATIONS, IntegrationDef, findIntegration } from './integrations.catalog';
+import {
+  INTEGRATIONS,
+  IntegrationDef,
+  IntegrationGroup,
+  findGroup,
+  findIntegration,
+} from './integrations.catalog';
 
 export interface IntegrationStatus {
   key: string;
   name: string;
   description: string;
+  /** Page section this connection belongs to (from INTEGRATION_GROUPS). */
+  group: IntegrationGroup;
   source: { key: string; name: string };
   target: { key: string; name: string };
   icon: string;
@@ -63,6 +71,8 @@ export class IntegrationsService {
         key: def.key,
         name: def.name,
         description: def.description,
+        // Catalog groups are static — every def.group key exists in INTEGRATION_GROUPS.
+        group: findGroup(def.group) as IntegrationGroup,
         source: def.source,
         target: def.target,
         icon: def.icon,

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { AddonModule } from '../addons/addon.module';
+import { IntegrationsModule } from '../integrations/integrations.module';
 import { WarehousesModule } from '../inventory/warehouses/warehouses.module';
 import { StockMovementsModule } from '../inventory/stock-movements/stock-movements.module';
 import { CampgroundsController } from './campgrounds.controller';
@@ -13,6 +14,7 @@ import { FacilitiesController } from './facilities.controller';
 import { FacilitiesService } from './facilities.service';
 import { ReservationsController } from './reservations.controller';
 import { ReservationsService } from './reservations.service';
+import { CampAccountingService } from './camp-accounting.service';
 import { AddonsController } from './addons.controller';
 import { AddonsService } from './addons.service';
 import { RequisitionsController } from './requisitions.controller';
@@ -29,7 +31,7 @@ import { CampDashboardService } from './dashboard.service';
  * (AddonModule ให้ทั้ง guard และ AddonService ที่ guard ต้องใช้)
  */
 @Module({
-  imports: [PrismaModule, AddonModule, WarehousesModule, StockMovementsModule],
+  imports: [PrismaModule, AddonModule, IntegrationsModule, WarehousesModule, StockMovementsModule],
   controllers: [
     CampgroundsController,
     ZonesController,
@@ -46,6 +48,7 @@ import { CampDashboardService } from './dashboard.service';
     PitchesService,
     FacilitiesService,
     ReservationsService,
+    CampAccountingService,
     AddonsService,
     RequisitionsService,
     CampDashboardService,

@@ -21,8 +21,10 @@ import {
 } from '@nestjs/swagger';
 import { RecipesService } from './recipes.service';
 import { RecipeReadinessService } from './recipe-readiness.service';
+import { RecipeLinkingService } from './recipe-linking.service';
 import { CreateRecipeDto } from './dto/create-recipe.dto';
 import { UpdateRecipeDto } from './dto/update-recipe.dto';
+import { LinkIngredientsDto } from './dto/link-ingredients.dto';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { AddonGuard } from '../../../common/guards/addon.guard';
 import { RequireAddon } from '../../../common/decorators/require-addon.decorator';
@@ -37,7 +39,29 @@ export class RecipesController {
   constructor(
     private readonly recipesService: RecipesService,
     private readonly readinessService: RecipeReadinessService,
+    private readonly linkingService: RecipeLinkingService,
   ) {}
+
+  @Post('link-ingredients')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Auto-link free-text recipe ingredients to inventory items',
+    description:
+      'Matches every unlinked (นอกคลัง) recipe ingredient to an inventory item by name; ' +
+      'optionally creates missing items and a kitchen warehouse so stock tracking works ' +
+      'in one click. Idempotent — re-running only touches ingredients still free-text.',
+  })
+  @ApiResponse({ status: 200, description: 'Linking summary' })
+  async linkIngredients(
+    @Body() dto: LinkIngredientsDto,
+    @CurrentUser() user?: any,
+  ): Promise<any> {
+    const result = await this.linkingService.linkIngredients(user?.tenantId, {
+      restaurantId: dto.restaurantId,
+      createMissing: dto.createMissing,
+    });
+    return { success: true, data: result };
+  }
 
   // Readiness is a KITCHEN feature (reads menuItemRecipe, not InventoryRecipe), so it is
   // gated by RESTAURANT_MODULE — overriding the controller-level INVENTORY_MODULE. This lets

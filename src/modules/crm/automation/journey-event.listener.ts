@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { JourneyService } from './journey.service';
 import { BookingEventPayload, CRM_EVENTS } from '../crm.events';
+import { IntegrationsService } from '../../integrations/integrations.service';
 
 /**
  * Auto-enroll guests into matching active journeys whenever
@@ -11,11 +12,15 @@ import { BookingEventPayload, CRM_EVENTS } from '../crm.events';
 export class JourneyEventListener {
   private readonly logger = new Logger(JourneyEventListener.name);
 
-  constructor(private readonly journeys: JourneyService) {}
+  constructor(
+    private readonly journeys: JourneyService,
+    private readonly integrations: IntegrationsService,
+  ) {}
 
   @OnEvent(CRM_EVENTS.BOOKING_CREATED, { async: true })
   async onBookingCreated(payload: BookingEventPayload): Promise<void> {
     if (!payload?.tenantId || !payload?.guestId) return;
+    if (!(await this.integrations.isEnabled(payload.tenantId, 'booking-crm-sync'))) return;
     const n = await this.journeys.enrollByTrigger(
       'booking.created',
       payload.tenantId,
@@ -28,6 +33,7 @@ export class JourneyEventListener {
   @OnEvent(CRM_EVENTS.BOOKING_CHECKED_IN, { async: true })
   async onBookingCheckedIn(payload: BookingEventPayload): Promise<void> {
     if (!payload?.tenantId || !payload?.guestId) return;
+    if (!(await this.integrations.isEnabled(payload.tenantId, 'booking-crm-sync'))) return;
     await this.journeys.enrollByTrigger('booking.checked_in', payload.tenantId, payload.guestId, {
       bookingId: payload.bookingId,
     });
@@ -36,6 +42,7 @@ export class JourneyEventListener {
   @OnEvent(CRM_EVENTS.BOOKING_CHECKED_OUT, { async: true })
   async onBookingCheckedOut(payload: BookingEventPayload): Promise<void> {
     if (!payload?.tenantId || !payload?.guestId) return;
+    if (!(await this.integrations.isEnabled(payload.tenantId, 'booking-crm-sync'))) return;
     await this.journeys.enrollByTrigger('booking.checked_out', payload.tenantId, payload.guestId, {
       bookingId: payload.bookingId,
       metadata: { totalAmount: payload.totalAmount },

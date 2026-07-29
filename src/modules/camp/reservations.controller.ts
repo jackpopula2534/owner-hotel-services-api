@@ -16,9 +16,11 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { StorageService } from '@/common/storage/storage.service';
 import { ReservationsService } from './reservations.service';
+import { CampAccountingService } from './camp-accounting.service';
 import {
   CreateReservationDto,
   RecordPaymentDto,
+  UpdateReservationAddonsDto,
   UpdateReservationDto,
 } from './dto/reservation.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -49,7 +51,19 @@ export class ReservationsController {
   constructor(
     private readonly service: ReservationsService,
     private readonly storage: StorageService,
+    private readonly campAccounting: CampAccountingService,
   ) {}
+
+  /**
+   * สร้าง Journal Entry ย้อนหลังให้การรับชำระของลานที่เกิดก่อนมีการลงบัญชีอัตโนมัติ
+   * คู่กับปุ่ม Backfill ฝั่งโรงแรม (bookings/admin/backfill-journal-entries)
+   */
+  @Post('admin/backfill-journal-entries')
+  @ApiOperation({ summary: 'Backfill journal entries for camp payments with no accounting entry' })
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager')
+  backfillJournalEntries(@CurrentUser() user: { tenantId?: string }) {
+    return this.campAccounting.backfillJournals(user?.tenantId);
+  }
 
   @Get()
   @ApiOperation({ summary: 'List reservations' })
@@ -85,6 +99,19 @@ export class ReservationsController {
     @CurrentUser() user: { tenantId?: string },
   ) {
     return this.service.update(id, dto, user?.tenantId);
+  }
+
+  @Put(':id/addons')
+  @ApiOperation({
+    summary: 'Replace reservation add-ons (stock-aware; recalculates total)',
+  })
+  @Roles(...WRITE_ROLES)
+  updateAddons(
+    @Param('id') id: string,
+    @Body() dto: UpdateReservationAddonsDto,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    return this.service.updateAddons(id, dto, user?.tenantId);
   }
 
   @Post(':id/check-in')

@@ -23,6 +23,7 @@ import {
   resolveTimeWithFallback,
 } from '../../common/availability/availability.util';
 import { CRM_EVENTS } from '../crm/crm.events';
+import { applyLedgerBalances } from '../accounting/ledger/ledger-balance.util';
 
 // ─── Activity Types ───────────────────────────────────────────────────────────
 
@@ -1771,32 +1772,38 @@ export class BookingsService {
     const fiscalPeriod = now.getMonth() + 1;
     const fiscalYear = now.getFullYear();
 
-    await this.prisma.journalEntry.create({
-      data: {
-        tenantId,
-        propertyId,
-        entryNo,
-        entryDate: now,
-        description: `รับชำระห้องพัก ${bookingNo ?? bookingId.slice(0, 8)}`,
-        reference: bookingNo ?? bookingId.slice(0, 8),
-        sourceType: 'BOOKING_PAYMENT',
-        sourceId: bookingId,
-        status: 'POSTED',
-        fiscalPeriod,
-        fiscalYear,
-        totalDebit,
-        totalCredit,
-        createdBy: 'system',
-        lines: {
-          create: lines.map((l) => ({
-            accountId: l.accountId,
-            lineNo: l.lineNo,
-            description: l.description,
-            debit: l.debit,
-            credit: l.credit,
-          })),
+    // JE + ledger_balances ต้องอยู่ transaction เดียวกัน — งบทดลอง/งบกำไรขาดทุนอ่านจาก
+    // ledger_balances ไม่ใช่ journal_entries ถ้าไม่บวกยอดตรงนี้ หน้าบัญชีจะขึ้น 0
+    await this.prisma.$transaction(async (tx) => {
+      await tx.journalEntry.create({
+        data: {
+          tenantId,
+          propertyId,
+          entryNo,
+          entryDate: now,
+          description: `รับชำระห้องพัก ${bookingNo ?? bookingId.slice(0, 8)}`,
+          reference: bookingNo ?? bookingId.slice(0, 8),
+          sourceType: 'BOOKING_PAYMENT',
+          sourceId: bookingId,
+          status: 'POSTED',
+          fiscalPeriod,
+          fiscalYear,
+          totalDebit,
+          totalCredit,
+          createdBy: 'system',
+          lines: {
+            create: lines.map((l) => ({
+              accountId: l.accountId,
+              lineNo: l.lineNo,
+              description: l.description,
+              debit: l.debit,
+              credit: l.credit,
+            })),
+          },
         },
-      },
+      });
+
+      await applyLedgerBalances(tx, { tenantId, propertyId, fiscalYear, fiscalPeriod }, lines);
     });
 
     this.logger.log(

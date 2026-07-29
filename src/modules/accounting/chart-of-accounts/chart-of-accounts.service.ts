@@ -358,6 +358,14 @@ const DEFAULT_ACCOUNTS = [
     level: 'ACCOUNT',
   },
   {
+    code: '4103',
+    name: 'รายได้ลานกางเต็นท์',
+    nameEn: 'Campground Revenue',
+    type: 'REVENUE',
+    normalBalance: 'CREDIT',
+    level: 'ACCOUNT',
+  },
+  {
     code: '4200',
     name: 'รายได้อาหารและเครื่องดื่ม',
     nameEn: 'F&B Revenue',

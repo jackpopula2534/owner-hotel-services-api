@@ -3,6 +3,7 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { CrmContactsService } from './crm-contacts.service';
 import { CrmTicketsService } from './crm-tickets.service';
 import { LoyaltyService } from '../../loyalty/loyalty.service';
+import { IntegrationsService } from '../integrations/integrations.service';
 import {
   BookingEventPayload,
   CRM_EVENTS,
@@ -26,6 +27,7 @@ export class CrmEventListener {
     private readonly contacts: CrmContactsService,
     private readonly tickets: CrmTicketsService,
     private readonly loyalty: LoyaltyService,
+    private readonly integrations: IntegrationsService,
   ) {}
 
   // ──────────────────────────────────────────────────────────
@@ -34,6 +36,7 @@ export class CrmEventListener {
   @OnEvent(CRM_EVENTS.BOOKING_CREATED, { async: true })
   async onBookingCreated(payload: BookingEventPayload): Promise<void> {
     if (!payload?.tenantId || !payload?.guestId) return;
+    if (!(await this.integrations.isEnabled(payload.tenantId, 'booking-crm-sync'))) return;
     try {
       await this.contacts.upsertFromGuest(payload.tenantId, payload.guestId);
       this.logger.debug(`booking.created handled · bookingId=${payload.bookingId}`);
@@ -48,6 +51,7 @@ export class CrmEventListener {
   @OnEvent(CRM_EVENTS.BOOKING_CHECKED_OUT, { async: true })
   async onBookingCheckedOut(payload: BookingEventPayload): Promise<void> {
     if (!payload?.tenantId || !payload?.guestId) return;
+    if (!(await this.integrations.isEnabled(payload.tenantId, 'booking-crm-sync'))) return;
     const amount = payload.totalAmount ?? 0;
     try {
       await this.contacts.recordStayCompletion(payload.tenantId, payload.guestId, amount);

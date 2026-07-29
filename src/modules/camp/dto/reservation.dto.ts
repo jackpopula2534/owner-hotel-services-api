@@ -118,6 +118,21 @@ export class UpdateReservationDto extends PartialType(CreateReservationDto) {
   status?: string;
 }
 
+/**
+ * แก้ไขอุปกรณ์เช่าของการจอง — ส่งรายการชุดใหม่ "ทั้งชุด" (replace)
+ * ส่ง array ว่างเพื่อถอดอุปกรณ์ออกทั้งหมด
+ */
+export class UpdateReservationAddonsDto {
+  @ApiProperty({
+    type: [ReservationAddonItemDto],
+    description: 'รายการอุปกรณ์ชุดใหม่ทั้งหมด — รายการที่ไม่ส่งมาจะถูกถอดออกและคืน stock',
+  })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ReservationAddonItemDto)
+  addons!: ReservationAddonItemDto[];
+}
+
 export class RecordPaymentDto {
   @ApiProperty({ description: 'จำนวนเงินที่รับชำระครั้งนี้ (บาท)', minimum: 0.01 })
   @IsNumber({ maxDecimalPlaces: 2 })

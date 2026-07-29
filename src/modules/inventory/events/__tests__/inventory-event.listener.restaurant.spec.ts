@@ -40,6 +40,9 @@ describe('InventoryEventListener — restaurant order completed', () => {
     prismaMock = {
       warehouse: { findFirst: jest.fn() },
       menuItemRecipe: { findMany: jest.fn() },
+      // Direct-sale (retail) menu items linked 1:1 to an inventory item —
+      // default: none, individual tests override.
+      menuItem: { findMany: jest.fn().mockResolvedValue([]) },
       $transaction: jest.fn(),
     };
     addonMock = { hasActiveAddon: jest.fn() };
@@ -93,7 +96,7 @@ describe('InventoryEventListener — restaurant order completed', () => {
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });
 
-  it('skips when order has no stock-linked recipes', async () => {
+  it('skips when order has no stock-linked recipes and no direct-linked items', async () => {
     addonMock.hasActiveAddon.mockResolvedValue(true);
     prismaMock.warehouse.findFirst.mockResolvedValue({ id: 'wh-1' });
     prismaMock.menuItemRecipe.findMany.mockResolvedValue([]); // nothing linked to คลัง
@@ -101,6 +104,113 @@ describe('InventoryEventListener — restaurant order completed', () => {
     await expect(listener.handleRestaurantOrderCompleted(baseEvent())).resolves.toBeUndefined();
 
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('deducts a direct-linked (retail) menu item 1:1 with ordered qty — e.g. bottled water', async () => {
+    addonMock.hasActiveAddon.mockResolvedValue(true);
+    prismaMock.warehouse.findFirst.mockResolvedValue({ id: 'wh-1' });
+    prismaMock.menuItemRecipe.findMany.mockResolvedValue([]); // no recipe — retail item
+    prismaMock.menuItem.findMany.mockResolvedValue([
+      {
+        id: 'mi-1',
+        name: 'น้ำดื่มขวด',
+        inventoryItemId: 'item-water',
+        inventoryItem: { id: 'item-water', name: 'น้ำดื่ม 600ml', sku: 'BEV-01' },
+      },
+    ]);
+
+    const tx = makeTxMock();
+    tx.warehouseStock.findUnique.mockResolvedValue({ quantity: 24, avgCost: 7 });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    prismaMock.$transaction.mockImplementation(async (cb: any) => cb(tx));
+
+    await listener.handleRestaurantOrderCompleted(baseEvent()); // order qty = 3
+
+    // 1 stock unit per menu qty → deduct 3 bottles
+    expect(tx.stockMovement.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          type: 'GOODS_ISSUE',
+          quantity: 3,
+          itemId: 'item-water',
+          warehouseId: 'wh-1',
+          referenceType: 'restaurant_order',
+          referenceId: 'ord-1',
+        }),
+      }),
+    );
+    expect(tx.warehouseStock.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ quantity: 21 }), // 24 − 3
+      }),
+    );
+  });
+
+  it('clamps a direct-linked deduction to available stock', async () => {
+    addonMock.hasActiveAddon.mockResolvedValue(true);
+    prismaMock.warehouse.findFirst.mockResolvedValue({ id: 'wh-1' });
+    prismaMock.menuItemRecipe.findMany.mockResolvedValue([]);
+    prismaMock.menuItem.findMany.mockResolvedValue([
+      {
+        id: 'mi-1',
+        name: 'น้ำดื่มขวด',
+        inventoryItemId: 'item-water',
+        inventoryItem: { id: 'item-water', name: 'น้ำดื่ม 600ml', sku: 'BEV-01' },
+      },
+    ]);
+
+    const tx = makeTxMock();
+    tx.warehouseStock.findUnique.mockResolvedValue({ quantity: 2, avgCost: 7 }); // only 2 left
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    prismaMock.$transaction.mockImplementation(async (cb: any) => cb(tx));
+
+    await listener.handleRestaurantOrderCompleted(baseEvent()); // order qty = 3
+
+    expect(tx.stockMovement.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ quantity: 2 }) }),
+    );
+  });
+
+  it('direct link takes precedence over a recipe on the same menu item', async () => {
+    addonMock.hasActiveAddon.mockResolvedValue(true);
+    prismaMock.warehouse.findFirst.mockResolvedValue({ id: 'wh-1' });
+    // Same menu item has BOTH a recipe and a direct inventory link
+    prismaMock.menuItemRecipe.findMany.mockResolvedValue([
+      {
+        menuItemId: 'mi-1',
+        servings: 1,
+        ingredients: [
+          {
+            itemId: 'item-syrup',
+            quantity: 1,
+            wastagePercent: 0,
+            name: 'Syrup',
+            item: { id: 'item-syrup', name: 'Syrup', sku: 'SY-01' },
+          },
+        ],
+      },
+    ]);
+    prismaMock.menuItem.findMany.mockResolvedValue([
+      {
+        id: 'mi-1',
+        name: 'น้ำดื่มขวด',
+        inventoryItemId: 'item-water',
+        inventoryItem: { id: 'item-water', name: 'น้ำดื่ม 600ml', sku: 'BEV-01' },
+      },
+    ]);
+
+    const tx = makeTxMock();
+    tx.warehouseStock.findUnique.mockResolvedValue({ quantity: 24, avgCost: 7 });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    prismaMock.$transaction.mockImplementation(async (cb: any) => cb(tx));
+
+    await listener.handleRestaurantOrderCompleted(baseEvent());
+
+    // Deducts ONLY the direct-linked item — the recipe is skipped entirely
+    expect(tx.stockMovement.create).toHaveBeenCalledTimes(1);
+    expect(tx.stockMovement.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ itemId: 'item-water' }) }),
+    );
   });
 
   it('deducts linked ingredients from kitchen warehouse when inventory is enabled', async () => {

@@ -299,6 +299,39 @@ export class ReportsService {
   // ==========================================
 
   /**
+   * ป้ายกำกับที่ใช้แทนลานกางเต็นท์ในช่อง byRoomType / byChannel
+   * (CampReservation ไม่มี room.type และไม่มี channel — จึงต้องมีถังของตัวเอง
+   * ไม่งั้นเปอร์เซ็นต์ในกราฟแยกประเภทจะรวมกันไม่ครบ 100% ของรายได้)
+   */
+  private static readonly CAMP_LABEL = 'ลานกางเต็นท์';
+
+  /**
+   * เงื่อนไข where ของ camp_reservations ที่ปลอดภัยข้าม tenant
+   *
+   * `CampReservation.tenantId` เป็น nullable — ข้อมูลเก่าบางแถวไม่มีค่า ถ้า query ด้วย
+   * `{ tenantId }` ตรงๆ แถวเหล่านั้นจะหายไปจากรายงาน จึงยอมรับกรณี tenantId = null
+   * โดยบังคับว่า "ลานที่แถวนั้นสังกัดอยู่" ต้องเป็นของ tenant นี้ (ไม่ fail open)
+   */
+  private campReservationWhere(tenantId: string) {
+    return {
+      status: { in: ['confirmed', 'checked_in', 'checked_out', 'completed'] },
+      OR: [{ tenantId }, { tenantId: null, campground: { tenantId } }],
+    };
+  }
+
+  /**
+   * แปลง CampReservation ให้มีหน้าตาเหมือน Booking เท่าที่ helper ของรายงานใช้จริง
+   * (checkIn / checkOut / totalPrice / room.type / channel.name)
+   */
+  private normalizeCampReservations(reservations: any[]) {
+    return reservations.map((r) => ({
+      ...r,
+      room: { type: ReportsService.CAMP_LABEL },
+      channel: { name: ReportsService.CAMP_LABEL },
+    }));
+  }
+
+  /**
    * Generate revenue report
    */
   async getRevenueReport(
@@ -327,25 +360,51 @@ export class ReportsService {
       baseWhere.propertyId = query.propertyId;
     }
 
+    // รายงานรวมลานกางเต็นท์ด้วย ยกเว้นตอนกรองเฉพาะ property เพราะ Campground
+    // ไม่มี propertyId จึงระบุไม่ได้ว่าลานไหนอยู่ property ไหน
+    const includeCamp = !query.propertyId;
+    const campWhere = this.campReservationWhere(tenantId);
+
     // Get current period bookings
-    const currentBookings = await this.prisma.booking.findMany({
-      where: {
-        ...baseWhere,
-        checkIn: { gte: startDate, lte: endDate },
-      },
-      include: {
-        room: true,
-        channel: true,
-      },
-    });
+    const [hotelBookings, campReservations] = await Promise.all([
+      this.prisma.booking.findMany({
+        where: {
+          ...baseWhere,
+          checkIn: { gte: startDate, lte: endDate },
+        },
+        include: {
+          room: true,
+          channel: true,
+        },
+      }),
+      includeCamp
+        ? this.prisma.campReservation.findMany({
+            where: { ...campWhere, checkIn: { gte: startDate, lte: endDate } },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const currentBookings = [
+      ...hotelBookings,
+      ...this.normalizeCampReservations(campReservations),
+    ];
 
     // Get previous period bookings for comparison
-    const previousBookings = await this.prisma.booking.findMany({
-      where: {
-        ...baseWhere,
-        checkIn: { gte: prevStartDate, lte: prevEndDate },
-      },
-    });
+    const [prevHotelBookings, prevCampReservations] = await Promise.all([
+      this.prisma.booking.findMany({
+        where: {
+          ...baseWhere,
+          checkIn: { gte: prevStartDate, lte: prevEndDate },
+        },
+      }),
+      includeCamp
+        ? this.prisma.campReservation.findMany({
+            where: { ...campWhere, checkIn: { gte: prevStartDate, lte: prevEndDate } },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const previousBookings = [...prevHotelBookings, ...prevCampReservations];
 
     // Calculate totals
     const totalRevenue = currentBookings.reduce((sum, b) => sum + Number(b.totalPrice), 0);
@@ -354,13 +413,19 @@ export class ReportsService {
     const prevRevenue = previousBookings.reduce((sum, b) => sum + Number(b.totalPrice), 0);
     const prevBookings = previousBookings.length;
 
-    // Calculate room count for RevPAR
-    const roomCount = await this.prisma.room.count({
-      where: { tenantId },
-    });
+    // Calculate unit count for RevPAR — รายได้รวมลานแล้ว ตัวหารจึงต้องรวมแปลงกางเต็นท์ด้วย
+    // ไม่งั้น RevPAR จะสูงเกินจริง
+    const [roomCount, pitchCount] = await Promise.all([
+      this.prisma.room.count({ where: { tenantId } }),
+      includeCamp
+        ? this.prisma.campPitch.count({
+            where: { OR: [{ tenantId }, { tenantId: null, campground: { tenantId } }] },
+          })
+        : Promise.resolve(0),
+    ]);
 
     const days = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) || 1;
-    const availableRoomNights = roomCount * days;
+    const availableRoomNights = (roomCount + pitchCount) * days;
 
     // Calculate metrics
     const averageAdr = totalBookings > 0 ? totalRevenue / totalBookings : 0;
@@ -556,37 +621,57 @@ export class ReportsService {
       bookingWhere.propertyId = query.propertyId;
     }
 
-    // Get all rooms
-    const rooms = await this.prisma.room.findMany({
-      where: roomWhere,
-    });
+    // เช่นเดียวกับรายงานรายได้: รวมลานกางเต็นท์ ยกเว้นตอนกรองเฉพาะ property
+    const includeCamp = !query.propertyId;
+    const campWhere = this.campReservationWhere(tenantId);
+    const campUnitWhere = { OR: [{ tenantId }, { tenantId: null, campground: { tenantId } }] };
 
-    const totalRooms = rooms.length;
+    // ช่วงวันที่ทับซ้อนกับงวดรายงาน — ใช้ซ้ำทั้ง booking และ camp
+    const overlaps = (from: Date, to: Date) => [
+      { checkIn: { gte: from, lte: to } },
+      { checkOut: { gte: from, lte: to } },
+      { AND: [{ checkIn: { lte: from } }, { checkOut: { gte: to } }] },
+    ];
+
+    // Get all rooms + pitches (ลานกางเต็นท์นับเป็นหน่วยที่ขายได้เหมือนห้อง)
+    const [rooms, pitches] = await Promise.all([
+      this.prisma.room.findMany({ where: roomWhere }),
+      includeCamp
+        ? this.prisma.campPitch.findMany({ where: campUnitWhere })
+        : Promise.resolve([] as any[]),
+    ]);
+
+    const campUnits = pitches.map((p) => ({ ...p, type: ReportsService.CAMP_LABEL }));
+    const totalRooms = rooms.length + campUnits.length;
 
     // Get bookings in the period
-    const bookings = await this.prisma.booking.findMany({
-      where: {
-        ...bookingWhere,
-        OR: [
-          { checkIn: { gte: startDate, lte: endDate } },
-          { checkOut: { gte: startDate, lte: endDate } },
-          { AND: [{ checkIn: { lte: startDate } }, { checkOut: { gte: endDate } }] },
-        ],
-      },
-      include: { room: true },
-    });
+    const [hotelBookings, campReservations] = await Promise.all([
+      this.prisma.booking.findMany({
+        where: { ...bookingWhere, OR: overlaps(startDate, endDate) },
+        include: { room: true },
+      }),
+      includeCamp
+        ? this.prisma.campReservation.findMany({
+            where: { ...campWhere, AND: [{ OR: overlaps(startDate, endDate) }] },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const bookings = [...hotelBookings, ...this.normalizeCampReservations(campReservations)];
 
     // Get previous period bookings for comparison
-    const prevBookings = await this.prisma.booking.findMany({
-      where: {
-        ...bookingWhere,
-        OR: [
-          { checkIn: { gte: prevStartDate, lte: prevEndDate } },
-          { checkOut: { gte: prevStartDate, lte: prevEndDate } },
-          { AND: [{ checkIn: { lte: prevStartDate } }, { checkOut: { gte: prevEndDate } }] },
-        ],
-      },
-    });
+    const [prevHotelBookings, prevCampReservations] = await Promise.all([
+      this.prisma.booking.findMany({
+        where: { ...bookingWhere, OR: overlaps(prevStartDate, prevEndDate) },
+      }),
+      includeCamp
+        ? this.prisma.campReservation.findMany({
+            where: { ...campWhere, AND: [{ OR: overlaps(prevStartDate, prevEndDate) }] },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const prevBookings = [...prevHotelBookings, ...prevCampReservations];
 
     // Calculate days in period
     const days = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) || 1;
@@ -616,8 +701,11 @@ export class ReportsService {
     const peakOccupancy = Math.max(...occupancyRates, 0);
     const lowestOccupancy = Math.min(...occupancyRates.filter((r) => r > 0), 0);
 
-    // Get current room status
-    const currentStatus = await this.getCurrentRoomStatus(roomWhere);
+    // Get current room status (รวมสถานะแปลงกางเต็นท์)
+    const currentStatus = await this.getCurrentRoomStatus(
+      roomWhere,
+      includeCamp ? campUnitWhere : null,
+    );
 
     // Build response
     const response: OccupancyReportResponseDto = {
@@ -649,7 +737,7 @@ export class ReportsService {
     // Add room type breakdown if requested
     if (query.includeRoomTypeBreakdown !== false) {
       response.byRoomType = await this.calculateRoomTypeOccupancy(
-        rooms,
+        [...rooms, ...campUnits],
         bookings,
         startDate,
         endDate,
@@ -803,8 +891,15 @@ export class ReportsService {
   /**
    * Get current room status summary
    */
-  private async getCurrentRoomStatus(where: any) {
-    const rooms = await this.prisma.room.findMany({ where });
+  private async getCurrentRoomStatus(where: any, campWhere: any = null) {
+    // แปลงกางเต็นท์ใช้ status ชุดเดียวกับห้อง (available | occupied | cleaning | maintenance | closed)
+    // จึงนับรวมในตารางเดียวกันได้ — 'closed' ถือเป็น out of order
+    const [hotelRooms, pitches] = await Promise.all([
+      this.prisma.room.findMany({ where }),
+      campWhere ? this.prisma.campPitch.findMany({ where: campWhere }) : Promise.resolve([] as any[]),
+    ]);
+
+    const rooms = [...hotelRooms, ...pitches];
 
     const statusCount = {
       total: rooms.length,
@@ -824,6 +919,7 @@ export class ReportsService {
           break;
         case 'out_of_order':
         case 'maintenance':
+        case 'closed':
           statusCount.outOfOrder++;
           break;
         case 'cleaning':

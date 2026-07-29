@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AddonModule } from '@/modules/addons/addon.module';
+import { IntegrationsModule } from '@/modules/integrations/integrations.module';
 import { CostCentersModule } from './cost-centers/cost-centers.module';
 import { CostTypesModule } from './cost-types/cost-types.module';
 import { CostEntriesModule } from './cost-entries/cost-entries.module';
@@ -15,6 +16,7 @@ import { CostEventListener } from './events/cost-event.listener';
 @Module({
   imports: [
     AddonModule,
+    IntegrationsModule,
     CostCentersModule,
     CostTypesModule,
     CostEntriesModule,

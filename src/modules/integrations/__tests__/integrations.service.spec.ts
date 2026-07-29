@@ -37,7 +37,7 @@ describe('IntegrationsService', () => {
   });
 
   describe('list', () => {
-    it('marks restaurant→inventory available when both add-ons active (default ON)', async () => {
+    it('marks restaurant→inventory available when both add-ons active (default OFF — opt-in)', async () => {
       addonMock.hasActiveAddon.mockResolvedValue(true);
 
       const list = await service.list(TENANT);
@@ -45,7 +45,20 @@ describe('IntegrationsService', () => {
 
       expect(item.available).toBe(true);
       expect(item.missingAddons).toEqual([]);
-      expect(item.enabled).toBe(true); // defaultEnabled, no stored row
+      expect(item.enabled).toBe(false); // no stored row → defaultEnabled=false (opt-in)
+    });
+
+    it('respects a stored ON setting when available', async () => {
+      addonMock.hasActiveAddon.mockResolvedValue(true);
+      prismaMock.tenantIntegration.findMany.mockResolvedValue([
+        { integrationKey: RESTAURANT_KEY, enabled: true, connectedAt: new Date('2026-01-01') },
+      ]);
+
+      const list = await service.list(TENANT);
+      const item = list.find((i) => i.key === RESTAURANT_KEY)!;
+
+      expect(item.available).toBe(true);
+      expect(item.enabled).toBe(true);
     });
 
     it('reports missing add-ons and forces enabled=false when not available', async () => {
@@ -86,9 +99,15 @@ describe('IntegrationsService', () => {
       expect(await service.isEnabled(TENANT, RESTAURANT_KEY)).toBe(false);
     });
 
-    it('returns catalog default (true) when available and no stored row', async () => {
+    it('returns catalog default (false — opt-in) when available and no stored row', async () => {
       addonMock.hasActiveAddon.mockResolvedValue(true);
       prismaMock.tenantIntegration.findFirst.mockResolvedValue(null);
+      expect(await service.isEnabled(TENANT, RESTAURANT_KEY)).toBe(false);
+    });
+
+    it('returns stored value (true) when the tenant explicitly enabled it', async () => {
+      addonMock.hasActiveAddon.mockResolvedValue(true);
+      prismaMock.tenantIntegration.findFirst.mockResolvedValue({ enabled: true });
       expect(await service.isEnabled(TENANT, RESTAURANT_KEY)).toBe(true);
     });
 

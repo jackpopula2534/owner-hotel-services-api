@@ -3,6 +3,7 @@ import { BullModule } from '@nestjs/bull';
 import { ScheduleModule } from '@nestjs/schedule';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { EmailModule } from '../../../email/email.module';
+import { IntegrationsModule } from '../../integrations/integrations.module';
 import { CampaignService } from './campaign.service';
 import { CampaignController } from './campaign.controller';
 import { CampaignProcessor } from './campaign.processor';
@@ -31,6 +32,7 @@ import { PushChannelAdapter } from './channels/push.adapter';
   imports: [
     PrismaModule,
     EmailModule,
+    IntegrationsModule,
     ScheduleModule.forRoot(),
     BullModule.registerQueue({
       name: CRM_CAMPAIGN_QUEUE,

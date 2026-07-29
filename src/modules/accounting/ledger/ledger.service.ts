@@ -48,22 +48,33 @@ export class LedgerService {
       orderBy: { account: { code: 'asc' } },
     });
 
+    /**
+     * ยอดที่เก็บใน ledger_balances เป็นค่ามีเครื่องหมาย (debit − credit) เสมอ
+     * บวก = ยอดอยู่ด้านเดบิต, ลบ = ยอดอยู่ด้านเครดิต — ไม่ขึ้นกับ normalBalance
+     *
+     * ของเดิมเช็ค normalBalance ด้วย ทำให้ยอดติดลบ (เช่นบัญชีรายได้ ซึ่งปกติต้องติดลบ)
+     * ตกเข้าเงื่อนไข `closing < 0` ของ *ทั้งสอง* คอลัมน์ จึงโผล่ทั้งเดบิตและเครดิต
+     * ยอดรวมเดบิตเลยเป็นสองเท่าและ isBalanced เป็น false ตลอด
+     */
+    const split = (value: number) => ({
+      debit: value > 0 ? value : 0,
+      credit: value < 0 ? -value : 0,
+    });
+
     const lines: TrialBalanceLine[] = balances.map((b) => {
-      const closing = Number(b.closingBalance);
-      const isDebitNormal = b.account.normalBalance === 'DEBIT';
+      const opening = split(Number(b.openingBalance));
+      const closing = split(Number(b.closingBalance));
       return {
         accountId: b.accountId,
         accountCode: b.account.code,
         accountName: b.account.name,
         accountType: b.account.type,
-        openingDebit: isDebitNormal && Number(b.openingBalance) >= 0 ? Number(b.openingBalance) : 0,
-        openingCredit:
-          !isDebitNormal && Number(b.openingBalance) >= 0 ? Number(b.openingBalance) : 0,
+        openingDebit: opening.debit,
+        openingCredit: opening.credit,
         periodDebit: Number(b.periodDebit),
         periodCredit: Number(b.periodCredit),
-        closingDebit: closing > 0 && isDebitNormal ? closing : closing < 0 ? Math.abs(closing) : 0,
-        closingCredit:
-          closing > 0 && !isDebitNormal ? closing : closing < 0 ? Math.abs(closing) : 0,
+        closingDebit: closing.debit,
+        closingCredit: closing.credit,
       };
     });
 
@@ -87,6 +98,74 @@ export class LedgerService {
       totalClosingCredit,
       isBalanced: Math.abs(totalClosingDebit - totalClosingCredit) < 0.01,
     };
+  }
+
+  /**
+   * สร้าง `ledger_balances` ใหม่จาก JE ที่ POSTED ทั้งหมด
+   *
+   * จำเป็นเพราะโมดูลที่สร้าง JE เป็น POSTED ตรงๆ (การจองห้องพัก / ลานกางเต็นท์)
+   * เคยไม่อัปเดตตารางนี้ ยอดเดิมจึงหายไปจากงบทดลองทั้งที่ JE อยู่ครบ
+   * — แก้ที่ต้นทางแล้ว อันนี้ไว้ซ่อมข้อมูลที่ค้างอยู่
+   *
+   * คำนวณใหม่ทั้งหมด (ไม่ increment) จึงรันซ้ำได้ ไม่มียอดซ้อน
+   * `openingBalance` ตั้งเป็น 0 ตามที่ `JournalEntriesService.post()` ทำ — ระบบนี้ยัง
+   * ไม่มีขั้นตอนปิดงวดที่ยกยอดข้ามงวด
+   */
+  async rebuildLedgerBalances(tenantId: string, propertyId?: string) {
+    const entries = await this.prisma.journalEntry.findMany({
+      where: { tenantId, status: 'POSTED', ...(propertyId ? { propertyId } : {}) },
+      include: { lines: { select: { accountId: true, debit: true, credit: true } } },
+    });
+
+    // คีย์ = ขอบเขตของหนึ่งแถวใน ledger_balances
+    const totals = new Map<
+      string,
+      {
+        tenantId: string;
+        propertyId: string;
+        accountId: string;
+        fiscalYear: number;
+        fiscalPeriod: number;
+        periodDebit: number;
+        periodCredit: number;
+        txnCount: number;
+      }
+    >();
+
+    for (const entry of entries) {
+      for (const line of entry.lines) {
+        const key = `${entry.propertyId}|${line.accountId}|${entry.fiscalYear}|${entry.fiscalPeriod}`;
+        const row = totals.get(key) ?? {
+          tenantId,
+          propertyId: entry.propertyId,
+          accountId: line.accountId,
+          fiscalYear: entry.fiscalYear,
+          fiscalPeriod: entry.fiscalPeriod,
+          periodDebit: 0,
+          periodCredit: 0,
+          txnCount: 0,
+        };
+        row.periodDebit += Number(line.debit);
+        row.periodCredit += Number(line.credit);
+        row.txnCount += 1;
+        totals.set(key, row);
+      }
+    }
+
+    for (const row of totals.values()) {
+      const { periodDebit, periodCredit, txnCount, ...key } = row;
+      const closingBalance = periodDebit - periodCredit;
+      await this.prisma.ledgerBalance.upsert({
+        where: { tenantId_propertyId_accountId_fiscalYear_fiscalPeriod: key },
+        update: { periodDebit, periodCredit, closingBalance, txnCount },
+        create: { ...key, openingBalance: 0, periodDebit, periodCredit, closingBalance, txnCount },
+      });
+    }
+
+    this.logger.log(
+      `Rebuilt ${totals.size} ledger balance rows from ${entries.length} posted entries (tenant ${tenantId})`,
+    );
+    return { entries: entries.length, balances: totals.size };
   }
 
   async getAccountLedger(

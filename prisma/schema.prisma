@@ -491,16 +491,23 @@ model MenuItem {
   spicyLevel      Int?
   isAvailable     Boolean         @default(true)
   displayOrder    Int             @default(0)
+  // inventoryItemId links a ready-made (retail) menu item — e.g. bottled water —
+  // 1:1 to an inventory item. When set, completing an order deducts that item
+  // directly (1 stock unit per menu qty) instead of going through a recipe.
+  // Null for cooked dishes, whose deduction flows via MenuItemRecipe.
+  inventoryItemId String?
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
   recipe          MenuItemRecipe?
   category        MenuCategory    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  inventoryItem   InventoryItem?  @relation(fields: [inventoryItemId], references: [id])
   orderItems      OrderItem[]
 
   @@index([tenantId])
   @@index([restaurantId])
   @@index([categoryId])
   @@index([isAvailable])
+  @@index([inventoryItemId])
   @@map("menu_items")
 }
 
@@ -3089,6 +3096,7 @@ model InventoryItem {
   inventoryRecipeIngredients InventoryRecipeIngredient[]
   recipeIngredients          RecipeIngredient[]
   itemSuppliers              ItemSupplier[]
+  menuItems                  MenuItem[]
   purchaseOrderItems         PurchaseOrderItem[]
   purchaseRequisitionItems   PurchaseRequisitionItem[]
   roomTypeTemplates          RoomTypeAmenityTemplate[]
@@ -5145,6 +5153,7 @@ enum JournalEntryStatus {
 enum JournalSourceType {
   MANUAL // บันทึกด้วยมือ
   BOOKING_PAYMENT // รับชำระจากการจอง
+  CAMP_PAYMENT // รับชำระจากการจองลานกางเต็นท์ (camp_reservations)
   FOLIO_CHARGE // charge ลง folio แขก
   AR_RECEIPT // รับชำระ AR
   AP_PAYMENT // จ่ายชำระ AP

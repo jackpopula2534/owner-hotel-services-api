@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { IntegrationsService } from '../integrations/integrations.service';
 import { StockMovementsService } from '../inventory/stock-movements/stock-movements.service';
 import { StockMovementTypeDto } from '../inventory/stock-movements/dto/create-stock-movement.dto';
 import {
@@ -29,6 +30,7 @@ export class RequisitionsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly stockMovements: StockMovementsService,
+    private readonly integrations: IntegrationsService,
   ) {}
 
   async findAll(campgroundId: string | undefined, tenantId?: string) {
@@ -64,6 +66,14 @@ export class RequisitionsService {
   ) {
     if (!tenantId) {
       throw new BadRequestException('ต้องระบุ tenant');
+    }
+    // Integration Hub gate — creating requisitions moves stock in the central
+    // warehouse, so the camp ↔ inventory connection must be switched on.
+    const connected = await this.integrations.isEnabled(tenantId, 'camp-inventory-requisition');
+    if (!connected) {
+      throw new BadRequestException(
+        'การเชื่อมต่อ "เบิก/โอนของจากคลังกลางไปลานแคมป์" ถูกปิดอยู่ — เปิดได้ที่ ตั้งค่า → การเชื่อมต่อระบบ',
+      );
     }
     const campground = await this.prisma.campground.findFirst({
       where: { id: dto.campgroundId, tenantId },

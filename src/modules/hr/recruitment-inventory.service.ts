@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
-import { AddonService, ADDON_CODES } from '../addons/addon.service';
+import { IntegrationsService } from '../integrations/integrations.service';
 import {
   COST_EVENTS,
   StockMovementCreatedEvent,
@@ -29,7 +29,7 @@ export interface LineAvailability {
 }
 
 /**
- * เชื่อม recruitment ↔ คลัง/จัดซื้อ (gate: INVENTORY_MODULE)
+ * เชื่อม recruitment ↔ คลัง/จัดซื้อ (gate: Integration Hub 'hr-inventory-onboarding')
  * ทุก method เป็น graceful degradation — caller ต้องเช็ค isEnabled() ก่อน (double-gate)
  * และเมื่อ addon ไม่ active ฟีเจอร์หลักของ recruitment ต้องทำงานได้ตามเดิม
  */
@@ -39,15 +39,20 @@ export class RecruitmentInventoryService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly addonService: AddonService,
+    private readonly integrations: IntegrationsService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async isEnabled(tenantId: string): Promise<boolean> {
     try {
-      return await this.addonService.hasActiveAddon(tenantId, ADDON_CODES.INVENTORY_MODULE);
+      // Central gate = Integration Hub connection (its requiredAddons already
+      // cover HR_MODULE + INVENTORY_MODULE), so tenants can switch this off
+      // from ตั้งค่า → การเชื่อมต่อระบบ without losing the add-ons.
+      return await this.integrations.isEnabled(tenantId, 'hr-inventory-onboarding');
     } catch (error) {
-      this.logger.warn(`Addon check failed (treating as disabled): ${(error as Error).message}`);
+      this.logger.warn(
+        `Integration check failed (treating as disabled): ${(error as Error).message}`,
+      );
       return false;
     }
   }

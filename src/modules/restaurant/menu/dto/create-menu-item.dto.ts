@@ -7,9 +7,11 @@ import {
   IsNumber,
   IsArray,
   IsPositive,
+  IsUUID,
   Min,
   Max,
   IsUrl,
+  ValidateIf,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -107,4 +109,16 @@ export class CreateMenuItemDto {
   @Min(0)
   @IsOptional()
   displayOrder?: number;
+
+  @ApiPropertyOptional({
+    example: 'uuid-inventory-item-id',
+    description:
+      'Link a ready-made (retail) menu item — e.g. bottled water — directly to an ' +
+      'inventory item. Completing an order deducts 1 stock unit per menu qty. ' +
+      'Send null to unlink; omit/null for cooked dishes (those deduct via recipe).',
+  })
+  @IsOptional()
+  @ValidateIf((o) => o.inventoryItemId !== null)
+  @IsUUID()
+  inventoryItemId?: string | null;
 }

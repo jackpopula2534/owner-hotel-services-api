@@ -238,7 +238,10 @@ export class MenuService {
         skip,
         take: Number(limit),
         orderBy: [{ displayOrder: 'asc' }, { name: 'asc' }],
-        include: { category: { select: { id: true, name: true } } },
+        include: {
+          category: { select: { id: true, name: true } },
+          inventoryItem: { select: { id: true, name: true, sku: true, unit: true } },
+        },
       }),
       this.prisma.menuItem.count({ where }),
     ]);
@@ -254,7 +257,10 @@ export class MenuService {
   async findOneItem(restaurantId: string, itemId: string, tenantId: string) {
     const item = await this.prisma.menuItem.findFirst({
       where: { id: itemId, restaurantId, tenantId },
-      include: { category: true },
+      include: {
+        category: true,
+        inventoryItem: { select: { id: true, name: true, sku: true, unit: true } },
+      },
     });
 
     if (!item) {
@@ -272,6 +278,9 @@ export class MenuService {
   ) {
     await this.validateRestaurant(restaurantId, tenantId);
     await this.findCategoryOrFail(dto.categoryId, restaurantId, tenantId);
+    if (dto.inventoryItemId) {
+      await this.validateInventoryItem(dto.inventoryItemId, tenantId);
+    }
 
     const maxOrder = await this.prisma.menuItem.aggregate({
       where: { categoryId: dto.categoryId, tenantId },
@@ -291,7 +300,10 @@ export class MenuService {
         restaurantId,
         tenantId,
       },
-      include: { category: { select: { id: true, name: true } } },
+      include: {
+        category: { select: { id: true, name: true } },
+        inventoryItem: { select: { id: true, name: true, sku: true, unit: true } },
+      },
     });
 
     this.auditLogService.log({
@@ -319,6 +331,9 @@ export class MenuService {
     if (dto.categoryId) {
       await this.findCategoryOrFail(dto.categoryId, restaurantId, tenantId);
     }
+    if (dto.inventoryItemId) {
+      await this.validateInventoryItem(dto.inventoryItemId, tenantId);
+    }
 
     const item = await this.prisma.menuItem.update({
       where: { id: itemId },
@@ -327,7 +342,10 @@ export class MenuService {
         // allergens is a Json? column — pass the array directly, no stringify needed
         allergens: dto.allergens !== undefined ? dto.allergens : undefined,
       },
-      include: { category: { select: { id: true, name: true } } },
+      include: {
+        category: { select: { id: true, name: true } },
+        inventoryItem: { select: { id: true, name: true, sku: true, unit: true } },
+      },
     });
 
     this.auditLogService.log({
@@ -543,6 +561,23 @@ export class MenuService {
     }
 
     return restaurant;
+  }
+
+  /**
+   * A direct-sale (retail) menu item must link to an active inventory item
+   * belonging to the same tenant — e.g. bottled water sold straight from stock.
+   */
+  private async validateInventoryItem(inventoryItemId: string, tenantId: string) {
+    const item = await this.prisma.inventoryItem.findFirst({
+      where: { id: inventoryItemId, tenantId, isActive: true, deletedAt: null },
+      select: { id: true },
+    });
+
+    if (!item) {
+      throw new BadRequestException(`Inventory item ${inventoryItemId} not found in this tenant`);
+    }
+
+    return item;
   }
 
   private async findCategoryOrFail(categoryId: string, restaurantId: string, tenantId: string) {

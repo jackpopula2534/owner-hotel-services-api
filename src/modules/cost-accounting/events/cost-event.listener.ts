@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '@/prisma/prisma.service';
-import { AddonService } from '@/modules/addons/addon.service';
+import { IntegrationsService } from '@/modules/integrations/integrations.service';
 import {
   COST_EVENTS,
   StockMovementCreatedEvent,
@@ -12,7 +12,8 @@ import {
 
 /**
  * Listens for events and auto-posts cost entries to the Cost Accounting module.
- * Only runs if tenant has COST_ACCOUNTING_MODULE addon active.
+ * Each handler is gated by the tenant's Integration Hub connection setting
+ * (which itself requires the relevant add-ons to be active).
  *
  * Key mappings:
  * - Stock movement (housekeeping) → MATERIAL cost to ROOMS cost center
@@ -27,7 +28,7 @@ export class CostEventListener {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly addonService: AddonService,
+    private readonly integrationsService: IntegrationsService,
   ) {}
 
   /**
@@ -37,11 +38,11 @@ export class CostEventListener {
   @OnEvent(COST_EVENTS.STOCK_MOVEMENT_CREATED, { async: true })
   async handleStockMovement(event: StockMovementCreatedEvent): Promise<void> {
     try {
-      const hasAddon = await this.addonService.hasActiveAddon(
+      const connected = await this.integrationsService.isEnabled(
         event.tenantId,
-        'COST_ACCOUNTING_MODULE',
+        'inventory-costaccounting-posting',
       );
-      if (!hasAddon) return;
+      if (!connected) return;
 
       // Only GOODS_ISSUE represents consumption (cost)
       if (event.type !== 'GOODS_ISSUE') return;
@@ -124,11 +125,11 @@ export class CostEventListener {
   @OnEvent(COST_EVENTS.BOOKING_CHECKOUT_COMPLETED, { async: true })
   async handleBookingCheckout(event: BookingCheckoutCompletedEvent): Promise<void> {
     try {
-      const hasAddon = await this.addonService.hasActiveAddon(
+      const connected = await this.integrationsService.isEnabled(
         event.tenantId,
-        'COST_ACCOUNTING_MODULE',
+        'booking-costaccounting-checkout',
       );
-      if (!hasAddon) return;
+      if (!connected) return;
 
       if (event.totalPrice <= 0) return;
 
@@ -199,11 +200,11 @@ export class CostEventListener {
   @OnEvent(COST_EVENTS.RECRUITMENT_BUDGET_RESERVED, { async: true })
   async handleBudgetReserved(event: RecruitmentBudgetReservedEvent): Promise<void> {
     try {
-      const hasAddon = await this.addonService.hasActiveAddon(
+      const connected = await this.integrationsService.isEnabled(
         event.tenantId,
-        'COST_ACCOUNTING_MODULE',
+        'hr-costaccounting-recruitment',
       );
-      if (!hasAddon) return;
+      if (!connected) return;
       if (event.budgetTotal <= 0) return;
 
       const target = await this.resolveRecruitmentTarget(event.tenantId, event.propertyId, event.departmentId);
@@ -262,11 +263,11 @@ export class CostEventListener {
   @OnEvent(COST_EVENTS.RECRUITMENT_SALARY_COMMITTED, { async: true })
   async handleSalaryCommitted(event: RecruitmentSalaryCommittedEvent): Promise<void> {
     try {
-      const hasAddon = await this.addonService.hasActiveAddon(
+      const connected = await this.integrationsService.isEnabled(
         event.tenantId,
-        'COST_ACCOUNTING_MODULE',
+        'hr-costaccounting-recruitment',
       );
-      if (!hasAddon) return;
+      if (!connected) return;
       if (event.monthlySalary <= 0) return;
 
       const target = await this.resolveRecruitmentTarget(event.tenantId, event.propertyId, event.departmentId);

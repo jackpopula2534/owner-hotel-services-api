@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { LoyaltyModule } from '../../loyalty/loyalty.module';
+import { IntegrationsModule } from '../integrations/integrations.module';
 import { AddonModule } from '../addons/addon.module';
 import { CrmContactsService } from './crm-contacts.service';
 import { CrmContactsController } from './crm-contacts.controller';
@@ -25,7 +26,7 @@ import { CrmAiModule } from './ai/ai.module';
  * See docs/CRM_PLAN.md.
  */
 @Module({
-  imports: [PrismaModule, LoyaltyModule, AddonModule, CrmAutomationModule, CrmSalesModule, CrmAiModule],
+  imports: [PrismaModule, LoyaltyModule, AddonModule, IntegrationsModule, CrmAutomationModule, CrmSalesModule, CrmAiModule],
   controllers: [CrmContactsController, CrmTicketsController],
   providers: [CrmContactsService, CrmTicketsService, CrmEventListener],
   exports: [CrmContactsService, CrmTicketsService],

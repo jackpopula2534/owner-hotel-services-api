@@ -269,8 +269,38 @@ export class SeederService {
           'Retail POS หน้าลาน',
           'รับชำระด้วย PromptPay QR',
           'รายงานรายได้รายวัน',
+          'ร้านอาหาร & F&B ในลาน',
         ]),
         buttonText: 'เริ่มใช้งาน Camp',
+      },
+      {
+        code: 'CAMP_PLUS',
+        name: 'Camp Plus',
+        system: 'CAMP',
+        priceMonthly: 999,
+        yearlyDiscountPercent: 15,
+        maxRooms: 300,
+        maxUsers: 20,
+        maxProperties: 3,
+        isActive: true,
+        description: 'ลานกางเต็นท์ที่ต้องการระบบหลังบ้านครบ — บัญชี พนักงาน สต๊อก และ CRM',
+        subtitle: 'ครบทุกโมดูลสำหรับลานขนาดใหญ่',
+        targetAudience: 'ลานกางเต็นท์หลายสาขา · รีสอร์ทแคมป์ · กลามปิ้งขนาดใหญ่',
+        pricePerRoom: null,
+        displayOrder: 2,
+        isPopular: false,
+        badge: 'ครบทุกโมดูล',
+        highlightColor: '#0EA5E9',
+        features: JSON.stringify([
+          'ทุกอย่างในแพ็ก Camp',
+          'ระบบบัญชี (Accounting)',
+          'ระบบพนักงาน / HR',
+          'จัดการสต๊อก (Inventory)',
+          'งานซ่อมบำรุง (Maintenance)',
+          'CRM & Guest 360',
+          'รองรับหลายลาน (สูงสุด 3 แห่ง)',
+        ]),
+        buttonText: 'อัปเกรดเป็น Camp Plus',
       },
     ];
 
@@ -817,6 +847,7 @@ export class SeederService {
     const planL = await this.plansService.findByCode('L');
     const planCampFree = await this.plansService.findByCode('CAMP_FREE');
     const planCamp = await this.plansService.findByCode('CAMP');
+    const planCampPlus = await this.plansService.findByCode('CAMP_PLUS');
 
     const basicReport = await this.featuresService.findByCode('basic_report');
     const taxInvoice = await this.featuresService.findByCode('tax_invoice');
@@ -851,6 +882,14 @@ export class SeederService {
     await this.assignPlanFeatures(planCampFree?.id, [basicReport, advancedReport]);
     // CAMP ฿199 — basic report (แชท FB/LINE ขายแยก ไม่รวมในแพ็ก)
     await this.assignPlanFeatures(planCamp?.id, [basicReport]);
+    // CAMP_PLUS ฿999 — รายงานเชิงลึก + audit log + หลายลาน
+    await this.assignPlanFeatures(planCampPlus?.id, [
+      basicReport,
+      advancedReport,
+      auditLog,
+      dailyManagerReport,
+      multiProperty,
+    ]);
   }
 
   private async assignPlanFeatures(
@@ -886,6 +925,7 @@ export class SeederService {
     const planL = await this.plansService.findByCode('L');
     const planCampFree = await this.plansService.findByCode('CAMP_FREE');
     const planCamp = await this.plansService.findByCode('CAMP');
+    const planCampPlus = await this.plansService.findByCode('CAMP_PLUS');
 
     // Resolve add-ons by code through Prisma since AddonService.findByCode
     // does not exist; the catalog was just upserted in seedAddOns.
@@ -946,12 +986,16 @@ export class SeederService {
     await this.assignPlanAddons(planL?.id, allHotelModules);
 
     // ── ลานกางเต็นท์ ────────────────────────────────────────
-    // CAMP_FREE — ทดลอง 15 วัน: เปิดทุก module ที่ใช้กับลานได้ (รวม CAMP_MODULE เอง)
-    await this.assignPlanAddons(planCampFree?.id, [campModule, ...campApplicableModules]);
+    // แผนลานแบ่งเป็น 3 ระดับ: ฟรี / Camp ฿199 / Camp Plus ฿999
+    // ฟรีกับ ฿199 ได้เฉพาะแกนหลักของลาน (Campground + Restaurant/F&B)
+    // ส่วนโมดูลหลังบ้านที่เหลือขยับไปเป็นจุดขายของ Camp Plus
+    const campCoreModules = [campModule, restaurantModule];
 
-    // CAMP ฿199 "ราคาเดียวจบ · ครบวงจร" — bundle ทุก module ที่ใช้กับลานได้
-    // (เหมือน trial) เพื่อให้จ่ายเงินแล้วได้ครบ ไม่น้อยกว่าตัวทดลอง
-    await this.assignPlanAddons(planCamp?.id, [campModule, ...campApplicableModules]);
+    await this.syncPlanAddons(planCampFree?.id, campCoreModules);
+    await this.syncPlanAddons(planCamp?.id, campCoreModules);
+
+    // CAMP_PLUS ฿999 — bundle เดิมของแผน ฿199 คือทุก module ที่ใช้กับลานได้
+    await this.syncPlanAddons(planCampPlus?.id, [campModule, ...campApplicableModules]);
 
     await this.pruneCrossSystemPlanAddons();
   }
@@ -1021,6 +1065,34 @@ export class SeederService {
         data: { plan_id: planId, addon_id: addon.id },
       });
       this.logger.log(`  ✓ plan_addons: ${planId} ← ${addon.code ?? addon.id}`);
+    }
+  }
+
+  /**
+   * `assignPlanAddons` only inserts, so trimming a plan's bundle in the seeder
+   * would leave the removed rows behind on any database seeded earlier — the
+   * tenants on that plan keep the entitlement forever. Use this instead when a
+   * plan's add-on list is authoritative: it inserts what's missing and deletes
+   * whatever the plan carries beyond `addons`.
+   */
+  private async syncPlanAddons(
+    planId: string | undefined,
+    addons: Array<{ id: string; code?: string } | null>,
+  ): Promise<void> {
+    if (!planId) return;
+
+    await this.assignPlanAddons(planId, addons);
+
+    const keepIds = addons.filter(Boolean).map((addon) => (addon as { id: string }).id);
+    const planAddonsClient = (this.prisma as unknown as { plan_addons: any }).plan_addons;
+    const removed = await planAddonsClient.deleteMany({
+      where: { plan_id: planId, addon_id: { notIn: keepIds } },
+    });
+    if (removed?.count) {
+      this.logger.log(`  ✂ plan_addons: ${planId} → removed ${removed.count} stale add-on(s)`);
+      // Entitlements are cached per tenant for 5 minutes — without this, tenants
+      // on this plan keep passing the gate for add-ons they just lost.
+      await this.addonService.invalidateAddonCacheForPlan(planId);
     }
   }
 

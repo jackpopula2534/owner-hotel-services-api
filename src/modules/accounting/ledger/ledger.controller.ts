@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards, ParseIntPipe } from '@nestjs/common';
+import { Controller, Get, Post, Query, UseGuards, ParseIntPipe } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { LedgerService } from './ledger.service';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
@@ -39,6 +39,19 @@ export class LedgerController {
   ) {
     const period = fiscalPeriod ? parseInt(fiscalPeriod, 10) : new Date().getMonth() + 1;
     const data = await this.service.getTrialBalance(user.tenantId, propertyId, fiscalYear, period);
+    return { success: true, data };
+  }
+
+  @Post('rebuild-balances')
+  @ApiOperation({
+    summary: 'สร้างยอดคงเหลือรายบัญชีใหม่จาก JE ที่ POSTED (ซ่อมข้อมูลเก่าที่ยอดไม่เข้างบทดลอง)',
+  })
+  @ApiQuery({ name: 'propertyId', required: false, description: 'ไม่ระบุ = ทุก property ของ tenant' })
+  async rebuildBalances(
+    @CurrentUser() user: JwtPayload,
+    @Query('propertyId') propertyId?: string,
+  ) {
+    const data = await this.service.rebuildLedgerBalances(user.tenantId, propertyId);
     return { success: true, data };
   }
 

@@ -47,6 +47,7 @@ import { HrEquipmentIssuanceService } from './hr-equipment-issuance.service';
 import { RecruitmentInventoryService } from './recruitment-inventory.service';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { AddonModule } from '../addons/addon.module';
+import { IntegrationsModule } from '../integrations/integrations.module';
 import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
 
 // NOTE: EmployeeCodeConfigController has been intentionally merged into HrController
@@ -59,7 +60,7 @@ import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
 // before HrController's @Get(':id') catches them as employee IDs.
 
 @Module({
-  imports: [PrismaModule, AddonModule],
+  imports: [PrismaModule, AddonModule, IntegrationsModule],
   controllers: [
     HrMasterDataController,
     HrAttendanceController,
