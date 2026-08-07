@@ -8,12 +8,28 @@ import { TenantStatus } from '../tenants/entities/tenant.entity';
 import { SubscriptionStatus } from '../subscriptions/entities/subscription.entity';
 import { AcceptDpaDto } from './dto/accept-dpa.dto';
 
+export type OnboardingSystem = 'HOTEL' | 'CAMP';
+
+/** Free-trial plan for each product line. Both are seeded by `seedPlans()`. */
+const TRIAL_PLAN_CODE: Record<OnboardingSystem, string> = {
+  HOTEL: 'FREE',
+  CAMP: 'CAMP_FREE',
+};
+
+/** Stored on `tenants.property_type` so the tenant remembers which line it signed up for. */
+const PROPERTY_TYPE: Record<OnboardingSystem, string> = {
+  HOTEL: 'hotel',
+  CAMP: 'campground',
+};
+
 export interface OnboardingResult {
   tenant: any;
   subscription: any;
   trialEndsAt: Date;
   message: string;
   property: any;
+  system: OnboardingSystem;
+  plan: { id: string; code: string; name: string };
 }
 
 export interface DpaStatusResult {
@@ -44,22 +60,26 @@ export class OnboardingService {
   async registerHotel(
     createTenantDto: CreateTenantDto,
     trialDays: number = 14,
+    system: OnboardingSystem = 'HOTEL',
   ): Promise<OnboardingResult> {
-    // 1. สร้าง Tenant (Hotel)
+    // 1. สร้าง Tenant (Hotel / ลานกางเต็นท์)
     const trialEndsAt = new Date();
     trialEndsAt.setDate(trialEndsAt.getDate() + trialDays);
 
     const tenant = await this.tenantsService.create({
       ...createTenantDto,
+      // Remember the product line, unless the caller named a more specific type.
+      propertyType: createTenantDto.propertyType || PROPERTY_TYPE[system],
       status: TenantStatus.TRIAL,
       trialEndsAt,
     });
 
-    // 2. ใช้ Free Trial Plan ที่ Admin กำหนดไว้ (code: FREE)
-    const trialPlan = await this.plansService.findByCode('FREE');
+    // 2. ใช้ Free Trial Plan ของ product line ที่เลือก (FREE / CAMP_FREE)
+    const planCode = TRIAL_PLAN_CODE[system] ?? TRIAL_PLAN_CODE.HOTEL;
+    const trialPlan = await this.plansService.findByCode(planCode);
     if (!trialPlan) {
       throw new Error(
-        'Free Trial plan (code: FREE) not found. Please run the database seeder first.',
+        `Free Trial plan (code: ${planCode}) not found. Please run the database seeder first.`,
       );
     }
 
@@ -86,7 +106,7 @@ export class OnboardingService {
     const defaultProperty = await this.prisma.property.create({
       data: {
         tenantId: tenant.id,
-        name: createTenantDto.name || 'โรงแรมหลัก',
+        name: createTenantDto.name || (system === 'CAMP' ? 'ลานกางเต็นท์หลัก' : 'โรงแรมหลัก'),
         code: propertyCode,
         location: createTenantDto.address || null,
         phone: createTenantDto.phone || null,
@@ -102,6 +122,8 @@ export class OnboardingService {
       trialEndsAt,
       message: `Hotel registered successfully. Trial period: ${trialDays} days.`,
       property: defaultProperty,
+      system,
+      plan: { id: trialPlan.id, code: trialPlan.code, name: trialPlan.name },
     };
   }
 

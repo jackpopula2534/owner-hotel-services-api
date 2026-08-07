@@ -62,7 +62,7 @@ describe('OnboardingController', () => {
 
       const result = await controller.registerHotel(dto);
 
-      expect(service.registerHotel).toHaveBeenCalledWith(dto, 14);
+      expect(service.registerHotel).toHaveBeenCalledWith(dto, 14, 'HOTEL');
       expect(result).toEqual(mockOnboardingResult);
     });
 
@@ -75,7 +75,31 @@ describe('OnboardingController', () => {
 
       await controller.registerHotel(dto, 30);
 
-      expect(service.registerHotel).toHaveBeenCalledWith(dto, 30);
+      expect(service.registerHotel).toHaveBeenCalledWith(dto, 30, 'HOTEL');
+    });
+
+    it('should register a campground on the CAMP product line', async () => {
+      const dto: CreateTenantDto = {
+        name: 'Test Campground',
+      };
+
+      mockOnboardingService.registerHotel.mockResolvedValue(mockOnboardingResult);
+
+      await controller.registerHotel(dto, 14, 'camp');
+
+      expect(service.registerHotel).toHaveBeenCalledWith(dto, 14, 'CAMP');
+    });
+
+    it('should fall back to HOTEL for an unknown system', async () => {
+      const dto: CreateTenantDto = {
+        name: 'Test Hotel',
+      };
+
+      mockOnboardingService.registerHotel.mockResolvedValue(mockOnboardingResult);
+
+      await controller.registerHotel(dto, 14, 'spaceship');
+
+      expect(service.registerHotel).toHaveBeenCalledWith(dto, 14, 'HOTEL');
     });
   });
 

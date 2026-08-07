@@ -1,5 +1,9 @@
-import { IsEmail, IsNotEmpty, IsString, MinLength, IsOptional } from 'class-validator';
+import { IsEmail, IsNotEmpty, IsString, MinLength, IsOptional, IsIn } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
+/** Product line the signup is for — decides which free-trial plan is granted. */
+export const REGISTER_SYSTEMS = ['HOTEL', 'CAMP'] as const;
+export type RegisterSystem = (typeof REGISTER_SYSTEMS)[number];
 
 export class RegisterDto {
   @ApiProperty({ example: 'John' })
@@ -38,4 +42,13 @@ export class RegisterDto {
   @IsString()
   @IsOptional()
   hotelPhone?: string;
+
+  @ApiPropertyOptional({
+    enum: REGISTER_SYSTEMS,
+    default: 'HOTEL',
+    description: 'Which product line to trial: HOTEL (โรงแรม) or CAMP (ลานกางเต็นท์)',
+  })
+  @IsIn(REGISTER_SYSTEMS)
+  @IsOptional()
+  system?: RegisterSystem;
 }

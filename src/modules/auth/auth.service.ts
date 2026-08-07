@@ -97,6 +97,7 @@ export class AuthService {
   ) {
     const { email, password, firstName, lastName, hotelName, hotelAddress, hotelPhone } =
       registerDto;
+    const system = registerDto.system ?? 'HOTEL';
 
     // Check if user already exists
     const existingUser = await this.prisma.user.findUnique({
@@ -133,7 +134,8 @@ export class AuthService {
 
     // Auto-create Tenant + Trial Subscription (Step 2 & 3 of registration flow)
     let onboardingResult = null;
-    const tenantName = hotelName || `${firstName}'s Hotel`;
+    const tenantName =
+      hotelName || `${firstName}'s ${system === 'CAMP' ? 'Campground' : 'Hotel'}`;
 
     try {
       onboardingResult = await this.onboardingService.registerHotel(
@@ -144,6 +146,7 @@ export class AuthService {
           email: email,
         },
         14, // 14-day trial
+        system, // decides which free-trial plan is granted (FREE vs CAMP_FREE)
       );
 
       // Link user to the newly created tenant
@@ -209,6 +212,8 @@ export class AuthService {
             subscriptionId: onboardingResult.subscription.id,
             trialEndsAt: onboardingResult.trialEndsAt,
             message: onboardingResult.message,
+            system: onboardingResult.system,
+            plan: onboardingResult.plan,
             property: onboardingResult.property
               ? {
                   id: onboardingResult.property.id,

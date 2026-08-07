@@ -212,6 +212,8 @@ export class OrderService {
       }
     }
 
+    const reservationId = await this.resolveReservationId(restaurantId, dto, tenantId);
+
     const orderNumber = await this.generateOrderNumber(tenantId);
 
     // Build initial items if provided
@@ -269,6 +271,7 @@ export class OrderService {
         orderNumber,
         orderType: (dto.orderType as OrderTypeEnum) ?? OrderTypeEnum.DINE_IN,
         tableId: dto.tableId,
+        reservationId,
         waiterId: dto.waiterId,
         guestName: dto.guestName,
         guestRoom: dto.guestRoom,
@@ -439,22 +442,11 @@ export class OrderService {
     if (status === 'CONFIRMED') timestamps.confirmedAt = now;
     if (status === 'COMPLETED') {
       timestamps.completedAt = now;
-      // Set table to cleaning after order completed
-      if (order.tableId) {
-        await this.prisma.restaurantTable.update({
-          where: { id: order.tableId },
-          data: { status: 'CLEANING' },
-        });
-      }
+      await this.closeOutTable(order, 'CLEANING');
     }
     if (status === 'CANCELLED') {
       timestamps.cancelledAt = now;
-      if (order.tableId) {
-        await this.prisma.restaurantTable.update({
-          where: { id: order.tableId },
-          data: { status: 'AVAILABLE' },
-        });
-      }
+      await this.closeOutTable(order, 'AVAILABLE');
     }
 
     const updatedOrder = await this.prisma.order.update({
@@ -566,6 +558,7 @@ export class OrderService {
     }
 
     const changeAmount = dto.paidAmount - total;
+    const becomesCompleted = order.status === 'SERVED';
 
     const updatedOrderPayment = await this.prisma.order.update({
       where: { id: orderId },
@@ -577,10 +570,16 @@ export class OrderService {
         discount,
         total,
         guestRoom: dto.guestRoom ?? order.guestRoom,
-        status: order.status === 'SERVED' ? 'COMPLETED' : order.status,
+        status: becomesCompleted ? 'COMPLETED' : order.status,
         completedAt: new Date(),
       },
     });
+
+    // Paying closes the bill without going through updateStatus, so the floor
+    // has to be handed back here too — otherwise the table stays OCCUPIED forever.
+    if (becomesCompleted) {
+      await this.closeOutTable(order, 'CLEANING');
+    }
 
     this.auditLogService.logOrderUpdate(
       orderId,
@@ -835,6 +834,72 @@ export class OrderService {
     await this.prisma.order.update({
       where: { id: orderId },
       data: { subtotal, taxAmount, serviceCharge, total },
+    });
+  }
+
+  /**
+   * Work out which reservation a new bill belongs to. An explicit id wins (and is
+   * validated against the restaurant); otherwise a party already seated at that
+   * table is adopted, so a walk-in order rung up on a reserved table still closes
+   * the booking when it is paid.
+   */
+  private async resolveReservationId(
+    restaurantId: string,
+    dto: CreateOrderDto,
+    tenantId: string,
+  ): Promise<string | null> {
+    if (dto.reservationId) {
+      const reservation = await this.prisma.tableReservation.findFirst({
+        where: { id: dto.reservationId, restaurantId, tenantId },
+      });
+      if (!reservation) {
+        throw new NotFoundException(`Reservation ${dto.reservationId} not found`);
+      }
+      return reservation.id;
+    }
+
+    if (!dto.tableId) return null;
+
+    const seated = await this.prisma.tableReservation.findFirst({
+      where: { restaurantId, tenantId, tableId: dto.tableId, status: 'SEATED' },
+      orderBy: { seatedAt: 'desc' },
+      select: { id: true },
+    });
+
+    return seated?.id ?? null;
+  }
+
+  /**
+   * Hand a table back to the floor once its bill is closed, and close the
+   * reservation that bill belonged to. A table with other live orders on it
+   * (split bills) stays OCCUPIED.
+   */
+  private async closeOutTable(
+    order: { id: string; tableId: string | null; reservationId: string | null },
+    nextStatus: 'CLEANING' | 'AVAILABLE',
+  ): Promise<void> {
+    if (order.tableId) {
+      const otherActive = await this.prisma.order.count({
+        where: {
+          tableId: order.tableId,
+          id: { not: order.id },
+          status: { notIn: ['COMPLETED', 'CANCELLED'] },
+        },
+      });
+
+      if (otherActive === 0) {
+        await this.prisma.restaurantTable.update({
+          where: { id: order.tableId },
+          data: { status: nextStatus },
+        });
+      }
+    }
+
+    if (!order.reservationId) return;
+
+    await this.prisma.tableReservation.updateMany({
+      where: { id: order.reservationId, status: 'SEATED' },
+      data: { status: 'COMPLETED', completedAt: new Date() },
     });
   }
 

@@ -441,6 +441,7 @@ model TableReservation {
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
   table           RestaurantTable   @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  orders          Order[]
 
   @@index([tenantId])
   @@index([restaurantId])
@@ -551,6 +552,9 @@ model Order {
   tenantId      String?
   restaurantId  String
   tableId       String?
+  // Set when the order was opened for a table reservation (walk-ins stay null).
+  // Lets seating a reservation and closing its bill stay in sync with table status.
+  reservationId String?
   orderNumber   String             @unique
   orderType     OrderType          @default(DINE_IN)
   status        OrderStatus        @default(PENDING)
@@ -579,10 +583,12 @@ model Order {
   items         OrderItem[]
   restaurant    Restaurant         @relation(fields: [restaurantId], references: [id])
   table         RestaurantTable?   @relation(fields: [tableId], references: [id])
+  reservation   TableReservation?  @relation(fields: [reservationId], references: [id])
 
   @@index([tenantId])
   @@index([restaurantId])
   @@index([tableId])
+  @@index([reservationId])
   @@index([status])
   @@index([paymentStatus])
   @@index([orderNumber])

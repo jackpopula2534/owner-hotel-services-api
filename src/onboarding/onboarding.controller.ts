@@ -20,8 +20,13 @@ export class OnboardingController {
   async registerHotel(
     @Body() createTenantDto: CreateTenantDto,
     @Body('trialDays') trialDays?: number,
+    @Body('system') system?: string,
   ) {
-    return this.onboardingService.registerHotel(createTenantDto, trialDays || 14);
+    return this.onboardingService.registerHotel(
+      createTenantDto,
+      trialDays || 14,
+      system?.toUpperCase() === 'CAMP' ? 'CAMP' : 'HOTEL',
+    );
   }
 
   /**

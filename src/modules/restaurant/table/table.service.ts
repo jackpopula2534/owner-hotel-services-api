@@ -13,6 +13,13 @@ import { CreateTableDto } from './dto/create-table.dto';
 import { UpdateTableDto } from './dto/update-table.dto';
 import { UpdateTableStatusDto } from './dto/update-table-status.dto';
 import { SaveLayoutDto } from './dto/save-layout.dto';
+import {
+  BLOCKING_RESERVATION_STATUSES,
+  overlaps,
+  startOfDay,
+  today,
+  toRange,
+} from '../reservation/reservation-slot.util';
 
 @Injectable()
 export class TableService {
@@ -39,6 +46,38 @@ export class TableService {
     return this.prisma.restaurantTable.findMany({
       where,
       orderBy: { tableNumber: 'asc' },
+      include: {
+        // The floor view needs to see who is booked in and what is on the bill,
+        // otherwise a RESERVED table gives staff no idea which party it is for.
+        reservations: {
+          where: {
+            reservationDate: today(),
+            status: { in: [...BLOCKING_RESERVATION_STATUSES] },
+          },
+          orderBy: { startTime: 'asc' },
+          select: {
+            id: true,
+            guestName: true,
+            guestPhone: true,
+            partySize: true,
+            startTime: true,
+            endTime: true,
+            status: true,
+          },
+        },
+        orders: {
+          where: { status: { notIn: ['COMPLETED', 'CANCELLED'] } },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: {
+            id: true,
+            orderNumber: true,
+            status: true,
+            paymentStatus: true,
+            total: true,
+          },
+        },
+      },
     });
   }
 
@@ -195,6 +234,37 @@ export class TableService {
       throw new BadRequestException('Cannot delete an occupied table');
     }
 
+    // `TableReservation` cascades on delete, so removing a table would silently
+    // wipe live bookings. Refuse instead — the caller has to cancel or move them.
+    const liveBookings = await this.prisma.tableReservation.count({
+      where: {
+        tableId,
+        restaurantId,
+        status: { in: [...BLOCKING_RESERVATION_STATUSES] },
+        reservationDate: { gte: today() },
+      },
+    });
+
+    if (liveBookings > 0) {
+      throw new BadRequestException(
+        `Cannot delete this table — it still has ${liveBookings} upcoming reservation(s). Cancel or move them first.`,
+      );
+    }
+
+    const openBills = await this.prisma.order.count({
+      where: {
+        tableId,
+        restaurantId,
+        status: { notIn: ['COMPLETED', 'CANCELLED'] },
+      },
+    });
+
+    if (openBills > 0) {
+      throw new BadRequestException(
+        `Cannot delete this table — it still has ${openBills} open order(s). Close or cancel them first.`,
+      );
+    }
+
     await this.prisma.restaurantTable.delete({ where: { id: tableId } });
 
     this.auditLogService.log({
@@ -225,21 +295,33 @@ export class TableService {
       orderBy: { capacity: 'asc' },
     });
 
-    const reservationDate = new Date(date);
-    reservationDate.setHours(0, 0, 0, 0);
+    const reservationDate = startOfDay(date);
 
-    const reservedTableIds = await this.prisma.tableReservation.findMany({
+    const requested = toRange(startTime);
+    if (!requested) {
+      throw new BadRequestException(`Invalid start time '${startTime}' (expected HH:mm)`);
+    }
+
+    const sameDay = await this.prisma.tableReservation.findMany({
       where: {
         restaurantId,
         tenantId,
         reservationDate,
-        startTime: startTime,
-        status: { in: ['PENDING', 'CONFIRMED'] },
+        status: { in: [...BLOCKING_RESERVATION_STATUSES] },
       },
-      select: { tableId: true },
+      select: { tableId: true, startTime: true, endTime: true },
     });
 
-    const reservedIds = new Set(reservedTableIds.map((r) => r.tableId));
+    // Compare whole time ranges — matching only on an identical startTime would
+    // report a table free at 18:30 while an 18:00–20:00 party is sitting at it.
+    const reservedIds = new Set(
+      sameDay
+        .filter((r) => {
+          const booked = toRange(r.startTime, r.endTime);
+          return booked !== null && overlaps(requested, booked);
+        })
+        .map((r) => r.tableId),
+    );
 
     return allTables.map((table) => ({
       ...table,
