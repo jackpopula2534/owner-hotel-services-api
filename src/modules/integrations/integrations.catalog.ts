@@ -77,6 +77,20 @@ export const INTEGRATIONS: IntegrationDef[] = [
     event: 'restaurant.order.completed',
   },
   {
+    key: 'restaurant-inventory-requisition',
+    group: 'inventory',
+    name: 'สร้างใบเบิกวัตถุดิบจากสูตรอาหาร',
+    description:
+      'คำนวณจากสูตรอาหารว่าต้องเบิกวัตถุดิบตัวไหนกี่หน่วย แล้วสร้างเป็น "ใบเบิก" ที่แก้ไขได้ก่อนส่ง ' +
+      'เมื่อกดส่ง ระบบจะโอน/เบิกของจากคลังต้นทางเข้าคลังครัวให้จริงในระบบคลังสินค้า',
+    source: { key: 'restaurant', name: 'ร้านอาหาร / ครัว' },
+    target: { key: 'inventory', name: 'คลังสินค้า' },
+    requiredAddons: [ADDON_CODES.RESTAURANT_MODULE, ADDON_CODES.INVENTORY_MODULE],
+    icon: 'ClipboardList',
+    defaultEnabled: false,
+    event: 'restaurant.requisition.created',
+  },
+  {
     key: 'housekeeping-inventory-autodeduct',
     group: 'inventory',
     name: 'ตัดของใช้สิ้นเปลืองเมื่อทำความสะอาดห้อง',

@@ -140,37 +140,77 @@ export class SuppliersService {
     return maskSupplierTaxId(deserializeSupplier(supplier));
   }
 
-  async create(dto: CreateSupplierDto, tenantId: string): Promise<Supplier> {
-    // Validate unique code per tenant
-    const existing = await this.prisma.supplier.findFirst({
-      where: {
-        code: dto.code,
-        tenantId,
-        deletedAt: null,
-      },
+  /**
+   * Next free SUP-#### for the tenant.
+   *
+   * Soft-deleted rows still hold their code — the unique index covers every row,
+   * deleted or not — so the scan deliberately ignores `deletedAt`. Reusing a
+   * dead supplier's code would collide at the database and, worse, silently
+   * attach old purchase history to a different vendor.
+   */
+  private async allocateSupplierCode(tenantId: string): Promise<string> {
+    const taken = await this.prisma.supplier.findMany({
+      where: { tenantId, code: { startsWith: 'SUP-' } },
+      select: { code: true },
     });
 
-    if (existing) {
-      throw new ConflictException(`Supplier with code ${dto.code} already exists for this tenant`);
+    let highest = 0;
+    for (const { code } of taken) {
+      const n = Number(code.slice(4));
+      if (Number.isInteger(n) && n > highest) highest = n;
     }
 
-    try {
-      const supplier = await this.prisma.supplier.create({
-        data: {
-          ...dto,
-          tags: serializeTags(dto.tags),
-          tenantId,
-        },
+    return `SUP-${String(highest + 1).padStart(4, '0')}`;
+  }
+
+  async create(dto: CreateSupplierDto, tenantId: string): Promise<Supplier> {
+    const { code: requestedCode, ...rest } = dto;
+
+    // An explicit code is the caller's to own — a clash is their mistake and
+    // must be reported. An allocated one is ours, so a clash (two people adding
+    // a vendor in the same second) is ours to retry through.
+    if (requestedCode) {
+      const existing = await this.prisma.supplier.findFirst({
+        where: { code: requestedCode, tenantId, deletedAt: null },
       });
 
-      this.logger.log(
-        `Created supplier ${supplier.id} (code: ${supplier.code}) for tenant ${tenantId}`,
-      );
+      if (existing) {
+        throw new ConflictException(
+          `Supplier with code ${requestedCode} already exists for this tenant`,
+        );
+      }
+    }
 
-      return maskSupplierTaxId(deserializeSupplier(supplier)) as unknown as Supplier;
-    } catch (error) {
-      this.logger.error(`Failed to create supplier for tenant ${tenantId}`, error);
-      throw error;
+    const MAX_ATTEMPTS = 5;
+    for (let attempt = 1; ; attempt++) {
+      const code = requestedCode ?? (await this.allocateSupplierCode(tenantId));
+      try {
+        const supplier = await this.prisma.supplier.create({
+          data: {
+            ...rest,
+            code,
+            tags: serializeTags(dto.tags),
+            tenantId,
+          },
+        });
+
+        this.logger.log(
+          `Created supplier ${supplier.id} (code: ${supplier.code}) for tenant ${tenantId}`,
+        );
+
+        return maskSupplierTaxId(deserializeSupplier(supplier)) as unknown as Supplier;
+      } catch (error) {
+        const raced =
+          !requestedCode &&
+          (error as { code?: string }).code === 'P2002' &&
+          attempt < MAX_ATTEMPTS;
+        if (raced) {
+          this.logger.warn(`Supplier code ${code} was taken mid-flight — reallocating`);
+          continue;
+        }
+        this.logger.error(`Failed to create supplier for tenant ${tenantId}`, error);
+        throw error;
+      }
     }
   }
 

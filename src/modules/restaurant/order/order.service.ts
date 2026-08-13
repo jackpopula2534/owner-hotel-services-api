@@ -9,7 +9,7 @@ import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as QRCode from 'qrcode';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { OrderStatus } from '@prisma/client';
+import { OrderStatus, Prisma } from '@prisma/client';
 import { CreateOrderDto, OrderTypeEnum } from './dto/create-order.dto';
 import { AddOrderItemDto } from './dto/add-order-item.dto';
 import { ProcessPaymentDto, PaymentMethodEnum } from './dto/process-payment.dto';
@@ -20,6 +20,35 @@ import {
   INVENTORY_EVENTS,
   RestaurantOrderCompletedEvent,
 } from '../../inventory/events/inventory.events';
+import { calculateOrderTotals, resolveChargeRates } from './order-totals.util';
+
+/** `document_sequences.docType` for restaurant bill numbers. */
+const ORDER_DOC_TYPE = 'ORD';
+
+/** Standing discount for a bill charged by an in-house hotel guest. */
+const GUEST_DISCOUNT_RATE = 0.02;
+
+/** How many times to re-draw a bill number before giving up on a collision. */
+const ORDER_NUMBER_ATTEMPTS = 5;
+
+const isUniqueConstraintError = (error: unknown): boolean =>
+  error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
+
+/**
+ * What a bill exposes about the booking it belongs to. Enough for the POS to name
+ * the party and jump back to the booking, and nothing more — a bill is not the
+ * place to hand out a guest's e-mail address.
+ */
+const RESERVATION_LINK_SELECT = {
+  id: true,
+  guestName: true,
+  guestPhone: true,
+  partySize: true,
+  status: true,
+  reservationDate: true,
+  startTime: true,
+  seatedAt: true,
+} as const;
 
 @Injectable()
 export class OrderService {
@@ -145,6 +174,9 @@ export class OrderService {
           items: {
             include: { menuItem: { select: { id: true, name: true, image: true } } },
           },
+          // The list has to be able to say "this bill is ปิยะ's booking" without a
+          // second round-trip per row.
+          reservation: { select: RESERVATION_LINK_SELECT },
         },
       }),
       this.prisma.order.count({ where }),
@@ -165,6 +197,7 @@ export class OrderService {
           orderBy: { createdAt: 'asc' },
         },
         kitchenOrders: { orderBy: { createdAt: 'asc' } },
+        reservation: { select: RESERVATION_LINK_SELECT },
       },
     });
 
@@ -212,9 +245,13 @@ export class OrderService {
       }
     }
 
-    const reservationId = await this.resolveReservationId(restaurantId, dto, tenantId);
+    const reservation = await this.resolveReservation(restaurantId, dto, tenantId);
 
-    const orderNumber = await this.generateOrderNumber(tenantId);
+    // The booking already knows who the party is — a bill opened for it must not
+    // ask the floor to type that in again. Anything the caller did send wins, so
+    // "order for a friend joining the table" is still possible.
+    const guestName = dto.guestName ?? reservation?.guestName ?? undefined;
+    const partySize = dto.partySize ?? reservation?.partySize ?? undefined;
 
     // Build initial items if provided
     let items: {
@@ -258,24 +295,30 @@ export class OrderService {
     }
 
     const subtotal = items.reduce((sum, item) => sum + item.totalPrice, 0);
-    const taxRate = dto.taxRate ?? 7;
-    const serviceRate = dto.serviceRate ?? 10;
-    const taxAmount = subtotal * (taxRate / 100);
-    const serviceCharge = subtotal * (serviceRate / 100);
-    const total = subtotal + taxAmount + serviceCharge;
+    // The outlet's own policy decides what this bill charges; the rates are then
+    // snapshotted onto the order so editing the policy never rewrites old bills.
+    const { taxRate, serviceRate } = resolveChargeRates(restaurant, {
+      taxRate: dto.taxRate,
+      serviceRate: dto.serviceRate,
+    });
+    const { taxAmount, serviceCharge, total } = calculateOrderTotals({
+      subtotal,
+      taxRate,
+      serviceRate,
+    });
 
-    const order = await this.prisma.order.create({
+    const order = await this.createWithFreshOrderNumber(tenantId, (orderNumber) => ({
       data: {
         restaurantId,
         tenantId,
         orderNumber,
         orderType: (dto.orderType as OrderTypeEnum) ?? OrderTypeEnum.DINE_IN,
         tableId: dto.tableId,
-        reservationId,
+        reservationId: reservation?.id ?? null,
         waiterId: dto.waiterId,
-        guestName: dto.guestName,
+        guestName,
         guestRoom: dto.guestRoom,
-        partySize: dto.partySize,
+        partySize,
         notes: dto.notes,
         taxRate,
         serviceRate,
@@ -288,8 +331,9 @@ export class OrderService {
       include: {
         table: { select: { id: true, tableNumber: true } },
         items: { include: { menuItem: { select: { id: true, name: true } } } },
+        reservation: { select: RESERVATION_LINK_SELECT },
       },
-    });
+    }));
 
     // Update table status if dine-in
     if (dto.tableId && dto.orderType !== OrderTypeEnum.DELIVERY) {
@@ -308,6 +352,15 @@ export class OrderService {
 
     if (['COMPLETED', 'CANCELLED'].includes(order.status)) {
       throw new BadRequestException(`Cannot add items to a ${order.status} order`);
+    }
+
+    // A settled bill has been rung up and handed over. Another round on it would
+    // quietly reopen a balance on a receipt the guest already holds — that round
+    // belongs on a new bill. PARTIAL is still open, so it is left alone.
+    if (['PAID', 'REFUNDED'].includes(order.paymentStatus)) {
+      throw new BadRequestException(
+        `Cannot add items to a ${order.paymentStatus.toLowerCase()} order — open a new bill`,
+      );
     }
 
     const menuItem = await this.prisma.menuItem.findFirst({
@@ -363,7 +416,10 @@ export class OrderService {
   async sendToKitchen(restaurantId: string, orderId: string, tenantId: string) {
     const order = await this.findOne(restaurantId, orderId, tenantId);
 
-    if (!['PENDING', 'CONFIRMED'].includes(order.status)) {
+    // A second round of food goes onto the bill that is already open, so an order
+    // that is PREPARING or READY must still accept a new ticket. Only a closed
+    // bill has nothing left to cook.
+    if (['COMPLETED', 'CANCELLED'].includes(order.status)) {
       throw new BadRequestException(`Cannot send ${order.status} order to kitchen`);
     }
 
@@ -548,8 +604,21 @@ export class OrderService {
       throw new BadRequestException('Room number is required for room charge payment');
     }
 
-    const discount = dto.discount ?? 0;
-    const total = Number(order.total) - discount;
+    // ส่วนลดตอนรับชำระเป็นส่วนลด "เพิ่มเติม" จากที่บิลมีอยู่แล้ว
+    // (เช่น ส่วนลดลูกค้าประจำ 2% ที่ applyLoyaltyDiscount หักไปแล้ว)
+    // ถ้าเขียนทับด้วย dto.discount ตรง ๆ ยอดส่วนลดเดิมจะหายไปทั้งที่ total ยังหักอยู่
+    // → ใบเสร็จกระทบยอดไม่ตรงแบบเงียบ ๆ
+    const extraDiscount = dto.discount ?? 0;
+    // Prisma Decimal มาเป็น float ตอน Number() — ไม่ปัดจะได้ 157.60000000000002 ลงคอลัมน์เงิน
+    const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
+    const discount = round2(Number(order.discount ?? 0) + extraDiscount);
+    const total = round2(Number(order.total) - extraDiscount);
+
+    if (total < 0) {
+      throw new BadRequestException(
+        `Discount (${extraDiscount}) is greater than the order total (${Number(order.total)})`,
+      );
+    }
 
     if (dto.paidAmount < total) {
       throw new BadRequestException(
@@ -557,7 +626,7 @@ export class OrderService {
       );
     }
 
-    const changeAmount = dto.paidAmount - total;
+    const changeAmount = round2(dto.paidAmount - total);
     const becomesCompleted = order.status === 'SERVED';
 
     const updatedOrderPayment = await this.prisma.order.update({
@@ -792,14 +861,24 @@ export class OrderService {
     );
 
     if (guestIdForOrder) {
-      const discount = Number(order.subtotal) * 0.02;
-      const updatedTotal = Number(order.total) - discount;
+      // A hotel-guest discount reduces the taxable value of the sale, so service
+      // charge and VAT have to be re-derived from the discounted net — taking it
+      // off the total alone would leave the guest paying VAT on money they never
+      // spent.
+      const totals = calculateOrderTotals({
+        subtotal: Number(order.subtotal),
+        taxRate: Number(order.taxRate),
+        serviceRate: Number(order.serviceRate),
+        discount: Number(order.subtotal) * GUEST_DISCOUNT_RATE,
+      });
 
       const updatedOrder = await this.prisma.order.update({
         where: { id: order.id },
         data: {
-          discount,
-          total: updatedTotal,
+          discount: totals.discount,
+          serviceCharge: totals.serviceCharge,
+          taxAmount: totals.taxAmount,
+          total: totals.total,
         },
         include: {
           table: { select: { id: true, tableNumber: true } },
@@ -823,56 +902,65 @@ export class OrderService {
       where: { orderId, status: { not: 'CANCELLED' } },
     });
 
-    const subtotal = items.reduce((sum, item) => sum + Number(item.totalPrice), 0);
-    const taxRate = Number(currentOrder.taxRate);
-    const serviceRate = Number(currentOrder.serviceRate);
-    const taxAmount = subtotal * (taxRate / 100);
-    const serviceCharge = subtotal * (serviceRate / 100);
-    const discount = Number(currentOrder.discount);
-    const total = subtotal + taxAmount + serviceCharge - discount;
+    // Rates come off the order, not the outlet: a bill keeps the policy it was
+    // opened under even if someone changes the outlet's settings mid-service.
+    const totals = calculateOrderTotals({
+      subtotal: items.reduce((sum, item) => sum + Number(item.totalPrice), 0),
+      taxRate: Number(currentOrder.taxRate),
+      serviceRate: Number(currentOrder.serviceRate),
+      discount: Number(currentOrder.discount),
+    });
 
     await this.prisma.order.update({
       where: { id: orderId },
-      data: { subtotal, taxAmount, serviceCharge, total },
+      data: {
+        subtotal: totals.subtotal,
+        taxAmount: totals.taxAmount,
+        serviceCharge: totals.serviceCharge,
+        total: totals.total,
+      },
     });
   }
 
   /**
-   * Work out which reservation a new bill belongs to. An explicit id wins (and is
-   * validated against the restaurant); otherwise a party already seated at that
-   * table is adopted, so a walk-in order rung up on a reserved table still closes
-   * the booking when it is paid.
+   * Work out which reservation a new bill belongs to, and hand back who that party
+   * is so the bill can inherit it. An explicit id wins (and is validated against
+   * the restaurant); otherwise a party already seated at that table is adopted, so
+   * a walk-in order rung up on a reserved table still closes the booking when it
+   * is paid.
    */
-  private async resolveReservationId(
+  private async resolveReservation(
     restaurantId: string,
     dto: CreateOrderDto,
     tenantId: string,
-  ): Promise<string | null> {
+  ): Promise<{ id: string; guestName: string; partySize: number } | null> {
+    const select = { id: true, guestName: true, partySize: true };
+
     if (dto.reservationId) {
       const reservation = await this.prisma.tableReservation.findFirst({
         where: { id: dto.reservationId, restaurantId, tenantId },
+        select,
       });
       if (!reservation) {
         throw new NotFoundException(`Reservation ${dto.reservationId} not found`);
       }
-      return reservation.id;
+      return reservation;
     }
 
     if (!dto.tableId) return null;
 
-    const seated = await this.prisma.tableReservation.findFirst({
+    return this.prisma.tableReservation.findFirst({
       where: { restaurantId, tenantId, tableId: dto.tableId, status: 'SEATED' },
       orderBy: { seatedAt: 'desc' },
-      select: { id: true },
+      select,
     });
-
-    return seated?.id ?? null;
   }
 
   /**
    * Hand a table back to the floor once its bill is closed, and close the
    * reservation that bill belonged to. A table with other live orders on it
-   * (split bills) stays OCCUPIED.
+   * (split bills) stays OCCUPIED — but an item-less order is not a bill, so it
+   * must not be what keeps a table out of service.
    */
   private async closeOutTable(
     order: { id: string; tableId: string | null; reservationId: string | null },
@@ -884,6 +972,7 @@ export class OrderService {
           tableId: order.tableId,
           id: { not: order.id },
           status: { notIn: ['COMPLETED', 'CANCELLED'] },
+          items: { some: {} },
         },
       });
 
@@ -903,21 +992,118 @@ export class OrderService {
     });
   }
 
+  /**
+   * Writes the bill, drawing a fresh number if the one it got is somehow taken.
+   *
+   * The sequence table makes a repeat draw very unlikely, but a bill that fails
+   * to save is the floor staff's problem, not the database's — a POS that says
+   * "This record already exists (orders_orderNumber_key)" while a table waits is
+   * the worst possible outcome. So a duplicate costs one more round trip instead
+   * of the order.
+   */
+  private async createWithFreshOrderNumber(
+    tenantId: string,
+    build: (orderNumber: string) => Parameters<PrismaService['order']['create']>[0],
+  ) {
+    let lastError: unknown;
+
+    for (let attempt = 0; attempt < ORDER_NUMBER_ATTEMPTS; attempt++) {
+      const orderNumber = await this.generateOrderNumber(tenantId);
+      try {
+        return await this.prisma.order.create(build(orderNumber));
+      } catch (error) {
+        if (!isUniqueConstraintError(error)) throw error;
+        lastError = error;
+        this.logger.warn(
+          `Order number ${orderNumber} was already taken — drawing another (attempt ${attempt + 1})`,
+        );
+      }
+    }
+
+    this.logger.error(
+      `Could not find a free order number for tenant ${tenantId} after ${ORDER_NUMBER_ATTEMPTS} attempts`,
+      lastError instanceof Error ? lastError.stack : undefined,
+    );
+    throw new BadRequestException('ออกเลขบิลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+  }
+
+  /**
+   * Hands out the next bill number for a tenant's day.
+   *
+   * Backed by `document_sequences` — the same counter table journal entries and
+   * guest folios use — because the number this returns has to be one nobody else
+   * gets. The old version derived it from `count(orders today)`, which broke in
+   * three separate ways:
+   *
+   *   - two bills opened at the same moment read the same count
+   *   - deleting or voiding a bill lowered the count, so the next one reused a
+   *     number that was already printed on a receipt
+   *   - the count window used local midnight while the date in the number used
+   *     the UTC date, so between 00:00 and 07:00 Bangkok time it handed out
+   *     yesterday's numbers all over again
+   *
+   * `upsert` with `increment` is a single atomic statement, so none of that
+   * applies here: every caller walks away with a different number.
+   */
   private async generateOrderNumber(tenantId: string): Promise<string> {
-    const today = new Date();
-    const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '');
+    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const prefix = `ORD-${dateStr}-`;
 
-    const startOfDay = new Date(today);
-    startOfDay.setHours(0, 0, 0, 0);
+    await this.seedOrderSequence(tenantId, dateStr, prefix);
 
-    const count = await this.prisma.order.count({
+    const seq = await this.prisma.documentSequence.upsert({
       where: {
-        tenantId,
-        createdAt: { gte: startOfDay },
+        tenantId_docType_yearMonth: { tenantId, docType: ORDER_DOC_TYPE, yearMonth: dateStr },
       },
+      update: { lastNumber: { increment: 1 } },
+      create: { tenantId, docType: ORDER_DOC_TYPE, prefix: 'ORD', yearMonth: dateStr, lastNumber: 1 },
     });
 
-    const seq = String(count + 1).padStart(4, '0');
-    return `ORD-${dateStr}-${seq}`;
+    return `${prefix}${String(seq.lastNumber).padStart(4, '0')}`;
+  }
+
+  /**
+   * Starts the day's counter above whatever the old count-based generator
+   * already wrote. Without this the first bill after deploy would ask for 0001
+   * on a day that already has one, and collide on its own tenant's rows.
+   * Runs once per tenant per day — after that the row exists and this is a no-op.
+   */
+  private async seedOrderSequence(tenantId: string, dateStr: string, prefix: string) {
+    // findFirst, not findUnique — the tenant-scope middleware rejects findUnique
+    // on tenant-scoped models because it cannot fold the tenant filter into it.
+    const existing = await this.prisma.documentSequence.findFirst({
+      where: { tenantId, docType: ORDER_DOC_TYPE, yearMonth: dateStr },
+      select: { id: true },
+    });
+
+    if (existing) return;
+
+    const written = await this.prisma.order.findMany({
+      where: { tenantId, orderNumber: { startsWith: prefix } },
+      select: { orderNumber: true },
+    });
+
+    // Highest sequence actually on a bill — read numerically, not by string
+    // order, so 0009 → 0010 does not become 0009 → 0001 once past 9999.
+    const highest = written.reduce((max, row) => {
+      const parsed = Number.parseInt(row.orderNumber.slice(prefix.length), 10);
+      return Number.isNaN(parsed) ? max : Math.max(max, parsed);
+    }, 0);
+
+    try {
+      await this.prisma.documentSequence.create({
+        data: {
+          tenantId,
+          docType: ORDER_DOC_TYPE,
+          prefix: 'ORD',
+          yearMonth: dateStr,
+          lastNumber: highest,
+        },
+      });
+    } catch (error) {
+      // Another bill opened at the same instant created the row first — fine,
+      // the upsert that follows increments whichever row won.
+      if (!isUniqueConstraintError(error)) throw error;
+    }
   }
 }

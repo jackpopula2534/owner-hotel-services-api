@@ -19,6 +19,7 @@ import { RegisterDto } from './dto/register.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { CreatePosUserDto } from './dto/create-pos-user.dto';
 import { PosLaunchDto } from './dto/pos-launch.dto';
+import { LaunchExchangeDto } from './dto/launch-exchange.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
@@ -507,6 +508,26 @@ export class AuthController {
     );
   }
 
+  @Post('pos-launch/exchange')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 30, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Trade a POS deep-link token for a full POS session',
+    description:
+      'The launch token lives 5 minutes and has no refresh token, so a POS that held on to it ' +
+      'died mid-shift. The POS calls this once on open and stores the returned access + refresh ' +
+      'tokens instead, giving it a renewable session tagged systemContext="pos".',
+  })
+  @ApiResponse({ status: 200, description: 'POS session issued' })
+  @ApiResponse({ status: 401, description: 'Launch token invalid, expired, or account not active' })
+  async posLaunchExchange(@Body() dto: LaunchExchangeDto, @Req() req: Request) {
+    return this.authService.exchangePosLaunchToken(dto.token, {
+      ipAddress: req.ip ?? req.socket?.remoteAddress,
+      userAgent: req.headers['user-agent'],
+    });
+  }
+
   // ─── Purchasing Sub-System Deep-link Launch ──────────────────────────────────
 
   @Post('purchasing-launch')
@@ -525,6 +546,27 @@ export class AuthController {
       { userId: caller.userId, email: caller.email, role: caller.role, tenantId: caller.tenantId },
       req.ip ?? req.socket?.remoteAddress,
     );
+  }
+
+  @Post('purchasing-launch/exchange')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 30, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Trade a Purchasing deep-link token for a full procurement session',
+    description:
+      'The launch token lives 5 minutes and has no refresh token, so a terminal that held on ' +
+      'to it went dead a few minutes in. The purchasing shell calls this once on open and ' +
+      'stores the returned access + refresh tokens instead, giving it a renewable session ' +
+      'tagged systemContext="procurement".',
+  })
+  @ApiResponse({ status: 200, description: 'Procurement session issued' })
+  @ApiResponse({ status: 401, description: 'Launch token invalid, expired, or account not active' })
+  async purchasingLaunchExchange(@Body() dto: LaunchExchangeDto, @Req() req: Request) {
+    return this.authService.exchangePurchasingLaunchToken(dto.token, {
+      ipAddress: req.ip ?? req.socket?.remoteAddress,
+      userAgent: req.headers['user-agent'],
+    });
   }
 
   // ─── Warehouse Sub-System Deep-link Launch ───────────────────────────────────
@@ -566,6 +608,26 @@ export class AuthController {
       { userId: caller.userId, email: caller.email, role: caller.role, tenantId: caller.tenantId },
       req.ip ?? req.socket?.remoteAddress,
     );
+  }
+
+  @Post('hotel-terminal-launch/exchange')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 30, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Trade a Hotel Terminal deep-link token for a full terminal session',
+    description:
+      'Same hand-off as the POS and Purchasing exchanges: the 5-minute launch token carries no ' +
+      'refresh token, so the terminal trades it once on open for access + refresh tokens tagged ' +
+      'systemContext="hotel-terminal" that /auth/refresh can renew all day.',
+  })
+  @ApiResponse({ status: 200, description: 'Hotel Terminal session issued' })
+  @ApiResponse({ status: 401, description: 'Launch token invalid, expired, or account not active' })
+  async hotelTerminalLaunchExchange(@Body() dto: LaunchExchangeDto, @Req() req: Request) {
+    return this.authService.exchangeHotelTerminalLaunchToken(dto.token, {
+      ipAddress: req.ip ?? req.socket?.remoteAddress,
+      userAgent: req.headers['user-agent'],
+    });
   }
 
   // ────────────────────────────────────────────────────────────────────────────

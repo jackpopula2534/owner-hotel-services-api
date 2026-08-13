@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Prisma } from '@prisma/client';
 import { OrderService } from '../modules/restaurant/order/order.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { KitchenGateway } from '../modules/restaurant/kitchen/kitchen.gateway';
@@ -14,6 +15,9 @@ import { INVENTORY_EVENTS } from '../modules/inventory/events/inventory.events';
 const makePrismaMock = () => ({
   restaurant: { findFirst: jest.fn() },
   restaurantTable: { findFirst: jest.fn(), update: jest.fn() },
+  // A dine-in order links itself back to whichever party is seated at the table,
+  // and closing the bill closes that booking.
+  tableReservation: { findFirst: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
   menuItem: { findFirst: jest.fn(), findMany: jest.fn() },
   order: {
     findFirst: jest.fn(),
@@ -31,8 +35,25 @@ const makePrismaMock = () => ({
     delete: jest.fn(),
   },
   kitchenOrder: { create: jest.fn(), findMany: jest.fn() },
+  // Bill numbers come from the shared counter table, not from counting rows.
+  documentSequence: { findFirst: jest.fn(), create: jest.fn(), upsert: jest.fn() },
   $transaction: jest.fn(),
 });
+
+/** The counter table as the order service sees it: hands out `next` and grows. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const stubOrderSequence = (prismaMock: any, next: number) => {
+  prismaMock.documentSequence.findFirst.mockResolvedValue({ id: 'seq-1' });
+  prismaMock.documentSequence.upsert.mockResolvedValue({ lastNumber: next });
+};
+
+/** What MySQL raises when two tills reach for the same bill number at once. */
+const duplicateOrderNumberError = () =>
+  new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+    code: 'P2002',
+    clientVersion: '5.0.0',
+    meta: { target: 'orders_tenantId_orderNumber_key' },
+  });
 
 const makeGatewayMock = () => ({
   emitNewOrder: jest.fn(),
@@ -120,6 +141,9 @@ describe('OrderService', () => {
 
   beforeEach(async () => {
     prismaMock = makePrismaMock();
+    // Bill numbering is exercised on its own below; every other test just needs
+    // a working counter so create() can draw a number.
+    stubOrderSequence(prismaMock, 1);
     gatewayMock = makeGatewayMock();
     eventEmitterMock = { emit: jest.fn() };
 
@@ -141,44 +165,144 @@ describe('OrderService', () => {
   // ── generateOrderNumber ───────────────────────────────────────────────────
 
   describe('generateOrderNumber (via create)', () => {
-    it('generates ORD-YYYYMMDD-0001 for first order of the day', async () => {
+    /** Arrange the happy path for a dine-in order that carries no items. */
+    const arrangeCreate = () => {
       prismaMock.restaurant.findFirst.mockResolvedValue(mockRestaurant);
       prismaMock.restaurantTable.findFirst.mockResolvedValue(mockTable);
-      prismaMock.order.count.mockResolvedValue(0); // no orders today
       prismaMock.menuItem.findMany.mockResolvedValue([]);
-      prismaMock.order.create.mockResolvedValue(makeOrder({ items: [] }));
       prismaMock.restaurantTable.update.mockResolvedValue({});
+    };
 
-      const result = await orderService.create(
+    /** Echo back whatever number the service drew, the way MySQL would. */
+    const echoOrderNumber = () =>
+      prismaMock.order.create.mockImplementation(({ data }: any) =>
+        Promise.resolve(makeOrder({ orderNumber: data.orderNumber, items: [] })),
+      );
+
+    const createDineIn = () =>
+      orderService.create(
         RESTAURANT_ID,
-        {
-          tableId: TABLE_ID,
-          orderType: 'DINE_IN' as any,
-        },
+        { tableId: TABLE_ID, orderType: 'DINE_IN' as any },
         TENANT_ID,
       );
+
+    it('generates ORD-YYYYMMDD-0001 for first order of the day', async () => {
+      arrangeCreate();
+      stubOrderSequence(prismaMock, 1); // counter is empty for today
+      echoOrderNumber();
+
+      const result = await createDineIn();
 
       expect(result.orderNumber).toMatch(/^ORD-\d{8}-0001$/);
     });
 
     it('pads sequence to 4 digits — e.g. ORD-YYYYMMDD-0012', async () => {
-      prismaMock.restaurant.findFirst.mockResolvedValue(mockRestaurant);
-      prismaMock.restaurantTable.findFirst.mockResolvedValue(mockTable);
-      prismaMock.order.count.mockResolvedValue(11); // 11 orders already today → next is 12
-      prismaMock.menuItem.findMany.mockResolvedValue([]);
-      prismaMock.order.create.mockResolvedValue(makeOrder({ orderNumber: `ORD-${TODAY}-0012` }));
-      prismaMock.restaurantTable.update.mockResolvedValue({});
+      arrangeCreate();
+      stubOrderSequence(prismaMock, 12);
+      echoOrderNumber();
 
-      const result = await orderService.create(
-        RESTAURANT_ID,
-        {
-          tableId: TABLE_ID,
-          orderType: 'DINE_IN' as any,
-        },
-        TENANT_ID,
-      );
+      const result = await createDineIn();
 
       expect(result.orderNumber).toMatch(/0012$/);
+    });
+
+    it('draws the number from this tenant own counter row', async () => {
+      arrangeCreate();
+      stubOrderSequence(prismaMock, 1);
+      echoOrderNumber();
+
+      await createDineIn();
+
+      // Two tenants opening their first bill of the day must land on separate
+      // counter rows — that is what keeps them off each other's numbers.
+      expect(prismaMock.documentSequence.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            tenantId_docType_yearMonth: {
+              tenantId: TENANT_ID,
+              docType: 'ORD',
+              yearMonth: TODAY,
+            },
+          },
+          update: { lastNumber: { increment: 1 } },
+        }),
+      );
+    });
+
+    it('seeds a fresh counter past the numbers already written today', async () => {
+      arrangeCreate();
+      // No counter row yet — orders predating the counter must not be reissued.
+      prismaMock.documentSequence.findFirst.mockResolvedValue(null);
+      prismaMock.order.findMany.mockResolvedValue([
+        { orderNumber: `ORD-${TODAY}-0003` },
+        { orderNumber: `ORD-${TODAY}-0007` },
+        { orderNumber: `ORD-${TODAY}-junk` },
+      ]);
+      prismaMock.documentSequence.create.mockResolvedValue({});
+      prismaMock.documentSequence.upsert.mockResolvedValue({ lastNumber: 8 });
+      echoOrderNumber();
+
+      const result = await createDineIn();
+
+      expect(prismaMock.documentSequence.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ tenantId: TENANT_ID, lastNumber: 7 }),
+        }),
+      );
+      expect(result.orderNumber).toBe(`ORD-${TODAY}-0008`);
+    });
+
+    it('looks the counter row up with findFirst, which the tenant guard allows', async () => {
+      arrangeCreate();
+      stubOrderSequence(prismaMock, 1);
+      echoOrderNumber();
+
+      await createDineIn();
+
+      // tenant-scope.middleware throws outright on findUnique for tenant-scoped
+      // models, so the lookup has to carry its own tenant filter.
+      expect(prismaMock.documentSequence.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { tenantId: TENANT_ID, docType: 'ORD', yearMonth: TODAY },
+        }),
+      );
+    });
+
+    it('retries with the next number when one is taken mid-flight', async () => {
+      arrangeCreate();
+      prismaMock.documentSequence.findFirst.mockResolvedValue({ id: 'seq-1' });
+      prismaMock.documentSequence.upsert
+        .mockResolvedValueOnce({ lastNumber: 4 })
+        .mockResolvedValueOnce({ lastNumber: 5 });
+      prismaMock.order.create
+        .mockRejectedValueOnce(duplicateOrderNumberError())
+        .mockImplementation(({ data }: any) =>
+          Promise.resolve(makeOrder({ orderNumber: data.orderNumber, items: [] })),
+        );
+
+      const result = await createDineIn();
+
+      expect(result.orderNumber).toBe(`ORD-${TODAY}-0005`);
+      expect(prismaMock.order.create).toHaveBeenCalledTimes(2);
+    });
+
+    it('gives up with a readable message after repeated collisions', async () => {
+      arrangeCreate();
+      stubOrderSequence(prismaMock, 1);
+      prismaMock.order.create.mockRejectedValue(duplicateOrderNumberError());
+
+      await expect(createDineIn()).rejects.toThrow(BadRequestException);
+      // The raw Prisma target must never reach the POS as the error text.
+      await expect(createDineIn()).rejects.toThrow(/เลขบิล/);
+    });
+
+    it('lets non-duplicate database errors through untouched', async () => {
+      arrangeCreate();
+      stubOrderSequence(prismaMock, 1);
+      prismaMock.order.create.mockRejectedValue(new Error('connection reset'));
+
+      await expect(createDineIn()).rejects.toThrow('connection reset');
+      expect(prismaMock.order.create).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -188,7 +312,6 @@ describe('OrderService', () => {
     it('creates order with correct subtotal when items supplied', async () => {
       prismaMock.restaurant.findFirst.mockResolvedValue(mockRestaurant);
       prismaMock.restaurantTable.findFirst.mockResolvedValue(mockTable);
-      prismaMock.order.count.mockResolvedValue(0);
       prismaMock.menuItem.findMany.mockResolvedValue([mockMenuItem]);
       const expectedOrder = makeOrder({ subtotal: 240, total: 280.8 });
       prismaMock.order.create.mockResolvedValue(expectedOrder);
@@ -224,7 +347,6 @@ describe('OrderService', () => {
     it('throws BadRequestException for unavailable menu item', async () => {
       prismaMock.restaurant.findFirst.mockResolvedValue(mockRestaurant);
       prismaMock.restaurantTable.findFirst.mockResolvedValue(mockTable);
-      prismaMock.order.count.mockResolvedValue(0);
       prismaMock.menuItem.findMany.mockResolvedValue([]); // item not found / unavailable
 
       await expect(
@@ -243,7 +365,6 @@ describe('OrderService', () => {
     it('sets table status to OCCUPIED after dine-in order', async () => {
       prismaMock.restaurant.findFirst.mockResolvedValue(mockRestaurant);
       prismaMock.restaurantTable.findFirst.mockResolvedValue(mockTable);
-      prismaMock.order.count.mockResolvedValue(0);
       prismaMock.menuItem.findMany.mockResolvedValue([]);
       prismaMock.order.create.mockResolvedValue(makeOrder());
       prismaMock.restaurantTable.update.mockResolvedValue({});
@@ -322,6 +443,67 @@ describe('OrderService', () => {
         ),
       ).rejects.toThrow(NotFoundException);
     });
+
+    // A second round is now one tap away in the POS, so the bills it can reach
+    // matter: a settled one would silently owe money again on a receipt the
+    // guest is already holding.
+    it.each(['PAID', 'REFUNDED'])(
+      'refuses a second round on a %s bill and never writes the item',
+      async (paymentStatus) => {
+        prismaMock.order.findFirst.mockResolvedValue(
+          makeOrder({ status: 'SERVED', paymentStatus }),
+        );
+
+        await expect(
+          orderService.addItem(
+            RESTAURANT_ID,
+            ORDER_ID,
+            { menuItemId: 'mi-1', quantity: 1 },
+            TENANT_ID,
+          ),
+        ).rejects.toThrow(BadRequestException);
+        expect(prismaMock.orderItem.create).not.toHaveBeenCalled();
+      },
+    );
+
+    it('lets a part-paid bill keep ordering — the party has not left', async () => {
+      prismaMock.order.findFirst.mockResolvedValue(
+        makeOrder({ status: 'SERVED', paymentStatus: 'PARTIAL' }),
+      );
+      prismaMock.menuItem.findFirst.mockResolvedValue(mockMenuItem);
+      prismaMock.orderItem.create.mockResolvedValue({ id: 'oi-2', totalPrice: 120 });
+      prismaMock.orderItem.findMany.mockResolvedValue([{ totalPrice: 120 }]);
+      prismaMock.order.update.mockResolvedValue({});
+
+      await expect(
+        orderService.addItem(
+          RESTAURANT_ID,
+          ORDER_ID,
+          { menuItemId: 'mi-1', quantity: 1 },
+          TENANT_ID,
+        ),
+      ).resolves.toBeDefined();
+    });
+
+    // Adding to a bill mid-service is the whole point of the new POS action.
+    it('accepts a round on a bill that is already SERVED', async () => {
+      prismaMock.order.findFirst.mockResolvedValue(
+        makeOrder({ status: 'SERVED', paymentStatus: 'UNPAID' }),
+      );
+      prismaMock.menuItem.findFirst.mockResolvedValue(mockMenuItem);
+      prismaMock.orderItem.create.mockResolvedValue({ id: 'oi-3', totalPrice: 120 });
+      prismaMock.orderItem.findMany.mockResolvedValue([{ totalPrice: 120 }]);
+      prismaMock.order.update.mockResolvedValue({});
+
+      await expect(
+        orderService.addItem(
+          RESTAURANT_ID,
+          ORDER_ID,
+          { menuItemId: 'mi-1', quantity: 1 },
+          TENANT_ID,
+        ),
+      ).resolves.toBeDefined();
+    });
   });
 
   // ── removeItem ────────────────────────────────────────────────────────────
@@ -389,6 +571,30 @@ describe('OrderService', () => {
       );
     });
 
+    it('sends a second round on a bill that is already cooking', async () => {
+      // Round two goes onto the bill that is already open, so a PREPARING order
+      // must still accept a new ticket — otherwise the POS is forced to open a
+      // second bill for the same table.
+      prismaMock.order.findFirst
+        .mockResolvedValueOnce(makeOrder({ status: 'PREPARING', items: [pendingItem] }))
+        .mockResolvedValueOnce(
+          makeOrder({
+            status: 'PREPARING',
+            items: [{ ...pendingItem, sentToKitchen: true, status: 'SENT' }],
+          }),
+        );
+
+      prismaMock.$transaction.mockResolvedValue([
+        { count: 1 },
+        makeOrder({ status: 'PREPARING' }),
+        { id: 'ko-2', orderId: ORDER_ID },
+      ]);
+
+      await orderService.sendToKitchen(RESTAURANT_ID, ORDER_ID, TENANT_ID);
+
+      expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    });
+
     it('throws BadRequestException for CANCELLED order', async () => {
       prismaMock.order.findFirst.mockResolvedValue(makeOrder({ status: 'CANCELLED', items: [] }));
 
@@ -450,6 +656,8 @@ describe('OrderService', () => {
       );
       prismaMock.order.update.mockResolvedValue(makeOrder({ status: 'COMPLETED' }));
       prismaMock.restaurantTable.update.mockResolvedValue({});
+      // No other bill is running on that table, so it is free to be cleaned.
+      prismaMock.order.count.mockResolvedValue(0);
 
       await orderService.updateStatus(RESTAURANT_ID, ORDER_ID, 'COMPLETED' as any, TENANT_ID);
 
@@ -457,6 +665,26 @@ describe('OrderService', () => {
         where: { id: TABLE_ID },
         data: { status: 'CLEANING' },
       });
+    });
+
+    it('leaves the table OCCUPIED while a real split bill is still open', async () => {
+      prismaMock.order.findFirst.mockResolvedValue(
+        makeOrder({ status: 'SERVED', tableId: TABLE_ID }),
+      );
+      prismaMock.order.update.mockResolvedValue(makeOrder({ status: 'COMPLETED' }));
+      // A second party's bill (with items on it) is still open on the same table.
+      prismaMock.order.count.mockResolvedValue(1);
+
+      await orderService.updateStatus(RESTAURANT_ID, ORDER_ID, 'COMPLETED' as any, TENANT_ID);
+
+      expect(prismaMock.restaurantTable.update).not.toHaveBeenCalled();
+      // An item-less order must never be what holds the table, so the count query
+      // only looks at orders that actually carry food.
+      expect(prismaMock.order.count).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ items: { some: {} } }),
+        }),
+      );
     });
 
     it('emits guest WebSocket notification on any status change', async () => {

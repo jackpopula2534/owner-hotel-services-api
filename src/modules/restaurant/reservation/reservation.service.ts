@@ -3,11 +3,9 @@ import {
   NotFoundException,
   BadRequestException,
   ConflictException,
-  Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogService } from '../../../audit-log/audit-log.service';
-import { OrderService } from '../order/order.service';
 import { CreateReservationDto } from './dto/create-reservation.dto';
 import { UpdateReservationDto, ReservationStatusEnum } from './dto/update-reservation.dto';
 import { QueryReservationsDto, ReservationSortEnum } from './dto/query-reservations.dto';
@@ -21,12 +19,9 @@ import {
 
 @Injectable()
 export class ReservationService {
-  private readonly logger = new Logger(ReservationService.name);
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLogService: AuditLogService,
-    private readonly orderService: OrderService,
   ) {}
 
   async findAll(restaurantId: string, query: QueryReservationsDto, tenantId: string) {
@@ -35,6 +30,7 @@ export class ReservationService {
       from,
       to,
       status,
+      tableId,
       page = 1,
       limit = 20,
       sort = ReservationSortEnum.SCHEDULE,
@@ -43,6 +39,7 @@ export class ReservationService {
 
     const where: Record<string, unknown> = { restaurantId, tenantId };
     if (status) where.status = status;
+    if (tableId) where.tableId = tableId;
 
     // `date` pins one day; `from`/`to` span a range (the calendar's visible month).
     // Neither means "every booking we hold", which is what the full list wants.
@@ -68,9 +65,17 @@ export class ReservationService {
         orderBy,
         include: {
           table: { select: { id: true, tableNumber: true, capacity: true, zone: true } },
+          // Live bills only, and only ones that actually hold food — an item-less
+          // order is not a bill and must not show up as one on the floor.
           orders: {
-            where: { status: { notIn: ['COMPLETED', 'CANCELLED'] } },
-            select: { id: true, orderNumber: true, status: true, total: true },
+            where: { status: { notIn: ['COMPLETED', 'CANCELLED'] }, items: { some: {} } },
+            select: {
+              id: true,
+              orderNumber: true,
+              status: true,
+              paymentStatus: true,
+              total: true,
+            },
           },
         },
       }),
@@ -86,7 +91,9 @@ export class ReservationService {
       include: {
         table: true,
         orders: {
+          where: { items: { some: {} } },
           select: { id: true, orderNumber: true, status: true, paymentStatus: true, total: true },
+          orderBy: { createdAt: 'desc' },
         },
       },
     });
@@ -221,6 +228,9 @@ export class ReservationService {
     const timestamps: Record<string, Date | null> = {};
     const now = new Date();
     let nextTableStatus: string | null = null;
+    // Extra writes that have to land in the same transaction as the status change
+    // (closing a booking also tidies up the bills it left behind).
+    const extraOps: unknown[] = [];
 
     if (dto.status === ReservationStatusEnum.CONFIRMED) {
       timestamps.confirmedAt = now;
@@ -233,7 +243,32 @@ export class ReservationService {
 
     if (dto.status === ReservationStatusEnum.COMPLETED) {
       timestamps.completedAt = now;
-      nextTableStatus = 'CLEANING';
+
+      // Closing a booking must not strand its bills: a real bill that nobody has
+      // paid blocks the close outright, an item-less bill is a leftover and gets
+      // cancelled so it stops showing up on the kitchen display.
+      const emptyBillIds = await this.assertBillsSettled(reservation.id, tenantId);
+      if (emptyBillIds.length > 0) {
+        extraOps.push(
+          this.prisma.order.updateMany({
+            where: { id: { in: emptyBillIds } },
+            data: { status: 'CANCELLED', cancelledAt: now },
+          }),
+        );
+      }
+
+      // Only send the table to CLEANING once nothing real is still running on it —
+      // a split bill from another party must keep it OCCUPIED.
+      const liveBillsOnTable = await this.prisma.order.count({
+        where: {
+          tableId: reservation.tableId,
+          tenantId,
+          status: { notIn: ['COMPLETED', 'CANCELLED'] },
+          id: { notIn: emptyBillIds },
+          items: { some: {} },
+        },
+      });
+      nextTableStatus = liveBillsOnTable > 0 ? null : 'CLEANING';
     }
 
     if (dto.status === ReservationStatusEnum.CANCELLED) {
@@ -261,6 +296,7 @@ export class ReservationService {
             }),
           ]
         : []),
+      ...(extraOps as never[]),
     ]);
 
     this.auditLogService.log({
@@ -277,9 +313,12 @@ export class ReservationService {
   }
 
   /**
-   * Seat a reservation: mark it SEATED, occupy the table, and open (or adopt)
-   * the dine-in bill for that party. Safe to call twice — a reservation that is
-   * already SEATED just gets its bill returned.
+   * Seat a reservation: mark it SEATED and occupy the table. It deliberately does
+   * NOT open a bill — an order with no items would be pushed onto the kitchen
+   * display as a phantom ticket. The bill is created by the first actual order
+   * and links itself back here (see OrderService.resolveReservationId).
+   * Safe to call twice — a reservation that is already SEATED just gets its
+   * current bill returned.
    */
   async seat(restaurantId: string, reservationId: string, tenantId: string, userId?: string) {
     const reservation = await this.findOne(restaurantId, reservationId, tenantId);
@@ -301,7 +340,7 @@ export class ReservationService {
       ]);
     }
 
-    const order = await this.attachOrder(restaurantId, reservation, tenantId, userId);
+    const order = await this.adoptOpenBill(restaurantId, reservation, tenantId);
 
     this.auditLogService.log({
       action: 'update' as any,
@@ -434,15 +473,15 @@ export class ReservationService {
   }
 
   /**
-   * Give a seated party a bill: adopt the table's open order if one exists,
-   * otherwise open an empty dine-in order. Failing to open the bill must not
-   * un-seat a party that is physically at the table, so this only logs.
+   * Hand the seated party whichever bill is already open on their table (a walk-in
+   * order rung up before the booking was seated), linking it to the booking so
+   * paying it closes both. Returns null when the party has not ordered yet — that
+   * is the normal case and must never fabricate an empty bill.
    */
-  private async attachOrder(
+  private async adoptOpenBill(
     restaurantId: string,
-    reservation: { id: string; tableId: string; guestName: string; partySize: number },
+    reservation: { id: string; tableId: string },
     tenantId: string,
-    userId?: string,
   ) {
     const existing = await this.prisma.order.findFirst({
       where: {
@@ -454,33 +493,49 @@ export class ReservationService {
       orderBy: { createdAt: 'desc' },
     });
 
-    if (existing) {
-      if (existing.reservationId === reservation.id) return existing;
-      return this.prisma.order.update({
-        where: { id: existing.id },
-        data: { reservationId: reservation.id },
-      });
+    if (!existing) return null;
+    if (existing.reservationId === reservation.id) return existing;
+
+    // Don't steal a bill that belongs to a different booking on the same table.
+    if (existing.reservationId) return null;
+
+    return this.prisma.order.update({
+      where: { id: existing.id },
+      data: { reservationId: reservation.id },
+    });
+  }
+
+  /**
+   * Guard the close of a booking against its bills. Throws when a bill with items
+   * is still unpaid; returns the ids of item-less bills, which are leftovers the
+   * caller cancels inside the same transaction.
+   */
+  private async assertBillsSettled(reservationId: string, tenantId: string): Promise<string[]> {
+    const bills = await this.prisma.order.findMany({
+      where: {
+        reservationId,
+        tenantId,
+        status: { notIn: ['COMPLETED', 'CANCELLED'] },
+      },
+      select: {
+        id: true,
+        orderNumber: true,
+        total: true,
+        paymentStatus: true,
+        _count: { select: { items: true } },
+      },
+    });
+
+    const unpaid = bills.filter((b) => b._count.items > 0 && b.paymentStatus !== 'PAID');
+    if (unpaid.length > 0) {
+      const list = unpaid
+        .map((b) => `${b.orderNumber} (฿${Number(b.total).toLocaleString('th-TH')})`)
+        .join(', ');
+      throw new BadRequestException(
+        `ปิดการจองไม่ได้ — ยังมีบิลค้างชำระ: ${list} กรุณาชำระเงินหรือยกเลิกบิลก่อน`,
+      );
     }
 
-    try {
-      return await this.orderService.create(
-        restaurantId,
-        {
-          tableId: reservation.tableId,
-          orderType: 'DINE_IN',
-          guestName: reservation.guestName,
-          partySize: reservation.partySize,
-          reservationId: reservation.id,
-        } as never,
-        tenantId,
-        userId,
-      );
-    } catch (error) {
-      this.logger.error(
-        `Seated reservation ${reservation.id} but could not open its order`,
-        error instanceof Error ? error.stack : undefined,
-      );
-      return null;
-    }
+    return bills.filter((b) => b._count.items === 0).map((b) => b.id);
   }
 }

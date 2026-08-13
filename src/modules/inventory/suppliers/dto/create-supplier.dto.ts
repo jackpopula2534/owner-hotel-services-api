@@ -11,13 +11,17 @@ export class CreateSupplierDto {
   @MaxLength(255)
   name: string;
 
-  @ApiProperty({
-    description: 'Unique supplier code per tenant',
+  @ApiPropertyOptional({
+    description:
+      'Unique supplier code per tenant. Omit it and the server allocates the next free SUP-#### — ' +
+      'the quick-add form on the RFQ screen relies on this, because a code is bookkeeping the ' +
+      'person typing a market vendor’s name has no way to invent.',
     example: 'SUP-001',
   })
+  @IsOptional()
   @IsString()
   @MaxLength(50)
-  code: string;
+  code?: string;
 
   @ApiPropertyOptional({
     description: 'Contact person name',

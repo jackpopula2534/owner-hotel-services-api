@@ -364,53 +364,70 @@ model Review {
 }
 
 model Restaurant {
-  id             String            @id @default(uuid())
-  tenantId       String?
-  name           String
-  code           String            @unique
-  description    String?
-  location       String?
-  capacity       Int?
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
-  type           RestaurantType    @default(CASUAL)
-  openTime       String?
-  closeTime      String?
-  isActive       Boolean           @default(true)
-  layoutData     Json?
-  propertyId     String?
-  menuCategories MenuCategory[]
-  orders         Order[]
-  tables         RestaurantTable[]
-  property       Property?         @relation(fields: [propertyId], references: [id])
-  staffCalls     StaffCall[]
+  id                   String            @id @default(uuid())
+  tenantId             String?
+  name                 String
+  // Scoped per tenant, like every other coded document in the schema. A global
+  // unique here meant the first tenant to take RES-001 blocked every other
+  // tenant from ever creating their first restaurant.
+  code                 String
+  description          String?
+  location             String?
+  capacity             Int?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  type                 RestaurantType    @default(CASUAL)
+  openTime             String?
+  closeTime            String?
+  isActive             Boolean           @default(true)
+  // ── Charge policy ────────────────────────────────────────────────────────
+  // Per outlet, not per property: a hotel routinely runs a 10% service charge
+  // in the restaurant and none on room service, and a non-VAT-registered
+  // outlet must be able to stop charging VAT entirely. Each order snapshots
+  // these onto itself at creation, so changing them never rewrites old bills.
+  vatEnabled           Boolean           @default(true)
+  vatRate              Decimal           @default(7.00) @db.Decimal(5, 2)
+  serviceChargeEnabled Boolean           @default(true)
+  serviceRate          Decimal           @default(10.00) @db.Decimal(5, 2)
+  layoutData           Json?
+  propertyId           String?
+  menuCategories       MenuCategory[]
+  orders               Order[]
+  tables               RestaurantTable[]
+  property             Property?         @relation(fields: [propertyId], references: [id])
+  staffCalls           StaffCall[]
 
+  @@unique([tenantId, code])
   @@index([tenantId])
   @@index([propertyId])
   @@map("restaurants")
 }
 
 model RestaurantTable {
-  id           String             @id @default(uuid())
-  tenantId     String?
-  restaurantId String
-  tableNumber  String
-  capacity     Int
-  shape        TableShape         @default(RECTANGLE)
-  status       TableStatus        @default(AVAILABLE)
-  positionX    Float?
-  positionY    Float?
-  width        Float?
-  height       Float?
-  rotation     Float?             @default(0)
-  zone         String?
-  isActive     Boolean            @default(true)
-  createdAt    DateTime           @default(now())
-  updatedAt    DateTime           @updatedAt
-  orders       Order[]
-  restaurant   Restaurant         @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
-  staffCalls   StaffCall[]
-  reservations TableReservation[]
+  id            String             @id @default(uuid())
+  tenantId      String?
+  restaurantId  String
+  tableNumber   String
+  capacity      Int
+  shape         TableShape         @default(RECTANGLE)
+  /// Floor-plan furniture the table is drawn as (e.g. 'rect-table-6').
+  /// Nullable: rows created before this existed fall back to a shape+capacity
+  /// guess on the client.
+  furnitureType String?            @db.VarChar(50)
+  status        TableStatus        @default(AVAILABLE)
+  positionX     Float?
+  positionY     Float?
+  width         Float?
+  height        Float?
+  rotation      Float?             @default(0)
+  zone          String?
+  isActive      Boolean            @default(true)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  orders        Order[]
+  restaurant    Restaurant         @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  staffCalls    StaffCall[]
+  reservations  TableReservation[]
 
   @@unique([restaurantId, tableNumber])
   @@index([tenantId])
@@ -555,7 +572,9 @@ model Order {
   // Set when the order was opened for a table reservation (walk-ins stay null).
   // Lets seating a reservation and closing its bill stay in sync with table status.
   reservationId String?
-  orderNumber   String             @unique
+  // เลขบิลเดินต่อกันภายใน tenant (ORD-YYYYMMDD-0001) จึงต้อง unique แบบผูก tenant
+  // ไม่ใช่ unique ทั้งฐาน — เหมือน journal_entries.entryNo และ restaurants.code
+  orderNumber   String
   orderType     OrderType          @default(DINE_IN)
   status        OrderStatus        @default(PENDING)
   waiterId      String?
@@ -585,6 +604,7 @@ model Order {
   table         RestaurantTable?   @relation(fields: [tableId], references: [id])
   reservation   TableReservation?  @relation(fields: [reservationId], references: [id])
 
+  @@unique([tenantId, orderNumber])
   @@index([tenantId])
   @@index([restaurantId])
   @@index([tableId])
@@ -3097,6 +3117,7 @@ model InventoryItem {
   requiresLotTracking        Boolean                     @default(false)
   requiresQC                 Boolean                     @default(false)
   goodsReceiveItems          GoodsReceiveItem[]
+  materialRequisitionItems   MaterialRequisitionItem[]
   category                   ItemCategory?               @relation(fields: [categoryId], references: [id])
   inventoryLots              InventoryLot[]
   inventoryRecipeIngredients InventoryRecipeIngredient[]
@@ -3148,6 +3169,7 @@ model Supplier {
   whtCertificates WhtCertificate[]
   apInvoices      ApInvoice[]
   apPayments      ApPayment[]
+  goodsReceives   GoodsReceive[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -3386,16 +3408,37 @@ model GoodsReceive {
   inspectedAt     DateTime?
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
-  items           GoodsReceiveItem[]
-  purchaseOrder   PurchaseOrder?     @relation(fields: [purchaseOrderId], references: [id])
-  warehouse       Warehouse          @relation(fields: [warehouseId], references: [id])
-  qcRecords       QCRecord[]
+
+  // --- ที่มาของของ ---
+  // A receipt against a purchase order can answer "who did we buy this from?"
+  // by walking to the PO. A market run has no PO to walk to, so the answer has
+  // to be written down here or it is lost the moment the person who went to the
+  // market forgets. `source` says which of the two this is; everything below it
+  // only ever applies to CASH_PURCHASE.
+  source                GoodsReceiveSource @default(PURCHASE_ORDER)
+  vendorName            String?
+  supplierId            String?
+  paidBy                String?
+  paymentMethod         CashPaymentMethod?
+  hasNoReceipt          Boolean            @default(false)
+  purchaseRequisitionId String?
+
+  items               GoodsReceiveItem[]
+  attachments         GoodsReceiveAttachment[]
+  purchaseOrder       PurchaseOrder?           @relation(fields: [purchaseOrderId], references: [id])
+  warehouse           Warehouse                @relation(fields: [warehouseId], references: [id])
+  supplier            Supplier?                @relation(fields: [supplierId], references: [id])
+  purchaseRequisition PurchaseRequisition?     @relation(fields: [purchaseRequisitionId], references: [id])
+  qcRecords           QCRecord[]
 
   @@unique([tenantId, grNumber])
   @@index([tenantId])
   @@index([purchaseOrderId])
   @@index([warehouseId])
   @@index([receiveDate])
+  @@index([tenantId, source])
+  @@index([supplierId])
+  @@index([purchaseRequisitionId])
   @@map("goods_receives")
 }
 
@@ -3422,6 +3465,42 @@ model GoodsReceiveItem {
   @@index([itemId])
   @@index([lotId])
   @@map("goods_receive_items")
+}
+
+/// SLIP  = ใบเสร็จ/สลิปโอนเงิน — หลักฐานว่าจ่ายเงินไปเท่าไหร่
+/// PHOTO = รูปของที่ซื้อมา/หน้าร้าน — ใช้แทนเมื่อร้านตลาดไม่ออกใบเสร็จ
+enum GoodsReceiveAttachmentKind {
+  SLIP
+  PHOTO
+  OTHER
+}
+
+/// ไฟล์แนบของใบรับของ
+///
+/// ใบรับของที่มี PO ตรวจย้อนได้จากเอกสารต้นทางว่าตกลงราคาไว้เท่าไหร่ แต่ซื้อสด
+/// ไม่มีเอกสารไหนให้ย้อนเลย — สลิปคือหลักฐานชิ้นเดียวที่ยืนยันว่าเงินออกไปจริง
+/// เท่าที่กรอกไว้ จึงต้องเก็บเป็นแถวแยก (ซื้อทีนึงหลายแผงก็หลายใบ) พร้อม
+/// storageKey ไว้ลบไฟล์จริงตามได้ และ uploadedBy/uploadedAt ไว้ตอบว่าใครแนบเมื่อไหร่
+model GoodsReceiveAttachment {
+  id             String                     @id @default(uuid())
+  goodsReceiveId String
+  tenantId       String
+  kind           GoodsReceiveAttachmentKind @default(SLIP)
+  /// key ใน object storage (folder/filename) — ใช้ลบไฟล์จริง ไม่ใช่ URL สำหรับแสดงผล
+  storageKey     String                     @db.VarChar(500)
+  /// path/URL สำหรับเปิดดู — local driver เป็น /uploads/..., s3 เป็น URL เต็ม
+  url            String                     @db.VarChar(500)
+  originalName   String?                    @db.VarChar(255)
+  mimeType       String                     @db.VarChar(100)
+  sizeBytes      Int
+  uploadedBy     String
+  uploadedAt     DateTime                   @default(now())
+
+  goodsReceive GoodsReceive @relation(fields: [goodsReceiveId], references: [id], onDelete: Cascade)
+
+  @@index([goodsReceiveId])
+  @@index([tenantId])
+  @@map("goods_receive_attachments")
 }
 
 model StockCount {
@@ -3870,30 +3949,32 @@ model CostKpiSnapshot {
 }
 
 model PurchaseRequisition {
-  id               String                    @id @default(uuid())
-  tenantId         String
-  propertyId       String
-  prNumber         String
-  status           PurchaseRequisitionStatus @default(DRAFT)
-  priority         String                    @default("NORMAL")
-  requiredDate     DateTime?
-  purpose          String?                   @db.Text
-  department       String?
-  notes            String?                   @db.Text
-  internalNotes    String?                   @db.Text
-  requestedBy      String
-  approvedBy       String?
-  approvedAt       DateTime?
-  cancelledBy      String?
-  cancelledAt      DateTime?
-  cancelReason     String?                   @db.Text
-  createdAt        DateTime                  @default(now())
-  updatedAt        DateTime                  @updatedAt
-  priceComparisons PriceComparison[]
-  purchaseOrders   PurchaseOrder[]
-  items            PurchaseRequisitionItem[]
-  rfqLinks         RfqPurchaseRequisition[]
-  supplierQuotes   SupplierQuote[]
+  id                   String                    @id @default(uuid())
+  tenantId             String
+  propertyId           String
+  prNumber             String
+  status               PurchaseRequisitionStatus @default(DRAFT)
+  priority             String                    @default("NORMAL")
+  requiredDate         DateTime?
+  purpose              String?                   @db.Text
+  department           String?
+  notes                String?                   @db.Text
+  internalNotes        String?                   @db.Text
+  requestedBy          String
+  approvedBy           String?
+  approvedAt           DateTime?
+  cancelledBy          String?
+  cancelledAt          DateTime?
+  cancelReason         String?                   @db.Text
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
+  priceComparisons     PriceComparison[]
+  purchaseOrders       PurchaseOrder[]
+  items                PurchaseRequisitionItem[]
+  materialRequisitions MaterialRequisition[]
+  rfqLinks             RfqPurchaseRequisition[]
+  supplierQuotes       SupplierQuote[]
+  goodsReceives        GoodsReceive[]
 
   @@unique([tenantId, prNumber])
   @@index([tenantId])
@@ -3921,6 +4002,62 @@ model PurchaseRequisitionItem {
   @@index([purchaseRequisitionId])
   @@index([itemId])
   @@map("purchase_requisition_items")
+}
+
+// ใบเบิกวัตถุดิบที่คำนวณจากสูตรอาหาร. A requisition outlives the moment it is
+// drafted: when the source warehouse is short, the document parks in WAITING_STOCK
+// — attached to the purchase requisition raising the shortfall, if one was opened —
+// until a goods receipt lands in that warehouse and flips it to READY.
+model MaterialRequisition {
+  id                    String                    @id @default(uuid())
+  tenantId              String
+  propertyId            String
+  restaurantId          String?
+  reqNumber             String
+  status                MaterialRequisitionStatus @default(WAITING_STOCK)
+  mode                  MaterialRequisitionMode   @default(TRANSFER)
+  sourceWarehouseId     String
+  toWarehouseId         String?
+  purchaseRequisitionId String?
+  notes                 String?                   @db.Text
+  createdBy             String
+  readyAt               DateTime?
+  issuedBy              String?
+  issuedAt              DateTime?
+  cancelledBy           String?
+  cancelledAt           DateTime?
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
+  items                 MaterialRequisitionItem[]
+  purchaseRequisition   PurchaseRequisition?      @relation(fields: [purchaseRequisitionId], references: [id])
+
+  @@unique([tenantId, reqNumber])
+  @@index([tenantId])
+  @@index([status])
+  @@index([sourceWarehouseId])
+  @@index([purchaseRequisitionId])
+  @@map("material_requisitions")
+}
+
+model MaterialRequisitionItem {
+  id                    String              @id @default(uuid())
+  materialRequisitionId String
+  itemId                String
+  // Whole units, because StockMovement.quantity is an Int.
+  quantity              Int
+  // The un-rounded recipe requirement, kept so the document can still show
+  // "ต้องใช้ 4.4 KG" beside the 5 whole units it asks the warehouse for.
+  requiredQty           Decimal             @default(0.000) @db.Decimal(12, 3)
+  // What was missing at the source when the document was raised — the quantity
+  // that went onto the purchase requisition.
+  shortageQty           Int                 @default(0)
+  createdAt             DateTime            @default(now())
+  item                  InventoryItem       @relation(fields: [itemId], references: [id])
+  materialRequisition   MaterialRequisition @relation(fields: [materialRequisitionId], references: [id], onDelete: Cascade)
+
+  @@index([materialRequisitionId])
+  @@index([itemId])
+  @@map("material_requisition_items")
 }
 
 model SupplierQuote {
@@ -4792,6 +4929,25 @@ enum PurchaseOrderDiscountType {
   AMOUNT
 }
 
+/// How the goods arrived. PURCHASE_ORDER is the procurement pipeline
+/// (RFQ → quote → PO → receipt). CASH_PURCHASE is the market run: someone went
+/// out, paid, and came back with the goods — the money was spent before the
+/// system ever heard about it, so there is no PO and never will be.
+enum GoodsReceiveSource {
+  PURCHASE_ORDER
+  CASH_PURCHASE
+}
+
+/// Where the cash came from on a market run. The distinction that matters is
+/// OWN_MONEY: the person is out of pocket until someone reimburses them, and
+/// that is the only one of these that creates a debt the hotel owes an employee.
+enum CashPaymentMethod {
+  PETTY_CASH
+  OWN_MONEY
+  TRANSFER
+  CARD
+}
+
 enum GoodsReceiveStatus {
   DRAFT
   INSPECTING
@@ -4842,6 +4998,18 @@ enum WasteReason {
   PREPARATION
   DAMAGED
   OTHER
+}
+
+enum MaterialRequisitionStatus {
+  WAITING_STOCK
+  READY
+  ISSUED
+  CANCELLED
+}
+
+enum MaterialRequisitionMode {
+  TRANSFER
+  ISSUE
 }
 
 enum PurchaseRequisitionStatus {

@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as QRCode from 'qrcode';
+import { Prisma, RestaurantTable } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogService } from '../../../audit-log/audit-log.service';
 import { CreateTableDto } from './dto/create-table.dto';
@@ -106,9 +107,22 @@ export class TableService {
       );
     }
 
-    const result = await this.prisma.restaurantTable.create({
-      data: { ...dto, restaurantId, tenantId },
-    });
+    let result: RestaurantTable;
+    try {
+      result = await this.prisma.restaurantTable.create({
+        data: { ...dto, restaurantId, tenantId },
+      });
+    } catch (error) {
+      // Two people adding a table at once clear the check above and then hit
+      // `restaurant_tables_restaurantId_tableNumber_key`. Say what happened
+      // instead of putting the index name on screen.
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException(
+          `Table number '${dto.tableNumber}' already exists in this restaurant`,
+        );
+      }
+      throw error;
+    }
 
     this.auditLogService.log({
       action: 'create' as any,
@@ -161,12 +175,20 @@ export class TableService {
       resourceId: tableId,
       userId,
       tenantId,
+      // `status` is editable here too (the POS edit form submits the whole
+      // table), so it has to be in the trail — not only on the status endpoint.
       oldValues: {
         tableNumber: oldTable.tableNumber,
         zone: oldTable.zone,
         capacity: oldTable.capacity,
+        status: oldTable.status,
       },
-      newValues: { tableNumber: result.tableNumber, zone: result.zone, capacity: result.capacity },
+      newValues: {
+        tableNumber: result.tableNumber,
+        zone: result.zone,
+        capacity: result.capacity,
+        status: result.status,
+      },
       description: 'แก้ไขโต๊ะ',
     });
 

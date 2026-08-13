@@ -7,6 +7,12 @@ import {
   QueryPurchaseRequisitionDto,
   PurchaseRequisitionStatus,
 } from './dto/query-purchase-requisition.dto';
+import {
+  ReceiveRow,
+  fulfillmentByItem,
+  mapLinkedReceives,
+  summariseFulfillment,
+} from './pr-fulfillment.util';
 
 @Injectable()
 export class PurchaseRequisitionsService {
@@ -17,15 +23,21 @@ export class PurchaseRequisitionsService {
   /**
    * Resolve user UUIDs to full names (firstName + lastName).
    * Returns a Map<userId, fullName>.
+   *
+   * Scoped by tenant. Most of the IDs passed here are written by the server from
+   * the caller's own token, but `paidBy` on a linked receipt is client-supplied
+   * and its column carries no foreign key — an unfiltered lookup would render
+   * another tenant's name and email back onto this document.
    */
   private async resolveUserNames(
     userIds: (string | null | undefined)[],
+    tenantId: string,
   ): Promise<Map<string, string>> {
     const validIds = userIds.filter((id): id is string => !!id);
     if (validIds.length === 0) return new Map();
 
     const users = await this.prisma.user.findMany({
-      where: { id: { in: validIds } },
+      where: { id: { in: validIds }, tenantId },
       select: { id: true, firstName: true, lastName: true, email: true },
     });
 
@@ -83,6 +95,13 @@ export class PurchaseRequisitionsService {
           requestedBy: true,
           approvedBy: true,
           approvedAt: true,
+          // ใบที่ปิดเพราะไปซื้อเองแล้ว กับใบที่ปิดทิ้ง มีสถานะเดียวกันคือ CLOSED
+          // ถ้าไม่ส่งจำนวนใบรับของมาด้วย หน้ารายการก็แยกสองอย่างนี้ไม่ออก
+          // (จำกัดที่ tenant เดียวกัน — ใบรับของถือ tenantId ของตัวเอง)
+          goodsReceives: {
+            where: { tenantId, source: 'CASH_PURCHASE' },
+            select: { id: true },
+          },
           _count: {
             select: { items: true, supplierQuotes: true },
           },
@@ -94,7 +113,7 @@ export class PurchaseRequisitionsService {
 
     // Resolve user names for approvedBy and requestedBy
     const userIds = data.flatMap((pr) => [pr.requestedBy, pr.approvedBy]);
-    const userNameMap = await this.resolveUserNames(userIds);
+    const userNameMap = await this.resolveUserNames(userIds, tenantId);
 
     return {
       data: data.map((pr) => ({
@@ -113,6 +132,7 @@ export class PurchaseRequisitionsService {
         approvedByName: pr.approvedBy ? userNameMap.get(pr.approvedBy) || null : null,
         approvedAt: pr.approvedAt,
         itemCount: pr._count.items,
+        cashPurchaseCount: (pr.goodsReceives ?? []).length,
         _count: {
           items: pr._count.items,
           supplierQuotes: pr._count.supplierQuotes,
@@ -165,6 +185,47 @@ export class PurchaseRequisitionsService {
             },
           },
         },
+        // The kitchen documents parked on this PR. Without this the link only
+        // runs one way and procurement cannot see who is waiting on the goods.
+        materialRequisitions: {
+          select: {
+            id: true,
+            reqNumber: true,
+            status: true,
+            createdAt: true,
+            _count: { select: { items: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+        },
+        // ใบรับของที่ผูกกับใบนี้ — ส่วนใหญ่คือ "ไปซื้อเอง" ที่ข้ามขั้น RFQ/PO ไป
+        // ถ้าไม่ดึงมา หน้ารายละเอียดจะบอกได้แค่ว่าใบนี้ปิดแล้ว แต่ตอบไม่ได้ว่า
+        // ของมาถึงคลังหรือยัง ซึ่งเป็นคำถามเดียวที่คนเปิดใบที่ปิดแล้วอยากรู้
+        goodsReceives: {
+          where: { tenantId },
+          select: {
+            id: true,
+            grNumber: true,
+            receiveDate: true,
+            status: true,
+            source: true,
+            vendorName: true,
+            paymentMethod: true,
+            hasNoReceipt: true,
+            invoiceNumber: true,
+            totalAmount: true,
+            paidBy: true,
+            warehouse: { select: { name: true } },
+            items: {
+              select: {
+                itemId: true,
+                receivedQty: true,
+                unitCost: true,
+                totalCost: true,
+              },
+            },
+          },
+          orderBy: { receiveDate: 'desc' },
+        },
       },
     });
 
@@ -172,12 +233,18 @@ export class PurchaseRequisitionsService {
       throw new NotFoundException('Purchase requisition not found');
     }
 
-    // Resolve user names for requestedBy, approvedBy, cancelledBy
-    const userNameMap = await this.resolveUserNames([
-      pr.requestedBy,
-      pr.approvedBy,
-      pr.cancelledBy,
-    ]);
+    const receives = ((pr as { goodsReceives?: ReceiveRow[] }).goodsReceives ??
+      []) as ReceiveRow[];
+
+    // Resolve user names for requestedBy, approvedBy, cancelledBy — plus whoever
+    // fronted the money on each linked receipt, which is the one name a reader of
+    // a market-run document actually needs.
+    const userNameMap = await this.resolveUserNames(
+      [pr.requestedBy, pr.approvedBy, pr.cancelledBy, ...receives.map((r) => r.paidBy)],
+      tenantId,
+    );
+
+    const received = fulfillmentByItem(receives);
 
     return {
       id: pr.id,
@@ -211,7 +278,14 @@ export class PurchaseRequisitionsService {
         specifications: item.specifications,
         preferredSupplierId: item.preferredSupplierId,
         notes: item.notes,
+        // ราคาที่จ่ายจริง มาแทนคำว่า "รอใบเสนอราคา" ได้เมื่อของถึงคลังแล้ว
+        // ประมาณการที่ยังค้างอยู่ข้าง ๆ ราคาจริงคือข้อมูลที่ขัดกันเอง
+        receivedQty: received.get(item.itemId)?.receivedQty ?? 0,
+        actualUnitCost: received.get(item.itemId)?.actualUnitCost ?? null,
+        actualTotalCost: received.get(item.itemId)?.actualTotalCost ?? 0,
       })),
+      goodsReceives: mapLinkedReceives(receives, userNameMap),
+      fulfillment: summariseFulfillment(pr.items, receives),
       supplierQuotes: pr.supplierQuotes.map((quote) => ({
         id: quote.id,
         supplierId: quote.supplierId,
@@ -219,6 +293,13 @@ export class PurchaseRequisitionsService {
         quotedDate: quote.quotedDate,
         totalAmount: quote.totalAmount,
         itemCount: quote.items.length,
+      })),
+      materialRequisitions: (pr.materialRequisitions ?? []).map((req) => ({
+        id: req.id,
+        reqNumber: req.reqNumber,
+        status: String(req.status),
+        createdAt: req.createdAt,
+        lineCount: req._count.items,
       })),
     };
   }
@@ -566,7 +647,9 @@ export class PurchaseRequisitionsService {
     const pr = await this.prisma.purchaseRequisition.findFirst({
       where: { id: prId, tenantId },
       include: {
-        items: true,
+        // The item name is only here so an unquoted line can be named back to
+        // the buyer instead of leaving them with a UUID.
+        items: { include: { item: { select: { name: true } } } },
         supplierQuotes: {
           include: {
             items: true,
@@ -599,19 +682,51 @@ export class PurchaseRequisitionsService {
       throw new NotFoundException('Warehouse not found');
     }
 
+    // A PR line the supplier never quoted has no price we are entitled to order
+    // at. Writing it anyway used to fall through to 0, putting a free line on a
+    // real purchase order — refuse instead and name what is missing.
+    const unquoted = pr.items.filter(
+      (prItem) => !selectedQuote.items.some((qi) => qi.itemId === prItem.itemId),
+    );
+    if (unquoted.length > 0) {
+      const names = unquoted
+        .slice(0, 3)
+        .map((prItem) => prItem.item?.name ?? prItem.itemId)
+        .join(', ');
+      throw new BadRequestException(
+        `ใบเสนอราคาที่เลือกไม่ได้เสนอราคา ${unquoted.length} รายการ (${names}` +
+          `${unquoted.length > 3 ? ' และอื่น ๆ' : ''}) — ` +
+          'กรุณาขอใบเสนอราคาเพิ่ม หรือตัดรายการออกจากใบขอซื้อก่อนออกใบสั่งซื้อ',
+      );
+    }
+
     // Create PO in transaction
     const result = await this.prisma.$transaction(async (tx) => {
       // Generate PO number
       const poNumber = await this.generateDocNumber(tenantId, 'PURCHASE_ORDER', 'PO', tx);
 
-      // Calculate totals from quote items
-      let subtotal = 0;
       const taxAmount = 0;
 
-      selectedQuote.items.forEach((item) => {
-        subtotal += Number(item.totalPrice) || 0;
+      // PO lines come from the PR, so the header has to be summed from that same
+      // list — totalling the quote instead let a header disagree with the lines
+      // printed underneath it whenever the two documents were not identical.
+      const lines = pr.items.map((prItem) => {
+        // Safe: every PR item was checked against the quote above.
+        const quoteItem = selectedQuote.items.find((qi) => qi.itemId === prItem.itemId)!;
+        const unitPrice = Number(quoteItem.unitPrice);
+
+        return {
+          itemId: prItem.itemId,
+          quantity: prItem.quantity,
+          unitPrice,
+          discount: 0,
+          taxRate: 0,
+          totalPrice: Number(quoteItem.totalPrice) || unitPrice * prItem.quantity,
+          notes: prItem.notes,
+        };
       });
 
+      const subtotal = lines.reduce((sum, line) => sum + line.totalPrice, 0);
       const totalAmount = subtotal + taxAmount;
 
       // Create purchase order
@@ -633,24 +748,8 @@ export class PurchaseRequisitionsService {
         },
       });
 
-      // Create PO items from PR items
-      const poItems = pr.items.map((prItem, index) => {
-        const quoteItem = selectedQuote.items.find((qi) => qi.itemId === prItem.itemId);
-
-        return {
-          purchaseOrderId: po.id,
-          itemId: prItem.itemId,
-          quantity: prItem.quantity,
-          unitPrice: quoteItem?.unitPrice || prItem.estimatedUnitPrice || 0,
-          discount: 0,
-          taxRate: 0,
-          totalPrice: quoteItem?.totalPrice || 0,
-          notes: prItem.notes,
-        };
-      });
-
       await tx.purchaseOrderItem.createMany({
-        data: poItems,
+        data: lines.map((line) => ({ ...line, purchaseOrderId: po.id })),
       });
 
       // Update PR status

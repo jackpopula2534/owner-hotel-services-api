@@ -6,10 +6,20 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '@/prisma/prisma.service';
 import { CreateGoodsReceiveDto } from './dto/create-goods-receive.dto';
+import {
+  CreateCashPurchaseDto,
+  CASH_PURCHASE_SLIP_FOLDER,
+} from './dto/create-cash-purchase.dto';
 import { QueryGoodsReceiveDto } from './dto/query-goods-receive.dto';
-import { InventoryLotStatus } from '@prisma/client';
+import {
+  InventoryLotStatus,
+  CashPaymentMethod,
+  GoodsReceiveAttachmentKind,
+} from '@prisma/client';
+import { StorageService } from '@/common/storage/storage.service';
 import {
   INVENTORY_EVENTS,
   GoodsReceiveCompletedEvent,
@@ -104,6 +114,81 @@ export interface GoodsReceiveDetail {
   inspectedBy?: string;
   inspectedAt?: Date;
   items?: any[];
+  /**
+   * How the goods arrived. CASH_PURCHASE receipts have no purchase order and
+   * never will, so the fields below carry what the PO would otherwise have
+   * answered: which shop, who paid, out of whose pocket.
+   */
+  source?: 'PURCHASE_ORDER' | 'CASH_PURCHASE';
+  vendorName?: string | null;
+  supplierId?: string | null;
+  paidBy?: string | null;
+  paidByName?: string | null;
+  paymentMethod?: string | null;
+  hasNoReceipt?: boolean;
+  purchaseRequisitionId?: string | null;
+  /**
+   * สลิป/รูปหลักฐานที่แนบไว้ ว่างเสมอสำหรับใบที่มา
+   * จาก PO เพราะเอกสารต้นทางตอบแทนได้อยู่แล้ว
+   */
+  attachments?: {
+    id: string;
+    kind: string;
+    url: string;
+    originalName: string | null;
+    mimeType: string;
+    sizeBytes: number;
+    uploadedBy: string;
+    uploadedByName?: string | null;
+    uploadedAt: Date;
+  }[];
+}
+
+/**
+ * Where a receipt came from, when it did not come from a purchase order.
+ *
+ * Kept internal to the service: `create()` accepts it as a separate argument
+ * rather than as DTO fields so that no ordinary caller can label its receipt a
+ * cash purchase. Only `createCashPurchase()`, which enforces the spend ceiling,
+ * is allowed to construct one.
+ */
+interface CashPurchaseProvenance {
+  source: 'CASH_PURCHASE';
+  vendorName: string | null;
+  supplierId: string | null;
+  paidBy: string;
+  paymentMethod: CashPaymentMethod;
+  hasNoReceipt: boolean;
+  purchaseRequisitionId: string | null;
+  /**
+   * ไฟล์ที่อัพไว้แล้ว รอผูกกับใบรับของ — เขียนใน transaction เดียวกับหัวใบ
+   * ถ้าใบพัง แถวแนบต้องไม่เหลือ และใบที่บันทึกสำเร็จต้องมีหลักฐานครบตามที่อ้าง
+   *
+   * ไม่ใช่คอลัมน์ของ GoodsReceive จึงถูกแยกออกก่อน spread ลง create()
+   */
+  slips: PreparedSlip[];
+}
+
+/**
+ * A person who can be named as having fronted the money for a market run.
+ *
+ * Deliberately id + display name only. This list exists so a form can offer a
+ * picker instead of a free-text box; it is not a user directory, and widening it
+ * would turn an inventory permission into a way to enumerate staff records.
+ */
+export interface CashPurchasePayer {
+  id: string;
+  name: string;
+}
+
+/** สลิปที่ผ่านการตรวจ key แล้ว พร้อมเขียนลงตาราง goods_receive_attachments */
+interface PreparedSlip {
+  kind: GoodsReceiveAttachmentKind;
+  storageKey: string;
+  url: string;
+  originalName: string | null;
+  mimeType: string;
+  sizeBytes: number;
 }
 
 @Injectable()
@@ -113,6 +198,8 @@ export class GoodsReceivesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly config: ConfigService,
+    private readonly storage: StorageService,
   ) {}
 
   /**
@@ -288,6 +375,8 @@ export class GoodsReceivesService {
           },
         },
         qcRecords: { select: { id: true } },
+        // เรียงตามเวลาที่แนบ เพื่อให้ลำดับสลิปตรงกับตอนที่ผู้ใช้เลือกไฟล์
+        attachments: { orderBy: { uploadedAt: 'asc' } },
       },
     });
 
@@ -323,23 +412,40 @@ export class GoodsReceivesService {
       : [];
     const lotMap = new Map(lots.map((l) => [l.id, l]));
 
-    // Resolve receiver + inspector display names so the UI doesn't render bare UUIDs.
-    const userMap = await this.resolveUserNames([receive.receivedBy, receive.inspectedBy]);
+    // Resolve receiver + inspector display names so the UI doesn't render bare
+    // UUIDs. `paidBy` matters most on a cash purchase: it names the person the
+    // hotel still owes money to.
+    const userMap = await this.resolveUserNames(
+      [
+        receive.receivedBy,
+        receive.inspectedBy,
+        receive.paidBy,
+        // คนแนบสลิปอาจไม่ใช่คนบันทึกใบ — เวลาตรวจย้อนต้องรู้ว่าใครเป็นคนเอาหลักฐานมาใส่
+        ...receive.attachments.map((a) => a.uploadedBy),
+      ],
+      tenantId,
+    );
 
     return this.mapToDetail(receive, { lotMap, userMap });
   }
 
   /**
    * Internal — resolve user UUIDs to display names (mirrors PurchaseOrdersService).
+   *
+   * Scoped by tenant on purpose. These IDs come off a stored row, and a stored
+   * row is not proof the ID belongs here — `paidBy` in particular is client-supplied.
+   * Without the filter, a receipt carrying another tenant's user ID would render
+   * that user's name and email back to whoever opens it.
    */
   private async resolveUserNames(
     userIds: (string | null | undefined)[],
+    tenantId: string,
   ): Promise<Map<string, string>> {
     const validIds = userIds.filter((id): id is string => !!id);
     if (validIds.length === 0) return new Map();
 
     const users = await this.prisma.user.findMany({
-      where: { id: { in: validIds } },
+      where: { id: { in: validIds }, tenantId },
       select: { id: true, firstName: true, lastName: true, email: true },
     });
 
@@ -367,6 +473,7 @@ export class GoodsReceivesService {
     dto: CreateGoodsReceiveDto,
     userId: string,
     tenantId: string,
+    provenance?: CashPurchaseProvenance,
   ): Promise<GoodsReceiveDetail> {
     if (!userId) {
       throw new BadRequestException('Authenticated user ID is required to create a goods receive');
@@ -377,6 +484,10 @@ export class GoodsReceivesService {
 
     let poStatusTransition: PurchaseOrderReceivedEvent | null = null;
     let grEventPayload: GoodsReceiveCompletedEvent | null = null;
+
+    // `slips` เป็นตารางลูก ไม่ใช่คอลัมน์ของ GoodsReceive — ต้องแยกออกก่อน
+    // spread ลง create() ไม่งั้น Prisma โยน validation error ทั้งใบ
+    const { slips: pendingSlips = [], ...provenanceColumns } = provenance ?? {};
 
     const detail = await this.prisma.$transaction(async (tx) => {
       // 1. Validate warehouse
@@ -445,8 +556,28 @@ export class GoodsReceivesService {
           status: 'DRAFT',
           notes: dto.notes,
           receivedBy: userId,
+          ...provenanceColumns,
         },
       });
+
+      // 5b. Attach the slips in the same transaction as the header. A receipt
+      // that says "slip attached" while the attachment write failed is worse
+      // than no slip at all — it looks verified and cannot be verified.
+      if (pendingSlips.length > 0) {
+        await tx.goodsReceiveAttachment.createMany({
+          data: pendingSlips.map((slip) => ({
+            goodsReceiveId: goodsReceive.id,
+            tenantId,
+            kind: slip.kind,
+            storageKey: slip.storageKey,
+            url: slip.url,
+            originalName: slip.originalName,
+            mimeType: slip.mimeType,
+            sizeBytes: slip.sizeBytes,
+            uploadedBy: userId,
+          })),
+        });
+      }
 
       // 6. Insert GR items (always — captures what was physically received).
       // Stock-writing side effects are deferred to `_applyAcceptance()`.
@@ -569,6 +700,238 @@ export class GoodsReceivesService {
     }
 
     return detail;
+  }
+
+  /**
+   * Record a purchase that has already happened — the market run.
+   *
+   * The procurement pipeline is built to commit before money moves: a
+   * requisition asks, an RFQ invites, a quote is compared, a PO commits, and
+   * only then does anything get received. A trip to the wet market runs the
+   * other way round. By the time the system hears about it the cash is gone and
+   * the goods are in the van, so there is nothing left to approve and no
+   * supplier who was ever going to send a quotation.
+   *
+   * Forcing that through the pipeline means fabricating an RFQ, quoting
+   * yourself, and backdating a PO for a ฿380 bag of chillies. Nobody does that
+   * — they simply carry the food into the kitchen and tell no one, which is how
+   * stock levels and food cost quietly stop being true. So this is a separate
+   * door that lands in the same place: a goods receipt with no purchase order.
+   *
+   * Everything downstream then works untouched, because none of it was ever
+   * looking at the PO. `create()` writes the stock movements and, when no QC
+   * template matches, accepts the receipt on the spot; `gr.completed` fires with
+   * `purchaseOrderId: null` and MaterialRequisitionListener keys off the
+   * warehouse and the item ids, so a kitchen requisition parked in WAITING_STOCK
+   * wakes up on a market run exactly as it would on a delivery.
+   *
+   * The one thing this path genuinely loses is the approval chain, so it is
+   * capped: past the ceiling the answer is "raise a requisition", which is the
+   * control the shortcut would otherwise route around.
+   */
+  async createCashPurchase(
+    dto: CreateCashPurchaseDto,
+    userId: string,
+    tenantId: string,
+  ): Promise<GoodsReceiveDetail> {
+    if (!userId) {
+      throw new BadRequestException('Authenticated user ID is required to record a cash purchase');
+    }
+    if (!tenantId) {
+      throw new BadRequestException('Tenant context is required to record a cash purchase');
+    }
+
+    const total = dto.items.reduce((sum, i) => sum + i.receivedQty * i.unitCost, 0);
+    const ceiling = this.cashPurchaseCeiling();
+    if (total > ceiling) {
+      throw new BadRequestException(
+        `ยอดซื้อสด ${total.toLocaleString('th-TH')} บาท เกินเพดานที่อนุญาต ` +
+          `${ceiling.toLocaleString('th-TH')} บาท — กรุณาเปิดใบขอซื้อเพื่อขออนุมัติตามปกติ`,
+      );
+    }
+
+    // Resolve the vendor before writing anything. A supplierId that belongs to
+    // another tenant must not become a receipt line, and a receipt that can name
+    // neither a supplier nor a shop is a record of nothing.
+    let vendorName = dto.vendorName?.trim() || null;
+    if (dto.supplierId) {
+      const supplier = await this.prisma.supplier.findFirst({
+        where: { id: dto.supplierId, tenantId, deletedAt: null },
+        select: { id: true, name: true },
+      });
+      if (!supplier) {
+        throw new NotFoundException(`Supplier with ID ${dto.supplierId} not found`);
+      }
+      // Snapshot the name so the receipt still reads correctly if the supplier
+      // is later renamed or removed.
+      vendorName = vendorName ?? supplier.name;
+    }
+    if (!vendorName) {
+      throw new BadRequestException('ต้องระบุร้าน/ตลาดที่ซื้อ หรือเลือกซัพพลายเออร์ในระบบ');
+    }
+
+    // Same for the requisition: pointing a receipt at another tenant's document
+    // would leak its existence, and closing it would be worse.
+    if (dto.purchaseRequisitionId) {
+      const pr = await this.prisma.purchaseRequisition.findFirst({
+        where: { id: dto.purchaseRequisitionId, tenantId },
+        select: { id: true },
+      });
+      if (!pr) {
+        throw new NotFoundException(
+          `Purchase Requisition with ID ${dto.purchaseRequisitionId} not found`,
+        );
+      }
+    }
+
+    // Same again for the payer. `paidBy` is client-supplied and the column has no
+    // foreign key, so "it is a UUID" is all the DTO can promise. On OWN_MONEY this
+    // field is the hotel's record of who it owes money to — pointing it at a user
+    // outside the tenant would both misdirect the reimbursement and expose that
+    // user's name on the receipt.
+    if (dto.paidBy) {
+      const payer = await this.prisma.user.findFirst({
+        where: { id: dto.paidBy, tenantId },
+        select: { id: true },
+      });
+      if (!payer) {
+        throw new NotFoundException(`User with ID ${dto.paidBy} not found`);
+      }
+    }
+
+    const slips = this.prepareSlips(dto.slips, tenantId);
+
+    const detail = await this.create(
+      {
+        warehouseId: dto.warehouseId,
+        invoiceNumber: dto.invoiceNumber,
+        invoiceDate: dto.purchaseDate,
+        notes: dto.notes,
+        items: dto.items.map((i) => ({
+          itemId: i.itemId,
+          receivedQty: i.receivedQty,
+          unitCost: i.unitCost,
+          expiryDate: i.expiryDate,
+          notes: i.notes,
+        })),
+      } as CreateGoodsReceiveDto,
+      userId,
+      tenantId,
+      {
+        source: 'CASH_PURCHASE',
+        vendorName,
+        supplierId: dto.supplierId ?? null,
+        // Whoever fronted the money, not whoever typed the form — the
+        // housekeeper who went to the market is usually not the one recording it.
+        paidBy: dto.paidBy ?? userId,
+        paymentMethod: dto.paymentMethod,
+        hasNoReceipt: dto.hasNoReceipt ?? false,
+        purchaseRequisitionId: dto.purchaseRequisitionId ?? null,
+        slips,
+      },
+    );
+
+    // Closing the requisition is deliberately last and deliberately non-fatal:
+    // the goods are already on the shelf and the movements are committed, so
+    // failing the whole call over a status flag would report a purchase that
+    // did not happen. A requisition left open is visible and fixable; stock that
+    // silently went missing is not.
+    if (dto.purchaseRequisitionId && dto.closePurchaseRequisition) {
+      try {
+        await this.prisma.purchaseRequisition.updateMany({
+          where: {
+            id: dto.purchaseRequisitionId,
+            tenantId,
+            status: { notIn: ['CANCELLED', 'CLOSED'] },
+          },
+          data: { status: 'CLOSED' },
+        });
+      } catch (err) {
+        this.logger.error(
+          `Cash purchase ${detail.grNumber} landed but PR ${dto.purchaseRequisitionId} ` +
+            `could not be closed: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    this.logger.log(
+      `Cash purchase ${detail.grNumber} recorded for tenant ${tenantId} — ` +
+        `${vendorName}, ${total} THB, paid via ${dto.paymentMethod}`,
+    );
+
+    return detail;
+  }
+
+  /**
+   * ตรวจสลิปที่ client ส่ง key กลับมา ก่อนยอมผูกเข้ากับใบรับของ
+   *
+   * ชื่อไฟล์เดาไม่ได้ก็จริง (timestamp + random) แต่ "เดายาก" ไม่ใช่การควบคุมสิทธิ์
+   * key ถูกวางไว้ใต้โฟลเดอร์ของแต่ละ tenant ตอนอัพ ตรงนี้จึงบังคับว่า key ที่ส่งมา
+   * ต้องอยู่ใต้โฟลเดอร์ของคนเรียกเท่านั้น — ไม่งั้นสลิปของโรงแรมอื่นกลายเป็น
+   * หลักฐานการจ่ายเงินของเราได้
+   *
+   * URL ประกอบจาก key ฝั่ง server เสมอ ไม่รับจาก client เพราะฟิลด์นี้จะถูกเอาไป
+   * render เป็นรูปในหน้ารายละเอียด
+   */
+  private prepareSlips(
+    slips: CreateCashPurchaseDto['slips'],
+    tenantId: string,
+  ): PreparedSlip[] {
+    if (!slips?.length) return [];
+
+    const allowedPrefix = `${CASH_PURCHASE_SLIP_FOLDER}/${tenantId}/`;
+
+    return slips.map((slip) => {
+      const key = slip.storageKey.trim();
+      if (!key.startsWith(allowedPrefix) || key.includes('..')) {
+        throw new BadRequestException(
+          'ไฟล์แนบไม่ถูกต้อง — กรุณาอัพโหลดสลิปใหม่อีกครั้ง',
+        );
+      }
+      return {
+        kind: slip.kind ?? GoodsReceiveAttachmentKind.SLIP,
+        storageKey: key,
+        url: this.storage.publicPath(key),
+        originalName: slip.originalName?.trim() || null,
+        mimeType: slip.mimeType,
+        sizeBytes: slip.sizeBytes,
+      };
+    });
+  }
+
+  /**
+   * People who can be named as having fronted the money.
+   *
+   * `paidBy` is a user reference, so the form has to offer real accounts — a typed
+   * name cannot be paid back, and until this existed the field asked for one and
+   * then rejected it. Active users only: naming a deactivated account as the person
+   * owed money is a reimbursement nobody will chase.
+   */
+  async listCashPurchasePayers(tenantId: string): Promise<CashPurchasePayer[]> {
+    const users = await this.prisma.user.findMany({
+      where: { tenantId, status: 'active' },
+      select: { id: true, firstName: true, lastName: true, email: true },
+      orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+    });
+
+    return users.map((u) => ({
+      id: u.id,
+      name: [u.firstName, u.lastName].filter(Boolean).join(' ') || u.email,
+    }));
+  }
+
+  /**
+   * Ceiling for a single cash purchase, in baht.
+   *
+   * A tenant-level setting is the right long-term home for this — a resort and
+   * a hostel do not share a sensible limit — but a deployment-wide default is
+   * what stops the shortcut being a way around approvals today, and a limit that
+   * exists is worth more than a configurable one that does not.
+   */
+  private cashPurchaseCeiling(): number {
+    const raw = this.config.get<string>('CASH_PURCHASE_MAX_AMOUNT');
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 5000;
   }
 
   /**
@@ -1244,6 +1607,31 @@ export class GoodsReceivesService {
             address: receive.purchaseOrder.supplier.address,
             taxId: receive.purchaseOrder.supplier.taxId,
           }
+        : undefined,
+      // Cash-purchase provenance. On a PO-backed receipt these are all empty and
+      // the supplier block above answers "who did we buy from" instead.
+      source: receive.source ?? 'PURCHASE_ORDER',
+      vendorName: receive.vendorName ?? null,
+      supplierId: receive.supplierId ?? null,
+      paidBy: receive.paidBy ?? null,
+      paidByName: receive.paidBy ? (userMap.get(receive.paidBy) ?? null) : null,
+      paymentMethod: receive.paymentMethod ?? null,
+      hasNoReceipt: receive.hasNoReceipt ?? false,
+      purchaseRequisitionId: receive.purchaseRequisitionId ?? null,
+      // list endpoint ไม่ include attachments — ปล่อยเป็น undefined ดีกว่าคืน []
+      // เพราะ [] อ่านได้ว่า "ตรวจแล้วไม่มีสลิป" ซึ่งไม่จริง
+      attachments: Array.isArray(receive.attachments)
+        ? receive.attachments.map((a: any) => ({
+            id: a.id,
+            kind: a.kind,
+            url: a.url,
+            originalName: a.originalName ?? null,
+            mimeType: a.mimeType,
+            sizeBytes: a.sizeBytes,
+            uploadedBy: a.uploadedBy,
+            uploadedByName: userMap.get(a.uploadedBy) ?? null,
+            uploadedAt: a.uploadedAt,
+          }))
         : undefined,
       warehouseId: receive.warehouseId,
       warehouseName: receive.warehouse?.name,

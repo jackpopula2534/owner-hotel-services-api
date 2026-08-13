@@ -32,6 +32,7 @@
     "migration:show:prod": "typeorm migration:show -d dist/config/data-source.js",
     "seed": "ts-node -r tsconfig-paths/register src/seeder/seed.ts",
     "seed:check": "ts-node -r tsconfig-paths/register scripts/check-restaurant-seed.ts",
+    "cleanup:phantom-orders": "ts-node -r tsconfig-paths/register scripts/cleanup-phantom-order-tickets.ts",
     "seed:backfill-scheduled": "ts-node -r tsconfig-paths/register src/seeder/backfill-scheduled-times.ts",
     "db:refresh": "ts-node -r tsconfig-paths/register src/seeder/refresh-seed.ts",
     "prisma:generate": "prisma generate",

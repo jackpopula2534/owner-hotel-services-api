@@ -4790,7 +4790,11 @@ export class SeederService {
       openTime?: string;
       closeTime?: string;
     }) => {
-      const existing = await this.prisma.restaurant.findUnique({ where: { code: data.code } });
+      // Codes are unique per tenant now, so the lookup has to name the tenant
+      // too — otherwise seeding a second tenant would find the first one's row.
+      const existing = await this.prisma.restaurant.findFirst({
+        where: { code: data.code, tenantId },
+      });
       if (existing) return existing;
       return this.prisma.restaurant.create({
         data: {

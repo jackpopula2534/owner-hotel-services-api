@@ -1,4 +1,4 @@
-import { IsDateString, IsEnum, IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
+import { IsDateString, IsEnum, IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { ReservationStatusEnum } from './update-reservation.dto';
@@ -39,6 +39,14 @@ export class QueryReservationsDto {
   @IsEnum(ReservationStatusEnum)
   @IsOptional()
   status?: ReservationStatusEnum;
+
+  @ApiPropertyOptional({
+    description:
+      'Only bookings for this table. With `status=SEATED` this answers "which party is sitting here right now?", which is what the POS needs before it opens a bill.',
+  })
+  @IsString()
+  @IsOptional()
+  tableId?: string;
 
   @ApiPropertyOptional({ enum: ReservationSortEnum, default: ReservationSortEnum.SCHEDULE })
   @IsIn(Object.values(ReservationSortEnum))

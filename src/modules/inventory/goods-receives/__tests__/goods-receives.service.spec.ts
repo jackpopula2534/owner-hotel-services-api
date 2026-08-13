@@ -1,8 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ConfigService } from '@nestjs/config';
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { GoodsReceivesService } from '../goods-receives.service';
 import { PrismaService } from '@/prisma/prisma.service';
+import { StorageService } from '@/common/storage/storage.service';
 import type { CreateGoodsReceiveDto } from '../dto/create-goods-receive.dto';
+import type { CreateCashPurchaseDto } from '../dto/create-cash-purchase.dto';
 
 /**
  * Unit tests covering every branch of GoodsReceivesService.create:
@@ -46,6 +49,7 @@ describe('GoodsReceivesService', () => {
       inventoryLotInserts: [] as any[],
       warehouseStockUpserts: [] as any[],
       qcRecordsInserted: [] as any[],
+      attachmentsInserted: [] as any[],
     };
 
     const warehouseRow = { id: warehouseId, tenantId, name: 'คลังกลาง' };
@@ -86,6 +90,14 @@ describe('GoodsReceivesService', () => {
       $transaction: jest.fn((fn: any) => fn(mockPrisma)),
       warehouse: {
         findFirst: jest.fn().mockResolvedValue(warehouseRow),
+      },
+      // `paidBy` is client-supplied and must be a user inside this tenant.
+      // Default: anyone named exists. Tests that probe the guard override it.
+      user: {
+        findFirst: jest
+          .fn()
+          .mockImplementation(({ where }: any) => ({ id: where.id, tenantId: where.tenantId })),
+        findMany: jest.fn().mockResolvedValue([]),
       },
       purchaseOrder: {
         findFirst: jest.fn().mockResolvedValue(poRow),
@@ -130,6 +142,12 @@ describe('GoodsReceivesService', () => {
             Object.assign(state.grInserted, data);
           }
           return { ...state.grInserted };
+        }),
+      },
+      goodsReceiveAttachment: {
+        createMany: jest.fn().mockImplementation(({ data }: any) => {
+          state.attachmentsInserted.push(...data);
+          return { count: data.length };
         }),
       },
       goodsReceiveItem: {
@@ -199,6 +217,17 @@ describe('GoodsReceivesService', () => {
   // can be satisfied — a no-op emit() mock is enough.
   const mockEventEmitter = { emit: jest.fn() };
 
+  // Only ever asked for CASH_PURCHASE_MAX_AMOUNT. Returning undefined exercises
+  // the built-in ฿5,000 fallback, which is what an unconfigured deployment gets.
+  const mockConfig = { get: jest.fn().mockReturnValue(undefined) };
+
+  // Slips only ever need a key → URL translation here; the real driver choice
+  // (local vs S3) is StorageService's own concern, not this service's.
+  const mockStorage = {
+    publicPath: jest.fn((key: string) => `/uploads/${key}`),
+    saveMany: jest.fn(),
+  };
+
   beforeEach(async () => {
     buildMock();
     mockEventEmitter.emit.mockClear();
@@ -210,6 +239,8 @@ describe('GoodsReceivesService', () => {
         GoodsReceivesService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: EventEmitter2, useValue: mockEventEmitter },
+        { provide: ConfigService, useValue: mockConfig },
+        { provide: StorageService, useValue: mockStorage },
       ],
     }).compile();
     service = moduleRef.get(GoodsReceivesService);
@@ -789,6 +820,363 @@ describe('GoodsReceivesService', () => {
       await expect(service.inspect('g1', userId, tenantId, 'INSPECTING')).rejects.toBeInstanceOf(
         NotFoundException,
       );
+    });
+  });
+
+  // ─── บันทึกซื้อสด — the market run ────────────────────────────────────────
+  describe('createCashPurchase', () => {
+    const cashDto = (overrides?: Partial<CreateCashPurchaseDto>): CreateCashPurchaseDto => ({
+      warehouseId,
+      vendorName: 'ตลาดสดบางกะปิ',
+      paymentMethod: 'OWN_MONEY' as CreateCashPurchaseDto['paymentMethod'],
+      items: [{ itemId: itemNonPerishable, receivedQty: 5, unitCost: 100 }],
+      ...overrides,
+    });
+
+    beforeEach(() => {
+      mockPrisma.supplier = { findFirst: jest.fn().mockResolvedValue(null) };
+      mockPrisma.purchaseRequisition = {
+        findFirst: jest.fn().mockResolvedValue({ id: 'pr-1' }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      };
+    });
+
+    it('writes stock through a receipt that has no purchase order', async () => {
+      await service.createCashPurchase(cashDto(), userId, tenantId);
+
+      expect(mockPrisma.purchaseOrder.findFirst).not.toHaveBeenCalled();
+      expect(mockPrisma.__state.grInserted.purchaseOrderId).toBeUndefined();
+      expect(mockPrisma.__state.grInserted.source).toBe('CASH_PURCHASE');
+      // The whole point: the goods actually land on the shelf.
+      expect(mockPrisma.stockMovement.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('emits gr.completed so a requisition waiting on stock can wake up', async () => {
+      await service.createCashPurchase(cashDto(), userId, tenantId);
+
+      const [event, payload] = mockEventEmitter.emit.mock.calls[0];
+      expect(event).toBe('gr.completed');
+      // MaterialRequisitionListener keys off warehouse + items, never the PO —
+      // which is exactly why a market run releases WAITING_STOCK for free.
+      expect(payload.purchaseOrderId).toBeNull();
+      expect(payload.warehouseId).toBe(warehouseId);
+      expect(payload.items[0].itemId).toBe(itemNonPerishable);
+    });
+
+    it('records who fronted the money, not who typed the form', async () => {
+      await service.createCashPurchase(cashDto({ paidBy: 'housekeeper-007' }), userId, tenantId);
+
+      expect(mockPrisma.__state.grInserted.paidBy).toBe('housekeeper-007');
+      expect(mockPrisma.__state.grInserted.paymentMethod).toBe('OWN_MONEY');
+    });
+
+    it('falls back to the recorder only when nobody else is named', async () => {
+      await service.createCashPurchase(cashDto(), userId, tenantId);
+
+      expect(mockPrisma.__state.grInserted.paidBy).toBe(userId);
+    });
+
+    /**
+     * `paidBy` has no foreign key and the DTO can only promise "shaped like a
+     * UUID". On OWN_MONEY it is the record of who the hotel owes money to, so
+     * an ID from outside the tenant would both misdirect a reimbursement and
+     * surface that user's name on the receipt.
+     */
+    it('refuses a payer from another tenant', async () => {
+      mockPrisma.user.findFirst.mockResolvedValueOnce(null);
+
+      await expect(
+        service.createCashPurchase(
+          cashDto({ paidBy: '11111111-2222-3333-4444-555555555555' }),
+          userId,
+          tenantId,
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(mockPrisma.goodsReceive.create).not.toHaveBeenCalled();
+    });
+
+    it('scopes the payer lookup to this tenant', async () => {
+      await service.createCashPurchase(cashDto({ paidBy: 'housekeeper-007' }), userId, tenantId);
+
+      expect(mockPrisma.user.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'housekeeper-007', tenantId } }),
+      );
+    });
+
+    it('skips the lookup entirely when nobody is named', async () => {
+      await service.createCashPurchase(cashDto(), userId, tenantId);
+
+      expect(mockPrisma.user.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('refuses a purchase over the ceiling instead of routing around approval', async () => {
+      mockConfig.get.mockReturnValueOnce('5000');
+
+      await expect(
+        service.createCashPurchase(
+          cashDto({ items: [{ itemId: itemNonPerishable, receivedQty: 100, unitCost: 100 }] }),
+          userId,
+          tenantId,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      // Nothing was written — a rejected purchase must not leave stock behind.
+      expect(mockPrisma.goodsReceive.create).not.toHaveBeenCalled();
+    });
+
+    it('honours a configured ceiling over the built-in default', async () => {
+      mockConfig.get.mockReturnValueOnce('100');
+
+      await expect(service.createCashPurchase(cashDto(), userId, tenantId)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+    });
+
+    it('rejects a receipt that can name neither a supplier nor a shop', async () => {
+      await expect(
+        service.createCashPurchase(cashDto({ vendorName: '   ' }), userId, tenantId),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('snapshots the supplier name so a later rename cannot rewrite history', async () => {
+      mockPrisma.supplier.findFirst = jest
+        .fn()
+        .mockResolvedValue({ id: 'sup-1', name: 'ร้านนายใหม่' });
+
+      await service.createCashPurchase(
+        cashDto({ vendorName: undefined, supplierId: 'sup-1' }),
+        userId,
+        tenantId,
+      );
+
+      expect(mockPrisma.__state.grInserted.vendorName).toBe('ร้านนายใหม่');
+      expect(mockPrisma.__state.grInserted.supplierId).toBe('sup-1');
+    });
+
+    it("will not attach another tenant's supplier", async () => {
+      mockPrisma.supplier.findFirst = jest.fn().mockResolvedValue(null);
+
+      await expect(
+        service.createCashPurchase(cashDto({ supplierId: 'sup-other' }), userId, tenantId),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it("will not attach another tenant's requisition", async () => {
+      mockPrisma.purchaseRequisition.findFirst = jest.fn().mockResolvedValue(null);
+
+      await expect(
+        service.createCashPurchase(cashDto({ purchaseRequisitionId: 'pr-other' }), userId, tenantId),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('closes the requisition only when asked to', async () => {
+      await service.createCashPurchase(
+        cashDto({ purchaseRequisitionId: 'pr-1' }),
+        userId,
+        tenantId,
+      );
+      expect(mockPrisma.purchaseRequisition.updateMany).not.toHaveBeenCalled();
+
+      await service.createCashPurchase(
+        cashDto({ purchaseRequisitionId: 'pr-1', closePurchaseRequisition: true }),
+        userId,
+        tenantId,
+      );
+      const { where, data } = mockPrisma.purchaseRequisition.updateMany.mock.calls[0][0];
+      expect(where).toMatchObject({ id: 'pr-1', tenantId });
+      expect(data.status).toBe('CLOSED');
+      // A cancelled requisition must not be resurrected into CLOSED.
+      expect(where.status).toEqual({ notIn: ['CANCELLED', 'CLOSED'] });
+    });
+
+    // ─── สลิป / หลักฐานการจ่ายเงิน ──────────────────────────────────────────
+    describe('แนบสลิป', () => {
+      const slip = (overrides?: Record<string, unknown>) => ({
+        storageKey: `cash-purchase-slips/${tenantId}/slip-1-2.jpg`,
+        originalName: 'IMG_2043.jpg',
+        mimeType: 'image/jpeg',
+        sizeBytes: 348122,
+        ...overrides,
+      });
+
+      it('ผูกสลิปกับใบรับของ พร้อมบันทึกว่าใครเป็นคนแนบ', async () => {
+        await service.createCashPurchase(
+          cashDto({ slips: [slip()] as CreateCashPurchaseDto['slips'] }),
+          userId,
+          tenantId,
+        );
+
+        const [row] = mockPrisma.__state.attachmentsInserted;
+        expect(mockPrisma.__state.attachmentsInserted).toHaveLength(1);
+        expect(row).toMatchObject({
+          tenantId,
+          kind: 'SLIP',
+          storageKey: `cash-purchase-slips/${tenantId}/slip-1-2.jpg`,
+          originalName: 'IMG_2043.jpg',
+          uploadedBy: userId,
+        });
+        expect(row.goodsReceiveId).toBe(mockPrisma.__state.grInserted.id);
+      });
+
+      it('ประกอบ URL เองจาก key ไม่รับ URL จาก client', async () => {
+        await service.createCashPurchase(
+          cashDto({
+            slips: [slip({ url: 'https://evil.example.com/tracker.png' })] as any,
+          }),
+          userId,
+          tenantId,
+        );
+
+        // ฟิลด์นี้ถูกเอาไป render เป็น <img> — ถ้าเชื่อ client ตรง ๆ ใครก็ฝัง
+        // ลิงก์ภายนอกลงใน "หลักฐานการจ่ายเงิน" ได้
+        expect(mockStorage.publicPath).toHaveBeenCalledWith(
+          `cash-purchase-slips/${tenantId}/slip-1-2.jpg`,
+        );
+        expect(mockPrisma.__state.attachmentsInserted[0].url).toBe(
+          `/uploads/cash-purchase-slips/${tenantId}/slip-1-2.jpg`,
+        );
+      });
+
+      it('ปฏิเสธ key ที่อยู่นอกโฟลเดอร์ของ tenant ตัวเอง', async () => {
+        await expect(
+          service.createCashPurchase(
+            cashDto({
+              slips: [
+                slip({ storageKey: 'cash-purchase-slips/tenant-999/slip-1-2.jpg' }),
+              ] as CreateCashPurchaseDto['slips'],
+            }),
+            userId,
+            tenantId,
+          ),
+        ).rejects.toBeInstanceOf(BadRequestException);
+
+        // ต้องตายก่อนเขียนอะไรลง DB — ไม่ใช่ได้ใบรับของแล้วค่อยพบว่าสลิปแปลกปลอม
+        expect(mockPrisma.goodsReceive.create).not.toHaveBeenCalled();
+      });
+
+      it('ปฏิเสธ key ที่พยายามไต่ออกนอกโฟลเดอร์', async () => {
+        await expect(
+          service.createCashPurchase(
+            cashDto({
+              slips: [
+                slip({ storageKey: `cash-purchase-slips/${tenantId}/../../secrets.pdf` }),
+              ] as CreateCashPurchaseDto['slips'],
+            }),
+            userId,
+            tenantId,
+          ),
+        ).rejects.toBeInstanceOf(BadRequestException);
+      });
+
+      it('รับ PHOTO ได้ด้วย สำหรับร้านที่ไม่ออกใบเสร็จ', async () => {
+        await service.createCashPurchase(
+          cashDto({
+            hasNoReceipt: true,
+            slips: [slip({ kind: 'PHOTO' })] as CreateCashPurchaseDto['slips'],
+          }),
+          userId,
+          tenantId,
+        );
+
+        expect(mockPrisma.__state.attachmentsInserted[0].kind).toBe('PHOTO');
+        expect(mockPrisma.__state.grInserted.hasNoReceipt).toBe(true);
+      });
+
+      it('ไม่แตะตารางไฟล์แนบเลยถ้าไม่ได้แนบอะไรมา', async () => {
+        await service.createCashPurchase(cashDto(), userId, tenantId);
+
+        expect(mockPrisma.goodsReceiveAttachment.createMany).not.toHaveBeenCalled();
+      });
+
+      it('slips ไม่หลุดไปเป็นคอลัมน์ของ GoodsReceive', async () => {
+        await service.createCashPurchase(
+          cashDto({ slips: [slip()] as CreateCashPurchaseDto['slips'] }),
+          userId,
+          tenantId,
+        );
+
+        // provenance ถูก spread ลง goodsReceive.create ตรง ๆ — ถ้าลืมแยก slips ออก
+        // Prisma จะโยน validation error ทั้งใบตอนรันจริง แต่ mock จะกลืนเงียบ ๆ
+        expect(mockPrisma.__state.grInserted).not.toHaveProperty('slips');
+      });
+    });
+
+    it('keeps the goods even if closing the requisition fails', async () => {
+      mockPrisma.purchaseRequisition.updateMany = jest
+        .fn()
+        .mockRejectedValue(new Error('deadlock'));
+
+      // The stock is already committed at this point; throwing here would
+      // report a purchase that did happen as one that did not.
+      await expect(
+        service.createCashPurchase(
+          cashDto({ purchaseRequisitionId: 'pr-1', closePurchaseRequisition: true }),
+          userId,
+          tenantId,
+        ),
+      ).resolves.toBeDefined();
+    });
+  });
+
+  /**
+   * รายชื่อคนที่เลือกเป็น "คนออกเงิน" ได้
+   *
+   * มีอยู่เพราะ `paidBy` เป็น user id ไม่ใช่ชื่อ — ฟอร์มจึงต้องมีรายชื่อให้เลือก
+   * แต่รายชื่อผู้ใช้เป็นข้อมูลที่ไม่ควรรั่วข้าม tenant และไม่ควรกลายเป็นทะเบียนพนักงาน
+   */
+  describe('listCashPurchasePayers', () => {
+    it('คืนเฉพาะคนใน tenant ตัวเอง และเฉพาะที่ยัง active', async () => {
+      mockPrisma.user.findMany.mockResolvedValueOnce([]);
+
+      await service.listCashPurchasePayers(tenantId);
+
+      expect(mockPrisma.user.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { tenantId, status: 'active' } }),
+      );
+    });
+
+    it('คืนแค่ id กับชื่อ ไม่ติดอีเมลหรือ role ออกไปด้วย', async () => {
+      mockPrisma.user.findMany.mockResolvedValueOnce([
+        { id: 'u-1', firstName: 'สมชาย', lastName: 'ใจดี', email: 'somchai@hotel.test' },
+      ]);
+
+      const payers = await service.listCashPurchasePayers(tenantId);
+
+      expect(payers).toEqual([{ id: 'u-1', name: 'สมชาย ใจดี' }]);
+    });
+
+    it('ไม่มีชื่อก็ใช้อีเมลแทน — ตัวเลือกที่ว่างเปล่าเลือกไม่ถูก', async () => {
+      mockPrisma.user.findMany.mockResolvedValueOnce([
+        { id: 'u-2', firstName: null, lastName: null, email: 'store@hotel.test' },
+      ]);
+
+      expect((await service.listCashPurchasePayers(tenantId))[0].name).toBe('store@hotel.test');
+    });
+  });
+
+  /**
+   * ชื่อที่ขึ้นบนใบรับของ
+   *
+   * id พวกนี้อ่านมาจากแถวที่เก็บไว้ ซึ่งไม่ใช่หลักฐานว่ามันเป็นของ tenant นี้ —
+   * `paidBy` มาจาก client โดยตรง ถ้าไม่กรอง tenant ใบที่ถือ id ของ tenant อื่น
+   * จะ render ชื่อและอีเมลของคนนั้นกลับมาให้คนที่เปิดดู
+   */
+  describe('resolveUserNames', () => {
+    it('กรองด้วย tenantId เสมอ', async () => {
+      mockPrisma.user.findMany.mockResolvedValueOnce([]);
+
+      await (service as any).resolveUserNames(['u-1', null, 'u-2'], tenantId);
+
+      expect(mockPrisma.user.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: { in: ['u-1', 'u-2'] }, tenantId } }),
+      );
+    });
+
+    it('ไม่มี id ให้แปลก็ไม่ต้องยิง query', async () => {
+      await (service as any).resolveUserNames([null, undefined], tenantId);
+
+      expect(mockPrisma.user.findMany).not.toHaveBeenCalled();
     });
   });
 });

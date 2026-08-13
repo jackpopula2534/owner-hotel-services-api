@@ -104,31 +104,58 @@ export class RestaurantService {
       throw new BadRequestException('Tenant ID is required');
     }
 
-    // Auto-generate code if not provided
-    if (!createRestaurantDto.code) {
-      const count = await this.prisma.restaurant.count({ where: { tenantId } });
-      createRestaurantDto.code = `RES-${String(count + 1).padStart(3, '0')}`;
-    }
+    const code = createRestaurantDto.code || (await this.nextCode(tenantId));
 
     const existing = await this.prisma.restaurant.findFirst({
-      where: { code: createRestaurantDto.code, tenantId },
+      where: { code, tenantId },
     });
 
     if (existing) {
-      throw new BadRequestException(
-        `Restaurant with code '${createRestaurantDto.code}' already exists`,
-      );
+      throw new BadRequestException(`มีร้านอาหารรหัส '${code}' อยู่แล้ว`);
     }
 
     const { layoutData, ...rest } = createRestaurantDto;
 
-    return (this.prisma.restaurant as any).create({
-      data: {
-        ...rest,
-        tenantId,
-        ...(layoutData !== undefined && { layoutData: layoutData as any }),
-      },
+    try {
+      return await (this.prisma.restaurant as any).create({
+        data: {
+          ...rest,
+          code,
+          tenantId,
+          ...(layoutData !== undefined && { layoutData: layoutData as any }),
+        },
+      });
+    } catch (error) {
+      // Two people creating at once land on the same generated code. The check
+      // above cannot see that, so translate the constraint rather than letting
+      // `restaurants_tenantId_code_key` reach the screen.
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new BadRequestException(`มีร้านอาหารรหัส '${code}' อยู่แล้ว กรุณาลองใหม่อีกครั้ง`);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Next free `RES-###` for this tenant. Counts up from the highest code in
+   * use rather than from how many restaurants exist — deleting one used to
+   * make the generator hand out a number that was already taken.
+   */
+  private async nextCode(tenantId: string): Promise<string> {
+    const taken = await this.prisma.restaurant.findMany({
+      where: { tenantId },
+      select: { code: true },
     });
+
+    const highest = taken.reduce((max, row) => {
+      const match = /^RES-(\d+)$/.exec(row.code ?? '');
+      return match ? Math.max(max, Number(match[1])) : max;
+    }, 0);
+
+    return `RES-${String(highest + 1).padStart(3, '0')}`;
   }
 
   async update(id: string, updateRestaurantDto: UpdateRestaurantDto, tenantId?: string) {

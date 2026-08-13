@@ -78,6 +78,7 @@ const makePrismaMock = () => ({
     findFirst: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn(),
     delete: jest.fn(),
     count: jest.fn(),
   },
@@ -536,6 +537,142 @@ describe('ReservationService', () => {
       await expect(
         reservationService.markAsNoShow(RESTAURANT_ID, 'rsv-1', TENANT_ID),
       ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('seat', () => {
+    const confirmed = {
+      ...mockReservation,
+      status: 'CONFIRMED',
+      table: { id: 'tbl-1', status: 'RESERVED', tableNumber: 'T01' },
+    };
+
+    beforeEach(() => {
+      prismaMock.tableReservation.findFirst.mockResolvedValue(confirmed);
+      prismaMock.tableReservation.update.mockResolvedValue({ ...confirmed, status: 'SEATED' });
+      prismaMock.restaurantTable.update.mockResolvedValue({ id: 'tbl-1', status: 'OCCUPIED' });
+    });
+
+    it('seats the party without opening a bill', async () => {
+      // Seating used to open an item-less DINE_IN order, which then sat on the
+      // kitchen display as a ticket with nothing to cook.
+      prismaMock.order.findFirst.mockResolvedValue(null);
+
+      const result = await reservationService.seat(RESTAURANT_ID, 'rsv-1', TENANT_ID);
+
+      expect(prismaMock.order.create).not.toHaveBeenCalled();
+      expect(result.order).toBeNull();
+      expect(prismaMock.restaurantTable.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: 'OCCUPIED' } }),
+      );
+    });
+
+    it('adopts a bill already open on the table instead of creating another', async () => {
+      // A walk-in bill was opened on this table before the booking was seated.
+      prismaMock.order.findFirst.mockResolvedValue({ id: 'ord-1', reservationId: null });
+      prismaMock.order.update.mockResolvedValue({ id: 'ord-1', reservationId: 'rsv-1' });
+
+      const result = await reservationService.seat(RESTAURANT_ID, 'rsv-1', TENANT_ID);
+
+      expect(prismaMock.order.create).not.toHaveBeenCalled();
+      expect(prismaMock.order.update).toHaveBeenCalledWith({
+        where: { id: 'ord-1' },
+        data: { reservationId: 'rsv-1' },
+      });
+      expect(result.order).toMatchObject({ id: 'ord-1', reservationId: 'rsv-1' });
+    });
+
+    it('leaves a bill that belongs to another booking alone', async () => {
+      prismaMock.order.findFirst.mockResolvedValue({ id: 'ord-9', reservationId: 'rsv-other' });
+
+      const result = await reservationService.seat(RESTAURANT_ID, 'rsv-1', TENANT_ID);
+
+      expect(prismaMock.order.update).not.toHaveBeenCalled();
+      expect(result.order).toBeNull();
+    });
+  });
+
+  describe('update to COMPLETED', () => {
+    const seated = {
+      ...mockReservation,
+      status: 'SEATED',
+      table: { id: 'tbl-1', status: 'OCCUPIED', tableNumber: 'T01' },
+    };
+    const complete = () =>
+      reservationService.update(
+        RESTAURANT_ID,
+        'rsv-1',
+        { status: 'COMPLETED' as never },
+        TENANT_ID,
+      );
+
+    beforeEach(() => {
+      prismaMock.tableReservation.findFirst.mockResolvedValue(seated);
+    });
+
+    it('blocks the close and names the unpaid bill', async () => {
+      prismaMock.order.findMany.mockResolvedValue([
+        {
+          id: 'ord-1',
+          orderNumber: 'ORD-20260811-0001',
+          total: 1250,
+          paymentStatus: 'UNPAID',
+          _count: { items: 3 },
+        },
+      ]);
+
+      await expect(complete()).rejects.toThrow(/ORD-20260811-0001/);
+      // Nothing may be written — the booking stays open until the money is in.
+      expect(prismaMock.tableReservation.update).not.toHaveBeenCalled();
+      expect(prismaMock.restaurantTable.update).not.toHaveBeenCalled();
+    });
+
+    it('cancels leftover item-less bills and sends the table to cleaning', async () => {
+      prismaMock.order.findMany.mockResolvedValue([
+        {
+          id: 'ord-empty',
+          orderNumber: 'ORD-20260811-0002',
+          total: 0,
+          paymentStatus: 'UNPAID',
+          _count: { items: 0 },
+        },
+      ]);
+      prismaMock.order.count.mockResolvedValue(0); // nothing real left on the table
+      prismaMock.order.updateMany.mockResolvedValue({ count: 1 });
+      prismaMock.tableReservation.update.mockResolvedValue({ ...seated, status: 'COMPLETED' });
+      prismaMock.restaurantTable.update.mockResolvedValue({ id: 'tbl-1', status: 'CLEANING' });
+
+      const result = await complete();
+
+      expect(prismaMock.order.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: { in: ['ord-empty'] } },
+          data: expect.objectContaining({ status: 'CANCELLED' }),
+        }),
+      );
+      expect(prismaMock.restaurantTable.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: 'CLEANING' } }),
+      );
+      expect(result.status).toBe('COMPLETED');
+    });
+
+    it('keeps the table occupied when another party is still on it', async () => {
+      prismaMock.order.findMany.mockResolvedValue([
+        {
+          id: 'ord-1',
+          orderNumber: 'ORD-20260811-0003',
+          total: 800,
+          paymentStatus: 'PAID',
+          _count: { items: 2 },
+        },
+      ]);
+      prismaMock.order.count.mockResolvedValue(1); // a split bill is still running
+      prismaMock.tableReservation.update.mockResolvedValue({ ...seated, status: 'COMPLETED' });
+
+      await complete();
+
+      expect(prismaMock.order.updateMany).not.toHaveBeenCalled();
+      expect(prismaMock.restaurantTable.update).not.toHaveBeenCalled();
     });
   });
 });

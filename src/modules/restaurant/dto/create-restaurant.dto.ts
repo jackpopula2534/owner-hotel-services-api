@@ -6,9 +6,14 @@ import {
   IsBoolean,
   IsEnum,
   IsObject,
+  IsNumber,
   Matches,
+  Max,
+  Min,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsStrictBoolean } from '../../../common/decorators/strict-boolean.decorator';
 
 export enum RestaurantTypeEnum {
   FINE_DINING = 'FINE_DINING',
@@ -72,6 +77,38 @@ export class CreateRestaurantDto {
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Charge VAT on bills from this outlet. Off for a non-VAT-registered outlet.',
+    example: true,
+  })
+  @IsStrictBoolean()
+  @IsOptional()
+  vatEnabled?: boolean;
+
+  @ApiPropertyOptional({ description: 'VAT percentage', example: 7 })
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100)
+  @IsOptional()
+  vatRate?: number;
+
+  @ApiPropertyOptional({
+    description: 'Add a service charge to bills from this outlet',
+    example: true,
+  })
+  @IsStrictBoolean()
+  @IsOptional()
+  serviceChargeEnabled?: boolean;
+
+  @ApiPropertyOptional({ description: 'Service charge percentage', example: 10 })
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100)
+  @IsOptional()
+  serviceRate?: number;
 
   @ApiPropertyOptional({
     description: 'Floor plan layout data (positions, zones, grid size)',

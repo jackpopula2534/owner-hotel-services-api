@@ -167,6 +167,19 @@ export class StorageService implements OnModuleInit {
   }
 
   /**
+   * สร้าง path สำหรับเก็บลง DB จาก key ที่ save() เคยคืนมา
+   *
+   * มีไว้ให้ flow แบบ 2 ขั้น (อัพโหลดก่อน → ค่อยบันทึกเอกสารทีหลัง) ฝั่ง client
+   * ส่งกลับมาแค่ key ได้ แล้ว server ประกอบ URL เอง — ถ้าปล่อยให้ client ส่ง URL
+   * มาตรง ๆ เท่ากับใครก็ฝัง URL ภายนอกลงในหลักฐานการเงินได้
+   */
+  publicPath(key: string): string {
+    return this.driver === 's3'
+      ? `${this.s3PublicUrl}/${key}`
+      : `/uploads/${key}`;
+  }
+
+  /**
    * ลบไฟล์ตาม key (folder/filename). best-effort — ไม่ throw ถ้าลบไม่ได้
    */
   async remove(key: string): Promise<void> {

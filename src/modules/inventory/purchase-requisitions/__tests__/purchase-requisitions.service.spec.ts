@@ -24,6 +24,11 @@ describe('PurchaseRequisitionsService', () => {
       createMany: jest.fn(),
       deleteMany: jest.fn(),
     },
+    // ต้องประกาศเอง ไม่ปล่อยให้ fallback สร้างให้ เพราะ fallback คืน type จริงของ
+    // Prisma ทำให้เรียก .mockResolvedValue() ไม่ได้ตอน typecheck
+    user: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     property: {
       findFirst: jest.fn(),
     },
@@ -126,6 +131,37 @@ describe('PurchaseRequisitionsService', () => {
       );
     });
 
+    it('บอกหน้ารายการว่าใบไหนปิดเพราะไปซื้อเอง — CLOSED เฉย ๆ แยกจากใบที่ปิดทิ้งไม่ออก', async () => {
+      mockPrismaService.purchaseRequisition.findMany.mockResolvedValue([
+        {
+          id: 'pr-001',
+          prNumber: 'PR-202608-0001',
+          status: 'CLOSED',
+          priority: 'NORMAL',
+          propertyId: mockPropertyId,
+          requiredDate: null,
+          createdAt: new Date(),
+          requestedBy: mockUserId,
+          approvedBy: null,
+          approvedAt: null,
+          goodsReceives: [{ id: 'gr-1' }, { id: 'gr-2' }],
+          _count: { items: 11, supplierQuotes: 0 },
+        },
+      ]);
+      mockPrismaService.purchaseRequisition.count.mockResolvedValue(1);
+
+      const result = await service.findAll(mockTenantId, { page: 1, limit: 20 });
+
+      expect((result.data[0] as any).cashPurchaseCount).toBe(2);
+      // นับเฉพาะใบซื้อสดของ tenant นี้ — ใบรับของถือ tenantId ของตัวเอง
+      const select = mockPrismaService.purchaseRequisition.findMany.mock.calls[0][0]
+        .select as any;
+      expect(select.goodsReceives.where).toEqual({
+        tenantId: mockTenantId,
+        source: 'CASH_PURCHASE',
+      });
+    });
+
     it('should apply search filter on prNumber', async () => {
       mockPrismaService.purchaseRequisition.findMany.mockResolvedValue([]);
       mockPrismaService.purchaseRequisition.count.mockResolvedValue(0);
@@ -191,6 +227,174 @@ describe('PurchaseRequisitionsService', () => {
       expect(result).toHaveProperty('prNumber', 'PR-202604-0001');
       expect((result as any).items).toHaveLength(1);
       expect((result as any).items[0]).toHaveProperty('itemName', 'Towels');
+    });
+
+    it('should surface the material requisitions waiting on this PR', async () => {
+      // Without this the link only runs one way: the kitchen can see the PR it
+      // is waiting on, but procurement cannot see who is blocked on the goods.
+      mockPrismaService.purchaseRequisition.findFirst.mockResolvedValue({
+        id: mockPRId,
+        tenantId: mockTenantId,
+        prNumber: 'PR-202604-0001',
+        status: 'DRAFT',
+        priority: 'NORMAL',
+        propertyId: mockPropertyId,
+        requestedBy: mockUserId,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        items: [],
+        supplierQuotes: [],
+        materialRequisitions: [
+          {
+            id: 'mr-1',
+            reqNumber: 'RCP-202604-0009',
+            status: 'WAITING_STOCK',
+            createdAt: new Date('2026-04-01'),
+            _count: { items: 3 },
+          },
+        ],
+      });
+
+      const result = (await service.findOne(mockPRId, mockTenantId)) as any;
+
+      expect(result.materialRequisitions).toEqual([
+        expect.objectContaining({
+          id: 'mr-1',
+          reqNumber: 'RCP-202604-0009',
+          status: 'WAITING_STOCK',
+          lineCount: 3,
+        }),
+      ]);
+    });
+
+    // ---- ใบขอซื้อที่ปิดเพราะ "ไปซื้อเอง" ----
+    // CLOSED เป็นคำเดียวกับใบที่ปิดทิ้ง คนอ่านจึงแยกไม่ออกว่าของมาถึงคลังหรือยัง
+    // คำตอบต้องมาจากใบรับของจริง ไม่ใช่จากธงอีกตัวที่อาจขัดกันเองภายหลัง
+    describe('ใบรับของที่ผูกกับใบขอซื้อ', () => {
+      const closedByCashPurchase = (over: Record<string, unknown> = {}) => ({
+        id: mockPRId,
+        tenantId: mockTenantId,
+        prNumber: 'PR-202608-0001',
+        status: 'CLOSED',
+        priority: 'NORMAL',
+        propertyId: mockPropertyId,
+        requestedBy: mockUserId,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        supplierQuotes: [],
+        items: [
+          {
+            id: 'row-1',
+            itemId: 'inv-1',
+            item: { name: 'เห็ดฟาง', sku: 'ING-AUTO-0008' },
+            quantity: 1000,
+            estimatedUnitPrice: null,
+          },
+        ],
+        goodsReceives: [
+          {
+            id: 'gr-1',
+            grNumber: 'GR-202608-0004',
+            receiveDate: new Date('2026-08-10'),
+            status: 'ACCEPTED',
+            source: 'CASH_PURCHASE',
+            vendorName: 'ตลาดสี่มุมเมือง',
+            paymentMethod: 'OWN_MONEY',
+            hasNoReceipt: false,
+            invoiceNumber: 'MOCK-3557',
+            totalAmount: 870,
+            paidBy: 'user-payer',
+            warehouse: { name: 'คลังครัวกลาง' },
+            items: [
+              { itemId: 'inv-1', receivedQty: 1000, unitCost: 0.87, totalCost: 870 },
+            ],
+          },
+        ],
+        ...over,
+      });
+
+      it('ส่งใบรับของที่ผูกไว้กลับไปด้วย พร้อมสรุปว่าได้ของครบหรือยัง', async () => {
+        mockPrismaService.purchaseRequisition.findFirst.mockResolvedValue(
+          closedByCashPurchase(),
+        );
+        mockPrismaService.user.findMany.mockResolvedValue([
+          { id: 'user-payer', firstName: 'สมชาย', lastName: 'ใจดี', email: 's@x.co' },
+        ]);
+
+        const result = (await service.findOne(mockPRId, mockTenantId)) as any;
+
+        expect(result.goodsReceives).toEqual([
+          expect.objectContaining({
+            grNumber: 'GR-202608-0004',
+            source: 'CASH_PURCHASE',
+            vendorName: 'ตลาดสี่มุมเมือง',
+            totalAmount: 870,
+            paidByName: 'สมชาย ใจดี',
+          }),
+        ]);
+        expect(result.fulfillment).toEqual(
+          expect.objectContaining({ cashPurchaseCount: 1, fullyReceived: true, totalPaid: 870 }),
+        );
+      });
+
+      it('บรรทัดที่ได้ของแล้ว ต้องพกราคาที่จ่ายจริงกลับไป ไม่ใช่แค่ประมาณการที่ว่างเปล่า', async () => {
+        mockPrismaService.purchaseRequisition.findFirst.mockResolvedValue(
+          closedByCashPurchase(),
+        );
+        mockPrismaService.user.findMany.mockResolvedValue([]);
+
+        const result = (await service.findOne(mockPRId, mockTenantId)) as any;
+
+        expect(result.items[0]).toEqual(
+          expect.objectContaining({
+            receivedQty: 1000,
+            actualUnitCost: 0.87,
+            actualTotalCost: 870,
+          }),
+        );
+      });
+
+      it('ดึงเฉพาะใบรับของของ tenant นี้', async () => {
+        mockPrismaService.purchaseRequisition.findFirst.mockResolvedValue(
+          closedByCashPurchase(),
+        );
+        mockPrismaService.user.findMany.mockResolvedValue([]);
+
+        await service.findOne(mockPRId, mockTenantId);
+
+        const include = mockPrismaService.purchaseRequisition.findFirst.mock.calls[0][0]
+          .include as any;
+        expect(include.goodsReceives.where).toEqual({ tenantId: mockTenantId });
+      });
+
+      it('หาชื่อคนออกเงินเฉพาะใน tenant นี้ — id มาจาก client ไม่มี foreign key คุม', async () => {
+        mockPrismaService.purchaseRequisition.findFirst.mockResolvedValue(
+          closedByCashPurchase(),
+        );
+        mockPrismaService.user.findMany.mockResolvedValue([]);
+
+        await service.findOne(mockPRId, mockTenantId);
+
+        expect(mockPrismaService.user.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({ tenantId: mockTenantId }),
+          }),
+        );
+      });
+
+      it('ใบที่ไม่มีใบรับของ ไม่ถูกอ้างว่าได้ของแล้ว', async () => {
+        mockPrismaService.purchaseRequisition.findFirst.mockResolvedValue(
+          closedByCashPurchase({ goodsReceives: [] }),
+        );
+        mockPrismaService.user.findMany.mockResolvedValue([]);
+
+        const result = (await service.findOne(mockPRId, mockTenantId)) as any;
+
+        expect(result.goodsReceives).toEqual([]);
+        expect(result.fulfillment.fullyReceived).toBe(false);
+        expect(result.items[0].receivedQty).toBe(0);
+        expect(result.items[0].actualUnitCost).toBeNull();
+      });
     });
 
     it('should throw NotFoundException if PR not found', async () => {
@@ -975,6 +1179,114 @@ describe('PurchaseRequisitionsService', () => {
       );
       expect((cancelled as any).status).toBe('CANCELLED');
       expect((cancelled as any).cancelReason).toBe('No longer needed');
+    });
+  });
+  describe('createPOFromPR', () => {
+    /**
+     * A purchase order is a commitment to pay. Anything the chosen supplier did
+     * not put a price on has no agreed price at all — the old code fell through
+     * to 0 and quietly ordered it for free.
+     */
+    const QUOTE_ID = 'quote-001';
+    const WAREHOUSE_ID = 'wh-001';
+
+    const buildPR = (items: any[], quoteItems: any[]) => ({
+      id: mockPRId,
+      tenantId: mockTenantId,
+      propertyId: mockPropertyId,
+      prNumber: 'PR-202608-0001',
+      status: 'PENDING_QUOTES',
+      notes: null,
+      internalNotes: null,
+      items,
+      supplierQuotes: [{ id: QUOTE_ID, supplierId: 'sup-001', items: quoteItems }],
+    });
+
+    beforeEach(() => {
+      mockPrismaService.warehouse.findFirst.mockResolvedValue({
+        id: WAREHOUSE_ID,
+        tenantId: mockTenantId,
+      });
+      mockPrismaService.documentSequence.upsert.mockResolvedValue({ lastNumber: 1 });
+      mockPrismaService.purchaseOrder.create.mockResolvedValue({ id: 'po-001', poNumber: 'PO-1' });
+      mockPrismaService.purchaseOrder.findFirst.mockResolvedValue({ id: 'po-001' });
+    });
+
+    it('refuses to create a PO when the chosen quote skipped a requisition line', async () => {
+      mockPrismaService.purchaseRequisition.findFirst.mockResolvedValue(
+        buildPR(
+          [
+            { itemId: 'item-a', quantity: 10, notes: null, item: { name: 'ถั่วฝักยาว' } },
+            { itemId: 'item-b', quantity: 5, notes: null, item: { name: 'น้ำมันพืช' } },
+          ],
+          [{ itemId: 'item-a', unitPrice: 20, totalPrice: 200 }],
+        ),
+      );
+
+      await expect(
+        service.createPOFromPR(mockPRId, QUOTE_ID, WAREHOUSE_ID, mockUserId, mockTenantId),
+      ).rejects.toThrow(BadRequestException);
+
+      // Names the item, so the buyer knows what to chase instead of a UUID.
+      await expect(
+        service.createPOFromPR(mockPRId, QUOTE_ID, WAREHOUSE_ID, mockUserId, mockTenantId),
+      ).rejects.toThrow(/น้ำมันพืช/);
+
+      expect(mockPrismaService.purchaseOrder.create).not.toHaveBeenCalled();
+      expect(mockPrismaService.purchaseOrderItem.createMany).not.toHaveBeenCalled();
+    });
+
+    it('never writes a PO line at 0 baht just because an estimate was missing', async () => {
+      mockPrismaService.purchaseRequisition.findFirst.mockResolvedValue(
+        buildPR([{ itemId: 'item-a', quantity: 10, notes: null, item: { name: 'ถั่วฝักยาว' } }], []),
+      );
+
+      await expect(
+        service.createPOFromPR(mockPRId, QUOTE_ID, WAREHOUSE_ID, mockUserId, mockTenantId),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('prices every line from the quote and totals the header from those same lines', async () => {
+      mockPrismaService.purchaseRequisition.findFirst.mockResolvedValue(
+        buildPR(
+          [
+            { itemId: 'item-a', quantity: 10, notes: 'ด่วน', item: { name: 'ถั่วฝักยาว' } },
+            { itemId: 'item-b', quantity: 5, notes: null, item: { name: 'น้ำมันพืช' } },
+          ],
+          [
+            { itemId: 'item-a', unitPrice: 20, totalPrice: 200 },
+            { itemId: 'item-b', unitPrice: 60, totalPrice: 300 },
+            // An extra quote line the requisition never asked for must not be ordered.
+            { itemId: 'item-ghost', unitPrice: 999, totalPrice: 9990 },
+          ],
+        ),
+      );
+
+      await service.createPOFromPR(mockPRId, QUOTE_ID, WAREHOUSE_ID, mockUserId, mockTenantId);
+
+      const lines = mockPrismaService.purchaseOrderItem.createMany.mock.calls[0][0].data;
+      expect(lines).toHaveLength(2);
+      expect(lines.every((l: any) => l.unitPrice > 0 && l.totalPrice > 0)).toBe(true);
+
+      // Header must equal the sum of what is actually printed underneath it —
+      // 500, not the 10,490 the whole quote adds up to.
+      const header = mockPrismaService.purchaseOrder.create.mock.calls[0][0].data;
+      expect(header.subtotal).toBe(500);
+      expect(header.totalAmount).toBe(500);
+    });
+
+    it('falls back to quantity x unit price when the quote line carries no total', async () => {
+      mockPrismaService.purchaseRequisition.findFirst.mockResolvedValue(
+        buildPR(
+          [{ itemId: 'item-a', quantity: 4, notes: null, item: { name: 'ถั่วฝักยาว' } }],
+          [{ itemId: 'item-a', unitPrice: 25, totalPrice: 0 }],
+        ),
+      );
+
+      await service.createPOFromPR(mockPRId, QUOTE_ID, WAREHOUSE_ID, mockUserId, mockTenantId);
+
+      const lines = mockPrismaService.purchaseOrderItem.createMany.mock.calls[0][0].data;
+      expect(lines[0].totalPrice).toBe(100);
     });
   });
 });
