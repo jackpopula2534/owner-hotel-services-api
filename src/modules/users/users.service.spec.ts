@@ -38,6 +38,9 @@ describe('UsersService — lifecycle management', () => {
     refreshToken: {
       updateMany: jest.fn(),
     },
+    subscriptions: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
   };
 
   const auditMock = {
@@ -293,6 +296,103 @@ describe('UsersService — lifecycle management', () => {
           }),
         }),
       );
+    });
+  });
+
+  /**
+   * `user.expiresAt` is a per-account override an admin sets by hand, so it is
+   * null for nearly every account — the console's "วันหมดอายุ" column was empty
+   * platform-wide. What actually ends someone's access is their hotel's
+   * subscription, so the list carries that date alongside.
+   */
+  describe('findAll — tenant expiry', () => {
+    it('attaches the tenant subscription end date and status to every row', async () => {
+      prismaMock.user.findMany.mockResolvedValue([
+        baseUser,
+        { ...baseUser, id: 'user-2', tenantId: 'tenant-2' },
+      ]);
+      prismaMock.user.count.mockResolvedValue(2);
+      prismaMock.subscriptions.findMany.mockResolvedValue([
+        { tenant_id: 'tenant-1', end_date: new Date('2027-08-11'), status: 'active' },
+        { tenant_id: 'tenant-2', end_date: new Date('2026-08-27'), status: 'trial' },
+      ]);
+
+      const result = await service.findAll({ page: 1, limit: 10 }, undefined);
+
+      expect(prismaMock.subscriptions.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { tenant_id: { in: ['tenant-1', 'tenant-2'] } },
+          orderBy: { end_date: 'desc' },
+        }),
+      );
+      expect(result.data[0]).toMatchObject({
+        id: 'user-1',
+        tenantExpiresAt: new Date('2027-08-11'),
+        tenantSubscriptionStatus: 'active',
+      });
+      expect(result.data[1]).toMatchObject({
+        id: 'user-2',
+        tenantExpiresAt: new Date('2026-08-27'),
+        tenantSubscriptionStatus: 'trial',
+      });
+    });
+
+    it('takes the furthest-reaching subscription when a tenant has several', async () => {
+      // A tenant that renewed early keeps the old row; access runs to the later
+      // end date, and the query is ordered so that row arrives first.
+      prismaMock.user.findMany.mockResolvedValue([baseUser]);
+      prismaMock.user.count.mockResolvedValue(1);
+      prismaMock.subscriptions.findMany.mockResolvedValue([
+        { tenant_id: 'tenant-1', end_date: new Date('2028-01-01'), status: 'active' },
+        { tenant_id: 'tenant-1', end_date: new Date('2027-01-01'), status: 'expired' },
+      ]);
+
+      const result = await service.findAll({ page: 1, limit: 10 }, 'tenant-1');
+
+      expect(result.data[0]).toMatchObject({
+        tenantExpiresAt: new Date('2028-01-01'),
+        tenantSubscriptionStatus: 'active',
+      });
+    });
+
+    it('reports null for a platform account with no tenant, without querying', async () => {
+      prismaMock.user.findMany.mockResolvedValue([{ ...baseUser, tenantId: null }]);
+      prismaMock.user.count.mockResolvedValue(1);
+
+      const result = await service.findAll({ page: 1, limit: 10 }, undefined);
+
+      expect(prismaMock.subscriptions.findMany).not.toHaveBeenCalled();
+      expect(result.data[0]).toMatchObject({
+        tenantExpiresAt: null,
+        tenantSubscriptionStatus: null,
+      });
+    });
+
+    it('still returns the users when the subscriptions lookup fails', async () => {
+      // A bookkeeping column must never be the reason the admin console is empty.
+      prismaMock.user.findMany.mockResolvedValue([baseUser]);
+      prismaMock.user.count.mockResolvedValue(1);
+      prismaMock.subscriptions.findMany.mockRejectedValue(new Error('table missing'));
+
+      const result = await service.findAll({ page: 1, limit: 10 }, 'tenant-1');
+
+      expect(result.total).toBe(1);
+      expect(result.data[0]).toMatchObject({ id: 'user-1', tenantExpiresAt: null });
+    });
+
+    it('findOneDetailed carries the same expiry as the list row', async () => {
+      prismaMock.user.findFirst.mockResolvedValue(baseUser);
+      prismaMock.subscriptions.findMany.mockResolvedValue([
+        { tenant_id: 'tenant-1', end_date: new Date('2027-08-11'), status: 'active' },
+      ]);
+
+      const result = await service.findOneDetailed('user-1', 'tenant-1');
+
+      expect(result).toMatchObject({
+        id: 'user-1',
+        tenantExpiresAt: new Date('2027-08-11'),
+        tenantSubscriptionStatus: 'active',
+      });
     });
   });
 });

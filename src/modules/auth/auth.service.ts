@@ -209,6 +209,10 @@ export class AuthService {
       deviceInfo,
     );
 
+    // Registration hands back a live session, so the owner is signed in from this
+    // moment — without this the brand-new account reads "never signed in".
+    await this.recordLogin('user', user.id, deviceInfo);
+
     // Send welcome email (async, non-blocking)
     this.emailEventsService
       .onUserRegistered({
@@ -277,6 +281,8 @@ export class AuthService {
       'admin',
       deviceInfo,
     );
+
+    await this.recordLogin('admin', admin.id, deviceInfo);
 
     return {
       ...tokens,
@@ -451,6 +457,48 @@ export class AuthService {
   }
 
   /**
+   * Stamp "last seen" on the account that just authenticated.
+   *
+   * Every read path (admin user list, POS staff list, the per-terminal user
+   * services) already surfaces `lastLoginAt`, but nothing ever wrote it — so the
+   * column stayed NULL for every account and the console showed "ยังไม่เคยเข้าระบบ"
+   * next to people who log in daily.
+   *
+   * Only credential logins land here. Refreshing a token, exchanging a launch
+   * deep-link, or an admin impersonating someone are not the account holder
+   * signing in and must not move this date.
+   *
+   * Failure is swallowed on purpose: a bookkeeping write must never be the reason
+   * a valid login is rejected.
+   */
+  private async recordLogin(
+    account: 'user' | 'admin',
+    id: string,
+    deviceInfo?: { ipAddress?: string; userAgent?: string },
+  ): Promise<void> {
+    const data = {
+      lastLoginAt: new Date(),
+      // `req.ip` is undefined behind some proxies; keep whatever was there before
+      // rather than blanking a known address with an unknown one.
+      ...(deviceInfo?.ipAddress ? { lastLoginIp: deviceInfo.ipAddress } : {}),
+    };
+
+    try {
+      if (account === 'admin') {
+        await this.prisma.admin.update({ where: { id }, data });
+      } else {
+        await this.prisma.user.update({ where: { id }, data });
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Could not stamp lastLoginAt on ${account} ${id}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
+  /**
    * Build the full login success payload (tokens + user object + property) for a
    * validated user. Shared by login() and completeLoginWith2FA().
    */
@@ -493,6 +541,10 @@ export class AuthService {
       deviceInfo,
       systemContext,
     );
+
+    // Every credential login for every system funnels through here — main
+    // dashboard, all six terminals, and the 2FA completion path.
+    await this.recordLogin('user', user.id, deviceInfo);
 
     // Resolve default property for this tenant so frontend has the correct propertyId
     let defaultProperty: { id: string; name: string; code: string } | undefined;

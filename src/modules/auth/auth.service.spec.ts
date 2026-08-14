@@ -27,10 +27,13 @@ describe('AuthService', () => {
   const mockPrismaService = {
     user: {
       findUnique: jest.fn(),
+      findFirst: jest.fn(),
       create: jest.fn(),
+      update: jest.fn().mockResolvedValue({}),
     },
     admin: {
       findUnique: jest.fn(),
+      update: jest.fn().mockResolvedValue({}),
     },
     refreshToken: {
       findUnique: jest.fn(),
@@ -446,6 +449,130 @@ describe('AuthService', () => {
           revokedAt: expect.any(Date),
         },
       });
+    });
+  });
+
+  /**
+   * Every read path already surfaced `lastLoginAt`, but no code path wrote it —
+   * so the admin console showed "ยังไม่เคยเข้าระบบ" beside people who sign in
+   * daily. Only credential logins may move this date: a token refresh is not the
+   * account holder signing in.
+   */
+  describe('lastLoginAt bookkeeping', () => {
+    const activeUser = {
+      id: 'user-9',
+      email: 'somchai@email.com',
+      password: 'hashedPassword',
+      firstName: 'สมชาย',
+      lastName: 'ใจดี',
+      role: 'tenant_admin',
+      tenantId: 'tenant-1',
+      status: 'active',
+    };
+
+    const primeLogin = () => {
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+      mockJwtService.sign.mockReturnValue('access-token');
+      mockPrismaService.refreshToken.create.mockResolvedValue({ id: '1', token: 'refresh-token' });
+    };
+
+    it('stamps the date and IP when a user signs in', async () => {
+      mockPrismaService.user.findUnique.mockResolvedValue(activeUser);
+      primeLogin();
+
+      await service.login(
+        { email: activeUser.email, password: 'password123' },
+        { ipAddress: '203.0.113.9' },
+      );
+
+      expect(mockPrismaService.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-9' },
+        data: { lastLoginAt: expect.any(Date), lastLoginIp: '203.0.113.9' },
+      });
+    });
+
+    it('keeps the previous IP when the request has none', async () => {
+      // Behind some proxies `req.ip` is undefined — blanking a known address
+      // with an unknown one loses information for no gain.
+      mockPrismaService.user.findUnique.mockResolvedValue(activeUser);
+      primeLogin();
+
+      await service.login({ email: activeUser.email, password: 'password123' });
+
+      expect(mockPrismaService.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-9' },
+        data: { lastLoginAt: expect.any(Date) },
+      });
+    });
+
+    it('stamps every terminal login, not just the main dashboard', async () => {
+      mockPrismaService.user.findUnique.mockResolvedValue(activeUser);
+      primeLogin();
+
+      for (const system of ['pos', 'procurement', 'warehouse', 'hotel-terminal', 'hr'] as const) {
+        mockPrismaService.user.update.mockClear();
+        await service.login({ email: activeUser.email, password: 'password123' }, undefined, system);
+        expect(mockPrismaService.user.update).toHaveBeenCalledWith(
+          expect.objectContaining({ where: { id: 'user-9' } }),
+        );
+      }
+    });
+
+    it('stamps a platform admin on the Admin table', async () => {
+      mockPrismaService.admin.findUnique.mockResolvedValue({
+        id: 'admin-3',
+        email: 'admin@hotelservices.com',
+        password: 'hashedPassword',
+        firstName: 'Super',
+        lastName: 'Admin',
+        role: 'platform_admin',
+        status: 'active',
+      });
+      primeLogin();
+
+      await service.loginAdmin(
+        { email: 'admin@hotelservices.com', password: 'Admin@123' },
+        { ipAddress: '198.51.100.4' },
+      );
+
+      expect(mockPrismaService.admin.update).toHaveBeenCalledWith({
+        where: { id: 'admin-3' },
+        data: { lastLoginAt: expect.any(Date), lastLoginIp: '198.51.100.4' },
+      });
+    });
+
+    it('does not move the date when a token is refreshed', async () => {
+      mockPrismaService.refreshToken.findUnique.mockResolvedValue({
+        id: 'rt-1',
+        token: 'refresh-token',
+        userId: 'user-9',
+        adminId: null,
+        expiresAt: new Date(Date.now() + 86400000),
+        revokedAt: null,
+        user: activeUser,
+        admin: null,
+      });
+      mockJwtService.sign.mockReturnValue('access-token');
+      mockPrismaService.refreshToken.create.mockResolvedValue({ id: '2', token: 'new-refresh' });
+      mockPrismaService.refreshToken.update.mockResolvedValue({});
+
+      await service.refreshToken({ refreshToken: 'refresh-token' } as RefreshTokenDto);
+
+      expect(mockPrismaService.user.update).not.toHaveBeenCalled();
+      expect(mockPrismaService.admin.update).not.toHaveBeenCalled();
+    });
+
+    it('completes the login even if the stamp write fails', async () => {
+      mockPrismaService.user.findUnique.mockResolvedValue(activeUser);
+      primeLogin();
+      mockPrismaService.user.update.mockRejectedValueOnce(new Error('db down'));
+
+      const result = (await service.login({
+        email: activeUser.email,
+        password: 'password123',
+      })) as any;
+
+      expect(result).toHaveProperty('accessToken');
     });
   });
 });

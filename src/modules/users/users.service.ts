@@ -39,6 +39,23 @@ type CallerContext = {
   ipAddress?: string;
 };
 
+/** Only the fields `withTenantExpiry` needs — the rows carry the full SAFE_USER_SELECT. */
+type SafeUser = { tenantId: string | null } & Record<string, unknown>;
+
+/**
+ * A user's own `expiresAt` is an optional override an admin sets by hand, so it
+ * is null for almost every account. What actually ends someone's access is their
+ * hotel's subscription — that is the date the console has to show, otherwise the
+ * "วันหมดอายุ" column reads "—" for the entire platform and the "expiring soon"
+ * counter can never be anything but zero.
+ */
+type TenantExpiry = {
+  /** End of the tenant's furthest-reaching subscription. */
+  tenantExpiresAt: Date | null;
+  /** trial | pending | active | expired | cancelled — lets the UI label the date. */
+  tenantSubscriptionStatus: string | null;
+};
+
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
@@ -95,7 +112,14 @@ export class UsersService {
         this.prisma.user.count({ where }),
       ]);
 
-      return { data, total, page, limit };
+      // `select: SAFE_USER_SELECT as any` leaves Prisma's inferred row type
+      // unusable here; the shape is pinned by SAFE_USER_SELECT itself.
+      return {
+        data: await this.withTenantExpiry(data as unknown as SafeUser[]),
+        total,
+        page,
+        limit,
+      };
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === 'P2021' || error.code === 'P2022') {
@@ -104,6 +128,51 @@ export class UsersService {
       }
       throw error;
     }
+  }
+
+  /**
+   * Attach each row's tenant expiry in one extra query, whatever the page size.
+   * Subscriptions are read straight through — this runs for platform admins who
+   * are deliberately looking across tenants, and the rows are keyed back to the
+   * users we already fetched, so nothing leaks beyond the page.
+   */
+  private async withTenantExpiry<T extends SafeUser>(users: T[]): Promise<(T & TenantExpiry)[]> {
+    const tenantIds = [...new Set(users.map((u) => u.tenantId).filter((id): id is string => !!id))];
+    if (tenantIds.length === 0) {
+      return users.map((u) => ({ ...u, tenantExpiresAt: null, tenantSubscriptionStatus: null }));
+    }
+
+    const byTenant = new Map<string, TenantExpiry>();
+    try {
+      const subscriptions = await this.prisma.subscriptions.findMany({
+        where: { tenant_id: { in: tenantIds } },
+        // Furthest-reaching subscription first: a tenant that renewed early has
+        // both the old and the new row, and access runs to the later end date.
+        orderBy: { end_date: 'desc' },
+        select: { tenant_id: true, end_date: true, status: true },
+      });
+
+      for (const sub of subscriptions) {
+        if (byTenant.has(sub.tenant_id)) continue;
+        byTenant.set(sub.tenant_id, {
+          tenantExpiresAt: sub.end_date,
+          tenantSubscriptionStatus: sub.status,
+        });
+      }
+    } catch (error) {
+      // The list must still render if the subscriptions table is unavailable.
+      this.logger.warn(
+        `Could not resolve tenant expiry: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    return users.map((u) => ({
+      ...u,
+      ...(byTenant.get(u.tenantId ?? '') ?? {
+        tenantExpiresAt: null,
+        tenantSubscriptionStatus: null,
+      }),
+    }));
   }
 
   async findOne(id: string, tenantId?: string) {
@@ -120,6 +189,17 @@ export class UsersService {
     }
 
     return user;
+  }
+
+  /**
+   * Same row as `findOne`, plus the tenant expiry the console shows. Kept apart
+   * from `findOne` because that one feeds the audit-log diff, which must compare
+   * stored columns only — not fields we compute for display.
+   */
+  async findOneDetailed(id: string, tenantId?: string) {
+    const user = (await this.findOne(id, tenantId)) as SafeUser;
+    const [detailed] = await this.withTenantExpiry([user]);
+    return detailed;
   }
 
   async update(id: string, updateUserDto: any, tenantId?: string, userId?: string) {

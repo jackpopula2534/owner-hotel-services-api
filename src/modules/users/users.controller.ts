@@ -59,7 +59,7 @@ export class UsersController {
   @Roles('admin', 'tenant_admin', 'platform_admin')
   async findOne(@Param('id') id: string, @CurrentUser() user: CallerUser) {
     const tenantId = user.role === 'platform_admin' ? undefined : user?.tenantId;
-    return this.usersService.findOne(id, tenantId);
+    return this.usersService.findOneDetailed(id, tenantId);
   }
 
   @Patch(':id')
