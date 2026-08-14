@@ -11,6 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { AllowSystems } from '@/common/decorators/allow-systems.decorator';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -33,10 +34,15 @@ export class PaymentSettingsController {
     private readonly prisma: PrismaService,
   ) {}
 
+  // The till has to know which channels the property actually accepts before it
+  // can offer a QR — PaymentModal opens this on every bill. Reading is all the
+  // POS needs; saving the merchant's PromptPay identity stays closed to it.
+  @AllowSystems('pos')
   @Get()
   @ApiOperation({ summary: 'Get payment settings for current property' })
   @ApiQuery({ name: 'propertyId', required: false })
   @ApiResponse({ status: 200, description: 'Payment settings' })
+  @ApiResponse({ status: 401, description: 'Missing or invalid access token' })
   @ApiResponse({ status: 404, description: 'Settings not configured yet' })
   async get(@CurrentUser() user: JwtUser, @Query('propertyId') propertyIdQuery?: string) {
     const propertyId = await this.resolvePropertyId(user, propertyIdQuery);

@@ -33,6 +33,13 @@ interface ErrorBody {
   error: {
     code: string;
     message: string;
+    /**
+     * Machine-readable extras the client has to branch on — never prose.
+     * `SystemGuard` uses it to name the system a rejected token belongs to, which
+     * is what tells the frontend "you are holding another terminal's key" (log
+     * out) apart from "this terminal cannot call that endpoint" (say nothing).
+     */
+    details?: Record<string, unknown>;
   };
   timestamp: string;
   path: string;
@@ -70,6 +77,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let code = 'INTERNAL_SERVER_ERROR';
     let message = this.t('errors.http.INTERNAL_SERVER_ERROR', language, 'Internal server error');
+    let details: Record<string, unknown> | undefined;
 
     // ─── NestJS / HTTP ────────────────────────────────────────────────────
     if (exception instanceof HttpException) {
@@ -94,6 +102,13 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
         if (hasStructuredCode) {
           code = b.code as string;
+        }
+
+        // `details` is the only part of a structured body that survives to the
+        // client besides code/message. Without it a guard can describe *why* it
+        // refused and the browser never hears about it.
+        if (b.details && typeof b.details === 'object' && !Array.isArray(b.details)) {
+          details = b.details as Record<string, unknown>;
         }
 
         if (Array.isArray(b.message)) {
@@ -222,7 +237,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     const body: ErrorBody = {
       success: false,
-      error: { code, message },
+      error: { code, message, ...(details ? { details } : {}) },
       timestamp: new Date().toISOString(),
       path: request.url,
       ...(requestId ? { requestId } : {}),

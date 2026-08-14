@@ -85,9 +85,12 @@ describe('SystemGuard', () => {
         run({ systemContext: 'pos' }, {});
         fail('expected ForbiddenException');
       } catch (err) {
+        // `details` specifically: AllExceptionsFilter forwards that key and
+        // drops every other extra, so a top-level `currentSystem` would never
+        // reach the browser that has to decide whether to log the user out.
         expect((err as ForbiddenException).getResponse()).toMatchObject({
           code: 'WRONG_SYSTEM_CONTEXT',
-          currentSystem: 'pos',
+          details: { currentSystem: 'pos' },
         });
       }
     });

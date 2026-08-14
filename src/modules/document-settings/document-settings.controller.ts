@@ -25,6 +25,7 @@ import {
   ApiConsumes,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
+import { AllowSystems } from '@/common/decorators/allow-systems.decorator';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
 import { DocumentSettingsService } from './document-settings.service';
 import { UpdateDocumentSettingsDto } from './dto/update-document-settings.dto';
@@ -44,9 +45,14 @@ export class DocumentSettingsController {
     private readonly storage: StorageService,
   ) {}
 
+  // A tax invoice printed at the till has to name the registered entity behind
+  // the outlet — legal name, tax id, branch — and that lives here. Reading it is
+  // all the POS needs; writing the settings stays closed to POS tokens.
+  @AllowSystems('pos')
   @ApiOperation({ summary: 'Get document settings for a property' })
   @ApiQuery({ name: 'propertyId', required: true, description: 'Property ID' })
   @ApiResponse({ status: 200, description: 'Document settings retrieved' })
+  @ApiResponse({ status: 401, description: 'Missing or invalid access token' })
   @Get()
   async get(
     @Query('propertyId') propertyId: string,

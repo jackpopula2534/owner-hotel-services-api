@@ -111,7 +111,11 @@ export class SystemGuard implements CanActivate {
     throw new ForbiddenException({
       code: 'WRONG_SYSTEM_CONTEXT',
       message: `This endpoint is not part of the ${SYSTEM_NAMES[effectiveSystem]}. Please log in via the correct system.`,
-      currentSystem: effectiveSystem,
+      // Under `details` so `AllExceptionsFilter` forwards it — the filter emits
+      // only { code, message, details } and the browser needs this field to tell
+      // "wrong terminal, log in again" from "right terminal, endpoint out of
+      // reach". Any other spelling reaches the client as a bare 403.
+      details: { currentSystem: effectiveSystem },
     });
   }
 

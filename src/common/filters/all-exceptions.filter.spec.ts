@@ -178,3 +178,60 @@ describe('AllExceptionsFilter i18n behaviour', () => {
     expect(body.error.message).toBe('This email is already in use');
   });
 });
+
+/**
+ * `details` is how a guard tells the browser something it has to branch on.
+ * SystemGuard's WRONG_SYSTEM_CONTEXT names the system the presented token was
+ * minted for; the POS terminal uses it to tell "you are holding the warehouse's
+ * key, sign in again" from "your key is fine, this endpoint is not ours". The
+ * filter used to emit only { code, message }, so that field never arrived and
+ * the terminal could only show a toast it had no way to act on.
+ */
+describe('AllExceptionsFilter — structured details', () => {
+  it('forwards `details` from a structured exception body', () => {
+    const filter = new AllExceptionsFilter();
+    const { host, response } = makeHost({ url: '/api/v1/payment-settings' });
+
+    filter.catch(
+      new HttpException(
+        {
+          code: 'WRONG_SYSTEM_CONTEXT',
+          message: 'This endpoint is not part of the POS System.',
+          details: { currentSystem: 'pos' },
+        },
+        HttpStatus.FORBIDDEN,
+      ),
+      host,
+    );
+
+    const body = (response.json as jest.Mock).mock.calls[0][0];
+    expect(body.error.code).toBe('WRONG_SYSTEM_CONTEXT');
+    expect(body.error.details).toEqual({ currentSystem: 'pos' });
+  });
+
+  it('omits the key entirely when there are no details', () => {
+    const filter = new AllExceptionsFilter();
+    const { host, response } = makeHost({ url: '/api/v1/bookings/999' });
+
+    filter.catch(new NotFoundException(), host);
+
+    const body = (response.json as jest.Mock).mock.calls[0][0];
+    expect(body.error).not.toHaveProperty('details');
+  });
+
+  it('ignores a non-object `details` rather than passing junk to the client', () => {
+    const filter = new AllExceptionsFilter();
+    const { host, response } = makeHost({ url: '/api/v1/anything' });
+
+    filter.catch(
+      new HttpException(
+        { code: 'SOMETHING_ODD', message: 'nope', details: 'not-an-object' },
+        HttpStatus.BAD_REQUEST,
+      ),
+      host,
+    );
+
+    const body = (response.json as jest.Mock).mock.calls[0][0];
+    expect(body.error).not.toHaveProperty('details');
+  });
+});
