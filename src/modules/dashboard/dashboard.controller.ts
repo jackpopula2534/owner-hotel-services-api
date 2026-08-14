@@ -5,6 +5,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { DashboardService } from './dashboard.service';
+import { BusinessOverview, BusinessOverviewService } from './business-overview.service';
 
 interface CurrentUserType {
   tenantId?: string;
@@ -16,7 +17,38 @@ interface CurrentUserType {
 @Controller({ path: 'dashboard', version: '1' })
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class DashboardController {
-  constructor(private readonly dashboardService: DashboardService) {}
+  constructor(
+    private readonly dashboardService: DashboardService,
+    private readonly businessOverviewService: BusinessOverviewService,
+  ) {}
+
+  @Get('business-overview')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager')
+  @ApiOperation({
+    summary: 'Get a cross-system overview of every module the tenant is entitled to',
+    description:
+      'Reports today revenue and outstanding work for the hotel plus F&B, inventory, ' +
+      'procurement, accounting, cost accounting and HR. Modules the tenant has no active ' +
+      'add-on for are omitted entirely. Figures are cut on the Bangkok (UTC+7) calendar day.',
+  })
+  @ApiQuery({
+    name: 'propertyId',
+    required: false,
+    type: 'string',
+    description: "Property to scope to (defaults to the user's default property)",
+  })
+  @ApiResponse({ status: 200, description: 'Business overview retrieved successfully' })
+  @ApiResponse({ status: 401, description: 'Missing or invalid access token' })
+  @ApiResponse({ status: 403, description: 'Role not permitted to read the overview' })
+  async getBusinessOverview(
+    @CurrentUser() user: CurrentUserType,
+    @Query('propertyId') propertyId?: string,
+  ): Promise<BusinessOverview> {
+    return this.businessOverviewService.getBusinessOverview(
+      user.tenantId,
+      propertyId || user.defaultPropertyId,
+    );
+  }
 
   @Get('today-actions')
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'receptionist')
