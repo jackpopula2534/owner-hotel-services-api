@@ -68,6 +68,18 @@ export class RetailSalesController {
     return { success: true, data };
   }
 
+  // ต้องประกาศก่อน @Get(':id') ไม่งั้น 'chargeable-rooms' จะถูกจับเป็น id
+  @Get('chargeable-rooms')
+  @ApiOperation({ summary: 'Rooms that can take a ROOM_CHARGE right now' })
+  @ApiResponse({ status: 200, description: 'In-house rooms retrieved' })
+  async chargeableRooms(
+    @Query('search') search: string | undefined,
+    @Req() req: AuthedReq,
+  ): Promise<{ success: boolean; data: unknown }> {
+    const data = await this.retailSalesService.listChargeableRooms(req.user.tenantId, search);
+    return { success: true, data };
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get a single retail sale receipt' })
   @ApiResponse({ status: 200, description: 'Sale retrieved' })

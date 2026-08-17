@@ -77,6 +77,7 @@ export const TENANT_SCOPED_MODELS: Readonly<Record<string, TenantScopeField>> = 
   QCTemplate: 'tenantId',
   Referral: 'tenantId',
   RequestForQuotation: 'tenantId',
+  RevenueEntry: 'tenantId',
   RetailSale: 'tenantId',
   Restaurant: 'tenantId',
   RestaurantTable: 'tenantId',

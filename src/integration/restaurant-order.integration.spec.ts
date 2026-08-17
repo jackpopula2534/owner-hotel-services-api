@@ -9,6 +9,10 @@ import { KitchenGateway } from '../modules/restaurant/kitchen/kitchen.gateway';
 import { MenuService } from '../modules/restaurant/menu/menu.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { INVENTORY_EVENTS } from '../modules/inventory/events/inventory.events';
+import { FolioPostingService } from '../modules/accounts-receivable/folio-posting/folio-posting.service';
+import { buildFolioPostingStub } from '../modules/restaurant/order/__tests__/folio-posting.stub';
+import { RevenuePostingService } from '../modules/revenue/revenue-posting.service';
+import { buildRevenuePostingStub } from '../modules/revenue/__tests__/revenue-posting.stub';
 
 // ─── Shared mock helpers ──────────────────────────────────────────────────────
 
@@ -37,8 +41,17 @@ const makePrismaMock = () => ({
   kitchenOrder: { create: jest.fn(), findMany: jest.fn() },
   // Bill numbers come from the shared counter table, not from counting rows.
   documentSequence: { findFirst: jest.fn(), create: jest.fn(), upsert: jest.fn() },
+  // Closing a bill writes the payment and the revenue entry together, so the
+  // callback has to actually run — against this same mock, where the writes
+  // stay observable.
   $transaction: jest.fn(),
 });
+
+/** Wire `$transaction` to run its callback against the mock itself. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const runTransactionsInline = (prismaMock: any) => {
+  prismaMock.$transaction.mockImplementation((run: (tx: unknown) => unknown) => run(prismaMock));
+};
 
 /** The counter table as the order service sees it: hands out `next` and grows. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -144,6 +157,7 @@ describe('OrderService', () => {
     // Bill numbering is exercised on its own below; every other test just needs
     // a working counter so create() can draw a number.
     stubOrderSequence(prismaMock, 1);
+    runTransactionsInline(prismaMock);
     gatewayMock = makeGatewayMock();
     eventEmitterMock = { emit: jest.fn() };
 
@@ -154,6 +168,8 @@ describe('OrderService', () => {
         { provide: KitchenGateway, useValue: gatewayMock },
         { provide: MenuService, useValue: makeMenuServiceMock() },
         { provide: AuditLogService, useValue: makeAuditMock() },
+        { provide: FolioPostingService, useValue: buildFolioPostingStub() },
+        { provide: RevenuePostingService, useValue: buildRevenuePostingStub() },
         { provide: ConfigService, useValue: makeConfigMock() },
         { provide: EventEmitter2, useValue: eventEmitterMock },
       ],

@@ -1,5 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { RevenueSourceModule, RevenueType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { RevenueFilter, RevenueQueryService } from '../revenue/revenue-query.service';
+import { round2, shiftDate, toBangkokDate } from '../../common/utils/bangkok-day.util';
 
 interface TodayActionsResponse {
   checkInsDue: number;
@@ -88,7 +91,10 @@ interface ActivityFeedResponse {
 export class DashboardService {
   private readonly logger = new Logger(DashboardService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private readonly revenue: RevenueQueryService,
+  ) {}
 
   async getTodayActions(tenantId?: string, propertyId?: string): Promise<TodayActionsResponse> {
     if (!tenantId) {
@@ -262,45 +268,57 @@ export class DashboardService {
         totalRooms > 0 ? Math.round((yesterdayOccupied / totalRooms) * 100) : 0;
       const occupancyTrend = occupancyRate - yesterdayOccupancy;
 
-      const todayBookings = await this.prisma.booking.findMany({
-        where: {
-          ...whereBase,
-          status: { in: ['confirmed', 'checked_in', 'checked_out'] },
-          checkIn: { gte: today, lt: tomorrow },
-        },
-        select: { grandTotal: true, totalPrice: true, addOns: { select: { amount: true } } },
+      // Money comes from the revenue ledger, which files a stay under the day its
+      // folio closed and cuts the day at Bangkok midnight. The counts above still
+      // use the server-local day boundaries they always did — changing those is a
+      // separate correction, and mixing the two here would be worse than either.
+      //
+      // ADR and RevPAR divide *room* revenue, not everything the hotel earned:
+      // a minibar charge is not part of the average daily rate. Reading the
+      // ledger makes that split available for the first time; the old figure
+      // divided grandTotal, add-ons and all, and quietly ran high.
+      const todayDate = toBangkokDate(new Date());
+      const yesterdayDate = shiftDate(todayDate, -1);
+      const hotelFilter = (day: string, roomsOnly = false): RevenueFilter => ({
+        tenantId,
+        from: day,
+        to: day,
+        propertyId,
+        sourceModule: RevenueSourceModule.HOTEL,
+        revenueType: roomsOnly ? RevenueType.ROOM : undefined,
       });
-      const todayRevenue = todayBookings.reduce((sum, b) => {
-        const base = Number(b.grandTotal ?? b.totalPrice ?? 0);
-        const addOns = b.addOns.reduce((s, a) => s + Number(a.amount ?? 0), 0);
-        return sum + base + addOns;
-      }, 0);
+      const todayRoomsFilter = hotelFilter(todayDate, true);
+      const yesterdayRoomsFilter = hotelFilter(yesterdayDate, true);
 
-      const yesterdayBookings = await this.prisma.booking.findMany({
-        where: {
-          ...whereBase,
-          status: { in: ['confirmed', 'checked_in', 'checked_out'] },
-          checkIn: { gte: yesterday, lt: today },
-        },
-        select: { grandTotal: true, totalPrice: true, addOns: { select: { amount: true } } },
-      });
-      const yesterdayRevenue = yesterdayBookings.reduce((sum, b) => {
-        const base = Number(b.grandTotal ?? b.totalPrice ?? 0);
-        const addOns = b.addOns.reduce((s, a) => s + Number(a.amount ?? 0), 0);
-        return sum + base + addOns;
-      }, 0);
+      const [[todayTotals, yesterdayTotals, todayRooms, yesterdayRooms], todayStays, yesterdayStays] =
+        await Promise.all([
+          this.revenue.totalsOfMany([
+            hotelFilter(todayDate),
+            hotelFilter(yesterdayDate),
+            todayRoomsFilter,
+            yesterdayRoomsFilter,
+          ]),
+          this.revenue.countDocuments(todayRoomsFilter),
+          this.revenue.countDocuments(yesterdayRoomsFilter),
+        ]);
+
+      const todayRevenue = todayTotals.net;
+      const yesterdayRevenue = yesterdayTotals.net;
       const revenueTrend =
         yesterdayRevenue > 0
           ? Math.round(((todayRevenue - yesterdayRevenue) / yesterdayRevenue) * 100)
           : 0;
 
-      const adr = occupiedBookings > 0 ? Math.round(todayRevenue / occupiedBookings) : 0;
+      // ตัวหารเป็น "ใบที่รับรู้ค่าห้องในวันนั้น" ชุดเดียวกับตัวตั้ง ไม่ใช่จำนวนห้องที่มีคน
+      // พักคืนนั้น สมุดรับรู้ค่าห้องทั้งก้อนตอนเช็คเอาต์ การเอาสองชุดมาหารกันจึงได้
+      // ตัวเลขที่ไม่มีความหมาย (เช่นเข้าพัก 3 คืนเช็คเอาต์วันนี้ หารด้วยห้องที่ยังมีคนพัก)
+      const adr = todayStays > 0 ? Math.round(todayRooms.net / todayStays) : 0;
       const yesterdayAdr =
-        yesterdayOccupied > 0 ? Math.round(yesterdayRevenue / yesterdayOccupied) : 0;
+        yesterdayStays > 0 ? Math.round(yesterdayRooms.net / yesterdayStays) : 0;
       const adrTrend =
         yesterdayAdr > 0 ? Math.round(((adr - yesterdayAdr) / yesterdayAdr) * 100) : 0;
 
-      const revpar = totalRooms > 0 ? Math.round(todayRevenue / totalRooms) : 0;
+      const revpar = totalRooms > 0 ? Math.round(todayRooms.net / totalRooms) : 0;
 
       const arrivalsToday = await this.prisma.booking.count({
         where: {
@@ -338,7 +356,7 @@ export class DashboardService {
         adr,
         adrTrend,
         revpar,
-        todayRevenue,
+        todayRevenue: round2(todayRevenue),
         revenueTrend,
         totalRooms,
         occupiedRooms: occupiedBookings,

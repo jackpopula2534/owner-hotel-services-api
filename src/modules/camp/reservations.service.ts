@@ -15,6 +15,14 @@ import {
 } from './dto/reservation.dto';
 import { calcAddonTotal, calcLodgingTotal, countNights, type SeasonalRate } from './camp-pricing';
 import { CampAccountingService } from './camp-accounting.service';
+import {
+  RevenuePostingService,
+  hasPostableRevenue,
+} from '../revenue/revenue-posting.service';
+import {
+  buildCampRevenueInput,
+  CAMP_REVENUE_SELECT,
+} from '../revenue/sources/camp-revenue.source';
 
 const BLOCKING_STATUSES = ['pending', 'confirmed', 'checked_in'];
 
@@ -25,6 +33,7 @@ export class ReservationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly campAccounting: CampAccountingService,
+    private readonly revenuePosting: RevenuePostingService,
   ) {}
 
   async findAll(query: { campgroundId?: string; status?: string }, tenantId?: string) {
@@ -463,9 +472,45 @@ export class ReservationsService {
         where: { id: reservation.pitchId },
         data: { status: 'cleaning' },
       });
+
+      // แขกออกแล้ว = รายได้เกิดแล้ว ลงสมุดในทรานแซกชันเดียวกับการปิดการจอง
+      await this.recordCampRevenue(tx, id, reservation.campgroundId);
+
       return reservation;
     });
     return { success: true, data };
+  }
+
+  /**
+   * ลงการจองที่เพิ่งเช็คเอาต์เข้าสมุดรายได้กลาง
+   *
+   * อ่านการจองกลับมาใหม่เพราะต้องได้ `addonItems` มาแยกค่าที่พักออกจากค่าเช่าอุปกรณ์
+   * (คนละแผนกในผังบัญชี) และต้องเป็นแถวชุดเดียวกับที่สคริปต์ backfill อ่าน ไม่งั้น
+   * ยอดที่ลงตอนเช็คเอาต์กับยอดที่ backfill ย้อนหลังจะไม่ตรงกันโดยไม่มีอะไรฟ้อง
+   *
+   * การจองยอดศูนย์ (คอมพลิเมนต์/แลกแต้ม) ข้ามเงียบ ๆ — เช็คเอาต์ต้องไม่พังเพราะไม่มีเงิน
+   */
+  private async recordCampRevenue(
+    tx: Prisma.TransactionClient,
+    reservationId: string,
+    campgroundId: string,
+  ): Promise<void> {
+    const [row, campground] = await Promise.all([
+      tx.campReservation.findFirst({
+        where: { id: reservationId },
+        select: CAMP_REVENUE_SELECT,
+      }),
+      tx.campground.findFirst({ where: { id: campgroundId }, select: { name: true } }),
+    ]);
+    if (!row) return;
+
+    const revenue = buildCampRevenueInput(row, {
+      campgroundId,
+      campgroundName: campground?.name ?? null,
+    });
+    if (!hasPostableRevenue(revenue)) return;
+
+    await this.revenuePosting.postWithin(tx, revenue);
   }
 
   async cancel(id: string, tenantId?: string) {
@@ -489,6 +534,18 @@ export class ReservationsService {
           });
         }
       }
+      // การจองที่เช็คเอาต์ไปแล้วแล้วถูกยกเลิกทีหลังมีรายได้ค้างอยู่ในสมุด ต้องดึงกลับ
+      // ด้วย ไม่งั้นยอดขายของลานจะค้างอยู่ทั้งที่คืนเงินไปแล้ว (ยังไม่เคยลง = คืน 0)
+      if (reservation.tenantId) {
+        await this.revenuePosting.voidWithin(tx, {
+          tenantId: reservation.tenantId,
+          sourceType: 'CAMP_RESERVATION',
+          sourceId: id,
+          voidedBy: 'system',
+          reason: 'ยกเลิกการจอง',
+        });
+      }
+
       return tx.campReservation.update({
         where: { id },
         data: { status: 'cancelled' },

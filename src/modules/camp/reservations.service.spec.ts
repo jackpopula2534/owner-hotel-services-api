@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { ReservationsService } from './reservations.service';
 import { CreateReservationDto } from './dto/reservation.dto';
+import { buildRevenuePostingStub } from '../revenue/__tests__/revenue-posting.stub';
 
 /**
  * สร้าง mock tx (Prisma transaction client) แบบยืดหยุ่น
@@ -49,8 +50,31 @@ function makeService(tx: ReturnType<typeof makeTx>) {
   };
   // การลงบัญชีเป็น side effect ที่ไม่บล็อกการรับเงิน — mock ทิ้งใน spec ชุดนี้
   const campAccounting = { postPaymentJournal: jest.fn().mockResolvedValue(undefined) };
+  const revenuePosting = buildRevenuePostingStub();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return new ReservationsService(prisma as any, campAccounting as any);
+  return new ReservationsService(prisma as any, campAccounting as any, revenuePosting as any);
+}
+
+/** เหมือน {@link makeService} แต่คืนตัวโพสต์รายได้มาให้ตรวจว่าถูกเรียกด้วยอะไร */
+function makeServiceWithRevenue(tx: ReturnType<typeof makeTx>) {
+  const prisma = {
+    $transaction: jest.fn().mockImplementation((cb: (t: unknown) => unknown) => cb(tx)),
+    campReservation: {
+      findFirst: jest.fn().mockResolvedValue({ id: 'res-1' }),
+      update: jest.fn().mockResolvedValue({ id: 'res-1' }),
+    },
+  };
+  const campAccounting = { postPaymentJournal: jest.fn().mockResolvedValue(undefined) };
+  const revenuePosting = buildRevenuePostingStub();
+  const service = new ReservationsService(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    prisma as any,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    campAccounting as any,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    revenuePosting as any,
+  );
+  return { service, revenuePosting };
 }
 
 const baseDto: CreateReservationDto = {
@@ -227,6 +251,102 @@ describe('ReservationsService.cancel', () => {
       where: { id: 'addon-1' },
       data: { stockQty: { increment: 2 } },
     });
+  });
+
+  it('ดึงรายได้ที่เคยลงไว้กลับ ในทรานแซกชันเดียวกับการยกเลิก', async () => {
+    const tx = makeTx();
+    tx.campReservation.findUniqueOrThrow = jest.fn().mockResolvedValue({
+      id: 'res-1',
+      tenantId: 'tenant-1',
+      addonItems: [],
+    });
+    const { service, revenuePosting } = makeServiceWithRevenue(tx);
+    await service.cancel('res-1');
+
+    expect(revenuePosting.voidWithin).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        tenantId: 'tenant-1',
+        sourceType: 'CAMP_RESERVATION',
+        sourceId: 'res-1',
+      }),
+    );
+  });
+});
+
+// ── เช็คเอาต์แล้วรายได้ต้องลงสมุด ────────────────────────────────────
+/**
+ * แขกออกจากลาน = รายได้เกิดขึ้นแล้ว
+ *
+ * ก่อนหน้านี้ยอดของลานมีอยู่ที่ `camp_reservations.totalPrice` ที่เดียว ใครอยากได้
+ * ยอดขายต้องไปนับเอง คนละเงื่อนไขสถานะ สเปกชุดนี้ตรึงว่าเช็คเอาต์ต้องยิงเข้าสมุด
+ * รายได้กลางในทรานแซกชันเดียวกัน และค่าเช่าอุปกรณ์ต้องแยกออกจากค่าที่พัก
+ */
+describe('ReservationsService.checkOut — สมุดรายได้', () => {
+  const checkedOutTx = (row: Record<string, unknown>) => {
+    const tx = makeTx();
+    tx.campReservation.update = jest
+      .fn()
+      .mockResolvedValue({ id: 'res-1', pitchId: 'pitch-1', campgroundId: 'cg-1' });
+    tx.campReservation.findFirst = jest.fn().mockResolvedValue(row);
+    tx.campground.findFirst = jest.fn().mockResolvedValue({ name: 'ลานริมธาร' });
+    return tx;
+  };
+
+  const baseRow = {
+    id: 'res-1',
+    tenantId: 'tenant-1',
+    campgroundId: 'cg-1',
+    reservationNo: 'CMP-20260817-1234',
+    paymentMethod: 'transfer',
+    checkOut: new Date('2026-08-17T05:00:00.000Z'),
+    actualCheckOut: new Date('2026-08-17T04:30:00.000Z'),
+    totalPrice: 2400,
+    addonItems: [],
+  };
+
+  it('ลงค่าที่พักเป็น ROOM พร้อมมิติของลาน', async () => {
+    const tx = checkedOutTx(baseRow);
+    const { service, revenuePosting } = makeServiceWithRevenue(tx);
+    await service.checkOut('res-1');
+
+    expect(revenuePosting.postWithin).toHaveBeenCalledTimes(1);
+    const [passedTx, input] = revenuePosting.postWithin.mock.calls[0];
+    expect(passedTx).toBe(tx);
+    expect(input).toMatchObject({
+      tenantId: 'tenant-1',
+      sourceModule: 'CAMP',
+      sourceType: 'CAMP_RESERVATION',
+      sourceId: 'res-1',
+      documentNo: 'CMP-20260817-1234',
+      outletId: 'cg-1',
+      outletName: 'ลานริมธาร',
+      settlement: 'TRANSFER',
+    });
+    expect(input.lines).toEqual([{ revenueType: 'ROOM', grossAmount: 2400 }]);
+  });
+
+  it('แยกค่าเช่าอุปกรณ์ออกจากค่าที่พัก (คนละแผนกในผังบัญชี)', async () => {
+    const tx = checkedOutTx({
+      ...baseRow,
+      addonItems: [{ qty: 2, priceSnapshot: 300 }],
+    });
+    const { service, revenuePosting } = makeServiceWithRevenue(tx);
+    await service.checkOut('res-1');
+
+    expect(revenuePosting.postWithin.mock.calls[0][1].lines).toEqual([
+      { revenueType: 'ROOM', grossAmount: 1800 },
+      { revenueType: 'OTHER', grossAmount: 600 },
+    ]);
+  });
+
+  it('การจองยอดศูนย์ (คอมพลิเมนต์) เช็คเอาต์ได้โดยไม่ต้องมีแถวในสมุด', async () => {
+    const tx = checkedOutTx({ ...baseRow, totalPrice: 0 });
+    const { service, revenuePosting } = makeServiceWithRevenue(tx);
+    const res = await service.checkOut('res-1');
+
+    expect(res.success).toBe(true);
+    expect(revenuePosting.postWithin).not.toHaveBeenCalled();
   });
 });
 

@@ -1,9 +1,11 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { RevenueSourceModule } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { RevenueQueryService } from '../../revenue/revenue-query.service';
 import {
-  DAY_MS,
-  PAID_ORDER_SELECT,
+  ORDER_DIMENSION_SELECT,
   SOLD_ITEM_SELECT,
+  type LedgerOrderRow,
   type SalesBreakdownRow,
   type SalesOperations,
   type SalesTopItem,
@@ -12,8 +14,10 @@ import {
   bangkokHour,
   breakdown,
   countOperations,
+  joinLedgerOrders,
   rankTopItems,
   round2,
+  shiftDate,
   sumTotals,
   toBangkokDate,
 } from './sales-shared';
@@ -50,14 +54,24 @@ export interface DailySalesReport {
  *
  * Kept apart from RestaurantAnalyticsService for two reasons. It is the only
  * analytic that must reconcile line-for-line with the printed receipt, so its
- * filters are deliberately fixed (COMPLETED **and** PAID, keyed on `completedAt`)
- * rather than varying per metric the way the older endpoints do. And it works in
- * Bangkok calendar days rather than server-local ones, so a report pulled from a
- * UTC container matches one pulled from a Thai laptop.
+ * bill set is deliberately fixed rather than varying per metric the way the older
+ * endpoints do. And it works in Bangkok calendar days rather than server-local
+ * ones, so a report pulled from a UTC container matches one pulled from a Thai
+ * laptop.
+ *
+ * Every money figure comes from the revenue ledger, keyed on the business date
+ * the bill was filed under. The orders table is still read — but only for what
+ * the ledger does not store (party size, order type, payment method, the hour the
+ * bill closed) and only for the bills the ledger already listed. That way this
+ * screen, the Command Center and accounting cannot drift apart: a bill that
+ * failed to post is missing from all three at once instead of from one.
  */
 @Injectable()
 export class RestaurantDailySalesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly revenue: RevenueQueryService,
+  ) {}
 
   /**
    * Resolve the requested day to a Bangkok calendar date.
@@ -91,48 +105,48 @@ export class RestaurantDailySalesService {
 
     const targetDate = this.resolveDate(date);
     const { start: dayStart, end: dayEnd } = bangkokDayRange(targetDate);
-    const previousDate = toBangkokDate(new Date(dayStart.getTime() - 1));
-    const previousStart = new Date(dayStart.getTime() - DAY_MS);
+    const previousDate = shiftDate(targetDate, -1);
 
-    const [paidOrders, openedOrders, items] = await Promise.all([
-      // Both days in one pass, split in memory — the comparison figure is one
-      // number and does not deserve a second round trip.
-      this.prisma.order.findMany({
-        where: {
-          restaurantId,
-          tenantId,
-          status: 'COMPLETED',
-          paymentStatus: 'PAID',
-          completedAt: { gte: previousStart, lt: dayEnd },
-        },
-        select: PAID_ORDER_SELECT,
-      }),
+    const scope = {
+      tenantId,
+      outletId: restaurantId,
+      sourceModule: RevenueSourceModule.RESTAURANT,
+    };
+
+    const [documents, previousTotals, openedOrders] = await Promise.all([
+      this.revenue.documents({ ...scope, from: targetDate, to: targetDate }),
+      this.revenue.totals({ ...scope, from: previousDate, to: previousDate }),
       // Operational counters key on createdAt: an order opened today but still
-      // unpaid has no completedAt, and would otherwise be invisible.
+      // unpaid has no ledger row, and would otherwise be invisible.
       this.prisma.order.findMany({
         where: { restaurantId, tenantId, createdAt: { gte: dayStart, lt: dayEnd } },
         select: { status: true },
       }),
-      this.prisma.orderItem.findMany({
-        where: {
-          status: { not: 'CANCELLED' },
-          order: {
-            restaurantId,
-            tenantId,
-            status: 'COMPLETED',
-            paymentStatus: 'PAID',
-            completedAt: { gte: dayStart, lt: dayEnd },
-          },
-        },
-        select: SOLD_ITEM_SELECT,
-      }),
     ]);
 
-    const today = paidOrders.filter((o) => o.completedAt && o.completedAt >= dayStart);
-    const previous = paidOrders.filter((o) => o.completedAt && o.completedAt < dayStart);
+    // Only the bills the ledger filed under this day — no second opinion about
+    // which orders count as sold.
+    const orderIds = [...new Set(documents.map((doc) => doc.sourceId))];
+
+    const [dimensions, items] = await Promise.all([
+      orderIds.length > 0
+        ? this.prisma.order.findMany({
+            where: { id: { in: orderIds }, tenantId },
+            select: ORDER_DIMENSION_SELECT,
+          })
+        : Promise.resolve([]),
+      orderIds.length > 0
+        ? this.prisma.orderItem.findMany({
+            where: { status: { not: 'CANCELLED' }, order: { id: { in: orderIds }, tenantId } },
+            select: SOLD_ITEM_SELECT,
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const today = joinLedgerOrders(documents, dimensions);
 
     const totals = sumTotals(today);
-    const previousCollected = round2(previous.reduce((sum, o) => sum + Number(o.total), 0));
+    const previousCollected = previousTotals.total;
     const changeAmount = round2(totals.totalCollected - previousCollected);
 
     return {
@@ -155,9 +169,13 @@ export class RestaurantDailySalesService {
     };
   }
 
-  private hourly(
-    orders: { total: unknown; completedAt: Date | null }[],
-  ): DailySalesReport['hourly'] {
+  /**
+   * The bill's own closing time decides its column — a bill the ledger filed
+   * under today but whose order row is gone has no hour to stand in, so it is
+   * left out of the chart rather than parked in hour 0. Its money still counts
+   * in the totals above.
+   */
+  private hourly(orders: LedgerOrderRow[]): DailySalesReport['hourly'] {
     const grid = Array.from({ length: 24 }, (_, hour) => ({ hour, orders: 0, amount: 0 }));
 
     for (const order of orders) {

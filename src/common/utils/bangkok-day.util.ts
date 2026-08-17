@@ -68,6 +68,41 @@ export const daysOfMonth = (month: string): string[] => {
   );
 };
 
+/** How a report rolls calendar days up into the points of a chart. */
+export type DayGrouping = 'day' | 'week' | 'month';
+
+/**
+ * The bucket a Bangkok calendar day belongs to: itself, the Sunday that starts
+ * its week, or its month.
+ *
+ * Shared so that every chart in the system draws the same week — one report
+ * starting weeks on Sunday and another on Monday makes two screens disagree
+ * about the same sale. The arithmetic stays in pure UTC: a 'YYYY-MM-DD' has no
+ * timezone of its own, and routing it through the server's clock is exactly how
+ * a day slips.
+ */
+export const bucketOfDay = (day: string, groupBy: DayGrouping): string => {
+  if (groupBy === 'month') return day.slice(0, 7);
+  if (groupBy === 'week') return shiftDate(day, -new Date(`${day}T00:00:00.000Z`).getUTCDay());
+  return day;
+};
+
+/**
+ * The value to store in a `@db.Date` business-date column for a sale that
+ * happened at instant `at`: UTC midnight of the Bangkok calendar day.
+ *
+ * MySQL DATE has no timezone, and the driver reads a DATE back as UTC midnight.
+ * Anything built with `setHours(0,0,0,0)` is local midnight instead, which is
+ * 17:00 UTC of the previous day on a Bangkok server — so the row silently lands
+ * on the wrong day and every daily total is off by one for the evening's sales.
+ * Round-trip safe: `toBangkokDate(toBusinessDate(at))` is the same date string.
+ */
+export const toBusinessDate = (at: Date): Date =>
+  new Date(`${toBangkokDate(at)}T00:00:00.000Z`);
+
+/** Same as {@link toBusinessDate} but from a 'YYYY-MM-DD' string already in hand. */
+export const businessDateOf = (date: string): Date => new Date(`${date}T00:00:00.000Z`);
+
 /** Hour 0–23 of the Bangkok clock at instant `at`. */
 export const bangkokHour = (at: Date): number =>
   new Date(at.getTime() + BANGKOK_OFFSET_MS).getUTCHours();

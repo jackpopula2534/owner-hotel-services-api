@@ -469,19 +469,25 @@ model TableReservation {
 }
 
 model MenuCategory {
-  id           String     @id @default(uuid())
+  id           String      @id @default(uuid())
   tenantId     String?
   restaurantId String
   name         String
   description  String?
-  image        String?    @db.LongText
-  displayOrder Int        @default(0)
-  isActive     Boolean    @default(true)
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  image        String?     @db.LongText
+  displayOrder Int         @default(0)
+  isActive     Boolean     @default(true)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
   icon         String?
   color        String?
-  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  /// รายได้ที่ขายในหมวดนี้ถือเป็นชนิดไหนในสมุดรายได้ — ตัวเดียวที่แยกอาหารจากเครื่องดื่ม
+  ///
+  /// ค่าเริ่มต้น FOOD เพราะหมวดส่วนใหญ่เป็นอาหาร และการเดาผิดฝั่งอาหารทำให้ยอด
+  /// Food Cost% เพี้ยนน้อยกว่าการเดาผิดฝั่งเครื่องดื่ม (ต้นทุนอาหารเป็นตัวเศษที่ใหญ่กว่า)
+  /// ค่าที่ยอมรับจำกัดไว้ที่ FOOD | BEVERAGE | OTHER ในชั้น DTO — ดู MENU_REVENUE_TYPES
+  revenueType  RevenueType @default(FOOD)
+  restaurant   Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   items        MenuItem[]
 
   @@index([tenantId])
@@ -579,7 +585,14 @@ model Order {
   status        OrderStatus        @default(PENDING)
   waiterId      String?
   guestName     String?
+  // เลขห้องที่แขกแจ้ง (ข้อความ) — เก็บไว้แสดงบนใบเสร็จเท่านั้น
+  // การชาร์จเข้าห้องต้องอ้าง bookingId ไม่ใช่ข้อความนี้
   guestRoom     String?
+  // การจองที่รับผิดชอบบิลนี้ ตั้งตอนชาร์จเข้าห้อง (ROOM_CHARGE)
+  bookingId     String?
+  // Folio + FolioCharge ที่รับหนี้ก้อนนี้ไป — ว่างแปลว่ายังไม่ได้ยกเข้าบิลห้อง
+  folioId       String?
+  folioChargeId String?
   partySize     Int?
   subtotal      Decimal            @default(0.00) @db.Decimal(10, 2)
   taxRate       Decimal            @default(7.00) @db.Decimal(5, 2)
@@ -612,6 +625,7 @@ model Order {
   @@index([status])
   @@index([paymentStatus])
   @@index([orderNumber])
+  @@index([bookingId])
   @@map("orders")
 }
 
@@ -3261,11 +3275,13 @@ model RetailSale {
   warehouseId   String
   status        RetailSaleStatus    @default(COMPLETED)
   paymentMethod RetailPaymentMethod @default(CASH)
-  // Room-charge metadata (free text captured at the POS). Folio posting is optional.
+  // Room-charge metadata. roomNumber/guestName are display snapshots only —
+  // the charge itself always hangs off bookingId → folioId → folioChargeId.
   roomNumber    String?
   guestName     String?
   bookingId     String?
   folioId       String?
+  folioChargeId String?
   // Money — all server-computed, never trusted from the client.
   subtotal      Decimal             @default(0.00) @db.Decimal(12, 2)
   discountTotal Decimal             @default(0.00) @db.Decimal(12, 2)
@@ -3726,7 +3742,7 @@ model PeriodClose {
   netOperatingIncome  Decimal            @default(0.00) @db.Decimal(14, 2)
   totalRoomNights     Int                @default(0)
   occupiedRoomNights  Int                @default(0)
-  occupancyRate       Decimal            @default(0.00) @db.Decimal(5, 2)
+  occupancyRate       Decimal            @default(0.00) @db.Decimal(10, 2)
   revPAR              Decimal            @default(0.00) @db.Decimal(10, 2)
   costPerOccupiedRoom Decimal            @default(0.00) @db.Decimal(10, 2)
   closedBy            String?
@@ -3758,7 +3774,7 @@ model DepartmentPnL {
   otherCost     Decimal     @default(0.00) @db.Decimal(14, 2)
   totalCost     Decimal     @default(0.00) @db.Decimal(14, 2)
   netProfit     Decimal     @default(0.00) @db.Decimal(14, 2)
-  profitMargin  Decimal     @default(0.00) @db.Decimal(5, 2)
+  profitMargin  Decimal     @default(0.00) @db.Decimal(10, 2)
   createdAt     DateTime    @default(now())
   costCenter    CostCenter  @relation(fields: [costCenterId], references: [id])
   periodClose   PeriodClose @relation(fields: [periodCloseId], references: [id], onDelete: Cascade)
@@ -3781,7 +3797,7 @@ model RoomCostAnalysis {
   revenuePerNight Decimal     @default(0.00) @db.Decimal(10, 2)
   costPerNight    Decimal     @default(0.00) @db.Decimal(10, 2)
   profitPerNight  Decimal     @default(0.00) @db.Decimal(10, 2)
-  margin          Decimal     @default(0.00) @db.Decimal(5, 2)
+  margin          Decimal     @default(0.00) @db.Decimal(10, 2)
   createdAt       DateTime    @default(now())
   periodClose     PeriodClose @relation(fields: [periodCloseId], references: [id], onDelete: Cascade)
 
@@ -3800,7 +3816,7 @@ model FoodCostAnalysis {
   ingredientCost  Decimal     @default(0.00) @db.Decimal(14, 2)
   sellingPrice    Decimal     @default(0.00) @db.Decimal(10, 2)
   costPerUnit     Decimal     @default(0.00) @db.Decimal(10, 2)
-  foodCostPercent Decimal     @default(0.00) @db.Decimal(5, 2)
+  foodCostPercent Decimal     @default(0.00) @db.Decimal(10, 2)
   profitPerUnit   Decimal     @default(0.00) @db.Decimal(10, 2)
   createdAt       DateTime    @default(now())
   periodClose     PeriodClose @relation(fields: [periodCloseId], references: [id], onDelete: Cascade)
@@ -4556,6 +4572,9 @@ enum OrderPaymentStatus {
   UNPAID
   PARTIAL
   PAID
+  /// ปิดบิลแล้วแต่ยังไม่ได้เงิน — ยกไปเก็บที่ folio ห้องพัก (ลูกหนี้)
+  /// แยกจาก PAID เพราะเป็นรายได้แต่ไม่ใช่เงินสดรับ
+  CHARGED_TO_ROOM
   REFUNDED
 }
 
@@ -7551,4 +7570,138 @@ model TenantIntegration {
   @@unique([tenantId, integrationKey])
   @@index([tenantId])
   @@map("tenant_integrations")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Revenue Ledger — สมุดรายได้กลาง
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// ช่องทางที่รายได้เกิด — ตอบคำถาม "เงินก้อนนี้มาจากธุรกิจไหน"
+enum RevenueSourceModule {
+  HOTEL
+  RESTAURANT
+  RETAIL
+  CAMP
+}
+
+/// แผนกตามผังบัญชีโรงแรม (USALI) — ชุดย่อยของ CostCenterType ฝั่งที่มีรายได้
+enum RevenueSegment {
+  ROOMS
+  FOOD_BEVERAGE
+  OTHER_OPERATED
+}
+
+/// ชนิดรายได้ ละเอียดกว่า segment — ใช้แยก Food/Beverage ที่ต้นทุนคนละตัวหาร
+enum RevenueType {
+  ROOM
+  FOOD
+  BEVERAGE
+  RETAIL_GOODS
+  SERVICE_CHARGE
+  OTHER
+}
+
+/// เอกสารต้นทางที่ทำให้เกิดรายได้ ใช้คู่กับ sourceId เป็นกุญแจกันโพสต์ซ้ำ
+enum RevenueSourceType {
+  BOOKING
+  ORDER
+  RETAIL_SALE
+  CAMP_RESERVATION
+}
+
+/// วิธีที่ยอดถูกชำระ — คนละเรื่องกับ "รับรู้รายได้แล้วหรือยัง"
+/// ROOM_CHARGE / CITY_LEDGER = รับรู้รายได้แล้วแต่ยังไม่ได้เงิน (เป็นลูกหนี้)
+enum SettlementType {
+  CASH
+  TRANSFER
+  CARD
+  ROOM_CHARGE
+  CITY_LEDGER
+}
+
+/// ORIGINAL = รายการขายจริง, REVERSAL = รายการกลับของบิลที่ถูกยกเลิกข้ามวัน
+/// อยู่ใน unique key ด้วย เพราะแถวกลับใช้ (sourceType, sourceId, revenueType)
+/// ชุดเดียวกับต้นฉบับ ถ้าไม่มีตัวแยกจะชนกุญแจกันเอง
+enum RevenueEntryKind {
+  ORIGINAL
+  REVERSAL
+}
+
+enum RevenueEntryStatus {
+  POSTED
+  VOIDED
+}
+
+/// สมุดรายได้กลาง — แหล่งความจริงเดียวของ "รายได้" ทุกช่องทาง
+///
+/// เกิดขึ้นเพราะรายได้เคยกระจายอยู่ตามตารางต้นทาง (orders / retail_sales / bookings /
+/// camp_reservations) แล้วแต่ละหน้าจอไปนับเอง คนละเงื่อนไข คนละช่วงเวลา ตัวเลขจึงขัดกัน
+/// ทุกหน้า ตารางนี้ถูกเขียนเสมอไม่ว่า tenant จะซื้อโมดูลบัญชีหรือไม่ (ผังบัญชีต้อง seed
+/// เองและบัญชีเป็น add-on เสียเงิน) ส่วน journal_entries จะ mirror ตามทีหลังเฉพาะ
+/// tenant ที่มีผังบัญชี — รายงานอ่านจากที่นี่ งบการเงินอ่านจาก GL
+///
+/// **netAmount คือตัวเลขเดียวที่รายงานเอาไปบวกกัน** — serviceCharge / taxAmount เป็น
+/// snapshot หน้าบิลไว้กระทบยอดเท่านั้น ห้ามบวกซ้ำเข้าไปในรายได้ (VAT เป็นหนี้สิน ไม่ใช่
+/// รายได้ และ service charge ที่แยกเป็นรายได้จะมีแถว SERVICE_CHARGE ของตัวเองอยู่แล้ว)
+model RevenueEntry {
+  id         String  @id @default(uuid())
+  tenantId   String
+  /// null ได้ — ลานกางเต็นท์/ร้านนอกโรงแรมไม่ผูก property
+  propertyId String?
+
+  /// วันตามปฏิทินธุรกิจ (เวลาไทย) เก็บเป็น UTC midnight — ใช้ toBusinessDate() เท่านั้น
+  /// ห้าม setHours(0,0,0,0) เพราะ server timezone ทำให้วันเพี้ยนไป 1 วันแบบเงียบ ๆ
+  businessDate DateTime @db.Date
+  /// timestamp จริงของการขาย เก็บไว้ไล่ย้อนตอนตัวเลขไม่ตรง
+  occurredAt   DateTime
+
+  sourceModule RevenueSourceModule
+  segment      RevenueSegment
+  revenueType  RevenueType
+  /// restaurantId / warehouseId / campgroundId — ledger_balances ไม่มีมิตินี้
+  outletId     String?
+  /// snapshot ชื่อ ณ วันขาย รายงานย้อนหลังจะได้ไม่เปลี่ยนตามการเปลี่ยนชื่อร้านวันนี้
+  outletName   String?
+  costCenterId String?
+
+  sourceType RevenueSourceType
+  sourceId   String
+  /// orderNumber / bookingNo / receiptNo — ไว้ให้คนกดดูเอกสารต้นทางได้
+  documentNo String?
+
+  grossAmount   Decimal @db.Decimal(14, 2)
+  discount      Decimal @default(0) @db.Decimal(14, 2)
+  /// = gross − discount → ฐานรายได้ที่รายงานใช้ (แถว REVERSAL เป็นค่าติดลบ)
+  netAmount     Decimal @db.Decimal(14, 2)
+  serviceCharge Decimal @default(0) @db.Decimal(14, 2)
+  /// VAT เป็นหนี้สิน ไม่ใช่รายได้ — ไม่รวมใน netAmount
+  taxAmount     Decimal @default(0) @db.Decimal(14, 2)
+  totalAmount   Decimal @db.Decimal(14, 2)
+
+  settlement    SettlementType
+  folioChargeId String?
+
+  /// null = ยังไม่ได้ลงบัญชี (tenant ไม่มีผังบัญชี หรือ mirror ยังตามไม่ทัน)
+  journalEntryId String?
+  accountCode    String?
+
+  entryKind    RevenueEntryKind   @default(ORIGINAL)
+  status       RevenueEntryStatus @default(POSTED)
+  /// แถว REVERSAL ชี้กลับไปที่แถวต้นฉบับที่มันกลับรายการให้
+  reversalOfId String?
+  voidedAt     DateTime?
+  voidedBy     String?
+  voidReason   String?            @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, sourceType, sourceId, revenueType, entryKind])
+  @@index([tenantId, businessDate])
+  @@index([tenantId, sourceModule, businessDate])
+  @@index([tenantId, segment, businessDate])
+  @@index([tenantId, outletId, businessDate])
+  @@index([tenantId, journalEntryId])
+  @@index([reversalOfId])
+  @@map("revenue_entries")
 }

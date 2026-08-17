@@ -31,6 +31,7 @@
     "migration:revert:prod": "typeorm migration:revert -d dist/config/data-source.js",
     "migration:show:prod": "typeorm migration:show -d dist/config/data-source.js",
     "seed": "ts-node -r tsconfig-paths/register src/seeder/seed.ts",
+    "verify:revenue": "ts-node -r tsconfig-paths/register scripts/verify-revenue-ledger.ts",
     "seed:check": "ts-node -r tsconfig-paths/register scripts/check-restaurant-seed.ts",
     "cleanup:phantom-orders": "ts-node -r tsconfig-paths/register scripts/cleanup-phantom-order-tickets.ts",
     "seed:backfill-scheduled": "ts-node -r tsconfig-paths/register src/seeder/backfill-scheduled-times.ts",

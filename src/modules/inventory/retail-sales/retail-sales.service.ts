@@ -1,7 +1,23 @@
 import { randomUUID } from 'crypto';
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { Prisma, RetailPaymentMethod } from '@prisma/client';
+import { Prisma, RetailPaymentMethod, RevenueSourceModule } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
+import { daysOfMonth, shiftDate, toBangkokDate } from '@/common/utils/bangkok-day.util';
+import {
+  RevenueDocument,
+  RevenueFilter,
+  RevenueQueryService,
+} from '@/modules/revenue/revenue-query.service';
+import { settlementOf } from '@/modules/revenue/sources/settlement.util';
+import {
+  FolioPostingService,
+  FOLIO_SOURCE_TYPE,
+} from '@/modules/accounts-receivable/folio-posting/folio-posting.service';
+import {
+  RevenuePostingService,
+  hasPostableRevenue,
+} from '@/modules/revenue/revenue-posting.service';
+import { buildRetailSaleRevenueInput } from '@/modules/revenue/sources/retail-sale-revenue.source';
 import { CreateRetailSaleDto } from './dto/create-retail-sale.dto';
 import { QueryRetailSaleDto } from './dto/query-retail-sale.dto';
 import { DashboardRetailSaleDto, RetailDashboardPeriod } from './dto/dashboard-retail-sale.dto';
@@ -20,7 +36,12 @@ function round2(n: number): number {
 export class RetailSalesService {
   private readonly logger = new Logger(RetailSalesService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly folioPosting: FolioPostingService,
+    private readonly revenuePosting: RevenuePostingService,
+    private readonly revenue: RevenueQueryService,
+  ) {}
 
   /**
    * Record a retail (POS) sale.
@@ -43,10 +64,9 @@ export class RetailSalesService {
       throw new BadRequestException('ไม่พบคลัง/ร้านค้านี้ หรือไม่ได้อยู่ในองค์กรของคุณ');
     }
 
-    if (dto.paymentMethod === RetailPaymentMethod.ROOM_CHARGE) {
-      if (!dto.roomNumber?.trim() || !dto.guestName?.trim()) {
-        throw new BadRequestException('ต้องระบุเลขห้องและชื่อแขกสำหรับการชาร์จเข้าห้อง');
-      }
+    const isRoomCharge = dto.paymentMethod === RetailPaymentMethod.ROOM_CHARGE;
+    if (isRoomCharge && !dto.bookingId && !dto.roomNumber?.trim()) {
+      throw new BadRequestException('ต้องเลือกห้องพัก (การจอง) สำหรับการชาร์จเข้าห้อง');
     }
 
     // Load every item up front (tenant-scoped) so we can validate + snapshot fields.
@@ -147,7 +167,27 @@ export class RetailSalesService {
       costTotal = round2(costTotal);
       const profitTotal = round2(taxable - costTotal);
 
-      return tx.retailSale.create({
+      // Room charges join this transaction: if the room cannot take the charge,
+      // the stock issue rolls back with it rather than leaving a sale nobody bills.
+      const posted = isRoomCharge
+        ? await this.folioPosting.postChargeWithin(tx, {
+            tenantId,
+            bookingId: dto.bookingId,
+            roomNumber: dto.roomNumber,
+            propertyId: warehouse.propertyId,
+            chargeType: 'OTHER',
+            description: `ร้านค้า — ใบเสร็จ ${receiptNo}`,
+            netAmount: round2(taxable),
+            vatRate,
+            vatAmount,
+            totalAmount: grandTotal,
+            sourceType: FOLIO_SOURCE_TYPE.RETAIL_SALE,
+            sourceId: saleId,
+            postedBy: userId,
+          })
+        : null;
+
+      const created = await tx.retailSale.create({
         data: {
           id: saleId,
           tenantId,
@@ -156,7 +196,9 @@ export class RetailSalesService {
           paymentMethod: dto.paymentMethod,
           roomNumber: dto.roomNumber?.trim() || null,
           guestName: dto.guestName?.trim() || null,
-          bookingId: dto.bookingId || null,
+          bookingId: posted?.bookingId ?? dto.bookingId ?? null,
+          folioId: posted?.folioId ?? null,
+          folioChargeId: posted?.chargeId ?? null,
           subtotal,
           discountTotal,
           vatRate,
@@ -170,6 +212,20 @@ export class RetailSalesService {
         },
         include: { items: true },
       });
+
+      // ลงสมุดรายได้กลางในทรานแซกชันเดียวกับการตัดสต็อกและออกใบเสร็จ — ใบเสร็จที่
+      // ออกสำเร็จแต่รายได้ไม่ถูกบันทึกคือยอดขายที่หายไปจากทุกรายงานแบบเงียบ ๆ
+      // (ใบเสร็จยอดศูนย์ — แจกของ/ตัดสต็อกเปล่า — ข้ามไป ไม่ใช่ขายไม่ได้)
+      const revenue = buildRetailSaleRevenueInput(created, {
+        warehouseId: warehouse.id,
+        warehouseName: warehouse.name,
+        propertyId: warehouse.propertyId,
+      });
+      if (hasPostableRevenue(revenue)) {
+        await this.revenuePosting.postWithin(tx, revenue);
+      }
+
+      return created;
     });
 
     this.logger.log(`Retail sale ${sale.receiptNo} created (tenant ${tenantId}, total ${sale.grandTotal})`);
@@ -213,6 +269,8 @@ export class RetailSalesService {
     return {
       data: rows.map((r) => this.toDetail(r)),
       meta: { page, limit, total },
+      // ผลรวมของ "ใบที่ตรงตัวกรองนี้" ไม่ใช่ยอดขายทางบัญชี — ตัวกรองของหน้าประวัติ
+      // เลือกได้ถึงใบที่ถูกยกเลิก ตัวเลขรายได้จริงอยู่ที่ getDashboard ซึ่งอ่านจากสมุด
       summary: {
         count: total,
         totalSales: Number(agg._sum.grandTotal ?? 0),
@@ -220,6 +278,16 @@ export class RetailSalesService {
         totalProfit: Number(agg._sum.profitTotal ?? 0),
       },
     };
+  }
+
+  /**
+   * ห้องที่หน้าร้านค้าเอาไปทำตัวเลือก "ชาร์จเข้าห้อง"
+   *
+   * มาจากตัวเดียวกับที่ลงรายการหนี้จริง ร้านค้าจึงเสนอได้เฉพาะห้องที่ระบบยอมรับ
+   * (ไม่ระบุ propertyId เพราะร้านค้าปลีกไม่ได้ผูกกับโรงแรมสาขาใดสาขาหนึ่ง)
+   */
+  async listChargeableRooms(tenantId: string, search?: string) {
+    return this.folioPosting.listChargeableRooms({ tenantId, search });
   }
 
   /** Single receipt detail. */
@@ -236,29 +304,42 @@ export class RetailSalesService {
 
   /**
    * Sales dashboard summary (สรุปยอดขาย) for a week / month / year window.
-   * Returns headline KPIs, a per-bucket time series for charting (daily for
-   * week & month, monthly for year), a payment-method breakdown and top items.
-   * Only COMPLETED sales are counted (voided sales are excluded).
+   *
+   * **ยอดขายมาจากสมุดรายได้** ไม่ได้บวก `grandTotal` เองอีกแล้ว หน้านี้เคยนับเฉพาะ
+   * ใบ `COMPLETED` ตามเวลาเครื่อง ส่วนรายงานรายได้นับตามวันธุรกิจไทยและหักใบที่ถูก
+   * กลับรายการข้ามวันให้ด้วย ตัวเลขสองหน้าจึงไม่เคยตรงกัน
+   *
+   * **ต้นทุนกับกำไรยังมาจากใบเสร็จ** เพราะสมุดรายได้เก็บแต่ฝั่งรายได้ ไม่มีต้นทุน
+   * (ฝั่งต้นทุนเป็นงานของ Phase 4) จึงต่อ `sourceId` กลับไปอ่านใบที่สมุดชี้มา
+   * — ชุดใบเดียวกับที่ทำยอดขาย เปอร์เซ็นต์กำไรจึงหารด้วยตัวหารเดียวกันเสมอ
    */
   async getDashboard(tenantId: string, query: DashboardRetailSaleDto) {
     const period: RetailDashboardPeriod = query.period ?? 'week';
-    const anchor = query.date ? new Date(query.date) : new Date();
-    const { from, to } = this.resolveRange(period, anchor);
+    const anchor = toBangkokDate(query.date ? new Date(query.date) : new Date());
+    const range = this.resolveRange(period, anchor);
 
-    const where: Prisma.RetailSaleWhereInput = {
+    const filter: RevenueFilter = {
       tenantId,
-      status: 'COMPLETED',
-      soldAt: { gte: from, lte: to },
+      sourceModule: RevenueSourceModule.RETAIL,
+      ...(query.warehouseId ? { outletId: query.warehouseId } : {}),
+      ...range,
     };
-    if (query.warehouseId) where.warehouseId = query.warehouseId;
 
-    const sales = await this.prisma.retailSale.findMany({
-      where,
-      include: { items: true },
-      orderBy: { soldAt: 'asc' },
-    });
+    const [totals, documents] = await Promise.all([
+      this.revenue.totals(filter),
+      this.revenue.documents(filter),
+    ]);
 
-    const buckets = this.makeBuckets(period, from, to);
+    // ใบเดียวโผล่ได้หลายแถวถ้าถูกกลับรายการคนละวัน — นับใบจาก sourceId ที่ไม่ซ้ำ
+    const saleIds = [...new Set(documents.map((doc) => doc.sourceId))];
+    const sales = saleIds.length
+      ? await this.prisma.retailSale.findMany({
+          where: { id: { in: saleIds }, tenantId },
+          include: { items: true },
+        })
+      : [];
+
+    const buckets = this.makeBuckets(period, range);
     const bucketByKey = new Map(buckets.map((b) => [b.key, b]));
     const paymentMap = new Map<string, { count: number; total: number }>();
     const itemMap = new Map<
@@ -266,28 +347,41 @@ export class RetailSalesService {
       { itemId: string; name: string; sku: string; quantity: number; sales: number }
     >();
 
-    let totalSales = 0;
+    // ยอดขายลงถังตามวันที่สมุดรับรู้ ใบที่กลับรายการวันหลังจึงหักออกจากถังของวันนั้น
+    for (const doc of documents) {
+      const bucket = bucketByKey.get(this.bucketKeyOf(period, doc.businessDate));
+      if (bucket) bucket.sales += doc.total;
+    }
+
+    // วันที่รับรู้ของใบหนึ่ง = วันแรกที่มันโผล่ในสมุด — ต้นทุน/กำไรของใบเกาะวันนั้น
+    // ทั้งก้อน (สมุดไม่ได้เก็บต้นทุน จึงเฉลี่ยตามแถวไม่ได้)
+    const recognizedOn = new Map<string, string>();
+    for (const doc of documents) {
+      const current = recognizedOn.get(doc.sourceId);
+      if (!current || doc.businessDate < current) recognizedOn.set(doc.sourceId, doc.businessDate);
+    }
+
     let totalProfit = 0;
     let totalCost = 0;
     let itemsSold = 0;
 
     for (const sale of sales) {
-      const gross = Number(sale.grandTotal);
-      totalSales += gross;
-      totalProfit += Number(sale.profitTotal);
+      const profit = Number(sale.profitTotal);
+      totalProfit += profit;
       totalCost += Number(sale.costTotal);
 
-      const pm = paymentMap.get(sale.paymentMethod) ?? { count: 0, total: 0 };
+      // ช่องทางรับเงินใช้คำเดียวกับสมุด (QR ของร้านค้า = TRANSFER) ไม่งั้นรายงาน
+      // กระทบยอดเงินสดจะนับ QR ของโมดูลนี้เป็นเงินสดแต่ไม่นับของโมดูลอื่น
+      const method = settlementOf(sale.paymentMethod);
+      const pm = paymentMap.get(method) ?? { count: 0, total: 0 };
       pm.count += 1;
-      pm.total += gross;
-      paymentMap.set(sale.paymentMethod, pm);
+      pm.total += this.ledgerTotalOf(documents, sale.id);
+      paymentMap.set(method, pm);
 
-      const key =
-        period === 'year' ? this.localMonthKey(sale.soldAt) : this.localDayKey(sale.soldAt);
-      const bucket = bucketByKey.get(key);
+      const day = recognizedOn.get(sale.id);
+      const bucket = day ? bucketByKey.get(this.bucketKeyOf(period, day)) : undefined;
       if (bucket) {
-        bucket.sales += gross;
-        bucket.profit += Number(sale.profitTotal);
+        bucket.profit += profit;
         bucket.count += 1;
       }
 
@@ -302,7 +396,8 @@ export class RetailSalesService {
       }
     }
 
-    const salesCount = sales.length;
+    const totalSales = totals.total;
+    const salesCount = saleIds.length;
     const topItems = [...itemMap.values()]
       .sort((a, b) => b.sales - a.sales)
       .slice(0, 5)
@@ -310,9 +405,11 @@ export class RetailSalesService {
 
     return {
       period,
-      range: { from: from.toISOString(), to: to.toISOString() },
+      range: { from: range.from, to: range.to },
       kpis: {
         totalSales: round2(totalSales),
+        /** gross − ส่วนลด (ไม่รวม VAT) — ตัวเดียวที่เรียกว่ารายได้ทางบัญชีได้ */
+        netSales: round2(totals.net),
         totalProfit: round2(totalProfit),
         totalCost: round2(totalCost),
         salesCount,
@@ -338,64 +435,63 @@ export class RetailSalesService {
 
   // ─── internals ──────────────────────────────────────────────────────────────
 
-  /** Local YYYY-MM-DD key (no timezone shift). */
-  private localDayKey(d: Date): string {
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  /** ยอดที่สมุดรับรู้ให้ใบนี้ตลอดช่วง (รวมแถวกลับรายการที่ติดลบ) */
+  private ledgerTotalOf(documents: RevenueDocument[], sourceId: string): number {
+    return documents
+      .filter((doc) => doc.sourceId === sourceId)
+      .reduce((sum, doc) => sum + doc.total, 0);
   }
 
-  /** Local YYYY-MM key (no timezone shift). */
-  private localMonthKey(d: Date): string {
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  /** ถังที่วันธุรกิจหนึ่งตกลงไป — รายเดือนสำหรับช่วงปี รายวันสำหรับที่เหลือ */
+  private bucketKeyOf(period: RetailDashboardPeriod, businessDate: string): string {
+    return period === 'year' ? businessDate.slice(0, 7) : businessDate;
   }
 
-  /** Resolve the inclusive [from, to] window for a dashboard period around an anchor date. */
+  /**
+   * ช่วงของแดชบอร์ดเป็นวันธุรกิจไทยแบบรวมปลายทั้งสองข้าง
+   *
+   * คิดเลขบนสตริง 'YYYY-MM-DD' ล้วน ๆ ไม่ผ่านนาฬิกาของเครื่อง — เซิร์ฟเวอร์ที่ตั้ง
+   * เขตเวลาอื่นเคยทำให้ขอบสัปดาห์/เดือนเลื่อนไปหนึ่งวันแบบเงียบ ๆ
+   */
   private resolveRange(
     period: RetailDashboardPeriod,
-    anchor: Date,
-  ): { from: Date; to: Date } {
+    anchor: string,
+  ): { from: string; to: string } {
     if (period === 'week') {
-      // Week starts on Monday.
-      const diffToMonday = (anchor.getDay() + 6) % 7;
-      const from = new Date(
-        anchor.getFullYear(),
-        anchor.getMonth(),
-        anchor.getDate() - diffToMonday,
-        0, 0, 0, 0,
-      );
-      const to = new Date(from.getFullYear(), from.getMonth(), from.getDate() + 6, 23, 59, 59, 999);
-      return { from, to };
+      // สัปดาห์เริ่มวันจันทร์
+      const dow = new Date(`${anchor}T00:00:00.000Z`).getUTCDay();
+      const from = shiftDate(anchor, -((dow + 6) % 7));
+      return { from, to: shiftDate(from, 6) };
     }
     if (period === 'year') {
-      return {
-        from: new Date(anchor.getFullYear(), 0, 1, 0, 0, 0, 0),
-        to: new Date(anchor.getFullYear(), 11, 31, 23, 59, 59, 999),
-      };
+      const year = anchor.slice(0, 4);
+      return { from: `${year}-01-01`, to: `${year}-12-31` };
     }
-    // month
-    return {
-      from: new Date(anchor.getFullYear(), anchor.getMonth(), 1, 0, 0, 0, 0),
-      to: new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0, 23, 59, 59, 999),
-    };
+    const days = daysOfMonth(anchor.slice(0, 7));
+    return { from: days[0], to: days[days.length - 1] };
   }
 
   /** Build the ordered, zero-filled series buckets for a period window. */
   private makeBuckets(
     period: RetailDashboardPeriod,
-    from: Date,
-    to: Date,
+    range: { from: string; to: string },
   ): Array<{ key: string; label: string; sales: number; profit: number; count: number }> {
     const buckets: Array<{ key: string; label: string; sales: number; profit: number; count: number }> = [];
     if (period === 'year') {
+      const year = range.from.slice(0, 4);
       for (let m = 0; m < 12; m++) {
-        const d = new Date(from.getFullYear(), m, 1);
-        buckets.push({ key: this.localMonthKey(d), label: MONTHS_TH_SHORT[m], sales: 0, profit: 0, count: 0 });
+        buckets.push({
+          key: `${year}-${String(m + 1).padStart(2, '0')}`,
+          label: MONTHS_TH_SHORT[m],
+          sales: 0,
+          profit: 0,
+          count: 0,
+        });
       }
       return buckets;
     }
-    const cursor = new Date(from);
-    while (cursor <= to) {
-      buckets.push({ key: this.localDayKey(cursor), label: String(cursor.getDate()), sales: 0, profit: 0, count: 0 });
-      cursor.setDate(cursor.getDate() + 1);
+    for (let day = range.from; day <= range.to; day = shiftDate(day, 1)) {
+      buckets.push({ key: day, label: String(Number(day.slice(8, 10))), sales: 0, profit: 0, count: 0 });
     }
     return buckets;
   }
@@ -512,6 +608,8 @@ export class RetailSalesService {
     roomNumber: string | null;
     guestName: string | null;
     bookingId: string | null;
+    folioId: string | null;
+    folioChargeId: string | null;
     subtotal: Prisma.Decimal;
     discountTotal: Prisma.Decimal;
     vatRate: Prisma.Decimal;
@@ -546,6 +644,8 @@ export class RetailSalesService {
       roomNumber: sale.roomNumber,
       guestName: sale.guestName,
       bookingId: sale.bookingId,
+      folioId: sale.folioId,
+      folioChargeId: sale.folioChargeId,
       subtotal: Number(sale.subtotal),
       discountTotal: Number(sale.discountTotal),
       vatRate: Number(sale.vatRate),

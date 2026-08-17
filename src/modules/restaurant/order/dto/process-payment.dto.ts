@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsNumber, IsOptional, IsPositive, IsEnum } from 'class-validator';
+import { IsString, IsNotEmpty, IsNumber, IsOptional, IsEnum, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -17,9 +17,17 @@ export class ProcessPaymentDto {
   @IsNotEmpty()
   paymentMethod: PaymentMethodEnum;
 
-  @ApiProperty({ example: 500.0, description: 'Amount paid by guest' })
+  /**
+   * เงินที่รับจากลูกค้าที่เคาน์เตอร์ — ROOM_CHARGE ส่ง 0 เพราะลิ้นชักไม่ได้เปิด
+   * (ยอดไปตกที่ folio ของห้อง เก็บตอนเช็คเอาต์)
+   *
+   * ห้ามกลับไปใช้ @IsPositive() — เคยใช้แล้วทำให้ ROOM_CHARGE โดนตีตกตั้งแต่ชั้น DTO
+   * ยิงไม่ถึง service ด้วยซ้ำ ส่วนเงินสดที่จ่าย 0 ยังโดนปฏิเสธอยู่ดีที่ service
+   * เพราะเช็คว่าจ่ายครบยอดบิลไหม
+   */
+  @ApiProperty({ example: 500.0, description: 'Amount paid by guest (0 for ROOM_CHARGE)' })
   @IsNumber({ maxDecimalPlaces: 2 })
-  @IsPositive()
+  @Min(0)
   @Type(() => Number)
   paidAmount: number;
 

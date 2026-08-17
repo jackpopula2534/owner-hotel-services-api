@@ -1,14 +1,18 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { RevenueSegment, RevenueSourceModule } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreatePropertyDto } from './dto/create-property.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
 import { AuditLogService } from '../../audit-log/audit-log.service';
+import { toBangkokDate } from '../../common/utils/bangkok-day.util';
+import { RevenueFilter, RevenueQueryService } from '../revenue/revenue-query.service';
 
 @Injectable()
 export class PropertiesService {
   constructor(
     private prisma: PrismaService,
     private auditLogService: AuditLogService,
+    private readonly revenue: RevenueQueryService,
   ) {}
 
   private buildWhere(tenantId: string, search?: string, includeDeleted = false) {
@@ -153,13 +157,30 @@ export class PropertiesService {
     }
 
     // Build detailed statistics filtered by tenantId + propertyId
-    const today = new Date();
+    const now = new Date();
+    const today = new Date(now);
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
     const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
 
     const roomWhere = { tenantId, propertyId: id };
+
+    // เดือนนี้ถึงวันนี้ตามปฏิทินไทย — ตัวเงินทุกตัวถามจากสมุดรายได้ด้วยช่วงเดียวกัน
+    // แปลงจากเวลาจริง ไม่ใช่เที่ยงคืนของเครื่อง — เครื่องที่ไม่ได้ตั้ง TZ ไทยจะเพี้ยนไปหนึ่งวัน
+    const todayBkk = toBangkokDate(now);
+    const monthToDate: RevenueFilter = {
+      tenantId,
+      propertyId: id,
+      from: `${todayBkk.slice(0, 7)}-01`,
+      to: todayBkk,
+    };
+    // ค่าห้องของโรงแรมหลังนี้เท่านั้น — ไม่ปนร้านอาหาร/ร้านค้าที่ตั้งอยู่ในโรงแรม
+    const roomsMonthToDate: RevenueFilter = {
+      ...monthToDate,
+      sourceModule: RevenueSourceModule.HOTEL,
+      segment: RevenueSegment.ROOMS,
+    };
 
     const [
       totalRooms,
@@ -169,6 +190,8 @@ export class PropertiesService {
       cleaningRooms,
       monthlyBookings,
       monthlyRevenue,
+      roomsRevenue,
+      roomsStays,
       todayCheckIns,
       todayCheckOuts,
       totalUsers,
@@ -189,25 +212,14 @@ export class PropertiesService {
           status: { not: 'cancelled' },
         },
       }),
-      // monthlyRevenue: sum grandTotal (or fallback totalPrice) + add-on amounts
-      this.prisma.booking
-        .findMany({
-          where: {
-            tenantId,
-            propertyId: id,
-            createdAt: { gte: firstDayOfMonth },
-            status: { in: ['confirmed', 'checked_in', 'checked_out'] },
-          },
-          select: { grandTotal: true, totalPrice: true, addOns: { select: { amount: true } } },
-        })
-        .then((bookings) =>
-          bookings.reduce((sum, b) => {
-            const base = Number(b.grandTotal ?? b.totalPrice ?? 0);
-            const addOnSum = b.addOns.reduce((s, a) => s + Number(a.amount ?? 0), 0);
-            return sum + base + addOnSum;
-          }, 0),
-        )
-        .catch(() => 0),
+      // รายได้ทั้งหมดที่รับรู้ที่โรงแรมหลังนี้เดือนนี้ (ห้อง + ร้านอาหาร + ร้านค้า)
+      // ใช้ net (= gross − ส่วนลด) เท่านั้น ตรงกับไทล์ "รายได้วันนี้" ของหน้าภาพรวม
+      // VAT กับค่าบริการไม่ใช่รายได้ ถ้าเอา total มาโชว์จะสูงกว่ารายงานรายได้เสมอ
+      // เคยบวก grandTotal ของใบจองที่ "สร้าง" เดือนนี้เอง ซึ่งไม่ใช่ทั้งวันที่รับรู้
+      // และไม่ใช่ทั้งรายได้ — ใบที่สร้างเดือนนี้เพื่อเข้าพักเดือนหน้าก็ถูกนับไปแล้ว
+      this.revenue.totals(monthToDate).then((t) => t.net),
+      this.revenue.totals(roomsMonthToDate).then((t) => t.net),
+      this.revenue.countDocuments(roomsMonthToDate),
       this.prisma.booking.count({
         where: {
           tenantId,
@@ -240,7 +252,9 @@ export class PropertiesService {
         roomUsagePercent,
         monthlyBookings,
         totalRevenue: monthlyRevenue,
-        avgDailyRate: monthlyBookings > 0 ? Math.round(monthlyRevenue / monthlyBookings) : 0,
+        // ค่าห้องเฉลี่ยต่อการเข้าพักที่รับรู้เดือนนี้ — ตัวตั้งกับตัวหารมาจากชุดเดียวกัน
+        // (เดิมหารด้วยจำนวนใบจองที่สร้างเดือนนี้ ซึ่งเป็นคนละกลุ่มกับตัวตั้ง)
+        avgDailyRate: roomsStays > 0 ? Math.round(roomsRevenue / roomsStays) : 0,
         totalUsers,
         activeUsers: 0,
         todayCheckIns,

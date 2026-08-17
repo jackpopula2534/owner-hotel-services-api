@@ -10,6 +10,12 @@ import { PaymentsService } from '../../payments/payments.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { HousekeepingService } from '../housekeeping/housekeeping.service';
 import { TaskPriority, TaskType } from '../housekeeping/dto/create-housekeeping-task.dto';
+import { RevenuePostingService } from '../revenue/revenue-posting.service';
+import {
+  buildRevenuePostingStub,
+  postedRevenueInput,
+  type RevenuePostingStub,
+} from '../revenue/__tests__/revenue-posting.stub';
 import { BookingsService } from './bookings.service';
 
 describe('BookingsService', () => {
@@ -36,11 +42,15 @@ describe('BookingsService', () => {
     invoices: {
       findFirst: jest.fn(),
     },
+    // เช็คเอาต์กับลงสมุดรายได้อยู่ในทรานแซกชันเดียวกัน — mock ส่ง client ตัวเดิม
+    // กลับไปให้ callback ทำงานจริง ไม่งั้นการเขียนทั้งก้อนจะหายไปเงียบ ๆ
+    $transaction: jest.fn(async (run: (tx: unknown) => unknown) => run(prismaMock)),
   };
 
   const emailEventsServiceMock = {
     onBookingCreated: jest.fn().mockResolvedValue(undefined),
     onBookingCheckout: jest.fn().mockResolvedValue(undefined),
+    onBookingCancelled: jest.fn().mockResolvedValue(undefined),
     sendReviewRequest: jest.fn().mockResolvedValue(undefined),
   };
 
@@ -63,11 +73,14 @@ describe('BookingsService', () => {
 
   const paymentsServiceMock = {};
   const invoicesServiceMock = {};
+  let revenuePostingMock: RevenuePostingStub;
   const eventEmitterMock = {
     emit: jest.fn().mockReturnValue(true),
   };
 
   beforeEach(async () => {
+    revenuePostingMock = buildRevenuePostingStub();
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         BookingsService,
@@ -80,6 +93,7 @@ describe('BookingsService', () => {
         { provide: LoyaltyService, useValue: loyaltyServiceMock },
         { provide: NotificationsService, useValue: notificationsServiceMock },
         { provide: PaymentsService, useValue: paymentsServiceMock },
+        { provide: RevenuePostingService, useValue: revenuePostingMock },
       ],
     }).compile();
 
@@ -225,7 +239,7 @@ describe('BookingsService', () => {
   });
 
   describe('checkOut', () => {
-    it('marks booking checked out, sets room to cleaning, and creates a checkout housekeeping task', async () => {
+    it('marks booking checked out, sets room to dirty, and creates a checkout housekeeping task', async () => {
       const now = new Date('2026-04-05T10:30:00.000Z');
       jest.useFakeTimers().setSystemTime(now);
 
@@ -264,9 +278,11 @@ describe('BookingsService', () => {
         },
         include: { guest: true, room: true, property: true },
       });
+      // dirty = ออกแล้วรอมอบหมายแม่บ้าน / cleaning = แม่บ้านรับงานแล้ว
+      // (เช็คเอาต์ยังไม่ได้มอบหมายงาน สถานะจึงเป็น dirty ไม่ใช่ cleaning)
       expect(prismaMock.room.update).toHaveBeenCalledWith({
         where: { id: 'room-1' },
-        data: { status: 'cleaning' },
+        data: { status: 'dirty' },
       });
       expect(housekeepingServiceMock.createTask).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -302,6 +318,129 @@ describe('BookingsService', () => {
       jest.spyOn(service, 'findOne').mockRejectedValue(new NotFoundException('Booking not found'));
 
       await expect(service.checkOut('booking-404')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  /**
+   * สมุดรายได้กลาง — ค่าห้องเข้าสมุดตอนเช็คเอาต์ ยกเลิกแล้วต้องดึงกลับ
+   *
+   * ยอดจริงถูกพิสูจน์กับฐานข้อมูลจริงใน `scripts/verify-revenue-ledger.ts` ที่นี่
+   * ตรึงว่าใบไหน แตกยอดเป็นบรรทัดอะไร และเขียนใน tx เดียวกับที่ปิดสถานะการจอง
+   */
+  describe('revenue ledger', () => {
+    /** การจองที่เช็คอินอยู่ พร้อมให้กดเช็คเอาต์ */
+    const stayInHouse = () =>
+      jest.spyOn(service, 'findOne').mockResolvedValue({
+        id: 'booking-1',
+        status: 'checked_in',
+        guestId: 'guest-1',
+        roomId: 'room-1',
+        room: { id: 'room-1', number: '101' },
+        totalPrice: 3000,
+        checkIn: new Date('2026-04-01T00:00:00.000Z'),
+        checkOut: new Date('2026-04-05T00:00:00.000Z'),
+        actualCheckIn: new Date('2026-04-01T14:00:00.000Z'),
+      } as any);
+
+    /** แถวที่ booking.update คืนกลับมาให้ตัวแปลงรายได้ */
+    const checkedOutRow = (over: Record<string, unknown> = {}) => ({
+      id: 'booking-1',
+      tenantId: 'tenant-1',
+      propertyId: 'property-1',
+      bookingNo: 'BK-0001',
+      paymentMethod: 'transfer',
+      status: 'checked_out',
+      checkOut: new Date('2026-04-05T00:00:00.000Z'),
+      actualCheckOut: new Date('2026-04-05T10:30:00.000Z'),
+      totalPrice: 3000,
+      roomSubtotal: 3000,
+      serviceChargeAmount: 0,
+      vatAmount: 0,
+      grandTotal: 3000,
+      room: { id: 'room-1', number: '101' },
+      property: { id: 'property-1' },
+      ...over,
+    });
+
+    it('posts the room revenue in the same transaction that closes the stay', async () => {
+      stayInHouse();
+      prismaMock.booking.update.mockResolvedValue(checkedOutRow());
+      prismaMock.invoices.findFirst.mockResolvedValue(null);
+
+      await service.checkOut('booking-1', 'tenant-1');
+
+      expect(revenuePostingMock.postWithin).toHaveBeenCalledTimes(1);
+      expect(revenuePostingMock.postWithin.mock.calls[0][0]).toBe(prismaMock);
+      expect(postedRevenueInput(revenuePostingMock)).toMatchObject({
+        tenantId: 'tenant-1',
+        propertyId: 'property-1',
+        sourceModule: 'HOTEL',
+        sourceType: 'BOOKING',
+        sourceId: 'booking-1',
+        documentNo: 'BK-0001',
+        settlement: 'TRANSFER',
+        lines: [{ revenueType: 'ROOM', grossAmount: 3000, taxAmount: 0 }],
+      });
+    });
+
+    it('splits service charge onto its own line and shares VAT across both', async () => {
+      stayInHouse();
+      prismaMock.booking.update.mockResolvedValue(
+        checkedOutRow({
+          roomSubtotal: 3000,
+          serviceChargeAmount: 300,
+          vatAmount: 231, // 7% ของ 3300
+          grandTotal: 3531,
+        }),
+      );
+      prismaMock.invoices.findFirst.mockResolvedValue(null);
+
+      await service.checkOut('booking-1', 'tenant-1');
+
+      expect(postedRevenueInput(revenuePostingMock).lines).toEqual([
+        { revenueType: 'ROOM', grossAmount: 3000, taxAmount: 210 },
+        { revenueType: 'SERVICE_CHARGE', grossAmount: 300, taxAmount: 21 },
+      ]);
+    });
+
+    it('adds invoice extras as OTHER — POS room charges are not counted twice here', async () => {
+      stayInHouse();
+      prismaMock.booking.update.mockResolvedValue(checkedOutRow());
+      prismaMock.invoices.findFirst.mockResolvedValue({
+        invoice_items: [{ amount: 500 }, { amount: 250 }],
+      });
+
+      await service.checkOut('booking-1', 'tenant-1');
+
+      expect(postedRevenueInput(revenuePostingMock).lines).toEqual([
+        { revenueType: 'ROOM', grossAmount: 3000, taxAmount: 0 },
+        { revenueType: 'OTHER', grossAmount: 750 },
+      ]);
+    });
+
+    it('pulls the revenue back when a booking is cancelled', async () => {
+      jest.spyOn(service, 'findOne').mockResolvedValue({
+        id: 'booking-1',
+        status: 'checked_out',
+        roomId: 'room-1',
+      } as any);
+      prismaMock.booking.update.mockResolvedValue({
+        id: 'booking-1',
+        status: 'cancelled',
+        property: { id: 'property-1' },
+        room: { id: 'room-1', number: '101' },
+      });
+
+      await service.remove('booking-1', 'tenant-1', 'user-9');
+
+      expect(revenuePostingMock.voidWithin).toHaveBeenCalledTimes(1);
+      expect(revenuePostingMock.voidWithin.mock.calls[0][0]).toBe(prismaMock);
+      expect(revenuePostingMock.voidWithin.mock.calls[0][1]).toMatchObject({
+        tenantId: 'tenant-1',
+        sourceType: 'BOOKING',
+        sourceId: 'booking-1',
+        voidedBy: 'user-9',
+      });
     });
   });
 });

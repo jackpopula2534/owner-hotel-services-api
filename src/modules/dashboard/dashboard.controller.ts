@@ -28,8 +28,12 @@ export class DashboardController {
     summary: 'Get a cross-system overview of every module the tenant is entitled to',
     description:
       'Reports today revenue and outstanding work for the hotel plus F&B, inventory, ' +
-      'procurement, accounting, cost accounting and HR. Modules the tenant has no active ' +
-      'add-on for are omitted entirely. Figures are cut on the Bangkok (UTC+7) calendar day.',
+      'procurement, accounting, cost accounting, HR and the campground. Each module carries ' +
+      'an `entitlement`: `owned` (live tile) or `lapsed` — no longer entitled, but the ledger ' +
+      'holds money it earned in the window, so the money is reported and the operational ' +
+      'half is left off. Modules with neither entitlement nor money are omitted entirely. ' +
+      'Headline revenue is the ledger total for the tenant, so it never moves with ' +
+      'entitlements. Figures are cut on the Bangkok (UTC+7) calendar day.',
   })
   @ApiQuery({
     name: 'propertyId',

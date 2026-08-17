@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, RevenueSourceModule, RevenueType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { shiftDate, toBangkokDate } from '../../common/utils/bangkok-day.util';
+import { RevenueFilter, RevenueQueryService } from '../revenue/revenue-query.service';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -69,11 +71,30 @@ type ResWithRel = Prisma.CampReservationGetPayload<{
   };
 }>;
 
+/** ช่องของสมุดรายได้ที่เป็นของลานนี้ (ไม่รวมช่วงวัน — แต่ละบล็อกถามคนละช่วง) */
+type LedgerScope = Pick<RevenueFilter, 'tenantId' | 'sourceModule' | 'outletId'>;
+
+/** ช่วงวันธุรกิจไทยแบบรวมปลายทั้งสองข้าง */
+interface DayRange {
+  from: string;
+  to: string;
+}
+
+/** ทุกวันในช่วง (รวมปลาย) — ไว้เติมวันที่ไม่มียอดให้กราฟไม่ขาดจุด */
+const daysBetween = (range: DayRange): string[] => {
+  const out: string[] = [];
+  for (let day = range.from; day <= range.to; day = shiftDate(day, 1)) out.push(day);
+  return out;
+};
+
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 @Injectable()
 export class CampDashboardService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly revenue: RevenueQueryService,
+  ) {}
 
   async getStats(
     params: { campgroundId?: string; period?: string },
@@ -154,14 +175,29 @@ export class CampDashboardService {
 
     const totalPitches = pitches.length;
 
+    // ── เงินทุกบาทมาจากสมุดรายได้ ──
+    // ลานรับรู้รายได้ตอนเช็คเอาต์ (`actualCheckOut ?? checkOut`) ไม่ใช่ตอนเช็คอิน
+    // ที่หน้านี้เคยนับ — การจองที่ยังพักอยู่จึงไม่โผล่เป็นยอดขายจนกว่าแขกจะออก
+    // ตรงกับที่รายงานรายได้และงบบัญชีเห็น
+    const ledgerScope: LedgerScope = {
+      tenantId,
+      sourceModule: RevenueSourceModule.CAMP,
+      ...(params.campgroundId ? { outletId: params.campgroundId } : {}),
+    };
+    const today = toBangkokDate(now);
+    const kpiRange: DayRange = { from: shiftDate(today, -(PERIOD_DAYS[period] - 1)), to: today };
+    const trendRange: DayRange = { from: shiftDate(today, -(TREND_DAYS[period] - 1)), to: today };
+
+    const revenue = await this.buildRevenue(ledgerScope, kpiRange, trendRange, outstandingRes, todayStart);
+
     return {
       success: true,
       data: {
         period,
         range: { start: kpiStart.toISOString(), end: now.toISOString() },
         totals: { totalPitches, totalReservations: reservations.length },
-        revenue: this.buildRevenue(reservations, kpiStart, rangeEnd, trendStart, todayStart, outstandingRes),
-        occupancy: this.buildOccupancy(reservations, totalPitches, pitches, kpiStart, rangeEnd, trendStart, todayStart),
+        revenue,
+        occupancy: this.buildOccupancy(reservations, totalPitches, pitches, kpiStart, rangeEnd, trendStart, todayStart, revenue.lodging),
         bookings: this.buildBookings(reservations, kpiStart, rangeEnd, trendStart, todayStart),
         inventory: this.buildInventory(addons, requisitions),
         operations: this.buildOperations(reservations, pitches, facilities, todayStart),
@@ -170,59 +206,63 @@ export class CampDashboardService {
   }
 
   // ── Revenue ──
-  private buildRevenue(
-    res: ResWithRel[],
-    start: Date,
-    end: Date,
-    trendStart: Date,
-    todayStart: Date,
+  /**
+   * ยอดขายของลาน — อ่านจากสมุดรายได้ทั้งหมด ไม่ได้บวก `totalPrice` เองแล้ว
+   *
+   * ที่ต้องเปลี่ยนเพราะหน้านี้เคยนับตาม `checkIn` และเงื่อนไขสถานะของตัวเอง ส่วน
+   * รายงานรายได้กับบัญชีนับตอนเช็คเอาต์ ตัวเลขสองหน้าจึงไม่มีวันตรงกัน ตอนนี้ถังทุกใบ
+   * (โซน/ช่องทางรับเงิน/กราฟรายวัน) มาจากแถวเดียวกับยอดรวม จึงรวมกลับได้พอดีเสมอ
+   *
+   * ยอดค้างชำระยังมาจากตารางการจอง เพราะเป็นลูกหนี้ ไม่ใช่รายได้ — สมุดไม่ได้เก็บว่า
+   * เก็บเงินครบหรือยัง
+   */
+  private async buildRevenue(
+    scope: LedgerScope,
+    kpi: DayRange,
+    trend: DayRange,
     outstanding: Array<{
       id: string; reservationNo: string | null; guestFirstName: string; guestLastName: string | null;
       totalPrice: Prisma.Decimal; amountPaid: Prisma.Decimal | null; checkIn: Date; status: string;
     }>,
+    todayStart: Date,
   ) {
-    // นับเฉพาะการจองที่ checkIn ในช่วง และไม่ยกเลิก
-    const inRange = res.filter(
-      (r) => r.checkIn >= start && r.checkIn < end && r.status !== 'cancelled' && r.status !== 'no_show',
-    );
-    const addonOf = (r: ResWithRel) => r.addonItems.reduce((s, a) => s + num(a.priceSnapshot) * a.qty, 0);
+    const [totals, byType, documents, settlements, lodgingDays, addonDays] = await Promise.all([
+      this.revenue.totals({ ...scope, ...kpi }),
+      this.revenue.byRevenueType({ ...scope, ...kpi }),
+      this.revenue.documents({ ...scope, ...kpi }),
+      this.revenue.bySettlement({ ...scope, ...kpi }),
+      this.revenue.byDay({ ...scope, ...trend, revenueType: RevenueType.ROOM }),
+      this.revenue.byDay({ ...scope, ...trend, revenueType: RevenueType.OTHER }),
+    ]);
 
-    let total = 0;
-    let addon = 0;
-    const byZoneMap = new Map<string, { zone: string; type: string; revenue: number }>();
-    for (const r of inRange) {
-      const t = num(r.totalPrice);
-      total += t;
-      addon += addonOf(r);
-      const type = r.pitch?.zone?.type ?? 'other';
-      const zoneName = r.pitch?.zone?.name ?? ZONE_LABELS[type] ?? 'อื่น ๆ';
-      const cur = byZoneMap.get(type) ?? { zone: zoneName, type, revenue: 0 };
-      cur.revenue += t;
-      byZoneMap.set(type, cur);
-    }
-    const lodging = Math.max(0, total - addon);
+    // ค่าอุปกรณ์ให้เช่าลงเป็น OTHER ที่เหลือคือค่าที่พัก — หักออกจากยอดรวมแทนการบวก
+    // ประเภทที่รู้จัก เผื่อวันหน้ามีชนิดรายได้ใหม่ สองก้อนนี้จะยังรวมได้เท่ายอดรวม
+    const total = totals.total;
+    const addon = byType.find((g) => g.key === RevenueType.OTHER)?.total ?? 0;
+    const lodging = Math.max(0, Math.round(total - addon));
 
-    // ช่องทางชำระเงิน (จากยอดที่ชำระจริง)
-    const payMap = new Map<string, number>();
-    for (const r of inRange) {
-      const paid = num(r.amountPaid);
-      if (paid <= 0) continue;
-      const m = r.paymentMethod || 'unknown';
-      payMap.set(m, (payMap.get(m) ?? 0) + paid);
-    }
-    const payTotal = Array.from(payMap.values()).reduce((s, v) => s + v, 0) || 1;
-    const byPaymentMethod = Array.from(payMap.entries())
-      .map(([method, amount]) => ({ method, amount, pct: Math.round((amount / payTotal) * 100) }))
+    // โซนไม่ได้อยู่ในสมุด — ต่อ sourceId กลับไปหาจุดกางเต็นท์ของการจองใบนั้น
+    const byZone = await this.zoneBreakdown(scope.tenantId, documents);
+
+    // ช่องทางรับเงินตามที่สมุดบันทึกไว้ ณ วันขาย (เดิมนับจาก amountPaid ซึ่งเป็นยอด
+    // ที่เก็บได้ ไม่ใช่ยอดขาย — สองอย่างนี้ไม่เท่ากันเมื่อมีมัดจำหรือค้างชำระ)
+    const payTotal = settlements.reduce((s, g) => s + g.total, 0) || 1;
+    const byPaymentMethod = settlements
+      .map((g) => ({
+        method: g.key || 'UNKNOWN',
+        amount: Math.round(g.total),
+        pct: Math.round((g.total / payTotal) * 100),
+      }))
+      .filter((p) => p.amount !== 0)
       .sort((a, b) => b.amount - a.amount);
 
     // Trend รายวัน (ค่าจุด vs อุปกรณ์)
-    const dailyTrend = this.dailySeries(trendStart, todayStart, (key) => {
-      const day = res.filter(
-        (r) => dateKey(r.checkIn) === key && r.status !== 'cancelled' && r.status !== 'no_show',
-      );
-      const a = day.reduce((s, r) => s + addonOf(r), 0);
-      const t = day.reduce((s, r) => s + num(r.totalPrice), 0);
-      return { addon: Math.round(a), lodging: Math.round(Math.max(0, t - a)), revenue: Math.round(t) };
+    const lodgingByDay = new Map(lodgingDays.map((g) => [g.key, g.total]));
+    const addonByDay = new Map(addonDays.map((g) => [g.key, g.total]));
+    const dailyTrend = daysBetween(trend).map((date) => {
+      const a = Math.round(addonByDay.get(date) ?? 0);
+      const l = Math.round(lodgingByDay.get(date) ?? 0);
+      return { date, addon: a, lodging: l, revenue: a + l };
     });
 
     const outstandingInvoices = outstanding
@@ -239,16 +279,53 @@ export class CampDashboardService {
 
     return {
       total: Math.round(total),
-      lodging: Math.round(lodging),
+      /** ยอดรับรู้ทางบัญชี (gross − discount) — ลานไม่แยก VAT ปกติจึงเท่ากับ total */
+      netTotal: Math.round(totals.net),
+      lodging,
       addon: Math.round(addon),
       outstanding: Math.round(outstandingTotal),
-      byZone: Array.from(byZoneMap.values())
-        .map((z) => ({ ...z, revenue: Math.round(z.revenue) }))
-        .sort((a, b) => b.revenue - a.revenue),
+      byZone,
       byPaymentMethod,
       dailyTrend,
       outstandingInvoices: outstandingInvoices.slice(0, 8),
     };
+  }
+
+  /**
+   * เทยอดของแต่ละใบลงถังโซน โดยต่อ `sourceId` กลับไปที่การจอง
+   *
+   * รับแถวที่ `tenantId` เป็น null ได้ถ้าลานเป็นของ tenant นี้ (ข้อมูลเก่าบางส่วนเป็น
+   * แบบนั้น) แต่ไม่ปล่อยผ่านทั้งหมด — ไม่งั้นเป็นรูข้าม tenant
+   */
+  private async zoneBreakdown(
+    tenantId: string,
+    documents: Array<{ sourceId: string; total: number }>,
+  ): Promise<Array<{ zone: string; type: string; revenue: number }>> {
+    const ids = Array.from(new Set(documents.map((d) => d.sourceId)));
+    if (ids.length === 0) return [];
+
+    const rows = await this.prisma.campReservation.findMany({
+      where: {
+        id: { in: ids },
+        OR: [{ tenantId }, { tenantId: null, campground: { tenantId } }],
+      },
+      select: { id: true, pitch: { select: { zone: { select: { name: true, type: true } } } } },
+    });
+    const zoneOf = new Map(rows.map((r) => [r.id, r.pitch?.zone ?? null]));
+
+    const buckets = new Map<string, { zone: string; type: string; revenue: number }>();
+    for (const doc of documents) {
+      const zone = zoneOf.get(doc.sourceId) ?? null;
+      const type = zone?.type ?? 'other';
+      const name = zone?.name ?? ZONE_LABELS[type] ?? 'อื่น ๆ';
+      const cur = buckets.get(type) ?? { zone: name, type, revenue: 0 };
+      cur.revenue += doc.total;
+      buckets.set(type, cur);
+    }
+
+    return Array.from(buckets.values())
+      .map((z) => ({ ...z, revenue: Math.round(z.revenue) }))
+      .sort((a, b) => b.revenue - a.revenue);
   }
 
   // ── Occupancy ──
@@ -260,20 +337,19 @@ export class CampDashboardService {
     end: Date,
     trendStart: Date,
     todayStart: Date,
+    /** ค่าที่พักจากสมุดรายได้ในช่วงเดียวกัน — ตัวตั้งของ ADR/RevPAS */
+    lodgingRev: number,
   ) {
     const occ = res.filter((r) => OCCUPYING.includes(r.status));
     const periodDays = Math.max(1, nights(start, end));
     const denom = Math.max(1, totalPitches * periodDays);
 
     let occupiedNights = 0;
-    let lodgingRev = 0;
     let stayNightsTotal = 0;
     let stayCount = 0;
     for (const r of occ) {
       const ovn = overlapNights(r.checkIn, r.checkOut, start, end);
       occupiedNights += ovn;
-      const addon = r.addonItems.reduce((s, a) => s + num(a.priceSnapshot) * a.qty, 0);
-      lodgingRev += Math.max(0, num(r.totalPrice) - addon);
       if (r.checkIn >= start && r.checkIn < end) {
         stayNightsTotal += nights(r.checkIn, r.checkOut);
         stayCount += 1;
@@ -498,7 +574,7 @@ export class CampDashboardService {
       period,
       range: { start: new Date().toISOString(), end: new Date().toISOString() },
       totals: { totalPitches: 0, totalReservations: 0 },
-      revenue: { total: 0, lodging: 0, addon: 0, outstanding: 0, byZone: [], byPaymentMethod: [], dailyTrend: [], outstandingInvoices: [] },
+      revenue: { total: 0, netTotal: 0, lodging: 0, addon: 0, outstanding: 0, byZone: [], byPaymentMethod: [], dailyTrend: [], outstandingInvoices: [] },
       occupancy: { ratePct: 0, adr: 0, revpas: 0, avgLengthOfStay: 0, totalPitches: 0, occupiedNights: 0, trend: [], byDayOfWeek: [], byZone: [] },
       bookings: { total: 0, cancelled: 0, cancelRatePct: 0, avgLeadTimeDays: 0, trend: [], byStatus: [], recent: [] },
       inventory: { skuCount: 0, lowStockCount: 0, stockValue: 0, avgUtilization: 0, utilization: [], lowStock: [], requisitions: [], requisitionStatusCounts: [] },

@@ -1,5 +1,6 @@
 import { Injectable, Logger, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '@/prisma/prisma.service';
+import { shiftDate, toBangkokDate } from '@/common/utils/bangkok-day.util';
 import { KpiSnapshotsService } from '../kpi-snapshots/kpi-snapshots.service';
 
 interface KpiCard {
@@ -102,11 +103,9 @@ export class DashboardWidgetsService {
     propertyId: string,
   ): Promise<{ success: boolean; data: OverviewCards }> {
     try {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-
-      const yesterday = new Date(today);
-      yesterday.setDate(yesterday.getDate() - 1);
+      // วันปฏิทินไทย ตรงกับวันที่สแนปช็อตถูกเก็บไว้
+      const today = toBangkokDate(new Date());
+      const yesterday = shiftDate(today, -1);
 
       // Get today's and yesterday's snapshots
       const todaySnapshot = await this.kpiSnapshotsService.getSnapshot(
@@ -124,12 +123,10 @@ export class DashboardWidgetsService {
       );
 
       // Get current month snapshot
-      const currentDate = new Date();
-      const monthStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
       const monthSnapshot = await this.kpiSnapshotsService.getSnapshot(
         tenantId,
         propertyId,
-        monthStart,
+        `${today.slice(0, 7)}-01`,
         'monthly',
       );
 
@@ -535,8 +532,7 @@ export class DashboardWidgetsService {
   async getTopAlerts(tenantId: string, propertyId: string): Promise<TopAlerts> {
     try {
       const alerts: AlertItem[] = [];
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
+      const today = toBangkokDate(new Date());
 
       // Get today's KPI
       const todaySnapshot = await this.kpiSnapshotsService.getSnapshot(
@@ -597,11 +593,10 @@ export class DashboardWidgetsService {
       }
 
       // 3. Budget overrun alert
-      const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
       const monthSnapshot = await this.kpiSnapshotsService.getSnapshot(
         tenantId,
         propertyId,
-        monthStart,
+        `${today.slice(0, 7)}-01`,
         'monthly',
       );
 

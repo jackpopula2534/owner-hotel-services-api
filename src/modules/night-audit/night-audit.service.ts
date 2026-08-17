@@ -110,7 +110,10 @@ export class NightAuditService {
           checkInDate: { lte: auditDate },
         },
         include: {
-          charges: { where: { nightAuditId: null, chargeType: 'ROOM_CHARGE' }, take: 1 },
+          // Every charge the folio has taken since the last audit, not just room
+          // nights — F&B and shop charges signed to the room are revenue for the
+          // day too, and were previously dropped (fbRevenue was hardcoded to 0).
+          charges: { where: { nightAuditId: null, status: 'POSTED' } },
         },
       });
 
@@ -132,9 +135,40 @@ export class NightAuditService {
 
       // 4. สร้าง NightAuditCharge สำหรับแต่ละ folio
       let roomRevenue = 0;
+      let fbRevenue = 0;
+      let otherRevenue = 0;
+      const sweptChargeIds: string[] = [];
       const chargeCreates: Parameters<typeof tx.nightAuditCharge.create>[0]['data'][] = [];
 
       for (const folio of openFolios) {
+        // Sweep charges posted by other modules (POS, shop) into this audit.
+        // They already sit on the folio balance — the audit only classifies them
+        // and stamps them so tomorrow's run cannot count them a second time.
+        for (const charge of folio.charges) {
+          const chargeTotal = Number(charge.totalAmount);
+          if (charge.chargeType === 'FB_CHARGE') {
+            fbRevenue += chargeTotal;
+          } else if (charge.chargeType !== 'ROOM_CHARGE') {
+            otherRevenue += chargeTotal;
+          } else {
+            roomRevenue += chargeTotal;
+          }
+          sweptChargeIds.push(charge.id);
+          chargeCreates.push({
+            nightAuditId: nightAudit.id,
+            folioId: folio.id,
+            bookingId: folio.bookingId ?? '',
+            roomId: folio.roomId ?? undefined,
+            chargeType: charge.chargeType,
+            description: charge.description,
+            amount: Number(charge.netAmount),
+            vatAmount: Number(charge.vatAmount),
+            totalAmount: chargeTotal,
+            isPosted: true,
+            postedAt: charge.chargeDate,
+          });
+        }
+
         const booking = folio.bookingId ? bookingMap.get(folio.bookingId) : undefined;
         let unitPrice = 0;
 
@@ -205,6 +239,14 @@ export class NightAuditService {
         await tx.nightAuditCharge.createMany({ data: chargeCreates as never[] });
       }
 
+      // Stamp the swept charges so the next run cannot pick them up again.
+      if (sweptChargeIds.length > 0) {
+        await tx.folioCharge.updateMany({
+          where: { id: { in: sweptChargeIds } },
+          data: { nightAuditId: nightAudit.id },
+        });
+      }
+
       // 6. คำนวณ totalBalance จาก folios
       const folioAgg = await tx.guestFolio.aggregate({
         where: {
@@ -220,9 +262,11 @@ export class NightAuditService {
         },
       });
 
-      const totalCharges = Number(folioAgg._sum.totalCharges ?? 0) + roomRevenue;
+      // The loop above already incremented each folio's totalCharges/balance, so
+      // the aggregate is current — adding roomRevenue again would double-count it.
+      const totalCharges = Number(folioAgg._sum.totalCharges ?? 0);
       const totalPayments = Number(folioAgg._sum.totalPayments ?? 0);
-      const totalBalance = Number(folioAgg._sum.balance ?? 0) + roomRevenue;
+      const totalBalance = Number(folioAgg._sum.balance ?? 0);
 
       // 7. สถิติห้อง
       const totalRooms = await tx.room.count({ where: { propertyId: dto.propertyId } });
@@ -259,9 +303,9 @@ export class NightAuditService {
         data: {
           status: 'COMPLETED',
           roomRevenue,
-          fbRevenue: 0,
-          otherRevenue: 0,
-          totalRevenue: roomRevenue,
+          fbRevenue,
+          otherRevenue,
+          totalRevenue: roomRevenue + fbRevenue + otherRevenue,
           totalCharges,
           totalPayments,
           totalBalance,

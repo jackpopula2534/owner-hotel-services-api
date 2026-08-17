@@ -24,6 +24,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { HousekeepingService } from '../housekeeping/housekeeping.service';
 import { mockAuditLogService, mockEventEmitter } from '../../common/test/mock-providers';
 import { withPrismaFallback } from '../../common/test/mock-prisma';
+import { RevenuePostingService } from '../revenue/revenue-posting.service';
+import { buildRevenuePostingStub } from '../revenue/__tests__/revenue-posting.stub';
 import { BookingsService } from './bookings.service';
 
 describe('BookingsService — requestEarlyCheckIn', () => {
@@ -72,6 +74,7 @@ describe('BookingsService — requestEarlyCheckIn', () => {
         { provide: LoyaltyService, useValue: { addPointsForStay: jest.fn() } },
         { provide: NotificationsService, useValue: { create: jest.fn() } },
         { provide: PaymentsService, useValue: {} },
+        { provide: RevenuePostingService, useValue: buildRevenuePostingStub() },
       ],
     }).compile();
     service = moduleRef.get(BookingsService);

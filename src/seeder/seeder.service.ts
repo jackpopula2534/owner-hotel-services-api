@@ -24,6 +24,7 @@ import {
   PurchaseOrderStatus,
   SupplierQuoteStatus,
   InventoryLotStatus,
+  RevenueType,
 } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { DEFAULT_HR_PERMISSIONS as HR_DEFAULT_PERMISSIONS } from '../modules/hr-terminal-users/dto/create-hr-terminal-user.dto';
@@ -5145,6 +5146,10 @@ export class SeederService {
         name: 'เครื่องดื่ม',
         description: 'เครื่องดื่มร้อน เย็น และผลไม้ปั่น',
         displayOrder: 4,
+        // หมวดเครื่องดื่มต้องลงรายได้เป็น BEVERAGE ไม่ใช่ค่า default FOOD — สมุด
+        // รายได้แยกอาหารกับเครื่องดื่มเพื่อคิด Food Cost% ถ้าชาไทยไปกองรวมกับ
+        // ข้าวผัด ตัวหารจะโตขึ้นแล้วเปอร์เซ็นต์ต้นทุนอาหารจะดูดีเกินจริง
+        revenueType: RevenueType.BEVERAGE,
         restaurantId: mainRestaurant.id,
         items: [
           {
@@ -5206,6 +5211,7 @@ export class SeederService {
           name: catData.name,
           description: catData.description,
           displayOrder: catData.displayOrder,
+          revenueType: catData.revenueType ?? RevenueType.FOOD,
           isActive: true,
         },
       });
@@ -5248,6 +5254,7 @@ export class SeederService {
           name: 'ค็อกเทลและเครื่องดื่มแอลกอฮอล์',
           description: 'ค็อกเทลทำสด ไวน์ เบียร์ สปิริต',
           displayOrder: 1,
+          revenueType: RevenueType.BEVERAGE,
           isActive: true,
         },
       });

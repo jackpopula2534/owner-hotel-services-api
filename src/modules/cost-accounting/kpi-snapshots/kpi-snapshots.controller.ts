@@ -3,6 +3,7 @@ import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagg
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AddonGuard } from '@/common/guards/addon.guard';
 import { RequireAddon } from '@/common/decorators/require-addon.decorator';
+import { toBangkokDate } from '@/common/utils/bangkok-day.util';
 import { KpiSnapshotsService } from './kpi-snapshots.service';
 import { QueryKpiSnapshotDto, GenerateDailySnapshotDto } from './dto/query-kpi-snapshot.dto';
 
@@ -38,13 +39,10 @@ export class KpiSnapshotsController {
     @Query('propertyId') propertyId: string,
     @Req() req: any,
   ): Promise<{ success: boolean; data: any }> {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
     const snapshot = await this.kpiSnapshotsService.getSnapshot(
       req.user.tenantId,
       propertyId,
-      today,
+      toBangkokDate(new Date()),
       'daily',
     );
 

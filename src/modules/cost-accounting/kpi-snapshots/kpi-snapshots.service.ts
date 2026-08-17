@@ -1,6 +1,14 @@
 import { Injectable, Logger, InternalServerErrorException } from '@nestjs/common';
+import { RevenueSegment, RevenueSourceModule } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
-import { Decimal } from '@prisma/client/runtime/library';
+import {
+  bangkokDayRange,
+  bangkokMonthRange,
+  businessDateOf,
+  daysOfMonth,
+  toBangkokDate,
+} from '@/common/utils/bangkok-day.util';
+import { RevenueFilter, RevenueQueryService } from '@/modules/revenue/revenue-query.service';
 import {
   QueryKpiSnapshotDto,
   KPIGranularity,
@@ -34,7 +42,55 @@ interface KpiSnapshotData {
 export class KpiSnapshotsService {
   private readonly logger = new Logger(KpiSnapshotsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly revenue: RevenueQueryService,
+  ) {}
+
+  /**
+   * รายได้ของช่วงหนึ่งตามสมุดรายได้ แยกเป็นห้อง / อาหาร / อื่น ๆ
+   *
+   * เดิมฝั่งรายได้ของ KPI มาจากสองที่ที่ไม่ตรงกันเลย: ยอดรวมนับจาก `cost_entries`
+   * ที่ `sourceType='booking'` (รวมแถวร่างที่ยังไม่โพสต์) ส่วนค่าห้องบวก
+   * `booking.totalPrice` ของทุกใบที่ "คาบ" วันนั้น — การจอง 3 คืน 9,000 บาทจึงถูก
+   * นับ 9,000 ซ้ำทั้งสามวัน ตอนนี้ทุกตัวมาจากสมุดใบเดียวกับหน้าภาพรวมและรายงานรายได้
+   *
+   * ตัวหารของ ADR เป็น "จำนวนใบที่รับรู้ค่าห้องในช่วงนี้" ไม่ใช่จำนวนห้องที่มีคนพัก
+   * คืนนี้ เพราะสมุดรับรู้ค่าห้องทั้งก้อนตอนเช็คเอาต์ ถ้าเอาสองชุดนี้มาหารกันจะได้
+   * ตัวเลขที่ไม่มีความหมาย (ตัวตั้งของวันนี้ ตัวหารของอีกกลุ่มหนึ่ง)
+   */
+  private async ledgerRevenue(
+    tenantId: string,
+    propertyId: string,
+    from: string,
+    to: string,
+  ): Promise<{ total: number; room: number; fb: number; other: number; roomStays: number }> {
+    const scope: RevenueFilter = { tenantId, propertyId, from, to };
+    const rooms: RevenueFilter = {
+      ...scope,
+      sourceModule: RevenueSourceModule.HOTEL,
+      segment: RevenueSegment.ROOMS,
+    };
+
+    const [[all, room, fb], roomStays] = await Promise.all([
+      this.revenue.totalsOfMany([
+        scope,
+        rooms,
+        { ...scope, sourceModule: RevenueSourceModule.RESTAURANT },
+      ]),
+      this.revenue.countDocuments(rooms),
+    ]);
+
+    return {
+      total: all.net,
+      room: room.net,
+      fb: fb.net,
+      // ที่เหลือหลังหักห้องกับอาหาร — ลบแบบนี้ทำให้สามก้อนรวมกลับเป็นยอดรวมเสมอ
+      // แม้จะมีช่องทางใหม่ (ร้านค้า/ลานกางเต็นท์) เพิ่มเข้ามาทีหลัง
+      other: Math.round((all.net - room.net - fb.net) * 100) / 100,
+      roomStays,
+    };
+  }
 
   /**
    * Generate daily KPI snapshot for a property
@@ -43,13 +99,14 @@ export class KpiSnapshotsService {
   async generateDailySnapshot(tenantId: string, dto: GenerateDailySnapshotDto): Promise<any> {
     try {
       const { propertyId, snapshotDate } = dto;
-      const snapshotDateObj = snapshotDate ? new Date(snapshotDate) : new Date();
-
-      // Set to start of day
-      snapshotDateObj.setHours(0, 0, 0, 0);
+      // หนึ่งแถว = หนึ่งวันปฏิทินไทย เก็บเป็นเที่ยงคืน UTC ของวันนั้น ตามกติกา
+      // เดียวกับคอลัมน์วันที่อื่นในระบบ เดิมเก็บเที่ยงคืน "ของเครื่อง" แล้วอ่านกลับ
+      // ด้วย toISOString() — เครื่องที่ตั้งเวลาไทยจึงรายงานวันย้อนหลังไปหนึ่งวัน
+      const day = snapshotDate ? snapshotDate.slice(0, 10) : toBangkokDate(new Date());
+      const snapshotDateObj = businessDateOf(day);
 
       // Calculate all KPIs
-      const kpiData = await this.calculateDailyKpis(tenantId, propertyId, snapshotDateObj);
+      const kpiData = await this.calculateDailyKpis(tenantId, propertyId, day);
 
       // Check if snapshot already exists for this date
       // NOTE: findFirst (not findUnique) because CostKpiSnapshot is tenant-scoped;
@@ -101,7 +158,7 @@ export class KpiSnapshotsService {
   async getSnapshot(
     tenantId: string,
     propertyId: string,
-    snapshotDate: Date,
+    day: string,
     granularity: string = 'daily',
   ): Promise<any> {
     try {
@@ -111,14 +168,14 @@ export class KpiSnapshotsService {
         where: {
           tenantId,
           propertyId,
-          snapshotDate,
+          snapshotDate: businessDateOf(day),
           granularity,
         },
       });
 
       if (!snapshot) {
         // If no snapshot exists, calculate live
-        const kpiData = await this.calculateDailyKpis(tenantId, propertyId, snapshotDate);
+        const kpiData = await this.calculateDailyKpis(tenantId, propertyId, day);
         return this.formatKpiData(kpiData);
       }
 
@@ -190,9 +247,13 @@ export class KpiSnapshotsService {
     periodStr: string, // YYYY-MM format
   ): Promise<any> {
     try {
-      const [year, month] = periodStr.split('-').map(Number);
-      const startDate = new Date(year, month - 1, 1);
-      const endDate = new Date(year, month, 0);
+      // เดือนตามปฏิทินไทย แถวรายวันถูกเก็บที่เที่ยงคืน UTC ของแต่ละวัน จึงเทียบ
+      // ด้วยขอบเดียวกัน ไม่ใช่ new Date(year, month, 0) ที่เป็นเวลาของเครื่อง
+      const days = daysOfMonth(periodStr);
+      const firstDay = days[0];
+      const lastDay = days[days.length - 1];
+      const startDate = businessDateOf(firstDay);
+      const endDate = businessDateOf(lastDay);
 
       // Get all daily snapshots for the period
       const dailySnapshots = await this.prisma.costKpiSnapshot.findMany({
@@ -210,8 +271,7 @@ export class KpiSnapshotsService {
 
       if (dailySnapshots.length === 0) {
         // If no daily snapshots, calculate fresh
-        const kpiData = await this.calculateMonthlyKpis(tenantId, propertyId, startDate, endDate);
-        startDate.setHours(0, 0, 0, 0);
+        const kpiData = await this.calculateMonthlyKpis(tenantId, propertyId, firstDay, lastDay);
         const existingMonthly = await this.prisma.costKpiSnapshot.findFirst({
           where: {
             tenantId,
@@ -245,7 +305,6 @@ export class KpiSnapshotsService {
       // Aggregate daily snapshots
       const aggregated = this.aggregateSnapshots(dailySnapshots);
 
-      startDate.setHours(0, 0, 0, 0);
       const existingMonthly = await this.prisma.costKpiSnapshot.findFirst({
         where: {
           tenantId,
@@ -288,30 +347,19 @@ export class KpiSnapshotsService {
   private async calculateDailyKpis(
     tenantId: string,
     propertyId: string,
-    date: Date,
+    day: string,
   ): Promise<KpiSnapshotData> {
-    const startOfDay = new Date(date);
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date(date);
-    endOfDay.setHours(23, 59, 59, 999);
+    // หน้าต่างวันเดียวกันทั้งฝั่งเงินและฝั่งต้นทุน: วันปฏิทินไทย ไม่ใช่วันของเครื่อง
+    const { start: startOfDay, end: nextDay } = bangkokDayRange(day);
+    const endOfDay = new Date(nextDay.getTime() - 1);
 
     try {
-      // Revenue: sum cost entries where sourceType='booking' for the day
-      const revenueEntries = await this.prisma.costEntry.findMany({
-        where: {
-          tenantId,
-          propertyId,
-          entryDate: {
-            gte: startOfDay,
-            lte: endOfDay,
-          },
-          sourceType: 'booking',
-        },
-      });
+      // รายได้ทุกก้อนมาจากสมุดรายได้ — ที่เดียวกับหน้าภาพรวมและรายงานรายได้
+      const revenue = await this.ledgerRevenue(tenantId, propertyId, day, day);
+      const totalRevenue = revenue.total;
+      const roomRevenue = revenue.room;
 
-      const totalRevenue = this.sumAmount(revenueEntries);
-
-      // Room revenue from bookings
+      // ห้องที่มีคนพักคืนนี้ — เป็นตัวเลขปฏิบัติการ ยังมาจากตารางการจองตามเดิม
       const bookingsToday = await this.prisma.booking.findMany({
         where: {
           tenantId,
@@ -319,9 +367,8 @@ export class KpiSnapshotsService {
           checkIn: { lte: endOfDay },
           checkOut: { gt: startOfDay },
         },
+        select: { id: true },
       });
-
-      const roomRevenue = this.sumAmount(bookingsToday.map((b) => ({ amount: b.totalPrice })));
 
       // Costs by category
       const costEntries = await this.prisma.costEntry.findMany({
@@ -352,29 +399,30 @@ export class KpiSnapshotsService {
 
       const occupiedRooms = bookingsToday.length;
       const occupancyRate = totalRooms > 0 ? (occupiedRooms / totalRooms) * 100 : 0;
-      const adr = occupiedRooms > 0 ? Number(roomRevenue) / occupiedRooms : 0;
-      const revPAR = totalRooms > 0 ? Number(roomRevenue) / totalRooms : 0;
+      // หารด้วยจำนวนใบที่ "รับรู้ค่าห้อง" วันนี้ ไม่ใช่จำนวนห้องที่มีคนพักคืนนี้
+      const adr = revenue.roomStays > 0 ? roomRevenue / revenue.roomStays : 0;
+      const revPAR = totalRooms > 0 ? roomRevenue / totalRooms : 0;
 
       // Room department costs (category='material' or 'labor')
       const roomCosts = costsByCategory.material + costsByCategory.labor;
       const costPOR = occupiedRooms > 0 ? roomCosts / occupiedRooms : 0;
 
       // Profitability
-      const grossProfit = Number(totalRevenue) - totalCost;
+      const grossProfit = totalRevenue - totalCost;
       const gopAmount = grossProfit; // For simplicity, GOP = gross profit
-      const gopPercent = Number(totalRevenue) > 0 ? (gopAmount / Number(totalRevenue)) * 100 : 0;
+      const gopPercent = totalRevenue > 0 ? (gopAmount / totalRevenue) * 100 : 0;
 
       // F&B metrics (from cost entries with F&B-related cost types)
-      const fbMetrics = this.calculateFbMetrics(costEntries, Number(totalRevenue));
+      const fbMetrics = this.calculateFbMetrics(costEntries, totalRevenue);
 
       // Inventory metrics
       const inventoryMetrics = await this.calculateInventoryMetrics(tenantId, propertyId);
 
       return {
-        totalRevenue: Number(totalRevenue),
-        roomRevenue: Number(roomRevenue),
-        fbRevenue: 0, // Can be enhanced with restaurant revenue
-        otherRevenue: Number(totalRevenue) - Number(roomRevenue),
+        totalRevenue,
+        roomRevenue,
+        fbRevenue: revenue.fb,
+        otherRevenue: revenue.other,
         totalCost,
         materialCost: costsByCategory.material,
         laborCost: costsByCategory.labor,
@@ -407,24 +455,20 @@ export class KpiSnapshotsService {
   private async calculateMonthlyKpis(
     tenantId: string,
     propertyId: string,
-    startDate: Date,
-    endDate: Date,
+    from: string,
+    to: string,
   ): Promise<KpiSnapshotData> {
-    try {
-      // Sum all revenue entries in the month
-      const revenueEntries = await this.prisma.costEntry.findMany({
-        where: {
-          tenantId,
-          propertyId,
-          entryDate: {
-            gte: startDate,
-            lte: endDate,
-          },
-          sourceType: 'booking',
-        },
-      });
+    // เดือนตามปฏิทินไทยแบบรวมปลายทั้งสองข้าง — ขอบเดียวกับที่ส่งให้สมุดรายได้
+    const { start: startDate, end: monthEnd } = bangkokMonthRange(from.slice(0, 7));
+    const endDate = new Date(monthEnd.getTime() - 1);
 
-      const totalRevenue = this.sumAmount(revenueEntries);
+    try {
+      // รายได้ทั้งเดือนมาจากสมุดรายได้ ไม่ใช่ผลรวม cost_entries ที่ sourceType='booking'
+      // (ซึ่งรวมแถวร่างที่ยังไม่ถูกโพสต์) และไม่ใช่ผลรวม booking.totalPrice ของใบที่
+      // "คาบ" เดือนนี้ (ซึ่งนับเต็มก้อนแม้เข้าพักคร่อมเดือน)
+      const revenue = await this.ledgerRevenue(tenantId, propertyId, from, to);
+      const totalRevenue = revenue.total;
+      const roomRevenue = revenue.room;
 
       // All bookings overlapping the month
       const bookingsInMonth = await this.prisma.booking.findMany({
@@ -434,9 +478,8 @@ export class KpiSnapshotsService {
           checkIn: { lte: endDate },
           checkOut: { gte: startDate },
         },
+        select: { id: true },
       });
-
-      const roomRevenue = this.sumAmount(bookingsInMonth.map((b) => ({ amount: b.totalPrice })));
 
       // All cost entries in the month
       const costEntries = await this.prisma.costEntry.findMany({
@@ -458,9 +501,7 @@ export class KpiSnapshotsService {
       const totalCost = this.sumAmount(costEntries);
 
       // Average occupancy for the month
-      const totalDays = Math.ceil(
-        (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24),
-      );
+      const totalDays = daysOfMonth(from.slice(0, 7)).length;
       const totalRooms = await this.prisma.room.count({
         where: {
           tenantId,
@@ -468,27 +509,29 @@ export class KpiSnapshotsService {
         },
       });
 
-      const occupancyRate = (bookingsInMonth.length / (totalRooms * totalDays)) * 100;
-      const adr = bookingsInMonth.length > 0 ? Number(roomRevenue) / bookingsInMonth.length : 0;
-      const revPAR = Number(roomRevenue) / (totalRooms * totalDays);
+      const roomNights = totalRooms * totalDays;
+      const occupancyRate = roomNights > 0 ? (bookingsInMonth.length / roomNights) * 100 : 0;
+      // ตัวหารเป็นใบที่รับรู้ค่าห้องในเดือนนี้ ชุดเดียวกับตัวตั้ง
+      const adr = revenue.roomStays > 0 ? roomRevenue / revenue.roomStays : 0;
+      const revPAR = roomNights > 0 ? roomRevenue / roomNights : 0;
 
       const costPOR =
         bookingsInMonth.length > 0
           ? (costsByCategory.material + costsByCategory.labor) / bookingsInMonth.length
           : 0;
 
-      const grossProfit = Number(totalRevenue) - totalCost;
+      const grossProfit = totalRevenue - totalCost;
       const gopAmount = grossProfit;
-      const gopPercent = Number(totalRevenue) > 0 ? (gopAmount / Number(totalRevenue)) * 100 : 0;
+      const gopPercent = totalRevenue > 0 ? (gopAmount / totalRevenue) * 100 : 0;
 
-      const fbMetrics = this.calculateFbMetrics(costEntries, Number(totalRevenue));
+      const fbMetrics = this.calculateFbMetrics(costEntries, totalRevenue);
       const inventoryMetrics = await this.calculateInventoryMetrics(tenantId, propertyId);
 
       return {
-        totalRevenue: Number(totalRevenue),
-        roomRevenue: Number(roomRevenue),
-        fbRevenue: 0,
-        otherRevenue: Number(totalRevenue) - Number(roomRevenue),
+        totalRevenue,
+        roomRevenue,
+        fbRevenue: revenue.fb,
+        otherRevenue: revenue.other,
         totalCost,
         materialCost: costsByCategory.material,
         laborCost: costsByCategory.labor,

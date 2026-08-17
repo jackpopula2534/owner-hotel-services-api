@@ -1,19 +1,70 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
+import { RevenueSourceModule, RevenueSourceType } from '@prisma/client';
 import { RestaurantMonthlySalesService } from './monthly-sales.service';
 import { PrismaService } from '../../../prisma/prisma.service';
+import {
+  RevenueDocument,
+  RevenueFilter,
+  RevenueQueryService,
+} from '../../revenue/revenue-query.service';
+import type { OrderDimensionRow } from './sales-shared';
 
 /**
  * The monthly overview is what the manager lands on, and every bar in it is a
- * door into the daily report. So the things worth pinning down are: the month
- * window is a *Bangkok* month with the right number of days, the per-day rows
- * are keyed on the Bangkok day (a bill settled at 00:30 belongs to that day, not
- * the previous one in UTC), and the month total is exactly the sum of the days
- * the drill-down will show.
+ * door into the daily report. So the things worth pinning down are: the money
+ * comes from the revenue ledger (the same rows the daily drill-down reads), the
+ * month window is a *Bangkok* month with the right number of days, each bill sits
+ * on the business day the ledger filed it under, and the month total is exactly
+ * the sum of the day rows the drill-down will show.
  */
 
 const RESTAURANT_ID = 'rest-1';
 const TENANT_ID = 'tenant-1';
+
+/** สลิปหนึ่งใบ: แถวที่สมุดลงไว้ + แถวใบสั่งที่รายงานเอามาต่อมิติ */
+interface Receipt {
+  doc: RevenueDocument;
+  order: OrderDimensionRow;
+}
+
+/** A receipt matching the POS: 1,100 + 110 service + 77 VAT = 1,287. */
+const receipt = (
+  businessDate: string,
+  id: string,
+  money: Partial<Pick<RevenueDocument, 'gross' | 'discount' | 'serviceCharge' | 'tax'>> = {},
+  dimensions: Partial<OrderDimensionRow> = {},
+): Receipt => {
+  const gross = money.gross ?? 1100;
+  const discount = money.discount ?? 0;
+  const serviceCharge = money.serviceCharge ?? 110;
+  const tax = money.tax ?? 77;
+  const net = gross - discount;
+
+  return {
+    doc: {
+      businessDate,
+      sourceType: RevenueSourceType.ORDER,
+      sourceId: id,
+      gross,
+      discount,
+      net,
+      serviceCharge,
+      tax,
+      total: net + serviceCharge + tax,
+      entries: 1,
+    },
+    order: {
+      id,
+      partySize: 2,
+      paymentMethod: 'CASH',
+      paymentStatus: 'PAID',
+      orderType: 'DINE_IN',
+      completedAt: new Date(`${businessDate}T12:00:00+07:00`),
+      ...dimensions,
+    },
+  };
+};
 
 const makePrismaMock = () => ({
   restaurant: { findFirst: jest.fn() },
@@ -21,34 +72,71 @@ const makePrismaMock = () => ({
   orderItem: { findMany: jest.fn() },
 });
 
-/** An order matching the receipt in the POS: 1,100 + 110 service + 77 VAT = 1,287. */
-const receiptOrder = (completedAt: string, overrides: Record<string, unknown> = {}) => ({
-  subtotal: '1100.00',
-  discount: '0.00',
-  serviceCharge: '110.00',
-  taxAmount: '77.00',
-  total: '1287.00',
-  partySize: 2,
-  paymentMethod: 'CASH',
-  orderType: 'DINE_IN',
-  completedAt: new Date(completedAt),
-  ...overrides,
-});
+/** สมุดรายได้จำลอง — ตอบตามช่วงวันที่ถูกถามจริง ไม่ใช่ตามลำดับการเรียก */
+const makeRevenueMock = (docs: RevenueDocument[]) => {
+  const inRange = (filter: RevenueFilter) =>
+    docs.filter((d) => d.businessDate >= filter.from && d.businessDate <= filter.to);
+
+  return {
+    documents: jest.fn(async (filter: RevenueFilter) => inRange(filter)),
+    totals: jest.fn(async (filter: RevenueFilter) =>
+      inRange(filter).reduce(
+        (sum, d) => ({
+          gross: sum.gross + d.gross,
+          discount: sum.discount + d.discount,
+          net: sum.net + d.net,
+          serviceCharge: sum.serviceCharge + d.serviceCharge,
+          tax: sum.tax + d.tax,
+          total: sum.total + d.total,
+          entries: sum.entries + 1,
+        }),
+        { gross: 0, discount: 0, net: 0, serviceCharge: 0, tax: 0, total: 0, entries: 0 },
+      ),
+    ),
+  };
+};
+
+const round2 = (value: number): number => Math.round(value * 100) / 100;
 
 describe('RestaurantMonthlySalesService', () => {
   let service: RestaurantMonthlySalesService;
   let prisma: ReturnType<typeof makePrismaMock>;
+  let revenue: ReturnType<typeof makeRevenueMock>;
+  /** Orders opened during the month — the operational query, independent of the ledger. */
+  let opened: { status: string }[];
+
+  /** Build the service with the ledger holding exactly these receipts. */
+  const withLedger = async (receipts: Receipt[] = []): Promise<void> => {
+    revenue = makeRevenueMock(receipts.map((r) => r.doc));
+
+    prisma.order.findMany.mockImplementation(async (args: any) => {
+      const ids: string[] | undefined = args?.where?.id?.in;
+      if (!ids) return opened;
+      return receipts.filter((r) => ids.includes(r.order.id)).map((r) => r.order);
+    });
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        RestaurantMonthlySalesService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: RevenueQueryService, useValue: revenue },
+      ],
+    }).compile();
+    service = module.get(RestaurantMonthlySalesService);
+  };
+
+  /** ตัวกรองทุกใบที่บริการยื่นให้สมุด */
+  const ledgerFilters = (): RevenueFilter[] =>
+    [...revenue.documents.mock.calls, ...revenue.totals.mock.calls].map(
+      ([filter]) => filter as RevenueFilter,
+    );
 
   beforeEach(async () => {
     prisma = makePrismaMock();
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [RestaurantMonthlySalesService, { provide: PrismaService, useValue: prisma }],
-    }).compile();
-    service = module.get(RestaurantMonthlySalesService);
-
+    opened = [];
     prisma.restaurant.findFirst.mockResolvedValue({ id: RESTAURANT_ID, name: 'The Grand Bistro' });
-    prisma.order.findMany.mockResolvedValue([]);
     prisma.orderItem.findMany.mockResolvedValue([]);
+    await withLedger();
   });
 
   it('rejects an outlet belonging to another tenant', async () => {
@@ -67,36 +155,54 @@ describe('RestaurantMonthlySalesService', () => {
     );
   });
 
-  it('queries a Bangkok calendar month, reaching back one month for the comparison', async () => {
+  it('asks the ledger for the whole Bangkok month, and the month before it', async () => {
     await service.getMonthlySales(RESTAURANT_ID, TENANT_ID, '2026-08');
 
-    const where = prisma.order.findMany.mock.calls[0][0].where;
-    // 2026-07-01 00:00 +07:00 → 2026-06-30T17:00Z; 2026-09-01 00:00 +07:00 → 2026-08-31T17:00Z.
-    expect(where.completedAt.gte.toISOString()).toBe('2026-06-30T17:00:00.000Z');
-    expect(where.completedAt.lt.toISOString()).toBe('2026-08-31T17:00:00.000Z');
-
-    const opsWhere = prisma.order.findMany.mock.calls[1][0].where;
-    expect(opsWhere.createdAt.gte.toISOString()).toBe('2026-07-31T17:00:00.000Z');
-    expect(opsWhere.createdAt.lt.toISOString()).toBe('2026-08-31T17:00:00.000Z');
+    expect(revenue.documents).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: TENANT_ID,
+        outletId: RESTAURANT_ID,
+        sourceModule: RevenueSourceModule.RESTAURANT,
+        from: '2026-08-01',
+        to: '2026-08-31',
+      }),
+    );
+    expect(revenue.totals).toHaveBeenCalledWith(
+      expect.objectContaining({ from: '2026-07-01', to: '2026-07-31' }),
+    );
   });
 
   it('rolls the year over when comparing January with December', async () => {
     const report = await service.getMonthlySales(RESTAURANT_ID, TENANT_ID, '2026-01');
 
     expect(report.comparison.previousMonth).toBe('2025-12');
-    const where = prisma.order.findMany.mock.calls[0][0].where;
-    expect(where.completedAt.gte.toISOString()).toBe('2025-11-30T17:00:00.000Z');
+    expect(ledgerFilters()).toContainEqual(
+      expect.objectContaining({ from: '2025-12-01', to: '2025-12-31' }),
+    );
   });
 
-  it('counts only completed and paid orders', async () => {
+  // เงินมาจากสมุดอย่างเดียว — ก่อนหน้านี้หน้านี้ไปนับ orders เองด้วยเงื่อนไขของตัวเอง
+  // ยอดจึงไม่ตรงกับหน้าอื่นที่ถามคำถามเดียวกัน
+  it('takes its money from the ledger, never by re-summing the orders table', async () => {
+    await withLedger([receipt('2026-08-13', 'o1')]);
+
     await service.getMonthlySales(RESTAURANT_ID, TENANT_ID, '2026-08');
 
-    expect(prisma.order.findMany.mock.calls[0][0].where).toMatchObject({
-      restaurantId: RESTAURANT_ID,
-      tenantId: TENANT_ID,
-      status: 'COMPLETED',
-      paymentStatus: 'PAID',
-    });
+    for (const [args] of prisma.order.findMany.mock.calls) {
+      expect(args.where.status).toBeUndefined();
+      expect(args.where.paymentStatus).toBeUndefined();
+      expect(args.where.completedAt).toBeUndefined();
+    }
+  });
+
+  it('counts operations over the Bangkok month window', async () => {
+    await service.getMonthlySales(RESTAURANT_ID, TENANT_ID, '2026-08');
+
+    const opsWhere = prisma.order.findMany.mock.calls[0][0].where;
+    // 2026-08-01 00:00 +07:00 → 2026-07-31T17:00Z; 2026-09-01 00:00 +07:00 → 2026-08-31T17:00Z.
+    expect(opsWhere.createdAt.gte.toISOString()).toBe('2026-07-31T17:00:00.000Z');
+    expect(opsWhere.createdAt.lt.toISOString()).toBe('2026-08-31T17:00:00.000Z');
+    expect(opsWhere).toMatchObject({ restaurantId: RESTAURANT_ID, tenantId: TENANT_ID });
   });
 
   it('emits one row per calendar day, including days that sold nothing', async () => {
@@ -113,22 +219,14 @@ describe('RestaurantMonthlySalesService', () => {
     expect(leap.days).toHaveLength(29);
   });
 
-  it('files each bill under its Bangkok day, and the days sum to the month total', async () => {
-    prisma.order.findMany
-      .mockResolvedValueOnce([
-        receiptOrder('2026-08-13T12:30:00+07:00'),
-        // 00:30 Bangkok on the 14th is still 17:30Z on the 13th — this belongs to
-        // the 14th, and filing it by UTC date would move the money a day.
-        receiptOrder('2026-08-14T00:30:00+07:00'),
-        receiptOrder('2026-08-14T19:00:00+07:00', {
-          subtotal: '720.00',
-          serviceCharge: '72.00',
-          taxAmount: '50.40',
-          total: '842.40',
-          partySize: 4,
-        }),
-      ])
-      .mockResolvedValueOnce([]);
+  it('files each bill under the business day the ledger gave it, and the days sum to the month', async () => {
+    await withLedger([
+      receipt('2026-08-13', 'o1'),
+      // A bill closed at 00:30 Bangkok on the 14th was posted to the 14th; the
+      // report must take the ledger's word for it rather than re-deriving a day.
+      receipt('2026-08-14', 'o2', {}, { completedAt: new Date('2026-08-14T00:30:00+07:00') }),
+      receipt('2026-08-14', 'o3', { gross: 720, serviceCharge: 72, tax: 50.4 }, { partySize: 4 }),
+    ]);
 
     const report = await service.getMonthlySales(RESTAURANT_ID, TENANT_ID, '2026-08');
     const byDate = Object.fromEntries(report.days.map((day) => [day.date, day]));
@@ -137,23 +235,16 @@ describe('RestaurantMonthlySalesService', () => {
     expect(byDate['2026-08-14']).toMatchObject({ orders: 2, totalCollected: 2129.4, guests: 6 });
 
     const summed = report.days.reduce((sum, day) => sum + day.totalCollected, 0);
-    expect(Math.round(summed * 100) / 100).toBe(report.totals.totalCollected);
+    expect(round2(summed)).toBe(report.totals.totalCollected);
     expect(report.totals.totalCollected).toBe(3416.4);
   });
 
   it('totals reconcile with the receipt: net + service + tax = collected', async () => {
-    prisma.order.findMany
-      .mockResolvedValueOnce([
-        // 1,100 − 100 discount → net 1,000, +10% service, +7% VAT = 1,170.
-        receiptOrder('2026-08-13T12:30:00+07:00', {
-          discount: '100.00',
-          serviceCharge: '100.00',
-          taxAmount: '70.00',
-          total: '1170.00',
-        }),
-        receiptOrder('2026-08-20T19:00:00+07:00'),
-      ])
-      .mockResolvedValueOnce([]);
+    await withLedger([
+      // 1,100 − 100 discount → net 1,000, +10% service, +7% VAT = 1,170.
+      receipt('2026-08-13', 'o1', { discount: 100, serviceCharge: 100, tax: 70 }),
+      receipt('2026-08-20', 'o2'),
+    ]);
 
     const { totals } = await service.getMonthlySales(RESTAURANT_ID, TENANT_ID, '2026-08');
 
@@ -167,13 +258,11 @@ describe('RestaurantMonthlySalesService', () => {
   });
 
   it('averages over trading days, not calendar days, and names the best day', async () => {
-    prisma.order.findMany
-      .mockResolvedValueOnce([
-        receiptOrder('2026-08-13T12:30:00+07:00'),
-        receiptOrder('2026-08-20T19:00:00+07:00'),
-        receiptOrder('2026-08-20T20:00:00+07:00'),
-      ])
-      .mockResolvedValueOnce([]);
+    await withLedger([
+      receipt('2026-08-13', 'o1'),
+      receipt('2026-08-20', 'o2'),
+      receipt('2026-08-20', 'o3'),
+    ]);
 
     const { pace, totals } = await service.getMonthlySales(RESTAURANT_ID, TENANT_ID, '2026-08');
 
@@ -185,12 +274,10 @@ describe('RestaurantMonthlySalesService', () => {
   });
 
   it('compares against the previous month and leaves growth from zero undefined', async () => {
-    prisma.order.findMany
-      .mockResolvedValueOnce([
-        receiptOrder('2026-08-13T12:30:00+07:00'),
-        receiptOrder('2026-07-13T12:30:00+07:00', { total: '1000.00' }),
-      ])
-      .mockResolvedValueOnce([]);
+    await withLedger([
+      receipt('2026-08-13', 'o1'),
+      receipt('2026-07-13', 'o0', { gross: 1000, serviceCharge: 0, tax: 0 }),
+    ]);
 
     const withHistory = await service.getMonthlySales(RESTAURANT_ID, TENANT_ID, '2026-08');
     expect(withHistory.comparison).toMatchObject({
@@ -200,9 +287,7 @@ describe('RestaurantMonthlySalesService', () => {
       changePct: 28.7,
     });
 
-    prisma.order.findMany
-      .mockResolvedValueOnce([receiptOrder('2026-08-13T12:30:00+07:00')])
-      .mockResolvedValueOnce([]);
+    await withLedger([receipt('2026-08-13', 'o1')]);
 
     const firstMonth = await service.getMonthlySales(RESTAURANT_ID, TENANT_ID, '2026-08');
     expect(firstMonth.comparison.totalCollected).toBe(0);
@@ -210,17 +295,11 @@ describe('RestaurantMonthlySalesService', () => {
   });
 
   it('splits the month by payment method and order type', async () => {
-    prisma.order.findMany
-      .mockResolvedValueOnce([
-        receiptOrder('2026-08-13T12:30:00+07:00'),
-        receiptOrder('2026-08-14T19:00:00+07:00', {
-          total: '1287.00',
-          paymentMethod: 'QR_PAYMENT',
-          orderType: 'TAKEAWAY',
-        }),
-        receiptOrder('2026-08-15T19:00:00+07:00', { paymentMethod: null }),
-      ])
-      .mockResolvedValueOnce([]);
+    await withLedger([
+      receipt('2026-08-13', 'o1'),
+      receipt('2026-08-14', 'o2', {}, { paymentMethod: 'QR_PAYMENT', orderType: 'TAKEAWAY' }),
+      receipt('2026-08-15', 'o3', {}, { paymentMethod: null }),
+    ]);
 
     const report = await service.getMonthlySales(RESTAURANT_ID, TENANT_ID, '2026-08');
 
@@ -237,6 +316,13 @@ describe('RestaurantMonthlySalesService', () => {
   });
 
   it('ranks the month top items and counts operations from orders opened in it', async () => {
+    opened = [
+      { status: 'COMPLETED' },
+      { status: 'COMPLETED' },
+      { status: 'CANCELLED' },
+      { status: 'PREPARING' },
+    ];
+    await withLedger([receipt('2026-08-13', 'o1')]);
     prisma.orderItem.findMany.mockResolvedValue([
       {
         quantity: 4,
@@ -253,12 +339,6 @@ describe('RestaurantMonthlySalesService', () => {
         totalPrice: '360.00',
         menuItem: { id: 'm1', name: 'ข้าวต้มปลา', category: { name: 'อาหารเช้า' } },
       },
-    ]);
-    prisma.order.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([
-      { status: 'COMPLETED' },
-      { status: 'COMPLETED' },
-      { status: 'CANCELLED' },
-      { status: 'PREPARING' },
     ]);
 
     const report = await service.getMonthlySales(RESTAURANT_ID, TENANT_ID, '2026-08');
@@ -302,5 +382,3 @@ describe('RestaurantMonthlySalesService', () => {
     expect(report.topItems).toEqual([]);
   });
 });
-
-const round2 = (value: number): number => Math.round(value * 100) / 100;

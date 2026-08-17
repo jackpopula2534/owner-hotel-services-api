@@ -4,6 +4,7 @@ import { AddonModule } from '../addons/addon.module';
 import { IntegrationsModule } from '../integrations/integrations.module';
 import { WarehousesModule } from '../inventory/warehouses/warehouses.module';
 import { StockMovementsModule } from '../inventory/stock-movements/stock-movements.module';
+import { RevenueModule } from '../revenue/revenue.module';
 import { CampgroundsController } from './campgrounds.controller';
 import { CampgroundsService } from './campgrounds.service';
 import { ZonesController } from './zones.controller';
@@ -31,7 +32,14 @@ import { CampDashboardService } from './dashboard.service';
  * (AddonModule ให้ทั้ง guard และ AddonService ที่ guard ต้องใช้)
  */
 @Module({
-  imports: [PrismaModule, AddonModule, IntegrationsModule, WarehousesModule, StockMovementsModule],
+  imports: [
+    PrismaModule,
+    AddonModule,
+    IntegrationsModule,
+    WarehousesModule,
+    StockMovementsModule,
+    RevenueModule,
+  ],
   controllers: [
     CampgroundsController,
     ZonesController,

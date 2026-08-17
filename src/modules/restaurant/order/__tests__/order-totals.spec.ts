@@ -19,6 +19,10 @@ import { OrderService } from '../order.service';
 import { PrismaService } from '../../../../prisma/prisma.service';
 import { MenuService } from '../../menu/menu.service';
 import { AuditLogService } from '../../../../audit-log/audit-log.service';
+import { FolioPostingService } from '@/modules/accounts-receivable/folio-posting/folio-posting.service';
+import { buildFolioPostingStub } from './folio-posting.stub';
+import { RevenuePostingService } from '@/modules/revenue/revenue-posting.service';
+import { buildRevenuePostingStub } from '@/modules/revenue/__tests__/revenue-posting.stub';
 import {
   calculateOrderTotals,
   resolveChargeRates,
@@ -207,6 +211,8 @@ describe('OrderService — outlet charge policy on a new bill', () => {
         { provide: ConfigService, useValue: { get: () => 'http://localhost:9010' } },
         { provide: MenuService, useValue: {} },
         { provide: AuditLogService, useValue: { logOrderCreate: jest.fn() } },
+        { provide: FolioPostingService, useValue: buildFolioPostingStub() },
+        { provide: RevenuePostingService, useValue: buildRevenuePostingStub() },
       ],
     }).compile();
     service = moduleRef.get(OrderService);

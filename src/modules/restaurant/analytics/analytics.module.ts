@@ -5,9 +5,11 @@ import { RestaurantDailySalesService } from './daily-sales.service';
 import { RestaurantMonthlySalesService } from './monthly-sales.service';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AddonModule } from '../../addons/addon.module';
+import { RevenueModule } from '../../revenue/revenue.module';
 
 @Module({
-  imports: [AddonModule],
+  // ทุกยอดเงินในรายงานร้านอาหารอ่านจากสมุดรายได้ ไม่ได้บวก orders.total เองแล้ว
+  imports: [AddonModule, RevenueModule],
   controllers: [RestaurantAnalyticsController],
   providers: [
     RestaurantAnalyticsService,

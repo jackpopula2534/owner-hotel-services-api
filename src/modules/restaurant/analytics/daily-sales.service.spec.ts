@@ -1,17 +1,69 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
+import { RevenueSourceModule, RevenueSourceType } from '@prisma/client';
 import { RestaurantDailySalesService } from './daily-sales.service';
 import { PrismaService } from '../../../prisma/prisma.service';
+import {
+  RevenueDocument,
+  RevenueFilter,
+  RevenueQueryService,
+} from '../../revenue/revenue-query.service';
+import type { OrderDimensionRow } from './sales-shared';
 
 /**
  * The daily sales report is the number a manager closes the till against, so the
- * things worth pinning down are: the day window is a *Bangkok* day (not the
- * server's), the money adds up the same way the printed receipt does, and only
- * paid-and-completed orders count toward it.
+ * things worth pinning down are: every baht comes from the revenue ledger (not
+ * from re-counting the orders table, which is how this screen used to disagree
+ * with the Command Center), the day is a *Bangkok* day rather than the server's,
+ * and the money adds up the way the printed receipt does.
  */
 
 const RESTAURANT_ID = 'rest-1';
 const TENANT_ID = 'tenant-1';
+
+/** สลิปหนึ่งใบ: แถวที่สมุดลงไว้ + แถวใบสั่งที่รายงานเอามาต่อมิติ */
+interface Receipt {
+  doc: RevenueDocument;
+  order: OrderDimensionRow;
+}
+
+/** A receipt matching the POS: 1,100 + 110 service + 77 VAT = 1,287. */
+const receipt = (
+  businessDate: string,
+  id: string,
+  money: Partial<Pick<RevenueDocument, 'gross' | 'discount' | 'serviceCharge' | 'tax'>> = {},
+  dimensions: Partial<OrderDimensionRow> = {},
+): Receipt => {
+  const gross = money.gross ?? 1100;
+  const discount = money.discount ?? 0;
+  const serviceCharge = money.serviceCharge ?? 110;
+  const tax = money.tax ?? 77;
+  const net = gross - discount;
+
+  return {
+    doc: {
+      businessDate,
+      sourceType: RevenueSourceType.ORDER,
+      sourceId: id,
+      gross,
+      discount,
+      net,
+      serviceCharge,
+      tax,
+      total: net + serviceCharge + tax,
+      entries: 1,
+    },
+    order: {
+      id,
+      partySize: 2,
+      paymentMethod: 'CASH',
+      paymentStatus: 'PAID',
+      orderType: 'DINE_IN',
+      completedAt: new Date(`${businessDate}T12:00:00+07:00`),
+      ...dimensions,
+    },
+  };
+};
 
 const makePrismaMock = () => ({
   restaurant: { findFirst: jest.fn() },
@@ -19,34 +71,69 @@ const makePrismaMock = () => ({
   orderItem: { findMany: jest.fn() },
 });
 
-/** An order matching the receipt in the POS: 1,100 + 110 service + 77 VAT = 1,287. */
-const receiptOrder = (completedAt: string, overrides: Record<string, unknown> = {}) => ({
-  subtotal: '1100.00',
-  discount: '0.00',
-  serviceCharge: '110.00',
-  taxAmount: '77.00',
-  total: '1287.00',
-  partySize: 2,
-  paymentMethod: 'CASH',
-  orderType: 'DINE_IN',
-  completedAt: new Date(completedAt),
-  ...overrides,
-});
+/**
+ * สมุดรายได้จำลอง — ตอบตามช่วงวันที่ถูกถามจริง ไม่ใช่ตามลำดับการเรียก
+ * เทสต์จะได้ล้มถ้าบริการถามผิดวัน (วันนี้กับวันเทียบใช้คนละเมธอดแต่กรองแบบเดียวกัน)
+ */
+const makeRevenueMock = (docs: RevenueDocument[]) => {
+  const inRange = (filter: RevenueFilter) =>
+    docs.filter((d) => d.businessDate >= filter.from && d.businessDate <= filter.to);
+
+  return {
+    documents: jest.fn(async (filter: RevenueFilter) => inRange(filter)),
+    totals: jest.fn(async (filter: RevenueFilter) => {
+      const rows = inRange(filter);
+      return rows.reduce(
+        (sum, d) => ({
+          gross: sum.gross + d.gross,
+          discount: sum.discount + d.discount,
+          net: sum.net + d.net,
+          serviceCharge: sum.serviceCharge + d.serviceCharge,
+          tax: sum.tax + d.tax,
+          total: sum.total + d.total,
+          entries: sum.entries + 1,
+        }),
+        { gross: 0, discount: 0, net: 0, serviceCharge: 0, tax: 0, total: 0, entries: 0 },
+      );
+    }),
+  };
+};
 
 describe('RestaurantDailySalesService', () => {
   let service: RestaurantDailySalesService;
   let prisma: ReturnType<typeof makePrismaMock>;
+  let revenue: ReturnType<typeof makeRevenueMock>;
+  /** Orders opened during the day — the operational query, independent of the ledger. */
+  let opened: { status: string }[];
+
+  /** Build the service with the ledger holding exactly these receipts. */
+  const withLedger = async (receipts: Receipt[] = []): Promise<void> => {
+    revenue = makeRevenueMock(receipts.map((r) => r.doc));
+
+    prisma.order.findMany.mockImplementation(async (args: any) => {
+      // The dimension fetch is keyed on the ids the ledger just handed over;
+      // anything else is the operational (createdAt) query.
+      const ids: string[] | undefined = args?.where?.id?.in;
+      if (!ids) return opened;
+      return receipts.filter((r) => ids.includes(r.order.id)).map((r) => r.order);
+    });
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        RestaurantDailySalesService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: RevenueQueryService, useValue: revenue },
+      ],
+    }).compile();
+    service = module.get(RestaurantDailySalesService);
+  };
 
   beforeEach(async () => {
     prisma = makePrismaMock();
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [RestaurantDailySalesService, { provide: PrismaService, useValue: prisma }],
-    }).compile();
-    service = module.get(RestaurantDailySalesService);
-
+    opened = [];
     prisma.restaurant.findFirst.mockResolvedValue({ id: RESTAURANT_ID, name: 'The Grand Bistro' });
-    prisma.order.findMany.mockResolvedValue([]);
     prisma.orderItem.findMany.mockResolvedValue([]);
+    await withLedger();
   });
 
   it('rejects an outlet belonging to another tenant', async () => {
@@ -65,48 +152,74 @@ describe('RestaurantDailySalesService', () => {
     );
   });
 
-  it('queries a Bangkok calendar day, not a server-local one', async () => {
+  // เงินทุกบาทต้องมาจากสมุด ไม่ใช่ไปนับ orders เอง — ตอนนับเองหน้านี้กับ Command
+  // Center ใช้เงื่อนไขคนละชุด ยอดเลยไม่เคยตรงกัน
+  it('takes its money from the ledger, never by re-summing the orders table', async () => {
+    await withLedger([receipt('2026-08-13', 'o1')]);
+
     await service.getDailySales(RESTAURANT_ID, TENANT_ID, '2026-08-13');
 
-    const where = prisma.order.findMany.mock.calls[0][0].where;
-    // 2026-08-13 00:00 +07:00 is 2026-08-12T17:00Z; the paid-orders query reaches
-    // back one further day for the comparison figure.
-    expect(where.completedAt.gte.toISOString()).toBe('2026-08-11T17:00:00.000Z');
-    expect(where.completedAt.lt.toISOString()).toBe('2026-08-13T17:00:00.000Z');
-
-    const opsWhere = prisma.order.findMany.mock.calls[1][0].where;
-    expect(opsWhere.createdAt.gte.toISOString()).toBe('2026-08-12T17:00:00.000Z');
-    expect(opsWhere.createdAt.lt.toISOString()).toBe('2026-08-13T17:00:00.000Z');
+    expect(revenue.documents).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: TENANT_ID,
+        outletId: RESTAURANT_ID,
+        sourceModule: RevenueSourceModule.RESTAURANT,
+        from: '2026-08-13',
+        to: '2026-08-13',
+      }),
+    );
+    // The orders table is only ever asked for operational rows or for the ids the
+    // ledger already listed — never for a money filter of its own.
+    for (const [args] of prisma.order.findMany.mock.calls) {
+      expect(args.where.status).toBeUndefined();
+      expect(args.where.paymentStatus).toBeUndefined();
+      expect(args.where.completedAt).toBeUndefined();
+    }
   });
 
-  it('counts only completed and paid orders', async () => {
+  it('asks the ledger for the previous business day as the comparison', async () => {
     await service.getDailySales(RESTAURANT_ID, TENANT_ID, '2026-08-13');
 
-    const where = prisma.order.findMany.mock.calls[0][0].where;
-    expect(where).toMatchObject({
-      restaurantId: RESTAURANT_ID,
-      tenantId: TENANT_ID,
-      status: 'COMPLETED',
-      paymentStatus: 'PAID',
-    });
+    expect(revenue.totals).toHaveBeenCalledWith(
+      expect.objectContaining({ from: '2026-08-12', to: '2026-08-12' }),
+    );
+  });
+
+  it('counts operations over a Bangkok calendar day, not a server-local one', async () => {
+    await service.getDailySales(RESTAURANT_ID, TENANT_ID, '2026-08-13');
+
+    const opsWhere = prisma.order.findMany.mock.calls[0][0].where;
+    // 2026-08-13 00:00 +07:00 is 2026-08-12T17:00Z.
+    expect(opsWhere.createdAt.gte.toISOString()).toBe('2026-08-12T17:00:00.000Z');
+    expect(opsWhere.createdAt.lt.toISOString()).toBe('2026-08-13T17:00:00.000Z');
+    expect(opsWhere).toMatchObject({ restaurantId: RESTAURANT_ID, tenantId: TENANT_ID });
+  });
+
+  it('reads dish detail only for the bills the ledger listed', async () => {
+    await withLedger([receipt('2026-08-13', 'o1'), receipt('2026-08-13', 'o2')]);
+
+    await service.getDailySales(RESTAURANT_ID, TENANT_ID, '2026-08-13');
+
+    expect(prisma.orderItem.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          order: { id: { in: ['o1', 'o2'] }, tenantId: TENANT_ID },
+          status: { not: 'CANCELLED' },
+        }),
+      }),
+    );
   });
 
   it('totals reconcile with the receipt: net + service + tax = collected', async () => {
-    prisma.order.findMany
-      .mockResolvedValueOnce([
-        receiptOrder('2026-08-13T12:30:00+07:00'),
-        receiptOrder('2026-08-13T19:00:00+07:00', {
-          subtotal: '720.00',
-          discount: '0.00',
-          serviceCharge: '72.00',
-          taxAmount: '50.40',
-          total: '842.40',
-          partySize: 4,
-          paymentMethod: 'QR_CODE',
-          orderType: 'TAKEAWAY',
-        }),
-      ])
-      .mockResolvedValueOnce([]);
+    await withLedger([
+      receipt('2026-08-13', 'o1'),
+      receipt(
+        '2026-08-13',
+        'o2',
+        { gross: 720, serviceCharge: 72, tax: 50.4 },
+        { partySize: 4, paymentMethod: 'QR_CODE', orderType: 'TAKEAWAY' },
+      ),
+    ]);
 
     const res = await service.getDailySales(RESTAURANT_ID, TENANT_ID, '2026-08-13');
 
@@ -115,28 +228,54 @@ describe('RestaurantDailySalesService', () => {
     expect(res.totals.serviceCharge).toBe(182);
     expect(res.totals.tax).toBe(127.4);
     expect(res.totals.totalCollected).toBe(2129.4);
-    expect(
-      res.totals.netSales + res.totals.serviceCharge + res.totals.tax,
-    ).toBeCloseTo(res.totals.totalCollected, 2);
+    expect(res.totals.netSales + res.totals.serviceCharge + res.totals.tax).toBeCloseTo(
+      res.totals.totalCollected,
+      2,
+    );
 
     expect(res.totals.orders).toBe(2);
     expect(res.totals.guests).toBe(6);
     expect(res.totals.averageOrderValue).toBe(1064.7);
     expect(res.totals.averagePartySize).toBe(3);
+    // Nothing was signed to a room, so revenue and cash agree here.
+    expect(res.totals.cashCollected).toBe(2129.4);
+    expect(res.totals.roomCharged).toBe(0);
+  });
+
+  // รายได้ กับ เงินสดรับ เป็นคนละตัวเลขโดยตั้งใจ: บิลที่เซ็นเข้าห้องเป็นรายได้แล้ว
+  // แต่เงินยังไม่เข้าลิ้นชัก — ไปเก็บที่ folio ตอนเช็คเอาต์
+  it('splits revenue from cash: a room charge counts as revenue but not as takings', async () => {
+    await withLedger([
+      receipt('2026-08-13', 'o1'),
+      receipt(
+        '2026-08-13',
+        'o2',
+        { gross: 720, serviceCharge: 72, tax: 50.4 },
+        { partySize: 4, paymentMethod: 'ROOM_CHARGE', paymentStatus: 'CHARGED_TO_ROOM' },
+      ),
+    ]);
+
+    const res = await service.getDailySales(RESTAURANT_ID, TENANT_ID, '2026-08-13');
+
+    expect(res.totals.totalCollected).toBe(2129.4);
+    expect(res.totals.cashCollected).toBe(1287);
+    expect(res.totals.roomCharged).toBe(842.4);
+    // The split has to account for the whole day, never a rounding gap.
+    expect(res.totals.cashCollected + res.totals.roomCharged).toBeCloseTo(
+      res.totals.totalCollected,
+      2,
+    );
   });
 
   it('subtracts discount from gross to get net sales', async () => {
-    prisma.order.findMany
-      .mockResolvedValueOnce([
-        receiptOrder('2026-08-13T12:30:00+07:00', {
-          subtotal: '1000.00',
-          discount: '100.00',
-          serviceCharge: '90.00',
-          taxAmount: '69.30',
-          total: '1059.30',
-        }),
-      ])
-      .mockResolvedValueOnce([]);
+    await withLedger([
+      receipt('2026-08-13', 'o1', {
+        gross: 1000,
+        discount: 100,
+        serviceCharge: 90,
+        tax: 69.3,
+      }),
+    ]);
 
     const res = await service.getDailySales(RESTAURANT_ID, TENANT_ID, '2026-08-13');
 
@@ -147,9 +286,9 @@ describe('RestaurantDailySalesService', () => {
   });
 
   it('buckets the hourly curve by Bangkok clock hour and keeps all 24 slots', async () => {
-    prisma.order.findMany
-      .mockResolvedValueOnce([receiptOrder('2026-08-13T19:45:00+07:00')])
-      .mockResolvedValueOnce([]);
+    await withLedger([
+      receipt('2026-08-13', 'o1', {}, { completedAt: new Date('2026-08-13T19:45:00+07:00') }),
+    ]);
 
     const res = await service.getDailySales(RESTAURANT_ID, TENANT_ID, '2026-08-13');
 
@@ -158,14 +297,36 @@ describe('RestaurantDailySalesService', () => {
     expect(res.hourly[12]).toEqual({ hour: 12, orders: 0, amount: 0 });
   });
 
-  it('splits the fetched window into today and the comparison day', async () => {
-    prisma.order.findMany
-      .mockResolvedValueOnce([
-        receiptOrder('2026-08-13T12:00:00+07:00'),
-        // Previous day — same query, must not land in today's totals.
-        receiptOrder('2026-08-12T12:00:00+07:00', { total: '1000.00' }),
-      ])
-      .mockResolvedValueOnce([]);
+  // บิลที่ถูกลบทิ้งหลังลงสมุดยังต้องนับเงิน — ยอดรวมห้ามหายไปเงียบ ๆ เพราะแถวต้นทางหาย
+  it('still counts a bill whose order row is gone, filed under UNKNOWN', async () => {
+    const orphan = receipt('2026-08-13', 'o-deleted');
+    revenue = makeRevenueMock([orphan.doc]);
+    prisma.order.findMany.mockImplementation(async (args: any) =>
+      args?.where?.id?.in ? [] : opened,
+    );
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        RestaurantDailySalesService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: RevenueQueryService, useValue: revenue },
+      ],
+    }).compile();
+    service = module.get(RestaurantDailySalesService);
+
+    const res = await service.getDailySales(RESTAURANT_ID, TENANT_ID, '2026-08-13');
+
+    expect(res.totals.totalCollected).toBe(1287);
+    expect(res.orderTypeBreakdown).toEqual([
+      { key: 'UNKNOWN', orders: 1, amount: 1287, share: 100 },
+    ]);
+  });
+
+  it('keeps the previous day out of today and reports the change', async () => {
+    await withLedger([
+      receipt('2026-08-13', 'o1'),
+      // Yesterday's bill — same ledger, must only appear in the comparison.
+      receipt('2026-08-12', 'o0', { gross: 1000, serviceCharge: 0, tax: 0 }),
+    ]);
 
     const res = await service.getDailySales(RESTAURANT_ID, TENANT_ID, '2026-08-13');
 
@@ -180,9 +341,7 @@ describe('RestaurantDailySalesService', () => {
   });
 
   it('reports no growth percentage when the previous day took nothing', async () => {
-    prisma.order.findMany
-      .mockResolvedValueOnce([receiptOrder('2026-08-13T12:00:00+07:00')])
-      .mockResolvedValueOnce([]);
+    await withLedger([receipt('2026-08-13', 'o1')]);
 
     const res = await service.getDailySales(RESTAURANT_ID, TENANT_ID, '2026-08-13');
 
@@ -191,16 +350,15 @@ describe('RestaurantDailySalesService', () => {
   });
 
   it('breaks revenue down by payment method and order type with shares', async () => {
-    prisma.order.findMany
-      .mockResolvedValueOnce([
-        receiptOrder('2026-08-13T12:00:00+07:00', { total: '750.00', paymentMethod: 'CASH' }),
-        receiptOrder('2026-08-13T13:00:00+07:00', {
-          total: '250.00',
-          paymentMethod: 'CREDIT_CARD',
-          orderType: 'ROOM_SERVICE',
-        }),
-      ])
-      .mockResolvedValueOnce([]);
+    await withLedger([
+      receipt('2026-08-13', 'o1', { gross: 750, serviceCharge: 0, tax: 0 }),
+      receipt(
+        '2026-08-13',
+        'o2',
+        { gross: 250, serviceCharge: 0, tax: 0 },
+        { paymentMethod: 'CREDIT_CARD', orderType: 'ROOM_SERVICE' },
+      ),
+    ]);
 
     const res = await service.getDailySales(RESTAURANT_ID, TENANT_ID, '2026-08-13');
 
@@ -212,6 +370,7 @@ describe('RestaurantDailySalesService', () => {
   });
 
   it('ranks top items by quantity and caps the list at ten', async () => {
+    await withLedger([receipt('2026-08-13', 'o1')]);
     prisma.orderItem.findMany.mockResolvedValue([
       {
         quantity: 2,
@@ -239,13 +398,15 @@ describe('RestaurantDailySalesService', () => {
     expect(res.topItems.length).toBeLessThanOrEqual(10);
   });
 
-  it('counts operations from orders opened during the day', async () => {
-    prisma.order.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([
+  // ใบสั่งที่เปิดแล้วยังไม่จ่ายไม่มีแถวในสมุด แต่ต้องยังเห็นบนหน้าจอปฏิบัติการ
+  it('counts operations from orders opened during the day, ledger or not', async () => {
+    opened = [
       { status: 'COMPLETED' },
       { status: 'CANCELLED' },
       { status: 'PENDING' },
       { status: 'PREPARING' },
-    ]);
+    ];
+    await withLedger();
 
     const res = await service.getDailySales(RESTAURANT_ID, TENANT_ID, '2026-08-13');
 

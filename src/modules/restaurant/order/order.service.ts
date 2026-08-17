@@ -21,6 +21,20 @@ import {
   RestaurantOrderCompletedEvent,
 } from '../../inventory/events/inventory.events';
 import { calculateOrderTotals, resolveChargeRates } from './order-totals.util';
+import {
+  FolioPostingService,
+  FOLIO_SOURCE_TYPE,
+  type ChargeableRoom,
+} from '../../accounts-receivable/folio-posting/folio-posting.service';
+import {
+  RevenuePostingService,
+  hasPostableRevenue,
+} from '../../revenue/revenue-posting.service';
+import {
+  buildOrderRevenueInput,
+  ORDER_REVENUE_SELECT,
+  type OrderRevenueOutlet,
+} from '../../revenue/sources/order-revenue.source';
 
 /** `document_sequences.docType` for restaurant bill numbers. */
 const ORDER_DOC_TYPE = 'ORD';
@@ -59,77 +73,39 @@ export class OrderService {
     private readonly configService: ConfigService,
     private readonly menuService: MenuService,
     private readonly auditLogService: AuditLogService,
+    private readonly folioPosting: FolioPostingService,
+    private readonly revenuePosting: RevenuePostingService,
     @Optional() private readonly kitchenGateway?: KitchenGateway,
     @Optional() private readonly eventEmitter?: EventEmitter2,
   ) {}
 
   // ─── Booked Rooms (for Room Service lookup) ────────────────────────────
 
+  /**
+   * ห้องที่หน้าจอ POS เอาไปทำตัวเลือก "ชาร์จเข้าห้อง"
+   *
+   * ตัวรายการมาจาก FolioPostingService ตัวเดียวกับที่ลงรายการหนี้จริง เพื่อไม่ให้
+   * จอกับตัวโพสต์นิยาม "ห้องที่ชาร์จได้" คนละแบบ — พนักงานเลือกห้องที่ระบบไม่รับ
+   * แล้วปิดบิลไม่ได้ทั้งที่จอบอกว่าเลือกได้
+   */
   async getBookedRooms(
     restaurantId: string,
     tenantId: string,
     search?: string,
-  ): Promise<{ roomNumber: string; guestName: string; bookingId: string; status: string }[]> {
-    // Verify restaurant belongs to tenant
+  ): Promise<ChargeableRoom[]> {
     const restaurant = await this.prisma.restaurant.findFirst({
       where: { id: restaurantId, tenantId },
+      select: { propertyId: true },
     });
     if (!restaurant) {
       throw new NotFoundException('Restaurant not found');
     }
 
-    const today = new Date();
-    const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
-
-    // Find bookings that are checked_in or confirmed for today
-    const bookings = await this.prisma.booking.findMany({
-      where: {
-        tenantId,
-        propertyId: restaurant.propertyId,
-        status: { in: ['checked_in', 'confirmed'] },
-        OR: [
-          // Currently checked in (checkIn <= today < checkOut)
-          {
-            checkIn: { lte: endOfDay },
-            checkOut: { gte: startOfDay },
-          },
-          // Scheduled for today
-          {
-            scheduledCheckIn: { lte: endOfDay },
-            scheduledCheckOut: { gte: startOfDay },
-          },
-        ],
-      },
-      include: {
-        room: { select: { number: true } },
-        guest: { select: { firstName: true, lastName: true } },
-      },
-      orderBy: { room: { number: 'asc' } },
+    return this.folioPosting.listChargeableRooms({
+      tenantId,
+      propertyId: restaurant.propertyId,
+      search,
     });
-
-    const results = bookings
-      .filter((b) => b.room?.number)
-      .map((b) => ({
-        roomNumber: b.room!.number,
-        guestName:
-          [b.guest?.firstName || b.guestFirstName, b.guest?.lastName || b.guestLastName]
-            .filter(Boolean)
-            .join(' ') || 'ไม่ระบุชื่อ',
-        bookingId: b.id,
-        status: b.status,
-      }));
-
-    // Filter by search term if provided
-    if (search) {
-      const term = search.toLowerCase();
-      return results.filter(
-        (r) =>
-          r.roomNumber.toLowerCase().includes(term) || r.guestName.toLowerCase().includes(term),
-      );
-    }
-
-    return results;
   }
 
   // ─── Orders ───────────────────────────────────────────────────────────────
@@ -596,12 +572,17 @@ export class OrderService {
       throw new BadRequestException('Order is already paid');
     }
 
+    if (order.paymentStatus === 'CHARGED_TO_ROOM') {
+      throw new BadRequestException('บิลนี้ถูกชาร์จเข้าห้องพักไปแล้ว');
+    }
+
     if (['CANCELLED'].includes(order.status)) {
       throw new BadRequestException('Cannot process payment for a cancelled order');
     }
 
-    if (dto.paymentMethod === PaymentMethodEnum.ROOM_CHARGE && !dto.guestRoom) {
-      throw new BadRequestException('Room number is required for room charge payment');
+    const isRoomCharge = dto.paymentMethod === PaymentMethodEnum.ROOM_CHARGE;
+    if (isRoomCharge && !dto.bookingId && !dto.guestRoom) {
+      throw new BadRequestException('ต้องเลือกห้องพัก (การจอง) สำหรับการชาร์จเข้าห้อง');
     }
 
     // ส่วนลดตอนรับชำระเป็นส่วนลด "เพิ่มเติม" จากที่บิลมีอยู่แล้ว
@@ -620,28 +601,81 @@ export class OrderService {
       );
     }
 
-    if (dto.paidAmount < total) {
+    // A room charge collects nothing at the till — the folio takes the receivable,
+    // so there is no cash to compare against the bill and no change to give back.
+    if (!isRoomCharge && dto.paidAmount < total) {
       throw new BadRequestException(
         `Paid amount (${dto.paidAmount}) is less than order total (${total})`,
       );
     }
 
-    const changeAmount = round2(dto.paidAmount - total);
-    const becomesCompleted = order.status === 'SERVED';
+    const paidAmount = isRoomCharge ? 0 : dto.paidAmount;
+    const changeAmount = isRoomCharge ? 0 : round2(dto.paidAmount - total);
+    // เก็บเงินแล้ว = ปิดบิลแล้ว ไม่ว่าจะเดินสถานะมาถึง SERVED หรือยัง
+    // (ร้านแบบสั่ง-จ่าย-รับของ ข้าม SERVED เป็นปกติ)
+    //
+    // เดิมปิดเฉพาะบิลที่ status === 'SERVED' แต่ปั๊ม completedAt ทุกกรณี บิลที่จ่ายแล้ว
+    // ยังค้าง PENDING จึงหลุดจากรายงานรายได้ทุกหน้า (ทุกหน้ากรอง status COMPLETED)
+    // — เงินเข้าลิ้นชักจริงแต่ไม่โผล่ในยอดขาย
+    const becomesCompleted = order.status !== 'COMPLETED';
 
-    const updatedOrderPayment = await this.prisma.order.update({
-      where: { id: orderId },
-      data: {
-        paymentStatus: 'PAID',
-        paymentMethod: dto.paymentMethod,
-        paidAmount: dto.paidAmount,
-        changeAmount,
-        discount,
-        total,
-        guestRoom: dto.guestRoom ?? order.guestRoom,
-        status: becomesCompleted ? 'COMPLETED' : order.status,
-        completedAt: new Date(),
-      },
+    // ร้านเจ้าของบิล — ต้องใช้ทั้งสองทาง: propertyId ชี้ว่าห้องที่ชาร์จได้อยู่ตึกไหน
+    // และชื่อร้านเป็นมิติ outlet ที่สมุดรายได้ snapshot ไว้ ณ วันขาย
+    const restaurant = await this.prisma.restaurant.findFirst({
+      where: { id: restaurantId, tenantId },
+      select: { name: true, propertyId: true },
+    });
+    const propertyId = restaurant?.propertyId ?? undefined;
+
+    // Post to the folio BEFORE closing the bill. If the room cannot take the
+    // charge the sale must stay open — marking it settled anyway is exactly how
+    // the money used to disappear.
+    const posted = isRoomCharge
+      ? await this.folioPosting.postCharge({
+          tenantId,
+          bookingId: dto.bookingId,
+          roomNumber: dto.guestRoom,
+          propertyId,
+          chargeType: 'FB_CHARGE',
+          description: `ร้านอาหาร — บิล ${order.orderNumber}`,
+          netAmount: round2(total - Number(order.taxAmount ?? 0)),
+          vatRate: Number(order.taxRate ?? 0),
+          vatAmount: Number(order.taxAmount ?? 0),
+          totalAmount: total,
+          sourceType: FOLIO_SOURCE_TYPE.RESTAURANT_ORDER,
+          sourceId: orderId,
+          postedBy: userId ?? 'system',
+        })
+      : null;
+
+    // ปิดบิลกับลงสมุดรายได้อยู่ใน transaction เดียวกัน — บิลที่ปิดสำเร็จแต่รายได้ไม่ถูก
+    // บันทึกคือรูเงินหายแบบเดียวกับที่ Phase 0 เพิ่งปิดไป ต้องสำเร็จหรือล้มไปด้วยกัน
+    const updatedOrderPayment = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.order.update({
+        where: { id: orderId },
+        data: {
+          paymentStatus: isRoomCharge ? 'CHARGED_TO_ROOM' : 'PAID',
+          paymentMethod: dto.paymentMethod,
+          paidAmount,
+          changeAmount,
+          discount,
+          total,
+          guestRoom: dto.guestRoom ?? order.guestRoom,
+          bookingId: posted?.bookingId ?? order.bookingId,
+          folioId: posted?.folioId ?? order.folioId,
+          folioChargeId: posted?.chargeId ?? order.folioChargeId,
+          status: becomesCompleted ? 'COMPLETED' : order.status,
+          completedAt: new Date(),
+        },
+      });
+
+      await this.recordOrderRevenue(tx, orderId, tenantId, {
+        restaurantId,
+        restaurantName: restaurant?.name ?? null,
+        propertyId: restaurant?.propertyId ?? null,
+      });
+
+      return updated;
     });
 
     // Paying closes the bill without going through updateStatus, so the floor
@@ -653,11 +687,39 @@ export class OrderService {
     this.auditLogService.logOrderUpdate(
       orderId,
       { paymentStatus: order.paymentStatus },
-      { paymentStatus: 'PAID' },
+      { paymentStatus: updatedOrderPayment.paymentStatus },
       userId,
       tenantId,
     );
     return updatedOrderPayment;
+  }
+
+  /**
+   * ลงบิลที่เพิ่งปิดเข้าสมุดรายได้กลาง
+   *
+   * อ่านบิลกลับมาใหม่ในทรานแซกชันเดียวกันแทนที่จะใช้ก้อนที่ `findOne` โหลดไว้ก่อนหน้า
+   * ด้วยเหตุผลสองข้อ: ยอดเงินเพิ่งถูกเขียนทับไป (ส่วนลดตอนรับชำระ) และการแตกยอด
+   * อาหาร/เครื่องดื่มต้องใช้ `menuItem.category.revenueType` ซึ่ง `findOne` ไม่ได้
+   * ดึงมา — ตัวเลขในสมุดต้องมาจากแถวเดียวกับที่สคริปต์ backfill จะอ่านทีหลังเป๊ะ
+   *
+   * บิลที่ยอดเป็นศูนย์โดยชอบ (แจกฟรี/ยกเลิกรายการหมด) ข้ามเงียบ ๆ ไม่ใช่ปิดบิลไม่ได้
+   */
+  private async recordOrderRevenue(
+    tx: Prisma.TransactionClient,
+    orderId: string,
+    tenantId: string,
+    outlet: OrderRevenueOutlet,
+  ): Promise<void> {
+    const row = await tx.order.findFirst({
+      where: { id: orderId, tenantId },
+      select: ORDER_REVENUE_SELECT,
+    });
+    if (!row) return;
+
+    const input = buildOrderRevenueInput(row, outlet);
+    if (!hasPostableRevenue(input)) return;
+
+    await this.revenuePosting.postWithin(tx, input);
   }
 
   async getReceipt(restaurantId: string, orderId: string, tenantId: string) {

@@ -1,9 +1,11 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { RevenueSourceModule } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { RevenueQueryService } from '../../revenue/revenue-query.service';
 import {
-  PAID_ORDER_SELECT,
+  ORDER_DIMENSION_SELECT,
   SOLD_ITEM_SELECT,
-  type PaidOrderRow,
+  type LedgerOrderRow,
   type SalesBreakdownRow,
   type SalesOperations,
   type SalesTopItem,
@@ -12,11 +14,11 @@ import {
   breakdown,
   countOperations,
   daysOfMonth,
+  joinLedgerOrders,
   rankTopItems,
   round2,
   shiftMonth,
   sumTotals,
-  toBangkokDate,
   toBangkokMonth,
 } from './sales-shared';
 
@@ -64,14 +66,17 @@ export interface MonthlySalesReport {
  * "สรุปรายได้ร้านอาหาร" screen, from which a manager clicks a day to drill into
  * RestaurantDailySalesService.
  *
- * Same filters as the daily report (COMPLETED **and** PAID, keyed on
- * `completedAt`, Bangkok calendar) so that the sum of the day rows shown here is
- * exactly what each day's drill-down reports — an overview that did not add up
- * to its own detail would be worse than no overview.
+ * Reads the same revenue ledger as the daily report, over the same Bangkok
+ * business dates, so the sum of the day rows shown here is exactly what each
+ * day's drill-down reports — an overview that did not add up to its own detail
+ * would be worse than no overview.
  */
 @Injectable()
 export class RestaurantMonthlySalesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly revenue: RevenueQueryService,
+  ) {}
 
   /**
    * Resolve the requested month to a Bangkok calendar month.
@@ -105,47 +110,54 @@ export class RestaurantMonthlySalesService {
     const targetMonth = this.resolveMonth(month);
     const { start: monthStart, end: monthEnd } = bangkokMonthRange(targetMonth);
     const previousMonth = shiftMonth(targetMonth, -1);
-    const { start: previousStart } = bangkokMonthRange(previousMonth);
 
-    const [paidOrders, openedOrders, items] = await Promise.all([
-      // This month and the one before it in one pass, split in memory — the
-      // comparison figure is one number and does not deserve a second round trip.
-      this.prisma.order.findMany({
-        where: {
-          restaurantId,
-          tenantId,
-          status: 'COMPLETED',
-          paymentStatus: 'PAID',
-          completedAt: { gte: previousStart, lt: monthEnd },
-        },
-        select: PAID_ORDER_SELECT,
+    const calendar = daysOfMonth(targetMonth);
+    const previousCalendar = daysOfMonth(previousMonth);
+
+    const scope = {
+      tenantId,
+      outletId: restaurantId,
+      sourceModule: RevenueSourceModule.RESTAURANT,
+    };
+
+    const [documents, previousTotals, openedOrders] = await Promise.all([
+      this.revenue.documents({ ...scope, from: calendar[0], to: calendar[calendar.length - 1] }),
+      this.revenue.totals({
+        ...scope,
+        from: previousCalendar[0],
+        to: previousCalendar[previousCalendar.length - 1],
       }),
       // Operational counters key on createdAt: an order opened but still unpaid
-      // has no completedAt, and would otherwise be invisible.
+      // has no ledger row, and would otherwise be invisible.
       this.prisma.order.findMany({
         where: { restaurantId, tenantId, createdAt: { gte: monthStart, lt: monthEnd } },
         select: { status: true },
       }),
-      this.prisma.orderItem.findMany({
-        where: {
-          status: { not: 'CANCELLED' },
-          order: {
-            restaurantId,
-            tenantId,
-            status: 'COMPLETED',
-            paymentStatus: 'PAID',
-            completedAt: { gte: monthStart, lt: monthEnd },
-          },
-        },
-        select: SOLD_ITEM_SELECT,
-      }),
     ]);
 
-    const current = paidOrders.filter((o) => o.completedAt && o.completedAt >= monthStart);
-    const previous = paidOrders.filter((o) => o.completedAt && o.completedAt < monthStart);
+    // Only the bills the ledger filed under this month — the day rows and the
+    // month total are then the same numbers seen at two zoom levels.
+    const orderIds = [...new Set(documents.map((doc) => doc.sourceId))];
+
+    const [dimensions, items] = await Promise.all([
+      orderIds.length > 0
+        ? this.prisma.order.findMany({
+            where: { id: { in: orderIds }, tenantId },
+            select: ORDER_DIMENSION_SELECT,
+          })
+        : Promise.resolve([]),
+      orderIds.length > 0
+        ? this.prisma.orderItem.findMany({
+            where: { status: { not: 'CANCELLED' }, order: { id: { in: orderIds }, tenantId } },
+            select: SOLD_ITEM_SELECT,
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const current = joinLedgerOrders(documents, dimensions);
 
     const totals = sumTotals(current);
-    const previousCollected = round2(previous.reduce((sum, o) => sum + Number(o.total), 0));
+    const previousCollected = previousTotals.total;
     const changeAmount = round2(totals.totalCollected - previousCollected);
 
     const days = this.daily(current, targetMonth);
@@ -191,7 +203,7 @@ export class RestaurantMonthlySalesService {
    * still be present and clickable — the drill-down explaining "no bills were
    * settled" is a real answer, and a gap-free axis keeps months comparable.
    */
-  private daily(orders: PaidOrderRow[], month: string): MonthlySalesDay[] {
+  private daily(orders: LedgerOrderRow[], month: string): MonthlySalesDay[] {
     const grid = new Map<string, MonthlySalesDay>(
       daysOfMonth(month).map((date) => [
         date,
@@ -199,9 +211,10 @@ export class RestaurantMonthlySalesService {
       ]),
     );
 
+    // Keyed on the ledger's business date, not on `completedAt` re-derived here —
+    // one day boundary for the whole system, decided when the bill was posted.
     for (const order of orders) {
-      if (!order.completedAt) continue;
-      const row = grid.get(toBangkokDate(order.completedAt));
+      const row = grid.get(order.businessDate);
       if (!row) continue;
       row.orders += 1;
       row.guests += order.partySize ?? 1;

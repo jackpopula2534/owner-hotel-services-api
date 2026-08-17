@@ -24,6 +24,11 @@ import {
 } from '../../common/availability/availability.util';
 import { CRM_EVENTS } from '../crm/crm.events';
 import { applyLedgerBalances } from '../accounting/ledger/ledger-balance.util';
+import {
+  RevenuePostingService,
+  hasPostableRevenue,
+} from '../revenue/revenue-posting.service';
+import { buildBookingRevenueInput } from '../revenue/sources/booking-revenue.source';
 
 // ─── Activity Types ───────────────────────────────────────────────────────────
 
@@ -118,6 +123,7 @@ export class BookingsService {
     private loyaltyService: LoyaltyService,
     private notificationsService: NotificationsService,
     private paymentsService: PaymentsService,
+    private revenuePosting: RevenuePostingService,
   ) {}
 
   private parseBookingDate(value: string, fieldName: 'checkIn' | 'checkOut'): Date {
@@ -1163,13 +1169,30 @@ export class BookingsService {
     }
 
     const now = new Date();
-    const updated = await this.prisma.booking.update({
-      where: { id },
-      data: {
-        status: 'checked_out',
-        actualCheckOut: now,
-      },
-      include: { guest: true, room: true, property: true },
+
+    // รายการเพิ่มเติมบนใบแจ้งหนี้ (พนักงานคีย์เข้าบิลห้องเอง) — อ่านก่อนเปิดทรานแซกชัน
+    // เพราะ `finalizeCheckoutInvoice` ที่รวมยอดเดียวกันนี้วิ่งแบบไม่บล็อกทีหลัง
+    // ถ้ารอมันสมุดรายได้จะได้ยอดคนละก้อนกับใบแจ้งหนี้แล้วแต่ใครเสร็จก่อน
+    const additionalCharges = await this.sumInvoiceExtras(id, tenantId);
+
+    // เช็คเอาต์กับลงสมุดรายได้อยู่ในทรานแซกชันเดียวกัน — ห้องที่ปิดบิลแล้วแต่รายได้
+    // ไม่ถูกบันทึกคือยอดที่หายไปจากทุกรายงานโดยไม่มีอะไรฟ้อง
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.booking.update({
+        where: { id },
+        data: {
+          status: 'checked_out',
+          actualCheckOut: now,
+        },
+        include: { guest: true, room: true, property: true },
+      });
+
+      const revenue = buildBookingRevenueInput(row, additionalCharges);
+      if (hasPostableRevenue(revenue)) {
+        await this.revenuePosting.postWithin(tx, revenue);
+      }
+
+      return row;
     });
 
     // Update room status to dirty (ว่างยังไม่สะอาด)
@@ -1278,6 +1301,25 @@ export class BookingsService {
     return this.mapBookingResponse(updated);
   }
 
+  /**
+   * ยอดรวมรายการเพิ่มเติมบนใบแจ้งหนี้ของการจองนี้
+   *
+   * เป็นค่าบริการที่พนักงานคีย์เข้าบิลห้องเอง (มินิบาร์ รถรับส่ง ค่าปรับ) — **ไม่ใช่**
+   * บิล POS ที่ชาร์จเข้าห้อง บิลพวกนั้นลงสมุดรายได้เป็นแถวของร้านตัวเองไปแล้วตอนปิดบิล
+   * ถ้านับซ้ำตรงนี้ ยอดรวมของโรงแรมจะบวมขึ้นเท่ากับยอด POS ทั้งหมดของทริปนั้น
+   *
+   * ไม่มีใบแจ้งหนี้ = 0 ไม่ใช่ error — การจองที่จ่ายครบตั้งแต่จองยังเช็คเอาต์ได้ปกติ
+   */
+  private async sumInvoiceExtras(bookingId: string, tenantId?: string): Promise<number> {
+    const invoice = await this.prisma.invoices.findFirst({
+      where: { booking_id: bookingId, tenant_id: tenantId },
+      select: { invoice_items: { select: { amount: true } } },
+    });
+    return (
+      invoice?.invoice_items?.reduce((sum, item) => sum + Number(item.amount || 0), 0) ?? 0
+    );
+  }
+
   async getCheckoutSummary(id: string, tenantId?: string): Promise<any> {
     const booking = await this.findOne(id, tenantId);
 
@@ -1361,13 +1403,30 @@ export class BookingsService {
   async remove(id: string, tenantId?: string, userId?: string) {
     const booking = await this.findOne(id, tenantId);
 
-    const cancelledBooking = await this.prisma.booking.update({
-      where: { id },
-      data: { status: 'cancelled' },
-      include: {
-        property: true,
-        room: true,
-      },
+    const cancelledBooking = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.booking.update({
+        where: { id },
+        data: { status: 'cancelled' },
+        include: {
+          property: true,
+          room: true,
+        },
+      });
+
+      // การจองที่เช็คเอาต์ไปแล้วแล้วถูกยกเลิกทีหลัง (คีย์ผิดคน/คืนเงินเต็มจำนวน) มีรายได้
+      // ค้างอยู่ในสมุด ต้องดึงกลับด้วย — เรียกดื้อ ๆ ได้ ถ้ายังไม่เคยลงก็คืน 0 ทุกช่อง
+      // ยกเลิกข้ามวันจะได้แถวกลับรายการลงวันที่ยกเลิก ไม่ไปแก้ยอดของวันที่ปิดไปแล้ว
+      if (tenantId) {
+        await this.revenuePosting.voidWithin(tx, {
+          tenantId,
+          sourceType: 'BOOKING',
+          sourceId: id,
+          voidedBy: userId || 'system',
+          reason: 'ยกเลิกการจอง',
+        });
+      }
+
+      return row;
     });
 
     // Send cancellation email (async, non-blocking)
