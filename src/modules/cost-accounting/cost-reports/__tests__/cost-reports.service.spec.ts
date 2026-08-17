@@ -482,6 +482,43 @@ describe('CostReportsService.getDepartmentPnL', () => {
       expect(mapped).toBe(10500);
     });
 
+    it('เงินที่ยังไม่มีศูนย์ต้นทุนรองรับถูกส่งออกไปให้หน้าจอบอกผู้ใช้', async () => {
+      const { service } = makeService(august, {
+        costCenters: [ROOMS_CENTER, FB_CENTER],
+      });
+
+      const report = await service.getDepartmentPnL(TENANT, PROPERTY, PERIOD);
+
+      // ส่วนต่าง 500 ระหว่างยอดพาดหัวกับผลบวกของแถว ต้องมีคำอธิบายว่าเป็นเงินของใคร
+      expect(report.unmappedRevenue).toBe(500);
+      expect(report.unmapped).toEqual([
+        {
+          segment: RevenueSegment.OTHER_OPERATED,
+          expectedCostCenterType: CostCenterType.OTHER_OPERATED,
+          revenue: 500,
+        },
+      ]);
+    });
+
+    it('tenant ที่ยังไม่ได้ตั้งศูนย์ต้นทุนเลย ต้องรู้ว่าเงินไปค้างอยู่ตรงไหน', async () => {
+      // เคสจริง: ร้านอาหารขายได้แล้วแต่ยังไม่มีใครตั้งผังศูนย์ต้นทุน หน้าจอเดิม
+      // ได้ departments ว่าง เลยขึ้น "ไม่มีข้อมูล P&L สำหรับงวดนี้" ทั้งที่มียอดขาย
+      const { service } = makeService([fbRow('ord-1', 748, '2026-08-17')], { costCenters: [] });
+
+      const report = await service.getDepartmentPnL(TENANT, PROPERTY, PERIOD);
+
+      expect(report.departments).toEqual([]);
+      expect(report.totals.revenue).toBe(748);
+      expect(report.unmappedRevenue).toBe(748);
+      expect(report.unmapped).toEqual([
+        {
+          segment: RevenueSegment.FOOD_BEVERAGE,
+          expectedCostCenterType: CostCenterType.FOOD_BEVERAGE,
+          revenue: 748,
+        },
+      ]);
+    });
+
     it('ต้นทุนประเภทอื่นถูกนับในยอดรวม ไม่หายไประหว่างทาง', async () => {
       const { service } = makeService(august, {
         costEntries: [
@@ -596,6 +633,10 @@ describe('CostReportsService.getDepartmentPnL', () => {
 
       expect(closed.departments).toEqual(live.departments);
       expect(closed.totals).toEqual(live.totals);
+      // งวดที่ปิดแล้วไม่ได้เก็บว่าเงินที่ลงแผนกไม่ได้เป็นของแผนกใด แต่ยอดต้องเท่ากัน
+      // ไม่งั้นวันที่บัญชีกดปิดงวด คำเตือนบนหน้าจอจะหายไปทั้งที่เงินยังค้างเหมือนเดิม
+      expect(closed.unmappedRevenue).toBe(live.unmappedRevenue);
+      expect(closed.unmappedRevenue).toBe(500);
     });
 
     it('งวดที่ปิดแล้วไม่ไปคิดสดซ้ำ', async () => {

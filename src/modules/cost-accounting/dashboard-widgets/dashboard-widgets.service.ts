@@ -1,6 +1,8 @@
 import { Injectable, Logger, InternalServerErrorException } from '@nestjs/common';
+import { RevenueSegment } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
-import { shiftDate, toBangkokDate } from '@/common/utils/bangkok-day.util';
+import { businessDateOf, round2, shiftDate, toBangkokDate } from '@/common/utils/bangkok-day.util';
+import { RevenueQueryService } from '@/modules/revenue/revenue-query.service';
 import { KpiSnapshotsService } from '../kpi-snapshots/kpi-snapshots.service';
 
 interface KpiCard {
@@ -93,6 +95,7 @@ export class DashboardWidgetsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly kpiSnapshotsService: KpiSnapshotsService,
+    private readonly revenue: RevenueQueryService,
   ) {}
 
   /**
@@ -251,6 +254,10 @@ export class DashboardWidgetsService {
 
   /**
    * Get revenue chart data (last N days breakdown)
+   *
+   * สแนปช็อตของวันที่ปิดยอดแล้วชนะเสมอ วันที่ยังไม่มีสแนปช็อตให้อ่านจากสมุดรายได้แทน
+   * — กติกาเดียวกับ {@link KpiSnapshotsService.getSnapshot} เดิมเติมศูนย์ให้ทุกวันที่ไม่มี
+   * สแนปช็อต ยอดที่เพิ่งโพสต์วันนี้จึงไม่มีวันขึ้นกราฟจนกว่า job ปิดยอดจะวิ่ง
    */
   async getRevenueChart(
     tenantId: string,
@@ -258,25 +265,31 @@ export class DashboardWidgetsService {
     days: number = 30,
   ): Promise<RevenueChart> {
     try {
-      const endDate = new Date();
-      endDate.setHours(23, 59, 59, 999);
+      // ช่วง N วันปฏิทินไทยที่จบ "วันนี้" — เดิมคำนวณจากเที่ยงคืนของเครื่องแล้ววน
+      // days รอบจาก startDate ทำให้กราฟจบที่เมื่อวาน วันนี้ตกขอบไปทั้งใบ
+      const to = toBangkokDate(new Date());
+      const from = shiftDate(to, -(days - 1));
 
-      const startDate = new Date(endDate);
-      startDate.setDate(startDate.getDate() - days);
-      startDate.setHours(0, 0, 0, 0);
-
-      const snapshots = await this.prisma.costKpiSnapshot.findMany({
-        where: {
-          tenantId,
-          propertyId,
-          granularity: 'daily',
-          snapshotDate: {
-            gte: startDate,
-            lte: endDate,
+      const [snapshots, roomLedger, fbLedger, otherLedger] = await Promise.all([
+        this.prisma.costKpiSnapshot.findMany({
+          where: {
+            tenantId,
+            propertyId,
+            granularity: 'daily',
+            snapshotDate: { gte: businessDateOf(from), lte: businessDateOf(to) },
           },
-        },
-        orderBy: { snapshotDate: 'asc' },
-      });
+          orderBy: { snapshotDate: 'asc' },
+        }),
+        this.ledgerByDay(tenantId, propertyId, from, to, RevenueSegment.ROOMS),
+        this.ledgerByDay(tenantId, propertyId, from, to, RevenueSegment.FOOD_BEVERAGE),
+        this.ledgerByDay(tenantId, propertyId, from, to, RevenueSegment.OTHER_OPERATED),
+      ]);
+
+      // snapshotDate เก็บเป็นเที่ยงคืน UTC ของวันไทยอยู่แล้ว ตัด 10 ตัวแรกได้ตรง ๆ
+      // ห้ามแปลงผ่าน toBangkokDate ซ้ำ เพราะจะบวก 7 ชั่วโมงทับ วันเลื่อนไปข้างหน้า
+      const snapshotOfDay = new Map(
+        snapshots.map((s) => [s.snapshotDate.toISOString().slice(0, 10), s]),
+      );
 
       const labels: string[] = [];
       const roomData: number[] = [];
@@ -285,14 +298,10 @@ export class DashboardWidgetsService {
       const totalData: number[] = [];
 
       for (let i = 0; i < days; i++) {
-        const date = new Date(startDate);
-        date.setDate(date.getDate() + i);
-        const dateStr = date.toISOString().split('T')[0];
-        labels.push(dateStr);
+        const day = shiftDate(from, i);
+        labels.push(day);
 
-        const snapshot = snapshots.find(
-          (s) => s.snapshotDate.toISOString().split('T')[0] === dateStr,
-        );
+        const snapshot = snapshotOfDay.get(day);
 
         if (snapshot) {
           roomData.push(Number(snapshot.roomRevenue));
@@ -300,10 +309,13 @@ export class DashboardWidgetsService {
           otherData.push(Number(snapshot.otherRevenue));
           totalData.push(Number(snapshot.totalRevenue));
         } else {
-          roomData.push(0);
-          fbData.push(0);
-          otherData.push(0);
-          totalData.push(0);
+          const room = roomLedger.get(day) ?? 0;
+          const fb = fbLedger.get(day) ?? 0;
+          const other = otherLedger.get(day) ?? 0;
+          roomData.push(room);
+          fbData.push(fb);
+          otherData.push(other);
+          totalData.push(round2(room + fb + other));
         }
       }
 
@@ -322,6 +334,18 @@ export class DashboardWidgetsService {
       );
       throw new InternalServerErrorException('Failed to get revenue chart');
     }
+  }
+
+  /** ยอดสุทธิรายวันของแผนกหนึ่งจากสมุดรายได้ คีย์เป็นวันไทย 'YYYY-MM-DD' */
+  private async ledgerByDay(
+    tenantId: string,
+    propertyId: string,
+    from: string,
+    to: string,
+    segment: RevenueSegment,
+  ): Promise<Map<string, number>> {
+    const groups = await this.revenue.byDay({ tenantId, propertyId, from, to, segment });
+    return new Map(groups.map((g) => [g.key, g.net]));
   }
 
   /**

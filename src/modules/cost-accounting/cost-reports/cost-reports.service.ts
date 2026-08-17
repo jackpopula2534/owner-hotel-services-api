@@ -21,6 +21,34 @@ interface DepartmentPnLItem {
   margin: number;
 }
 
+/**
+ * เงินในสมุดที่ยังไม่มีศูนย์ต้นทุนรองรับ — ลง P&L รายแผนกไม่ได้แต่ยังอยู่ในยอดพาดหัว
+ *
+ * ต้องส่งออกไปให้หน้าจอบอกผู้ใช้ ไม่งั้นผลบวกของแถวไม่เท่ายอดรวมโดยไม่มีคำอธิบาย
+ * (และ tenant ที่ยังไม่ได้สร้างศูนย์ต้นทุนเลยจะเห็นแค่ "ไม่มีข้อมูล" ทั้งที่ขายได้)
+ */
+interface UnmappedRevenueItem {
+  segment: string;
+  /** ประเภทศูนย์ต้นทุนที่ต้องสร้างเพื่อให้เงินก้อนนี้ลงแผนกได้ */
+  expectedCostCenterType: string;
+  revenue: number;
+}
+
+interface DepartmentPnLReport {
+  period: string;
+  departments: DepartmentPnLItem[];
+  /** รวมเงินที่ยังไม่มีแผนกรองรับ — `totals.revenue` − ผลบวกรายได้ของทุกแถว */
+  unmappedRevenue: number;
+  /** รายละเอียดว่าเป็นเงินของแผนกไหนและต้องสร้างศูนย์ต้นทุนประเภทใด */
+  unmapped: UnmappedRevenueItem[];
+  totals: {
+    revenue: number;
+    totalCost: number;
+    grossProfit: number;
+    netOperatingIncome: number;
+  };
+}
+
 interface RoomCostItem {
   roomType: string;
   nights: number;
@@ -79,7 +107,11 @@ export class CostReportsService {
     return { year, month };
   }
 
-  async getDepartmentPnL(tenantId: string, propertyId: string, period: string) {
+  async getDepartmentPnL(
+    tenantId: string,
+    propertyId: string,
+    period: string,
+  ): Promise<DepartmentPnLReport> {
     const { year, month } = this.parsePeriod(period);
 
     // Try to get closed period first
@@ -124,9 +156,16 @@ export class CostReportsService {
         Number(closedPeriod.totalOverhead) +
         Number(closedPeriod.totalOtherCost);
 
+      // งวดที่ปิดแล้วเก็บเฉพาะแถวรายแผนก ไม่ได้เก็บว่าเงินที่ลงแผนกไม่ได้เป็นของแผนกใด
+      // — บอกได้แค่ส่วนต่าง แต่ต้องบอก ไม่งั้นผลบวกไม่เท่ายอดพาดหัวแบบไร้คำอธิบาย
+      const mappedRevenue = round2(departments.reduce((sum, d) => sum + d.revenue, 0));
+      const unmappedRevenue = round2(Math.max(0, periodTotalRevenue - mappedRevenue));
+
       return {
         period: `${year}-${String(month).padStart(2, '0')}`,
         departments,
+        unmappedRevenue,
+        unmapped: [],
         totals: {
           revenue: periodTotalRevenue,
           totalCost: periodTotalCost,
@@ -228,10 +267,19 @@ export class CostReportsService {
     const totalCost = totalMaterialCost + totalLaborCost + totalOverheadCost + totalOtherCost;
     // ยอดพาดหัวเป็นยอดของสมุด (รวมเงินที่ยังไม่มีศูนย์ต้นทุนรองรับ) ตรงกับทุกหน้าจอ
     const totalRevenue = revenueByCenter.total;
+    // เงินที่ไม่มีศูนย์ต้นทุนของแผนกนั้นรองรับ ส่งออกไปให้หน้าจอชี้ทางแก้ได้
+    const unmapped: UnmappedRevenueItem[] = revenueByCenter.unmapped.map((orphan) => ({
+      segment: orphan.segment,
+      expectedCostCenterType: orphan.expectedCostCenterType,
+      revenue: orphan.revenue,
+    }));
+    const unmappedRevenue = round2(unmapped.reduce((sum, orphan) => sum + orphan.revenue, 0));
 
     return {
       period: periodStr,
       departments,
+      unmappedRevenue,
+      unmapped,
       totals: {
         revenue: totalRevenue,
         totalCost,

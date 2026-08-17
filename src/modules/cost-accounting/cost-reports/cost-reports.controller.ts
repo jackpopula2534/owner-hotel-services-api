@@ -14,7 +14,14 @@ export class CostReportsController {
   constructor(private readonly costReportsService: CostReportsService) {}
 
   @Get('department-pnl')
-  @ApiOperation({ summary: 'Get USALI department P&L report' })
+  @ApiOperation({
+    summary: 'Get USALI department P&L report',
+    description:
+      'totals.revenue is the ledger total for the period. Revenue whose segment has no ' +
+      'matching cost center cannot be placed in any department row: it is reported in ' +
+      'unmappedRevenue (with per-segment detail in unmapped for open periods) so the rows ' +
+      'and the header can be reconciled.',
+  })
   @ApiQuery({ name: 'propertyId', required: true })
   @ApiQuery({ name: 'period', required: true, example: '2026-04' })
   @ApiResponse({ status: 200, description: 'Department P&L retrieved' })
