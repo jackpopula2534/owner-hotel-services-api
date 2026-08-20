@@ -148,6 +148,9 @@ model Property {
   description              String?                     @db.Text
   phone                    String?
   email                    String?
+  /// จำนวนชั้นของอาคาร — เป็นแหล่งเดียวที่บอกว่าที่พักหลังนี้มีกี่ชั้น
+  /// ทั้งตัวเลือก "ชั้น" ตอนเพิ่มห้อง และตัวกรองชั้นทุกหน้าจออ่านจากค่านี้
+  floors                   Int                         @default(1)
   isDefault                Boolean                     @default(false)
   status                   String                      @default("active")
   createdAt                DateTime                    @default(now())
@@ -1512,7 +1515,7 @@ model HrApprovalFlow {
   @@map("hr_approval_flows")
 }
 
-// Stage 1+2: ขอกำลังคน + ขออนุมัติงบ
+// Stage 1+2: ขอกำลังพล + ขออนุมัติงบ
 model HrManpowerRequest {
   id                String    @id @default(uuid())
   tenantId          String

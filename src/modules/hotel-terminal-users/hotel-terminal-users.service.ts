@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import { StaffService } from '../staff/staff.service';
 import * as bcrypt from 'bcrypt';
 import type { Prisma } from '@prisma/client';
 import {
@@ -93,6 +94,7 @@ export class HotelTerminalUsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContext: TenantContextService,
+    private readonly staffService: StaffService,
   ) {}
 
   private allowedSystemsFor(_role: HotelTerminalRole): string {
@@ -116,6 +118,142 @@ export class HotelTerminalUsersService {
 
   private mergeMetadata(raw: string | null, patch: HotelTerminalMetadata): string {
     return JSON.stringify({ ...this.parseMetadata(raw), ...patch });
+  }
+
+  /**
+   * ตำแหน่งบนทะเบียนพนักงานปฏิบัติการ ที่คู่กับ role ของบัญชี Hotel Terminal
+   *
+   * มีแค่สองตำแหน่งที่รับงานจริง — แม่บ้านกับช่าง ผู้จัดการ/พนักงานต้อนรับเป็นคน
+   * "สั่งงาน" ไม่ใช่ "รับงาน" จึงไม่ต้องขึ้นทะเบียน
+   */
+  private rosterRoleFor(role: HotelTerminalRole): 'housekeeper' | 'technician' | null {
+    if (role === 'housekeeper') return 'housekeeper';
+    if (role === 'maintenance') return 'technician';
+    return null;
+  }
+
+  /**
+   * ทำให้บัญชีแม่บ้าน/ช่างที่เพิ่งสร้าง โผล่ในรายชื่อ "มอบหมายงาน" ทันที
+   *
+   * ก่อนหน้านี้หน้า "ผู้ใช้โรงแรม" เขียนลงตาราง users อย่างเดียว ส่วนหน้ามอบหมายงาน
+   * แม่บ้านอ่านจากตาราง staff คนละใบ — สร้างบัญชีแม่บ้านเสร็จแล้วกลับไปมอบหมายงาน
+   * ก็ยังขึ้นว่า "ยังไม่มีพนักงานในระบบ" ตอนนี้ทั้งสองหน้าอ่านทะเบียนเดียวกัน
+   *
+   * เป็นงานเสริม (best-effort) — ถ้าขึ้นทะเบียนไม่สำเร็จ บัญชีที่สร้างไปแล้วต้องไม่ล้ม
+   * ตามไปด้วย แต่ต้องมี log ไว้ให้ตามได้
+   */
+  private async syncRoster(
+    user: { firstName: string | null; lastName: string | null; email: string; phone?: string | null },
+    role: HotelTerminalRole,
+    tenantId: string,
+    opts: { employeeCode?: string | null; hrEmployeeId?: string | null } = {},
+  ): Promise<void> {
+    const rosterRole = this.rosterRoleFor(role);
+    if (!rosterRole) return;
+
+    try {
+      const { staff, action } = await this.staffService.provision(
+        {
+          firstName: user.firstName ?? user.email.split('@')[0],
+          lastName: user.lastName ?? '',
+          email: user.email,
+          phone: user.phone ?? null,
+          role: rosterRole,
+          department: rosterRole === 'technician' ? 'maintenance' : 'housekeeping',
+          employeeCode: opts.employeeCode ?? null,
+          employeeId: opts.hrEmployeeId ?? null,
+        },
+        tenantId,
+      );
+      this.logger.log(
+        `Roster sync (${action}): ${user.email} → staff ${staff.id} (${rosterRole}) tenant=${tenantId}`,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Roster sync failed for ${user.email} (${rosterRole}) tenant=${tenantId}: ${(error as Error)?.message ?? error}`,
+      );
+    }
+  }
+
+  /**
+   * ย้ายตำแหน่งบนทะเบียนให้ตามบัญชี รวมถึงกรณี "เลิกรับงานแล้ว"
+   *
+   * เปลี่ยนแม่บ้าน → ช่าง แต่ทะเบียนยังเป็นแม่บ้าน = ใบงานซ่อมมองไม่เห็นคนคนนี้
+   * ส่วนเปลี่ยนเป็นผู้จัดการ/พนักงานต้อนรับ (ไม่ลงมือทำงานห้องแล้ว) ต้องถอดออกจาก
+   * รายชื่อมอบหมายงาน แต่ห้ามลบแถวทิ้ง เพราะงานเก่าที่เคยทำยังอ้างอิงอยู่ — ปิดใช้งานแทน
+   *
+   * provision() เป็นงาน "รับช่วงหรือสร้างใหม่" โดยไม่ทับข้อมูลเดิม การย้ายแผนกจึงต้อง
+   * สั่งตรงนี้อีกชั้น
+   */
+  private async reconcileRosterRole(
+    user: {
+      firstName: string | null;
+      lastName: string | null;
+      email: string;
+      phone?: string | null;
+      status?: string | null;
+    },
+    role: HotelTerminalRole,
+    tenantId: string,
+    opts: { employeeCode?: string | null; hrEmployeeId?: string | null } = {},
+  ): Promise<void> {
+    const rosterRole = this.rosterRoleFor(role);
+    if (!rosterRole) {
+      await this.syncRosterStatus(user.email, 'inactive', tenantId);
+      return;
+    }
+
+    await this.syncRoster(user, role, tenantId, opts);
+
+    try {
+      const staff = await this.prisma.staff.findFirst({
+        where: { email: user.email, tenantId },
+      });
+      if (!staff) return;
+
+      const data: Prisma.StaffUpdateInput = {};
+      if (staff.role !== rosterRole) {
+        data.role = rosterRole;
+        data.department = rosterRole === 'technician' ? 'maintenance' : 'housekeeping';
+      }
+      // กลับมารับงานอีกครั้ง — แต่ "ลาพัก" เป็นสถานะที่หัวหน้าตั้งเอง ห้ามเขียนทับ
+      if (staff.status === 'inactive' && (user.status ?? 'active') === 'active') {
+        data.status = 'active';
+      }
+      if (Object.keys(data).length === 0) return;
+
+      await this.prisma.staff.update({ where: { id: staff.id }, data });
+      this.logger.log(
+        `Roster role sync: staff ${staff.id} → ${rosterRole} (tenant=${tenantId})`,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Roster role sync failed for ${user.email} tenant=${tenantId}: ${(error as Error)?.message ?? error}`,
+      );
+    }
+  }
+
+  /**
+   * ปิด/เปิดการใช้งานบนทะเบียนพนักงานให้ตรงกับสถานะบัญชี
+   *
+   * บัญชีที่ถูกระงับแล้วยังโผล่ให้เลือกมอบหมายงานได้ = มอบงานให้คนที่ล็อกอินไม่ได้
+   */
+  private async syncRosterStatus(
+    email: string,
+    status: string,
+    tenantId: string,
+  ): Promise<void> {
+    const rosterStatus = status === 'active' ? 'active' : 'inactive';
+    try {
+      const staff = await this.prisma.staff.findFirst({ where: { email, tenantId } });
+      if (!staff || staff.status === rosterStatus || staff.status === 'on_leave') return;
+      await this.prisma.staff.update({ where: { id: staff.id }, data: { status: rosterStatus } });
+      this.logger.log(`Roster status sync: staff ${staff.id} → ${rosterStatus} (tenant=${tenantId})`);
+    } catch (error) {
+      this.logger.warn(
+        `Roster status sync failed for ${email} tenant=${tenantId}: ${(error as Error)?.message ?? error}`,
+      );
+    }
   }
 
   async create(
@@ -155,6 +293,16 @@ export class HotelTerminalUsersService {
     this.logger.log(
       `Hotel Terminal user created: ${user.email} (role=${user.role}, property=${dto.propertyId ?? '-'}) tenant=${tenantId}`,
     );
+
+    // ถ้าเป็นแม่บ้าน/ช่าง ให้ขึ้นทะเบียนพนักงานปฏิบัติการด้วย จะได้มอบหมายงานได้เลย
+    // hrEmployeeId ที่ผู้เรียกส่งมาต้องพิสูจน์ก่อนว่าเป็นพนักงานของ tenant นี้จริง
+    const verifiedHrEmployeeId = dto.hrEmployeeId
+      ? (await this.prisma.employee.findFirst({ where: { id: dto.hrEmployeeId, tenantId } }))?.id ?? null
+      : null;
+    await this.syncRoster(user as unknown as UserLike, dto.role, tenantId, {
+      employeeCode: dto.employeeId ?? null,
+      hrEmployeeId: verifiedHrEmployeeId,
+    });
 
     return { success: true, data: await this.formatWithProperty(user as unknown as UserLike) };
   }
@@ -203,6 +351,11 @@ export class HotelTerminalUsersService {
     this.logger.log(
       `Hotel Terminal user imported from HR employee ${employee.id}: ${user.email} (role=${user.role}) tenant=${tenantId}`,
     );
+
+    await this.syncRoster(user as unknown as UserLike, dto.role, tenantId, {
+      employeeCode: employee.employeeCode ?? null,
+      hrEmployeeId: employee.id,
+    });
 
     return { success: true, data: await this.formatWithProperty(user as unknown as UserLike) };
   }
@@ -269,6 +422,10 @@ export class HotelTerminalUsersService {
           } as unknown as Prisma.UserCreateInput,
         });
         created.push(await this.formatWithProperty(user as unknown as UserLike));
+        await this.syncRoster(user as unknown as UserLike, item.role, tenantId, {
+          employeeCode: employee.employeeCode ?? null,
+          hrEmployeeId: employee.id,
+        });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'สร้างไม่สำเร็จ';
         skipped.push({ employeeId: item.employeeId, reason: message });
@@ -344,6 +501,19 @@ export class HotelTerminalUsersService {
       where: { id: userId },
       data: data as Prisma.UserUpdateInput,
     });
+
+    // เปลี่ยนตำแหน่งเป็นแม่บ้าน/ช่าง → ต้องขึ้นทะเบียนให้ด้วย ไม่งั้นเลือกมอบหมายงานไม่ได้
+    // เปลี่ยนออกจากสองตำแหน่งนี้ → ต้องถอดออกจากรายชื่อมอบหมายงานเช่นกัน
+    if (dto.role) {
+      await this.reconcileRosterRole(updated as unknown as UserLike, dto.role, tenantId, {
+        employeeCode: (updated as unknown as UserLike).employeeId ?? null,
+        hrEmployeeId: this.parseMetadata((updated as unknown as UserLike).metadata).hrEmployeeId ?? null,
+      });
+    }
+    if (dto.status) {
+      await this.syncRosterStatus(updated.email, dto.status, tenantId);
+    }
+
     return {
       success: true,
       data: await this.formatWithProperty(updated as unknown as UserLike),
@@ -361,7 +531,78 @@ export class HotelTerminalUsersService {
       where: { id: userId },
       data: { status: 'inactive' },
     });
+    await this.syncRosterStatus(user.email, 'inactive', tenantId);
     return { success: true };
+  }
+
+  /**
+   * ยกบัญชีแม่บ้าน/ช่างที่มีอยู่แล้ว ขึ้นทะเบียนพนักงานปฏิบัติการย้อนหลัง
+   *
+   * บัญชีที่ถูกสร้างก่อนที่การขึ้นทะเบียนอัตโนมัติจะมีผล ยังค้างอยู่ในตาราง users
+   * อย่างเดียว — เจ้าของโรงแรมเห็นชื่อในหน้า "ผู้ใช้โรงแรม" ครบทุกคน แต่พอไป
+   * มอบหมายงานกลับขึ้นว่า "ยังไม่มีพนักงานในระบบ" นี่คือทางแก้ที่ไม่ต้องพึ่ง
+   * ส่วนเสริม HR เลย
+   *
+   * ทำซ้ำได้ — คนที่ขึ้นทะเบียนแล้วนับเป็น existing ไม่เกิดแถวซ้ำ
+   */
+  async syncRosterFromAccounts(tenantId: string): Promise<{
+    success: true;
+    data: { created: number; existing: number; skipped: number };
+  }> {
+    if (!tenantId) throw new BadRequestException('No active tenant');
+
+    const accounts = await this.prisma.user.findMany({
+      where: {
+        tenantId,
+        role: { in: ['housekeeper', 'maintenance'] },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    let created = 0;
+    let existing = 0;
+    let skipped = 0;
+
+    for (const account of accounts) {
+      // บัญชีที่ถูกระงับ ไม่ควรโผล่ให้เลือกมอบหมายงาน — ข้ามไป ไม่ต้องสร้างแถว
+      if (account.status !== 'active') {
+        skipped += 1;
+        continue;
+      }
+      const user = account as unknown as UserLike;
+      const rosterRole = this.rosterRoleFor(user.role as HotelTerminalRole);
+      if (!rosterRole) {
+        skipped += 1;
+        continue;
+      }
+
+      try {
+        const { action } = await this.staffService.provision(
+          {
+            firstName: user.firstName ?? user.email.split('@')[0],
+            lastName: user.lastName ?? '',
+            email: user.email,
+            role: rosterRole,
+            department: rosterRole === 'technician' ? 'maintenance' : 'housekeeping',
+            employeeCode: user.employeeId ?? null,
+            employeeId: this.parseMetadata(user.metadata).hrEmployeeId ?? null,
+          },
+          tenantId,
+        );
+        if (action === 'created') created += 1;
+        else existing += 1;
+      } catch (error) {
+        skipped += 1;
+        this.logger.warn(
+          `Roster backfill skipped ${user.email} tenant=${tenantId}: ${(error as Error)?.message ?? error}`,
+        );
+      }
+    }
+
+    this.logger.log(
+      `Roster backfill for tenant ${tenantId}: created=${created} existing=${existing} skipped=${skipped}`,
+    );
+    return { success: true, data: { created, existing, skipped } };
   }
 
   /** Stats: totals, by-role, active-today, etc. */

@@ -30,6 +30,7 @@ import {
   PreviewEmployeeCodeDto,
 } from './dto/employee-code-config.dto';
 import { CreateStaffFromEmployeeDto } from './dto/create-staff-from-employee.dto';
+import { BulkCreateStaffDto } from './dto/bulk-create-staff.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -242,8 +243,9 @@ export class HrController {
   @ApiOperation({
     summary: 'Bulk-create Staff records from all unlinked HR employees (requires HR add-on)',
     description:
-      'Creates a linked Staff entry for every Employee that does not yet have one. ' +
-      'Safe to run multiple times — already-linked employees are skipped.',
+      'ไม่ส่ง body = นำเข้าเฉพาะแผนกที่มีหน้างาน (HK, ENG) และเฉพาะพนักงานที่ยังทำงานอยู่ ' +
+      'ตำแหน่งเดาจากแผนกรายคน · เรียกซ้ำได้ คนที่ผูกแล้วจะถูกข้าม ' +
+      'คนที่มีอยู่บนทะเบียนแล้วจะถูกผูกเข้ากับ HR ไม่ใช่สร้างซ้ำ',
   })
   @ApiResponse({
     status: 201,
@@ -269,11 +271,15 @@ export class HrController {
       },
     },
   })
+  @ApiBody({ type: BulkCreateStaffDto, required: false })
   @ApiResponse({ status: 403, description: 'HR add-on not active' })
   @HttpCode(HttpStatus.CREATED)
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
-  async bulkCreateStaffFromEmployees(@CurrentUser() user: { tenantId?: string }) {
-    return this.hrService.bulkCreateStaffFromEmployees(user?.tenantId ?? '');
+  async bulkCreateStaffFromEmployees(
+    @Body() body: BulkCreateStaffDto,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    return this.hrService.bulkCreateStaffFromEmployees(user?.tenantId ?? '', body ?? {});
   }
 
   /**

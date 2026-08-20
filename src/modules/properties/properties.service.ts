@@ -377,6 +377,21 @@ export class PropertiesService {
       }
     }
 
+    // ลดจำนวนชั้นทิ้งห้องไว้ข้างบนไม่ได้ — ห้องที่อยู่เกินชั้นสูงสุดจะกลายเป็นห้องที่
+    // ไม่มีชั้นให้เลือกอีกต่อไป และหลุดจากตัวกรองชั้นทุกหน้าจอแบบเงียบ ๆ
+    if (updatePropertyDto.floors !== undefined) {
+      const highest = await this.prisma.room.aggregate({
+        where: { propertyId: id, tenantId },
+        _max: { floor: true },
+      });
+      const highestFloor = highest._max.floor ?? 0;
+      if (highestFloor > updatePropertyDto.floors) {
+        throw new BadRequestException(
+          `ลดจำนวนชั้นเหลือ ${updatePropertyDto.floors} ชั้นไม่ได้ — ยังมีห้องพักอยู่ถึงชั้น ${highestFloor} กรุณาย้ายหรือลบห้องเหล่านั้นก่อน`,
+        );
+      }
+    }
+
     // Strip fields not yet in DB schema (pending migration: SC/VAT settings)
     const result = await this.prisma.property.update({
       where: { id },

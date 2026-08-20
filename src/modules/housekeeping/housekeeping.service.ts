@@ -7,7 +7,10 @@ import {
   TaskPriority,
   TaskStatus,
 } from './dto/create-housekeeping-task.dto';
-import { UpdateHousekeepingTaskDto } from './dto/update-housekeeping-task.dto';
+import {
+  UpdateHousekeepingTaskDto,
+  HousekeepingTaskStatus,
+} from './dto/update-housekeeping-task.dto';
 import { AuditLogService } from '../../audit-log/audit-log.service';
 import { normalizePagination } from '../../common/utils/pagination.util';
 import {
@@ -64,6 +67,33 @@ export class HousekeepingService {
 
     if (!room) {
       throw new NotFoundException(`Room with ID ${dto.roomId} not found`);
+    }
+
+    // ── กันงานทำความสะอาดหลังเช็คเอาต์ซ้ำ ────────────────────────────────
+    // การจองหนึ่งใบเช็คเอาต์ได้ครั้งเดียว จึงมีงาน checkout ได้ใบเดียว แต่มีผู้เรียก
+    // หลายทางที่ยิงเข้ามาตอนเดียวกัน (endpoint เช็คเอาต์ของ backend, หน้าจอที่กด
+    // ซ้ำ, retry ของ client) แล้วบอร์ดแม่บ้านขึ้นการ์ดห้องเดียวกันสองใบ
+    // แม่บ้านสองคนวิ่งไปห้องเดียวกัน — คืนงานเดิมไปแทนการสร้างใบใหม่
+    //
+    // เฉพาะ checkout เท่านั้น: งาน daily/turndown ของการจองยาวต้องมีได้วันละใบ
+    if (dto.bookingId && dto.type === TaskType.CHECKOUT) {
+      const existing = await this.prisma.housekeepingTask.findFirst({
+        where: {
+          tenantId,
+          bookingId: dto.bookingId,
+          type: TaskType.CHECKOUT,
+          status: { in: [TaskStatus.PENDING, TaskStatus.IN_PROGRESS] },
+        },
+        orderBy: { createdAt: 'asc' },
+      });
+
+      if (existing) {
+        this.logger.warn(
+          `Duplicate checkout task suppressed for booking ${dto.bookingId} ` +
+            `(room ${room.number}) — returning existing task ${existing.id}`,
+        );
+        return existing;
+      }
     }
 
     try {
@@ -266,9 +296,18 @@ export class HousekeepingService {
       throw new NotFoundException(`Task with ID ${id} not found`);
     }
 
+    // งานที่ยกเลิกแล้วถือว่าปิดเรื่อง — แก้ต่อได้จะกลายเป็นช่องทางปลุกงานที่ตายแล้ว
+    // กลับมาโดยไม่ผ่านการตัดสินใจใหม่ ถ้าต้องการทำงานนั้นอีกให้สร้างใบใหม่
+    if (task.status === HousekeepingTaskStatus.CANCELLED) {
+      throw new BadRequestException('Cannot edit a task that has been cancelled');
+    }
+
     try {
       const updateData: any = {
         ...(dto.status && { status: dto.status }),
+        ...(dto.type && { type: dto.type }),
+        ...(dto.priority && { priority: dto.priority }),
+        ...(dto.estimatedDuration && { estimatedDuration: dto.estimatedDuration }),
         ...(dto.assignedToId && { assignedToId: dto.assignedToId }),
         ...(dto.assignedToName && { assignedToName: dto.assignedToName }),
         ...(dto.notes && { notes: dto.notes }),
@@ -304,6 +343,51 @@ export class HousekeepingService {
       return updated;
     } catch (error) {
       this.logger.error(`Failed to update task ${id}: ${(error as any)?.message ?? error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * ยกเลิกงาน (soft) — เก็บใบงานไว้แต่ปิดสถานะเป็น cancelled
+   *
+   * ไม่ยุ่งกับสถานะห้องโดยตั้งใจ: การ "เริ่มงาน" ไม่ได้เปลี่ยนสถานะห้อง มีแต่ตอน
+   * completeTask ที่ปล่อยห้องเป็น available ยกเลิกงานจึงไม่มีสถานะห้องให้ย้อนคืน
+   */
+  async cancelTask(id: string, reason: string | undefined, tenantId: string): Promise<any> {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
+    const task = await this.getTask(id, tenantId);
+
+    if (!task) {
+      throw new NotFoundException(`Task with ID ${id} not found`);
+    }
+
+    if (task.status === HousekeepingTaskStatus.CANCELLED) {
+      throw new BadRequestException('Task has already been cancelled');
+    }
+
+    const trimmedReason = reason?.trim();
+    // ต่อท้ายหมายเหตุเดิม ไม่ทับ — หมายเหตุจากตอนสร้างงานคือบริบทที่ใช้ตัดสินว่าทำไมถึงยกเลิก
+    const cancelNote = `[ยกเลิก] ${trimmedReason || 'ไม่ระบุเหตุผล'}`;
+    const notes = task.notes ? `${task.notes}\n${cancelNote}` : cancelNote;
+
+    try {
+      const updated = await this.prisma.housekeepingTask.update({
+        where: { id },
+        data: { status: HousekeepingTaskStatus.CANCELLED, notes },
+        include: { room: true },
+      });
+
+      this.logger.log(
+        `Cancelled housekeeping task ${id} (was ${task.status})` +
+          `${trimmedReason ? ` — ${trimmedReason}` : ''}`,
+      );
+
+      return updated;
+    } catch (error) {
+      this.logger.error(`Failed to cancel task ${id}: ${(error as any)?.message ?? error}`);
       throw error;
     }
   }

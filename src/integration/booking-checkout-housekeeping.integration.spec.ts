@@ -184,6 +184,12 @@ describe('Booking -> Checkout -> Housekeeping integration flow', () => {
       where: { id: 'room-1' },
       data: { status: 'dirty' },
     });
+    // งานแม่บ้านถูกสั่งแบบไม่บล็อกการเช็คเอาต์ (fire-and-forget) และตอนนี้ createTask
+    // ต้อง await ตัวกันสร้างซ้ำก่อนถึงจะ create — ต้องปล่อยให้ microtask เดินจบก่อน
+    // ไม่งั้นเช็คตรงนี้เร็วกว่างานที่ยังค้างอยู่ในคิว
+    // (fake timers เปิดอยู่ setImmediate จึงถูกแทน ใช้ microtask ล้วน ๆ แทน)
+    for (let i = 0; i < 5; i += 1) await Promise.resolve();
+
     expect(prismaMock.housekeepingTask.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         roomId: 'room-1',

@@ -9,6 +9,8 @@ jest.mock('bcrypt', () => ({
 import { Test, TestingModule } from '@nestjs/testing';
 import { HotelTerminalUsersService } from './hotel-terminal-users.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import { StaffService } from '../staff/staff.service';
 
 /**
  * Tests for the HR → Hotel Terminal Users sync flow.
@@ -38,11 +40,23 @@ describe('HotelTerminalUsersService.listImportableEmployees', () => {
   let service: HotelTerminalUsersService;
   let prisma: ReturnType<typeof createMockPrisma>;
 
+  /**
+   * บริการนี้ต้องออกนอกขอบเขต tenant ตอนเช็คอีเมลซ้ำ (runUnscoped) และต้องขึ้นทะเบียน
+   * พนักงานให้ด้วย (StaffService) — ตัวแทนสองตัวนี้ทำให้ประกอบโมดูลได้โดยไม่ต้องมี DB
+   */
+  const tenantContext = { runUnscoped: jest.fn((fn: () => unknown) => fn()) };
+  const staffService = { provision: jest.fn().mockResolvedValue({ staff: { id: 'staff-1' }, action: 'created' }) };
+
   beforeEach(async () => {
     prisma = createMockPrisma();
 
     const moduleRef: TestingModule = await Test.createTestingModule({
-      providers: [HotelTerminalUsersService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        HotelTerminalUsersService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: TenantContextService, useValue: tenantContext },
+        { provide: StaffService, useValue: staffService },
+      ],
     }).compile();
 
     service = moduleRef.get<HotelTerminalUsersService>(HotelTerminalUsersService);

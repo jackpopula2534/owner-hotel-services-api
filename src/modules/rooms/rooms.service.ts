@@ -89,6 +89,22 @@ export class RoomsService {
     }
   }
 
+  /**
+   * ชั้นที่พิมพ์มาต้องอยู่ในกรอบที่ที่พักตั้งไว้
+   *
+   * เดิมช่อง "ชั้น" เป็นเลขอิสระ ไม่มีอะไรผูกกับที่พักเลย ห้อง 101 จึงบันทึกเป็น
+   * ชั้น 11 ได้ และหน้าจอที่ไล่ชั้นจากห้องจริงจะงอกชั้นผีขึ้นมาทันที
+   */
+  private assertFloorWithinProperty(floor: number, property?: { floors?: number } | null): number {
+    const maxFloor = property?.floors ?? 1;
+    if (floor < 1 || floor > maxFloor) {
+      throw new BadRequestException(
+        `ชั้น ${floor} อยู่นอกช่วงของที่พักนี้ — ตั้งไว้ ${maxFloor} ชั้น (เลือกได้ 1-${maxFloor}) หากต้องการชั้นเพิ่ม กรุณาแก้จำนวนชั้นในข้อมูลที่พักก่อน`,
+      );
+    }
+    return floor;
+  }
+
   async findOne(id: string, tenantId?: string) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID is required');
@@ -175,6 +191,14 @@ export class RoomsService {
       this.logger.log(`Falling back to property ${resolvedPropertyId}`);
     }
 
+    // ชั้นของห้องต้องอยู่ในจำนวนชั้นที่ที่พักตั้งไว้ (property.floors)
+    // ไม่ส่งชั้นมาถือว่าชั้น 1 — ปล่อยให้ว่างแล้วตารางห้องจะขึ้น "-" และห้องจะหลุด
+    // จากตัวกรองชั้นทุกหน้าจอ
+    const resolvedProperty = property ?? (await this.prisma.property.findFirst({
+      where: { id: resolvedPropertyId, tenantId },
+    }));
+    const floor = this.assertFloorWithinProperty(createRoomDto.floor ?? 1, resolvedProperty);
+
     // Check room limit against subscription plan
     const subscription = await this.prisma.subscriptions.findFirst({
       where: {
@@ -221,7 +245,7 @@ export class RoomsService {
       price: new Prisma.Decimal(createRoomDto.price),
       property: { connect: { id: resolvedPropertyId } },
       tenantId,
-      ...(createRoomDto.floor !== undefined && { floor: createRoomDto.floor }),
+      floor,
       ...(createRoomDto.status !== undefined && { status: createRoomDto.status }),
       ...(createRoomDto.maxOccupancy !== undefined && { maxOccupancy: createRoomDto.maxOccupancy }),
       ...(createRoomDto.bedType !== undefined && { bedType: createRoomDto.bedType }),
@@ -288,6 +312,10 @@ export class RoomsService {
           `Room with number ${updateRoomDto.number} already exists in this property`,
         );
       }
+    }
+
+    if (updateRoomDto.floor !== undefined) {
+      this.assertFloorWithinProperty(updateRoomDto.floor, (room as any).property);
     }
 
     const childPricing = this.normalizeChildNoExtraChargeFields(updateRoomDto, {

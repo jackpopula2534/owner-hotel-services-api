@@ -24,6 +24,8 @@ export class LoyaltyService {
 
   // Points per THB (1 point per 100 THB by default)
   private static readonly POINTS_PER_THB_DIVISOR = 100;
+  /** เหตุผลบนรายการดึงแต้มคืน — ใช้เป็นตัวกันดึงซ้ำด้วย */
+  private static readonly CHECKOUT_UNDO_REASON = 'checkout_undo';
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -137,6 +139,71 @@ export class LoyaltyService {
     } catch (error) {
       this.logger.error(
         `Failed to add loyalty points for guest ${guestId}: ${(error as Error).message}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * ดึงแต้มที่แจกตอนเช็คเอาต์กลับ เมื่อเช็คเอาต์นั้นถูกย้อนสถานะ
+   *
+   * แต้มโผล่ในแอปแขกทันทีที่แจก ถ้าเช็คเอาต์ผิดคนแล้วย้อนสถานะโดยไม่ดึงแต้มคืน
+   * แขกจะได้แต้มฟรีทุกครั้งที่พนักงานกดผิด และยอดแต้มคงเหลือจะเดินหนีจากยอดขายจริง
+   *
+   * เรียกซ้ำได้ — ถ้าเคยดึงคืนไปแล้วจะไม่ทำอะไร (คืน null) เหมือน addPointsForStay
+   * ความล้มเหลวไม่โยนออกไป เพราะห้ามให้เรื่องแต้มไปบล็อกการย้อนสถานะที่หน้าเคาน์เตอร์
+   */
+  async reverseStayAward(
+    tenantId: string,
+    guestId: string,
+    bookingId: string,
+  ): Promise<PointsResult | null> {
+    try {
+      if (!tenantId || !guestId || !bookingId) return null;
+
+      const txns = await this.prisma.loyaltyTransaction.findMany({
+        where: { tenantId, guestId, bookingId },
+        select: { type: true, points: true, reason: true },
+      });
+
+      // เคยดึงคืนไปแล้ว — กันกดย้อนสถานะซ้ำแล้วแต้มติดลบ
+      if (txns.some((t) => t.reason === LoyaltyService.CHECKOUT_UNDO_REASON)) {
+        this.logger.debug(`Stay award for booking ${bookingId} already reversed`);
+        return null;
+      }
+
+      const awarded = txns
+        .filter((t) => t.type === 'earn')
+        .reduce((sum, t) => sum + t.points, 0);
+      if (awarded <= 0) return null;
+
+      // ยอดคงเหลือน้อยกว่าที่จะดึงคืน (แขกใช้แต้มไปแล้ว) — ดึงเท่าที่เหลือ
+      // ดีกว่าปล่อยให้ applyPointsDelta โยน 'Balance cannot go below zero'
+      // แล้วแต้มค้างเต็มจำนวน
+      const account = await this.prisma.loyaltyPoint.findFirst({
+        where: { tenantId, guestId },
+        select: { points: true },
+      });
+      const clawback = Math.min(awarded, account?.points ?? 0);
+      if (clawback <= 0) {
+        this.logger.warn(
+          `Cannot reverse ${awarded} pts for booking ${bookingId}: guest balance is 0 (points already redeemed)`,
+        );
+        return null;
+      }
+      if (clawback < awarded) {
+        this.logger.warn(
+          `Partial loyalty clawback for booking ${bookingId}: ${clawback}/${awarded} pts (rest already redeemed)`,
+        );
+      }
+
+      return await this.applyPointsDelta(tenantId, guestId, -clawback, 'adjust', {
+        bookingId,
+        reason: LoyaltyService.CHECKOUT_UNDO_REASON,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Failed to reverse loyalty points for booking ${bookingId}: ${(error as Error).message}`,
       );
       return null;
     }

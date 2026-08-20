@@ -4,6 +4,11 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuditLogService } from '../../audit-log/audit-log.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { mockEventEmitter } from '../../common/test/mock-providers';
+import {
+  TaskPriority,
+  TaskStatus,
+  TaskType,
+} from './dto/create-housekeeping-task.dto';
 import { HousekeepingService } from './housekeeping.service';
 
 describe('HousekeepingService', () => {
@@ -40,6 +45,68 @@ describe('HousekeepingService', () => {
 
     service = module.get(HousekeepingService);
     jest.clearAllMocks();
+  });
+
+  /**
+   * งานทำความสะอาดหลังเช็คเอาต์ซ้ำ — บอร์ดแม่บ้านเคยขึ้นการ์ดห้องเดียวกันสองใบ
+   * เพราะทั้ง endpoint เช็คเอาต์และหน้าจอต่างยิงสร้างงานคนละครั้ง
+   */
+  describe('createTask — checkout dedupe', () => {
+    const checkoutDto = {
+      roomId: 'room-1',
+      type: TaskType.CHECKOUT,
+      priority: TaskPriority.HIGH,
+      bookingId: 'booking-1',
+      estimatedDuration: 60,
+    } as any;
+
+    beforeEach(() => {
+      prismaMock.room.findFirst.mockResolvedValue({
+        id: 'room-1',
+        number: '149',
+        tenantId: 'tenant-1',
+        property: { id: 'property-1' },
+      });
+    });
+
+    it('returns the task that already exists instead of creating a second card', async () => {
+      const existing = { id: 'task-existing', roomId: 'room-1', status: 'pending' };
+      prismaMock.housekeepingTask.findFirst.mockResolvedValue(existing);
+
+      const result = await service.createTask(checkoutDto, 'tenant-1');
+
+      expect(result).toBe(existing);
+      expect(prismaMock.housekeepingTask.create).not.toHaveBeenCalled();
+      expect(prismaMock.housekeepingTask.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            tenantId: 'tenant-1',
+            bookingId: 'booking-1',
+            type: TaskType.CHECKOUT,
+            status: { in: [TaskStatus.PENDING, TaskStatus.IN_PROGRESS] },
+          }),
+        }),
+      );
+    });
+
+    it('creates the task when the booking has no open checkout task yet', async () => {
+      prismaMock.housekeepingTask.findFirst.mockResolvedValue(null);
+      prismaMock.housekeepingTask.create.mockResolvedValue({ id: 'task-new' });
+
+      const result = await service.createTask(checkoutDto, 'tenant-1');
+
+      expect(result).toEqual({ id: 'task-new' });
+      expect(prismaMock.housekeepingTask.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not dedupe daily cleaning — a long stay needs one per day', async () => {
+      prismaMock.housekeepingTask.create.mockResolvedValue({ id: 'task-daily' });
+
+      await service.createTask({ ...checkoutDto, type: TaskType.DAILY }, 'tenant-1');
+
+      expect(prismaMock.housekeepingTask.findFirst).not.toHaveBeenCalled();
+      expect(prismaMock.housekeepingTask.create).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('completeTask', () => {

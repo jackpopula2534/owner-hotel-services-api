@@ -23,6 +23,7 @@ export enum AuditAction {
   BOOKING_CANCEL = 'booking_cancel',
   BOOKING_CHECKIN = 'booking_checkin',
   BOOKING_CHECKOUT = 'booking_checkout',
+  BOOKING_CHECKOUT_UNDO = 'booking_checkout_undo',
   BOOKING_EARLY_CHECKIN_REQUEST = 'booking_early_checkin_request',
   BOOKING_EARLY_CHECKIN_APPROVE = 'booking_early_checkin_approve',
   BOOKING_LATE_CHECKOUT_REQUEST = 'booking_late_checkout_request',

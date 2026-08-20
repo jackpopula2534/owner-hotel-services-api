@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogService } from '../../audit-log/audit-log.service';
 import { AuditAction, AuditResource, AuditCategory } from '../../audit-log/dto/audit-log.dto';
@@ -124,8 +125,22 @@ export class HrOffboardingService {
     }
 
     // Revoke user account access (P2-07)
-    const userResult = await (this.prisma as any).user.updateMany({
-      where: { tenantId, employeeId: record.employeeId },
+    //
+    // users.employeeId เก็บ "รหัสพนักงาน" แบบข้อความอิสระ (เช่น EMP3704) ไม่ใช่ id ของ
+    // ตาราง employees — ตัวเชื่อมจริงคือ metadata.hrEmployeeId ที่ hotel-terminal-users เขียนไว้
+    // จับคู่ด้วย record.employeeId ตรง ๆ จึงไม่เคยเจอแถวไหนเลย บัญชีของคนที่ลาออกยัง login ได้
+    // ต้องไล่จากตัวพนักงานจริงทั้งสามทางที่ระบบใช้ผูกบัญชี
+    const employee = await this.prisma.employee.findFirst({
+      where: { id: record.employeeId, tenantId },
+      select: { email: true, employeeCode: true },
+    });
+    const accountMatches: Prisma.UserWhereInput[] = [
+      { metadata: { contains: `"hrEmployeeId":"${record.employeeId}"` } },
+    ];
+    if (employee?.employeeCode) accountMatches.push({ employeeId: employee.employeeCode });
+    if (employee?.email) accountMatches.push({ email: employee.email });
+    const userResult = await this.prisma.user.updateMany({
+      where: { tenantId, OR: accountMatches },
       data: { status: 'inactive' },
     });
 

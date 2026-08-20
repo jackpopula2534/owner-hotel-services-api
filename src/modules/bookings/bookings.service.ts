@@ -1,4 +1,10 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+  Logger,
+} from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmailEventsService } from '../../email/email-events.service';
@@ -10,7 +16,11 @@ import { HousekeepingService } from '../housekeeping/housekeeping.service';
 import { LoyaltyService } from '../../loyalty/loyalty.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
-import { TaskType, TaskPriority } from '../housekeeping/dto/create-housekeeping-task.dto';
+import {
+  TaskType,
+  TaskPriority,
+  TaskStatus,
+} from '../housekeeping/dto/create-housekeeping-task.dto';
 import { PaymentsService } from '../../payments/payments.service';
 import { PaymentMethod, PaymentStatus } from '../../payments/entities/payment.entity';
 import { Prisma } from '@prisma/client';
@@ -29,6 +39,7 @@ import {
   hasPostableRevenue,
 } from '../revenue/revenue-posting.service';
 import { buildBookingRevenueInput } from '../revenue/sources/booking-revenue.source';
+import { businessDateOf, toBangkokDate, DAY_MS } from '../../common/utils/bangkok-day.util';
 
 // ─── Activity Types ───────────────────────────────────────────────────────────
 
@@ -1302,6 +1313,183 @@ export class BookingsService {
   }
 
   /**
+   * ย้อนสถานะเช็คเอาต์ (กดผิดใบ / ผิดห้อง / แขกยังไม่ไป)
+   *
+   * เช็คเอาต์เป็นประตูทางเดียวของทั้งระบบ — มันปิดบิล ลงสมุดรายได้ ตั้งห้องเป็นสกปรก
+   * สั่งงานแม่บ้าน แจกแต้ม แล้วปล่อยคืนที่เหลือกลับเข้าคลังให้ขายใหม่ พนักงานที่กด
+   * ผิดใบจึงไม่มีทางแก้เองเลยนอกจากไปแก้สถานะดิบ ๆ ในฐานข้อมูล ซึ่งทิ้งรายได้
+   * ค้างสมุดไว้ทั้งก้อน เมธอดนี้คือทางกลับที่ถอนของพวกนั้นให้ครบในคราวเดียว
+   *
+   * ขอบเขตที่ยอมให้ย้อนได้ จงใจแคบ:
+   * 1. ต้องเป็นวันทำการ (เวลาไทย) เดียวกับที่เช็คเอาต์ — ข้ามวันแล้ว `voidWithin`
+   *    จะเขียนแถวกลับรายการลงวันปัจจุบันแทนการล้างแถวเดิม แล้ว `postWithin` จะไม่
+   *    ยอมลงรายได้ใบนี้อีกตลอดไป (เช็คอินกลับได้แต่เช็คเอาต์รอบสองจะพัง)
+   *    ข้ามวันแล้วต้องใช้เส้นทางบัญชี: ยกเลิก/คืนเงิน แล้วเปิดใบใหม่
+   * 2. ห้องต้องยังไม่ถูกขายต่อ — คืนที่ปล่อยคืนคลังไปแล้วอาจมีคนจองทับ
+   *
+   * งานแม่บ้านที่แม่บ้าน "ยังไม่แตะ" จะถูกลบทิ้ง ใบที่รับงาน/ทำไปแล้วเก็บไว้ตามจริง
+   * แล้วรายงานกลับเป็นคำเตือน — ประวัติงานที่ทำจริงห้ามหายไปเพราะออฟฟิศกดผิด
+   */
+  async undoCheckOut(
+    id: string,
+    tenantId?: string,
+    userId?: string,
+    reason?: string,
+  ): Promise<any> {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
+    const booking = await this.findOne(id, tenantId);
+
+    if (booking.status !== 'checked_out') {
+      throw new BadRequestException(
+        `ย้อนสถานะได้เฉพาะการจองที่เช็คเอาต์แล้วเท่านั้น (สถานะปัจจุบัน: ${booking.status})`,
+      );
+    }
+
+    const actualCheckOut = booking.actualCheckOut ? new Date(booking.actualCheckOut) : null;
+    if (!actualCheckOut || Number.isNaN(actualCheckOut.getTime())) {
+      throw new BadRequestException(
+        'การจองนี้ไม่มีเวลาเช็คเอาต์จริงบันทึกไว้ จึงย้อนสถานะอัตโนมัติไม่ได้',
+      );
+    }
+
+    const now = new Date();
+    const checkOutDay = toBangkokDate(actualCheckOut);
+    const today = toBangkokDate(now);
+    if (checkOutDay !== today) {
+      throw new BadRequestException(
+        `ย้อนสถานะได้เฉพาะภายในวันเดียวกับที่เช็คเอาต์ (เช็คเอาต์เมื่อ ${checkOutDay}) ` +
+          'ข้ามวันแล้วต้องแก้ผ่านการยกเลิก/คืนเงินและเปิดการจองใหม่ เพื่อไม่ให้ยอดของวันที่ปิดไปแล้วเปลี่ยน',
+      );
+    }
+
+    // ห้องอาจถูกขายต่อทันทีที่เช็คเอาต์ — คืนที่เหลือกลับเข้าคลังไปแล้ว
+    if (booking.roomId) {
+      const conflict = await this.prisma.booking.findFirst({
+        where: {
+          tenantId,
+          roomId: booking.roomId,
+          id: { not: id },
+          status: { in: ['pending', 'confirmed', 'checked_in'] },
+          checkIn: { lt: new Date(booking.checkOut) },
+          checkOut: { gt: now },
+        },
+        select: { id: true, bookingNo: true },
+      });
+      if (conflict) {
+        throw new ConflictException(
+          `ห้องนี้ถูกจองต่อแล้ว (${conflict.bookingNo ?? conflict.id.slice(0, 8)}) ` +
+            'ย้อนสถานะไม่ได้ ต้องย้ายการจองที่ทับก่อน',
+        );
+      }
+    }
+
+    // งานแม่บ้านที่ยังไม่มีใครรับ ลบได้ ใบที่เริ่มทำแล้วเก็บไว้เป็นประวัติ
+    const checkoutTasks = await this.prisma.housekeepingTask.findMany({
+      where: { tenantId, bookingId: id, type: TaskType.CHECKOUT },
+      select: { id: true, status: true, assignedToId: true },
+    });
+    const untouchedTaskIds = checkoutTasks
+      .filter((t) => t.status === TaskStatus.PENDING && !t.assignedToId)
+      .map((t) => t.id);
+    const keptTasks = checkoutTasks.filter((t) => !untouchedTaskIds.includes(t.id));
+
+    const { updated, revenue } = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.booking.update({
+        where: { id },
+        data: { status: 'checked_in', actualCheckOut: null },
+        include: { guest: true, room: true, property: true },
+      });
+
+      // วันเดียวกัน = ล้างแถวเดิมเป็น VOIDED (ไม่ใช่แถวกลับรายการ) เช็คเอาต์รอบใหม่
+      // จึงลงรายได้ทับได้ตามปกติ — นี่คือเหตุผลเดียวที่กติกา "ภายในวันเดียวกัน" มีอยู่
+      const voided = await this.revenuePosting.voidWithin(tx, {
+        tenantId,
+        sourceType: 'BOOKING',
+        sourceId: id,
+        voidedBy: userId || 'system',
+        reason: reason ? `ย้อนสถานะเช็คเอาต์: ${reason}` : 'ย้อนสถานะเช็คเอาต์',
+        at: now,
+      });
+
+      if (untouchedTaskIds.length > 0) {
+        await tx.housekeepingTask.deleteMany({
+          where: { tenantId, id: { in: untouchedTaskIds } },
+        });
+      }
+
+      if (booking.roomId) {
+        await tx.room.update({
+          where: { id: booking.roomId },
+          data: { status: 'occupied' },
+        });
+      }
+
+      return { updated: row, revenue: voided };
+    });
+
+    const warnings: string[] = [];
+    if (keptTasks.length > 0) {
+      warnings.push(
+        `งานแม่บ้าน ${keptTasks.length} ใบเริ่มทำไปแล้ว จึงไม่ถูกยกเลิกให้ กรุณาแจ้งแม่บ้านเอง`,
+      );
+    }
+    if (revenue.reversed > 0) {
+      warnings.push('รายได้บางส่วนถูกกลับรายการข้ามวัน ตรวจสอบรายงานรายได้ก่อนเช็คเอาต์ใหม่');
+    }
+
+    // กลับรายการบัญชี (async, ไม่บล็อก) — ระบบโรงแรมต้องกลับสถานะได้แม้บัญชีล้ม
+    this.reverseBookingRevenueJournal(id, tenantId, userId || 'system').catch((err: Error) => {
+      this.logger.warn(`Journal reversal skipped for booking ${id}: ${err.message}`);
+    });
+
+    // แต้มที่แจกตอนเช็คเอาต์ต้องดึงคืน ไม่งั้นกดผิดหนึ่งครั้ง = แต้มฟรีหนึ่งชุด
+    if (booking.guestId) {
+      this.loyaltyService
+        .reverseStayAward(tenantId, booking.guestId, id)
+        .catch((err: Error) => {
+          this.logger.warn(`Loyalty clawback skipped for booking ${id}: ${err.message}`);
+        });
+    }
+
+    this.auditLogService
+      .log({
+        action: AuditAction.BOOKING_CHECKOUT_UNDO,
+        resource: AuditResource.BOOKING,
+        resourceId: id,
+        oldValues: { status: 'checked_out', actualCheckOut: actualCheckOut.toISOString() },
+        newValues: { status: 'checked_in', actualCheckOut: null },
+        userId: userId || 'system',
+        tenantId,
+        description:
+          `ย้อนสถานะเช็คเอาต์ของ ${booking.guestFirstName} ${booking.guestLastName} ` +
+          `(ห้อง ${booking.room?.number || 'N/A'})` +
+          (reason ? ` — เหตุผล: ${reason}` : ''),
+      })
+      .catch((err) => {
+        this.logger.error(`Failed to log checkout undo: ${err.message}`);
+      });
+
+    this.logger.log(
+      `Checkout undone for booking ${booking.bookingNo ?? id} by ${userId || 'system'}: ` +
+        `revenue voided=${revenue.voided} reversed=${revenue.reversed}, ` +
+        `housekeeping removed=${untouchedTaskIds.length} kept=${keptTasks.length}`,
+    );
+
+    return {
+      ...this.mapBookingResponse(updated),
+      undo: {
+        revenue,
+        housekeepingTasksRemoved: untouchedTaskIds.length,
+        housekeepingTasksKept: keptTasks.length,
+        warnings,
+      },
+    };
+  }
+
+  /**
    * ยอดรวมรายการเพิ่มเติมบนใบแจ้งหนี้ของการจองนี้
    *
    * เป็นค่าบริการที่พนักงานคีย์เข้าบิลห้องเอง (มินิบาร์ รถรับส่ง ค่าปรับ) — **ไม่ใช่**
@@ -1361,6 +1549,25 @@ export class BookingsService {
 
     const balanceRemaining = totalAmount - amountPaid;
 
+    // ── ออกก่อนกำหนด ─────────────────────────────────────────────────────
+    // เช็คเอาต์ก่อนวันคืนห้องตามใบจอง = คืนที่แขกจ่ายไว้แล้วแต่จะไม่ได้นอน กดแล้ว
+    // ห้องถูกปล่อยกลับเข้าคลังให้ขายต่อทันที ส่วนยอดที่ลงสมุดรายได้ยังเป็นยอดเต็ม
+    // ตามใบจอง (ระบบไม่ลดให้เอง — ถ้าจะคืนเงินต้องแก้ยอดก่อนกดเช็คเอาต์)
+    // หน้าจอจึงต้องได้ตัวเลขนี้ไปเตือนก่อน ไม่ใช่รู้ตอนที่ย้อนไม่ได้แล้ว
+    const scheduledOutDay = businessDateOf(toBangkokDate(new Date(booking.checkOut)));
+    const scheduledInDay = businessDateOf(toBangkokDate(new Date(booking.checkIn)));
+    const departureDay = businessDateOf(
+      toBangkokDate(booking.actualCheckOut ? new Date(booking.actualCheckOut) : new Date()),
+    );
+    const scheduledNights = Math.max(
+      0,
+      Math.round((scheduledOutDay.getTime() - scheduledInDay.getTime()) / DAY_MS),
+    );
+    const nightsRemaining = Math.max(
+      0,
+      Math.round((scheduledOutDay.getTime() - departureDay.getTime()) / DAY_MS),
+    );
+
     // Prepare summary object (all fields use defensive fallbacks)
     const summary = {
       booking: {
@@ -1381,6 +1588,9 @@ export class BookingsService {
         actualCheckOutDate: booking.actualCheckOut ?? null,
         stayDuration: `${stayDuration} คืน`,
         nightCount: stayDuration,
+        scheduledNights,
+        nightsRemaining,
+        isEarlyDeparture: nightsRemaining > 0,
       },
       charges: {
         roomCharge,
@@ -1722,6 +1932,26 @@ export class BookingsService {
 
     if (!propertyId || totalAmount <= 0) return;
 
+    // เช็คเอาต์ซ้ำใบเดิม (ย้อนสถานะแล้วเช็คเอาต์ใหม่ / retry ของหน้าจอ) ต้องไม่ได้ JE
+    // เพิ่มอีกใบ — ต่างจากสมุดรายได้ที่ postWithin เขียนทับแถวเดิมได้ ตรงนี้ create
+    // ล้วน ๆ ยอดในงบทดลองจึงบวมเป็นสองเท่าเงียบ ๆ ใบที่ถูกกลับรายการไปแล้วสถานะ
+    // เป็น REVERSED ไม่ใช่ POSTED จึงเปิดทางให้ลงใหม่ได้ตามต้องการ
+    const postedEntry = await this.prisma.journalEntry.findFirst({
+      where: {
+        tenantId,
+        sourceType: 'BOOKING_PAYMENT',
+        sourceId: bookingId,
+        status: 'POSTED',
+      },
+      select: { entryNo: true },
+    });
+    if (postedEntry) {
+      this.logger.debug(
+        `Accounting journal skipped for booking ${bookingId}: ${postedEntry.entryNo} already posted`,
+      );
+      return;
+    }
+
     // Look up required accounts — skip if tenant hasn't seeded Chart of Accounts
     const REQUIRED_CODES = ['1101', '4101'];
     const OPTIONAL_CODES = ['2103', '4305', '4300'];
@@ -1868,6 +2098,96 @@ export class BookingsService {
     this.logger.log(
       `Journal entry ${entryNo} created for booking ${bookingId}: total ${totalAmount} THB` +
         (additionalCharges > 0 ? ` (incl. add-ons ${additionalCharges})` : ''),
+    );
+  }
+
+  /**
+   * กลับรายการ JE ของการจอง เมื่อเช็คเอาต์ถูกย้อนสถานะ
+   *
+   * ลบ JE ทิ้งไม่ได้ — สมุดรายวันต้องเดินหน้าอย่างเดียว จึงออกใบกลับรายการที่สลับ
+   * เดบิต/เครดิต แล้วปั๊มใบเดิมเป็น REVERSED (ซึ่งพ่วงเป็นตัวปลดล็อกให้เช็คเอาต์
+   * รอบใหม่ลง JE ได้อีกครั้ง ดู guard ใน createBookingRevenueJournal)
+   *
+   * `ledger_balances` ต้องขยับในทรานแซกชันเดียวกัน เพราะงบทดลอง/งบกำไรขาดทุน
+   * อ่านจากตารางนั้น ไม่ได้อ่านจาก journal_entries
+   */
+  private async reverseBookingRevenueJournal(
+    bookingId: string,
+    tenantId: string,
+    reversedBy: string,
+  ): Promise<void> {
+    const entry = await this.prisma.journalEntry.findFirst({
+      where: {
+        tenantId,
+        sourceType: 'BOOKING_PAYMENT',
+        sourceId: bookingId,
+        status: 'POSTED',
+      },
+      include: { lines: true },
+    });
+    if (!entry) return;
+
+    const now = new Date();
+    const yearMonth = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const seq = await this.prisma.documentSequence.upsert({
+      where: { tenantId_docType_yearMonth: { tenantId, docType: 'JE', yearMonth } },
+      update: { lastNumber: { increment: 1 } },
+      create: { tenantId, docType: 'JE', prefix: 'JE', yearMonth, lastNumber: 1 },
+    });
+    const entryNo = `JE-${yearMonth}-${String(seq.lastNumber).padStart(6, '0')}`;
+
+    const reversalLines = entry.lines
+      .sort((a, b) => a.lineNo - b.lineNo)
+      .map((line, index) => ({
+        accountId: line.accountId,
+        lineNo: index + 1,
+        description: `กลับรายการ: ${line.description ?? ''}`.trim(),
+        debit: Number(line.credit),
+        credit: Number(line.debit),
+      }));
+
+    const fiscalPeriod = now.getMonth() + 1;
+    const fiscalYear = now.getFullYear();
+
+    await this.prisma.$transaction(async (tx) => {
+      const reversal = await tx.journalEntry.create({
+        data: {
+          tenantId,
+          propertyId: entry.propertyId,
+          entryNo,
+          entryDate: now,
+          description: `กลับรายการ ${entry.entryNo} (ย้อนสถานะเช็คเอาต์)`,
+          reference: entry.entryNo,
+          sourceType: 'ADJUSTMENT',
+          sourceId: bookingId,
+          status: 'POSTED',
+          fiscalPeriod,
+          fiscalYear,
+          totalDebit: entry.totalCredit,
+          totalCredit: entry.totalDebit,
+          reversedById: entry.id,
+          createdBy: reversedBy,
+          postedBy: reversedBy,
+          postedAt: now,
+          lines: { create: reversalLines },
+        },
+        select: { id: true },
+      });
+
+      await tx.journalEntry.update({
+        where: { id: entry.id },
+        data: { status: 'REVERSED', reversedById: reversal.id, reversedAt: now },
+      });
+
+      await applyLedgerBalances(
+        tx,
+        { tenantId, propertyId: entry.propertyId, fiscalYear, fiscalPeriod },
+        reversalLines,
+      );
+    });
+
+    this.logger.log(
+      `Journal entry ${entry.entryNo} reversed by ${entryNo} for booking ${bookingId}`,
     );
   }
 
@@ -2512,6 +2832,7 @@ export class BookingsService {
       booking_cancel: 'ยกเลิกการจอง',
       booking_checkin: 'เช็คอิน',
       booking_checkout: 'เช็คเอาท์',
+      booking_checkout_undo: 'ย้อนสถานะเช็คเอาท์',
       booking_early_checkin_request: 'ขอ Early Check-in',
       booking_early_checkin_approve: 'อนุมัติ Early Check-in',
       booking_late_checkout_request: 'ขอ Late Check-out',
@@ -2536,6 +2857,7 @@ export class BookingsService {
       booking_cancel: 'x-circle',
       booking_checkin: 'log-in',
       booking_checkout: 'log-out',
+      booking_checkout_undo: 'rotate-ccw',
       booking_early_checkin_request: 'clock',
       booking_early_checkin_approve: 'check-square',
       booking_late_checkout_request: 'clock',
@@ -2560,6 +2882,7 @@ export class BookingsService {
       booking_cancel: 'red',
       booking_checkin: 'indigo',
       booking_checkout: 'gray',
+      booking_checkout_undo: 'orange',
       booking_early_checkin_request: 'amber',
       booking_early_checkin_approve: 'green',
       booking_late_checkout_request: 'amber',

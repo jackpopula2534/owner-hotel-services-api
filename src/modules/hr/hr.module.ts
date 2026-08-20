@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { StaffModule } from '../staff/staff.module';
 import { HrController } from './hr.controller';
 import { HrService } from './hr.service';
 import { HrMasterDataController } from './hr-master-data.controller';
@@ -60,7 +61,7 @@ import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
 // before HrController's @Get(':id') catches them as employee IDs.
 
 @Module({
-  imports: [PrismaModule, AddonModule, IntegrationsModule],
+  imports: [PrismaModule, AddonModule, IntegrationsModule, StaffModule],
   controllers: [
     HrMasterDataController,
     HrAttendanceController,

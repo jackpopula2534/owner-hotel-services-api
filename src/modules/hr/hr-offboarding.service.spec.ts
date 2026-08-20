@@ -64,17 +64,47 @@ describe('HrOffboardingService', () => {
       id: 'o1', status: 'clearing', employeeId: 'e1', type: 'termination',
       clearanceItems: [{ label: 'a', done: true }],
     });
+    prisma.employee.findFirst.mockResolvedValue({ email: 'somchai@hotel.test', employeeCode: 'EMP-001' });
     prisma.hrOffboarding.update.mockImplementation(({ data }: any) => ({ id: 'o1', ...data }));
     await service.complete('o1', 't1', 'u1');
 
+    // users.employeeId เก็บ "รหัส" ไม่ใช่ id ของ employees — ค้นด้วย employeeId: 'e1'
+    // ตรง ๆ จะไม่เจอบัญชีใครเลย ต้องไล่จากตัวพนักงานจริงทั้งสามทางที่ระบบใช้ผูกบัญชี
     expect(prisma.user.updateMany).toHaveBeenCalledWith({
+      where: {
+        tenantId: 't1',
+        OR: [
+          { metadata: { contains: '"hrEmployeeId":"e1"' } },
+          { employeeId: 'EMP-001' },
+          { email: 'somchai@hotel.test' },
+        ],
+      },
+      data: { status: 'inactive' },
+    });
+    // ทะเบียนพนักงานปฏิบัติการผูกด้วย FK จริง จับคู่ด้วย id ได้ตามเดิม
+    expect(prisma.staff.updateMany).toHaveBeenCalledWith({
       where: { tenantId: 't1', employeeId: 'e1' },
       data: { status: 'inactive' },
     });
-    expect(prisma.staff.updateMany).toHaveBeenCalled();
     expect(prisma.employee.update).toHaveBeenCalledWith({
       where: { id: 'e1' },
       data: { status: 'TERMINATED' },
+    });
+  });
+
+  it('still revokes by metadata link when the employee has no code or email on file', async () => {
+    prisma.hrOffboarding.findFirst.mockResolvedValue({
+      id: 'o1', status: 'clearing', employeeId: 'e1', type: 'resignation',
+      clearanceItems: [{ label: 'a', done: true }],
+    });
+    prisma.employee.findFirst.mockResolvedValue({ email: '', employeeCode: null });
+    prisma.hrOffboarding.update.mockImplementation(({ data }: any) => ({ id: 'o1', ...data }));
+    await service.complete('o1', 't1', 'u1');
+
+    // ค่าว่างต้องไม่กลายเป็นเงื่อนไขกว้าง ๆ ที่ไปปิดบัญชีคนอื่นทั้ง tenant
+    expect(prisma.user.updateMany).toHaveBeenCalledWith({
+      where: { tenantId: 't1', OR: [{ metadata: { contains: '"hrEmployeeId":"e1"' } }] },
+      data: { status: 'inactive' },
     });
   });
 

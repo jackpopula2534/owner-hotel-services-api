@@ -10,7 +10,7 @@
 
 ```
 ┌──────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐
-│ 1. ขอกำลังคน  │──▶│ 2. ขออนุมัติงบ │──▶│ 3. ขออุปกรณ์  │──▶│ 4. สัมภาษณ์    │
+│ 1. ขอกำลังพล  │──▶│ 2. ขออนุมัติงบ │──▶│ 3. ขออุปกรณ์  │──▶│ 4. สัมภาษณ์    │
 │  (Manpower)  │   │  (Budget)    │   │ (Equipment)  │   │ (Interview)  │
 └──────────────┘   └──────────────┘   └──────────────┘   └──────┬───────┘
                                                                 │
@@ -52,7 +52,7 @@ type ApprovalChain = ApprovalStep[];
 ```
 
 - **Default chain:** หัวหน้าแผนก → HR → เจ้าของโรงแรม (3 ขั้น)
-- chain แยกอิสระ 3 จุด: ขอกำลังคน, ขออนุมัติงบ, ขออุปกรณ์
+- chain แยกอิสระ 3 จุด: ขอกำลังพล, ขออนุมัติงบ, ขออุปกรณ์
 - reject ที่ขั้นไหนก็ได้ → request กลับเป็น `rejected` พร้อม note (แก้แล้ว resubmit ได้ → reset chain)
 - เก็บเป็น JSON column + sync `currentApprovalLevel` ไว้ query/filter
 
@@ -61,7 +61,7 @@ type ApprovalChain = ApprovalStep[];
 ## 3. Prisma Schema (ใหม่ทั้งหมด)
 
 ```prisma
-// ── Stage 1+2: ขอกำลังคน + งบ ───────────────────────────────
+// ── Stage 1+2: ขอกำลังพล + งบ ───────────────────────────────
 model HrManpowerRequest {
   id                String    @id @default(uuid())
   tenantId          String
@@ -356,7 +356,7 @@ app/dashboard/hr/
 ├── recruitment/
 │   ├── page.tsx                  # รายการ manpower requests + status board
 │   ├── [id]/page.tsx             # Timeline 7 stage + ปุ่ม action ตาม role
-│   └── new/page.tsx              # ฟอร์มขอกำลังคน (React Hook Form + Zod)
+│   └── new/page.tsx              # ฟอร์มขอกำลังพล (React Hook Form + Zod)
 ├── candidates/[id]/page.tsx      # โปรไฟล์ผู้สมัคร + ตารางสัมภาษณ์
 ├── interviews/page.tsx           # ปฏิทินนัดสัมภาษณ์รวม
 └── probation/page.tsx            # rewrite: rounds + checkpoints + decide

@@ -77,6 +77,7 @@ export class SeederService {
       await this.seedEmployeesForAllTenants();
       await this.seedKpiTemplates();
       await this.seedHotelStaff();
+      await this.seedOperationalStaff();
       await this.seedPremiumHrData();
       await this.seedHrPerformanceData();
       await this.seedRestaurantData();
@@ -2129,6 +2130,219 @@ export class SeederService {
     this.logger.log('  - Hotel Staff: 4 total (manager & receptionist for top 2 hotels)');
     this.logger.log('');
     this.logger.log('══════════════════════════════════════════════════════');
+  }
+
+  /**
+   * 🧹 Seed Operational Staff (staff table → ทะเบียนพนักงานที่หน้ามอบหมายงานอ่าน)
+   *
+   * `staff` เป็นคนละตารางกับ `users` (บัญชีล็อกอิน) และ `employees` (ประวัติ HR)
+   * ถ้าไม่หว่านตารางนี้ หน้ามอบหมายงานแม่บ้าน/ซ่อมบำรุงจะว่างเปล่าบน DB ใหม่ทุกครั้ง
+   *
+   * หว่านให้ครบทั้งสองเคสที่ระบบต้องรองรับ:
+   *  - **ต่อ HR**: แถวทะเบียนผูก FK `employeeId` → `employees.id` และบัญชีล็อกอินผูกกลับ
+   *    ด้วย `metadata.hrEmployeeId` + `users.employeeId` = รหัสพนักงาน
+   *  - **ไม่ต่อ HR**: บัญชีล็อกอินที่ไม่มีประวัติ HR เลย แต่ยังมีแถวทะเบียนของตัวเอง
+   *    (สภาพเดียวกับที่ปุ่ม "ซิงก์จากบัญชีผู้ใช้" สร้างให้)
+   */
+  private async seedOperationalStaff(): Promise<void> {
+    this.logger.log('🧹 Seeding Operational Staff (staff table)...');
+
+    const allTenants = await this.tenantsService.findAll();
+    if (allTenants.length === 0) {
+      this.logger.warn('  ⚠️ No tenants found, skipping operational staff seeding');
+      return;
+    }
+
+    // แผนก HK/ENG ใน HR → บทบาทในทะเบียนปฏิบัติการ
+    const rosterPlan = [
+      { deptCode: 'HK', role: 'housekeeper', department: 'housekeeping', take: 4, accounts: 2 },
+      { deptCode: 'ENG', role: 'technician', department: 'maintenance', take: 3, accounts: 1 },
+    ] as const;
+
+    // ผู้ใช้ระบบเทอร์มินัลใช้ role คนละคำกับทะเบียน (maintenance ↔ technician)
+    const terminalRoleFor: Record<string, string> = {
+      housekeeper: 'housekeeper',
+      technician: 'maintenance',
+    };
+    const terminalPermissions: Record<string, string[]> = {
+      housekeeper: ['housekeeping.view', 'housekeeping.manage', 'rooms.view'],
+      maintenance: ['maintenance.view', 'maintenance.manage', 'rooms.view'],
+    };
+
+    const defaultPassword = process.env.SEED_STAFF_PASSWORD || 'StaffDev@2026!';
+    const hashedPassword = await bcrypt.hash(defaultPassword, 10);
+    const allowedSystems = JSON.stringify(['main', 'hotel-terminal']);
+
+    let rosterCount = 0;
+    let accountCount = 0;
+
+    /** สร้างบัญชีล็อกอินถ้ายังไม่มี — email ของ users เป็น unique ทั้งระบบ */
+    const createLogin = async (params: {
+      tenantId: string;
+      email: string;
+      firstName: string;
+      lastName: string;
+      terminalRole: string;
+      employeeCode: string | null;
+      hrEmployeeId: string | null;
+    }): Promise<void> => {
+      const existing = await this.prisma.$queryRaw`
+        SELECT id FROM users WHERE email = ${params.email} LIMIT 1
+      `;
+      if (Array.isArray(existing) && existing.length > 0) return;
+
+      const metadata = JSON.stringify({
+        hrEmployeeId: params.hrEmployeeId,
+        propertyId: null,
+        permissions: terminalPermissions[params.terminalRole] ?? [],
+      });
+      await this.prisma.$executeRaw`
+        INSERT INTO users (id, email, password, firstName, lastName, role, status, tenantId, employeeId, allowedSystems, metadata, createdAt, updatedAt)
+        VALUES (
+          ${uuidv4()}, ${params.email}, ${hashedPassword}, ${params.firstName}, ${params.lastName},
+          ${params.terminalRole}, 'active', ${params.tenantId}, ${params.employeeCode},
+          ${allowedSystems}, ${metadata}, NOW(), NOW()
+        )
+      `;
+      accountCount++;
+    };
+
+    /** สร้างแถวทะเบียนถ้ายังไม่มี — employeeId เป็น unique ห้ามผูกซ้ำคน */
+    const createRosterRow = async (params: {
+      tenantId: string;
+      firstName: string;
+      lastName: string;
+      email: string;
+      phone: string | null;
+      role: string;
+      department: string;
+      employeeCode: string | null;
+      hrEmployeeId: string | null;
+    }): Promise<boolean> => {
+      const existing = await this.prisma.$queryRaw`
+        SELECT id FROM staff WHERE tenantId = ${params.tenantId} AND email = ${params.email} LIMIT 1
+      `;
+      if (Array.isArray(existing) && existing.length > 0) return false;
+
+      if (params.hrEmployeeId) {
+        const linked = await this.prisma.$queryRaw`
+          SELECT id FROM staff WHERE employeeId = ${params.hrEmployeeId} LIMIT 1
+        `;
+        if (Array.isArray(linked) && linked.length > 0) return false;
+      }
+
+      await this.prisma.$executeRaw`
+        INSERT INTO staff (id, tenantId, firstName, lastName, email, phone, role, department, employeeCode, status, employeeId, createdAt, updatedAt)
+        VALUES (
+          ${uuidv4()}, ${params.tenantId}, ${params.firstName}, ${params.lastName}, ${params.email},
+          ${params.phone}, ${params.role}, ${params.department}, ${params.employeeCode}, 'active',
+          ${params.hrEmployeeId}, NOW(3), NOW(3)
+        )
+      `;
+      rosterCount++;
+      return true;
+    };
+
+    for (const tenant of allTenants) {
+      const match = tenant.name.match(/\(([^)]+)\)/);
+      const engName = match ? match[1] : tenant.name;
+      const tenantSlug = engName
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '')
+        .substring(0, 10);
+
+      for (const plan of rosterPlan) {
+        let employees: Array<{
+          id: string;
+          firstName: string;
+          lastName: string;
+          email: string;
+          phone: string | null;
+          employeeCode: string | null;
+        }> = [];
+        try {
+          employees = (await this.prisma.$queryRaw`
+            SELECT e.id, e.firstName, e.lastName, e.email, e.phone, e.employeeCode
+            FROM employees e
+            JOIN hr_departments d ON e.departmentId = d.id
+            WHERE e.tenantId = ${tenant.id} AND d.code = ${plan.deptCode}
+            ORDER BY e.employeeCode
+            LIMIT ${plan.take}
+          `) as typeof employees;
+        } catch (error: any) {
+          this.logger.warn(
+            `    ⚠️  Could not read ${plan.deptCode} employees for ${tenant.name}: ${error.message}`,
+          );
+          continue;
+        }
+
+        for (let i = 0; i < employees.length; i++) {
+          const employee = employees[i];
+          try {
+            await createRosterRow({
+              tenantId: tenant.id,
+              firstName: employee.firstName,
+              lastName: employee.lastName,
+              email: employee.email,
+              phone: employee.phone ?? null,
+              role: plan.role,
+              department: plan.department,
+              employeeCode: employee.employeeCode ?? null,
+              hrEmployeeId: employee.id,
+            });
+
+            // ให้บางคนล็อกอินเข้าเทอร์มินัลได้จริง จะได้ทดสอบสายงานครบวง
+            if (i < plan.accounts) {
+              await createLogin({
+                tenantId: tenant.id,
+                email: employee.email,
+                firstName: employee.firstName,
+                lastName: employee.lastName,
+                terminalRole: terminalRoleFor[plan.role],
+                employeeCode: employee.employeeCode ?? null,
+                hrEmployeeId: employee.id,
+              });
+            }
+          } catch (error: any) {
+            this.logger.warn(
+              `    ⚠️  Could not seed roster row for ${employee.email}: ${error.message}`,
+            );
+          }
+        }
+      }
+
+      // เคส "ไม่เชื่อมระบบ HR": บัญชีแม่บ้านที่ไม่มีประวัติ HR แต่ยังมีแถวทะเบียนของตัวเอง
+      const standaloneEmail = `housekeeper.${tenantSlug}@hotel.test`;
+      try {
+        await createLogin({
+          tenantId: tenant.id,
+          email: standaloneEmail,
+          firstName: 'มาลี',
+          lastName: 'ขยันงาน',
+          terminalRole: 'housekeeper',
+          employeeCode: `HK-LOCAL-${tenantSlug.toUpperCase().substring(0, 4)}`,
+          hrEmployeeId: null,
+        });
+        await createRosterRow({
+          tenantId: tenant.id,
+          firstName: 'มาลี',
+          lastName: 'ขยันงาน',
+          email: standaloneEmail,
+          phone: null,
+          role: 'housekeeper',
+          department: 'housekeeping',
+          employeeCode: `HK-LOCAL-${tenantSlug.toUpperCase().substring(0, 4)}`,
+          hrEmployeeId: null,
+        });
+      } catch (error: any) {
+        this.logger.warn(
+          `    ⚠️  Could not seed standalone housekeeper for ${tenant.name}: ${error.message}`,
+        );
+      }
+    }
+
+    this.logger.log(`  ✓ Operational roster rows created: ${rosterCount}`);
+    this.logger.log(`  ✓ Terminal login accounts created: ${accountCount}`);
   }
 
   /**

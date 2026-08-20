@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuditLogService } from '../../audit-log/audit-log.service';
@@ -42,6 +42,13 @@ describe('BookingsService', () => {
     invoices: {
       findFirst: jest.fn(),
     },
+    housekeepingTask: {
+      findMany: jest.fn().mockResolvedValue([]),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+    journalEntry: {
+      findFirst: jest.fn().mockResolvedValue(null),
+    },
     // เช็คเอาต์กับลงสมุดรายได้อยู่ในทรานแซกชันเดียวกัน — mock ส่ง client ตัวเดิม
     // กลับไปให้ callback ทำงานจริง ไม่งั้นการเขียนทั้งก้อนจะหายไปเงียบ ๆ
     $transaction: jest.fn(async (run: (tx: unknown) => unknown) => run(prismaMock)),
@@ -65,6 +72,7 @@ describe('BookingsService', () => {
 
   const loyaltyServiceMock = {
     addPointsForStay: jest.fn().mockResolvedValue(undefined),
+    reverseStayAward: jest.fn().mockResolvedValue(null),
   };
 
   const notificationsServiceMock = {
@@ -318,6 +326,142 @@ describe('BookingsService', () => {
       jest.spyOn(service, 'findOne').mockRejectedValue(new NotFoundException('Booking not found'));
 
       await expect(service.checkOut('booking-404')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  /**
+   * ย้อนสถานะเช็คเอาต์ — ทางกลับของประตูทางเดียว
+   *
+   * ที่ต้องตรึงไว้คือ "ขอบเขต" ไม่ใช่แค่ว่ามันย้อนได้: ข้ามวันทำการไทยแล้วต้องไม่ยอม
+   * (ไม่งั้นยอดของวันที่ปิดไปแล้วขยับ และเช็คเอาต์รอบต่อไปจะลงสมุดไม่ได้อีกเลย)
+   * และห้องที่ขายต่อไปแล้วต้องไม่ยอม (ไม่งั้นแขกสองรายอยู่ห้องเดียวกันบนกระดาษ)
+   */
+  describe('undoCheckOut', () => {
+    const BANGKOK_AFTERNOON = new Date('2026-04-05T10:30:00.000Z'); // 17:30 ตามเวลาไทย
+    const CHECKED_OUT_TODAY = new Date('2026-04-05T04:00:00.000Z'); // 11:00 ตามเวลาไทย วันเดียวกัน
+
+    const checkedOutBooking = (overrides: Record<string, unknown> = {}) => ({
+      id: 'booking-1',
+      status: 'checked_out',
+      guestId: 'guest-1',
+      guestFirstName: 'Jane',
+      guestLastName: 'Doe',
+      roomId: 'room-1',
+      room: { id: 'room-1', number: '101' },
+      checkIn: new Date('2026-04-04T00:00:00.000Z'),
+      checkOut: new Date('2026-04-06T00:00:00.000Z'),
+      actualCheckIn: new Date('2026-04-04T07:00:00.000Z'),
+      actualCheckOut: CHECKED_OUT_TODAY,
+      ...overrides,
+    });
+
+    beforeEach(() => {
+      jest.useFakeTimers().setSystemTime(BANGKOK_AFTERNOON);
+      prismaMock.booking.findFirst.mockResolvedValue(null);
+      prismaMock.housekeepingTask.findMany.mockResolvedValue([]);
+      prismaMock.booking.update.mockResolvedValue({
+        id: 'booking-1',
+        status: 'checked_in',
+        actualCheckOut: null,
+        guestFirstName: 'Jane',
+        guestLastName: 'Doe',
+        room: { id: 'room-1', number: '101' },
+        property: { id: 'property-1' },
+      });
+      prismaMock.room.update.mockResolvedValue({ id: 'room-1', status: 'occupied' });
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('puts the guest back in the room and pulls the revenue in the same transaction', async () => {
+      jest.spyOn(service, 'findOne').mockResolvedValue(checkedOutBooking() as any);
+      prismaMock.housekeepingTask.findMany.mockResolvedValue([
+        { id: 'hk-1', status: 'pending', assignedToId: null },
+      ]);
+
+      const result = await service.undoCheckOut('booking-1', 'tenant-1', 'user-9', 'กดผิดห้อง');
+
+      expect(prismaMock.booking.update).toHaveBeenCalledWith({
+        where: { id: 'booking-1' },
+        data: { status: 'checked_in', actualCheckOut: null },
+        include: { guest: true, room: true, property: true },
+      });
+      expect(revenuePostingMock.voidWithin).toHaveBeenCalledWith(
+        prismaMock,
+        expect.objectContaining({
+          tenantId: 'tenant-1',
+          sourceType: 'BOOKING',
+          sourceId: 'booking-1',
+          voidedBy: 'user-9',
+        }),
+      );
+      // งานที่ยังไม่มีใครรับต้องหายไปจากบอร์ด ไม่งั้นแม่บ้านเดินไปเคาะห้องที่มีคนอยู่
+      expect(prismaMock.housekeepingTask.deleteMany).toHaveBeenCalledWith({
+        where: { tenantId: 'tenant-1', id: { in: ['hk-1'] } },
+      });
+      expect(prismaMock.room.update).toHaveBeenCalledWith({
+        where: { id: 'room-1' },
+        data: { status: 'occupied' },
+      });
+      expect(auditLogServiceMock.log).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'booking_checkout_undo', resourceId: 'booking-1' }),
+      );
+      expect(loyaltyServiceMock.reverseStayAward).toHaveBeenCalledWith(
+        'tenant-1',
+        'guest-1',
+        'booking-1',
+      );
+      expect(result.status).toBe('checked_in');
+      expect(result.undo.housekeepingTasksRemoved).toBe(1);
+      expect(result.undo.warnings).toEqual([]);
+    });
+
+    it('keeps a task the housekeeper already started and says so', async () => {
+      jest.spyOn(service, 'findOne').mockResolvedValue(checkedOutBooking() as any);
+      prismaMock.housekeepingTask.findMany.mockResolvedValue([
+        { id: 'hk-1', status: 'in_progress', assignedToId: 'staff-1' },
+      ]);
+
+      const result = await service.undoCheckOut('booking-1', 'tenant-1', 'user-9');
+
+      expect(prismaMock.housekeepingTask.deleteMany).not.toHaveBeenCalled();
+      expect(result.undo.housekeepingTasksKept).toBe(1);
+      expect(result.undo.warnings).toHaveLength(1);
+    });
+
+    it('refuses once the Bangkok business day has rolled over', async () => {
+      jest.spyOn(service, 'findOne').mockResolvedValue(
+        checkedOutBooking({ actualCheckOut: new Date('2026-04-04T10:00:00.000Z') }) as any,
+      );
+
+      await expect(service.undoCheckOut('booking-1', 'tenant-1')).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(prismaMock.booking.update).not.toHaveBeenCalled();
+      expect(revenuePostingMock.voidWithin).not.toHaveBeenCalled();
+    });
+
+    it('refuses when the room has already been sold to someone else', async () => {
+      jest.spyOn(service, 'findOne').mockResolvedValue(checkedOutBooking() as any);
+      prismaMock.booking.findFirst.mockResolvedValue({ id: 'booking-2', bookingNo: 'BK-002' });
+
+      await expect(service.undoCheckOut('booking-1', 'tenant-1')).rejects.toThrow(
+        ConflictException,
+      );
+      expect(prismaMock.booking.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses a booking that is not checked out', async () => {
+      jest.spyOn(service, 'findOne').mockResolvedValue(
+        checkedOutBooking({ status: 'checked_in', actualCheckOut: null }) as any,
+      );
+
+      await expect(service.undoCheckOut('booking-1', 'tenant-1')).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(prismaMock.booking.update).not.toHaveBeenCalled();
     });
   });
 

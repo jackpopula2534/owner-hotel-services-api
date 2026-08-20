@@ -113,6 +113,24 @@ export class HotelTerminalUsersController {
     return this.service.bulkImportFromEmployees(dto, this.assertTenant(caller));
   }
 
+  @Post('sync-roster')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Backfill the operational staff roster from existing hotel terminal accounts',
+    description:
+      'Housekeeper and maintenance accounts created before roster auto-sync existed live ' +
+      'only in the users table, so they never appear in the housekeeping assign list. ' +
+      'This walks every active account of those two roles and provisions the matching ' +
+      'staff row. Idempotent — already-registered people come back as "existing". ' +
+      'Needs no HR add-on.',
+  })
+  @ApiResponse({ status: 200, description: 'Roster backfilled' })
+  async syncRoster(@CurrentUser() caller: AuthenticatedCaller) {
+    this.assertManager(caller);
+    return this.service.syncRosterFromAccounts(this.assertTenant(caller));
+  }
+
   @Get()
   @Throttle({ default: { limit: 60, ttl: 60 } })
   @ApiOperation({ summary: 'List all hotel terminal users in the current tenant' })

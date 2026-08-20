@@ -90,6 +90,9 @@ export class MaintenanceService {
           skip,
           take: limit,
           include: {
+            // ต้องมี room ด้วย — งานซ่อมไม่มีคอลัมน์ floor/roomNumber ของตัวเอง
+            // ขาด include นี้ไปตัวกรอง "ชั้น" กับชื่อห้องบนกระดานจะว่างเสมอ
+            room: true,
             assignedTo: true,
             inspectedBy: true,
           },
@@ -294,8 +297,13 @@ export class MaintenanceService {
         },
       });
 
-      // If task is completed, mark room as available again
-      if (dto.status === MaintenanceTaskStatus.COMPLETED && task.roomId) {
+      // ปิดงานแล้วต้องคืนห้องให้ขายได้ — ทั้ง "เสร็จสิ้น" และ "ยกเลิก"
+      // ตอนสร้างงานซ่อมเราปิดห้องเป็น maintenance ทันที ถ้ายกเลิกแล้วไม่คืนสถานะ
+      // ห้องจะค้างขายไม่ได้ทั้งที่ไม่มีงานซ่อมเหลืออยู่ (เคยเกิดจริงกับห้อง 104)
+      const releasesRoom =
+        dto.status === MaintenanceTaskStatus.COMPLETED ||
+        dto.status === MaintenanceTaskStatus.CANCELLED;
+      if (releasesRoom && task.roomId) {
         await this.prisma.room.update({
           where: { id: task.roomId },
           data: { status: 'available' },

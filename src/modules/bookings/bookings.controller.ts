@@ -20,6 +20,7 @@ import { AddFolioChargeDto } from './dto/add-folio-charge.dto';
 import { AddFolioPaymentDto } from './dto/add-folio-payment.dto';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { WalkInDto } from './dto/walk-in.dto';
+import { UndoCheckOutDto } from './dto/undo-checkout.dto';
 import { RequestEarlyCheckInDto } from './dto/request-early-checkin.dto';
 import { RequestLateCheckOutDto } from './dto/request-late-checkout.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -121,6 +122,21 @@ export class BookingsController {
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'receptionist')
   async checkOut(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.bookingsService.checkOut(id, user?.tenantId);
+  }
+
+  @Post(':id/undo-checkout')
+  @ApiOperation({ summary: 'Undo a check-out done in error (same business day only)' })
+  @ApiResponse({ status: 400, description: 'ไม่ได้เช็คเอาต์ หรือข้ามวันทำการไปแล้ว' })
+  @ApiResponse({ status: 409, description: 'ห้องถูกจองต่อไปแล้ว' })
+  // ไม่มี receptionist — การย้อนสถานะแตะสมุดรายได้กับบัญชี จึงเป็นงานระดับหัวหน้ากะ
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async undoCheckOut(
+    @Param('id') id: string,
+    @Body() undoDto: UndoCheckOutDto,
+    @CurrentUser() user: { tenantId?: string; id?: string },
+  ) {
+    return this.bookingsService.undoCheckOut(id, user?.tenantId, user?.id, undoDto?.reason);
   }
 
   @Post('admin/backfill-journal-entries')

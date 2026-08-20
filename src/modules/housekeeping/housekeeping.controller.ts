@@ -23,6 +23,7 @@ import {
 import { HousekeepingService } from './housekeeping.service';
 import { CreateHousekeepingTaskDto } from './dto/create-housekeeping-task.dto';
 import { UpdateHousekeepingTaskDto } from './dto/update-housekeeping-task.dto';
+import { CancelHousekeepingTaskDto } from './dto/cancel-housekeeping-task.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
@@ -179,6 +180,39 @@ export class HousekeepingController {
     const task = await this.housekeepingService.updateTask(
       id,
       updateHousekeepingTaskDto,
+      user?.tenantId,
+    );
+
+    return {
+      success: true,
+      data: task,
+    };
+  }
+
+  @Patch(':id/cancel')
+  @Throttle({ default: { limit: 20, ttl: 60 } })
+  @ApiOperation({ summary: 'Cancel a housekeeping task (soft — keeps the record)' })
+  @ApiParam({ name: 'id', description: 'Task ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Housekeeping task cancelled',
+    schema: {
+      example: {
+        success: true,
+        data: { id: 'task-123', status: 'cancelled' },
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'Task has already been cancelled' })
+  @ApiResponse({ status: 429, description: 'Too many requests' })
+  async cancelTask(
+    @Param('id') id: string,
+    @Body() cancelTaskDto: CancelHousekeepingTaskDto,
+    @CurrentUser() user?: any,
+  ): Promise<any> {
+    const task = await this.housekeepingService.cancelTask(
+      id,
+      cancelTaskDto?.reason,
       user?.tenantId,
     );
 

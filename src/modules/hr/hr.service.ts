@@ -11,6 +11,42 @@ import { HrLifecycleAssignmentService } from './hr-lifecycle-assignment.service'
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { Prisma } from '@prisma/client';
+import { StaffService } from '../staff/staff.service';
+
+/**
+ * ตำแหน่งบนทะเบียนพนักงานปฏิบัติการ เดาจากรหัสแผนกของ HR
+ *
+ * ENG (วิศวกรรม) และแผนกที่ชื่อสื่อถึงงานช่าง → ช่างซ่อมบำรุง
+ * นอกนั้น (HK ฯลฯ) → แม่บ้าน
+ */
+function inferStaffRoleFromDepartment(code?: string | null, name?: string | null): 'housekeeper' | 'technician' {
+  const c = (code ?? '').toUpperCase();
+  if (c === 'ENG' || c === 'MAINT' || c === 'MAINTENANCE') return 'technician';
+  const n = (name ?? '').toLowerCase();
+  if (n.includes('engineer') || n.includes('maintenance') || n.includes('วิศวกรรม')) {
+    return 'technician';
+  }
+  return 'housekeeper';
+}
+
+/** แผนกที่ปกติแล้วมีหน้างานในโรงแรม — ใช้เป็นค่าตั้งต้นของการนำเข้าแบบยกชุด */
+const OPERATIONAL_DEPARTMENT_CODES = ['HK', 'ENG'];
+
+/** สถานะพนักงาน HR ที่ถือว่ายังทำงานอยู่ — คนที่ลาออก/พ้นสภาพต้องไม่ถูกนำเข้า */
+const EMPLOYABLE_STATUSES = ['ACTIVE', 'PROBATION'];
+
+export interface BulkCreateStaffOptions {
+  /** เจาะจงรายคน — ถ้าส่งมา จะไม่สนใจตัวกรองแผนก */
+  employeeIds?: string[];
+  /** กรองตามแผนก HR (id) — ไม่ส่ง = ใช้แผนกปฏิบัติการตั้งต้น (HK, ENG) */
+  departmentIds?: string[];
+  /** true = ไม่กรองแผนกเลย นำเข้าทุกคนที่ยังทำงานอยู่ */
+  allDepartments?: boolean;
+  /** บังคับตำแหน่งเดียวกันทุกคน — ไม่ส่ง = เดาจากแผนกรายคน */
+  role?: 'housekeeper' | 'technician';
+  /** true = รวมคนที่พ้นสภาพแล้วด้วย (ปกติไม่ควรใช้) */
+  includeInactive?: boolean;
+}
 
 @Injectable()
 export class HrService {
@@ -20,6 +56,7 @@ export class HrService {
     private prisma: PrismaService,
     private employeeCodeConfigService: EmployeeCodeConfigService,
     private hrLifecycleAssignmentService: HrLifecycleAssignmentService,
+    private staffService: StaffService,
   ) {}
 
   async findAll(query: any, tenantId?: string) {
@@ -340,87 +377,81 @@ export class HrService {
 
     const employee = await this.findOne(employeeId, tenantId);
 
-    // Resolve role and department: caller-supplied > inferred from employee dept code > defaults
-    const resolvedRole = dto?.role ?? 'housekeeper';
+    // ตำแหน่ง/แผนก: ผู้เรียกระบุมาก่อน → เดาจากแผนก HR ของพนักงาน → แม่บ้าน
+    const resolvedRole =
+      dto?.role ??
+      inferStaffRoleFromDepartment(
+        (employee as any).hrDepartment?.code,
+        (employee as any).hrDepartment?.name ?? (employee as any).department,
+      );
     const resolvedDepartment =
       dto?.department ?? (resolvedRole === 'technician' ? 'maintenance' : 'housekeeping');
 
-    try {
-      // Atomic: guard check + Staff creation in a single transaction.
-      // If the DB fails mid-way, Prisma rolls back automatically.
-      const staff = await this.prisma.$transaction(async (tx) => {
-        // Re-check inside transaction to prevent race conditions
-        const existingStaff = await (tx.staff as any).findUnique({
-          where: { employeeId },
-        });
-        if (existingStaff) {
-          throw new ConflictException(
-            `Employee ${employeeId} already has a linked Staff record (${existingStaff.id})`,
-          );
-        }
+    // ไปทางเดียวกับการเพิ่มพนักงานเองในหน้าแม่บ้าน — ถ้ามีแถวของคนนี้อยู่แล้ว
+    // (เพิ่มไว้ตอนยังไม่ได้เชื่อม HR) จะถูกผูกให้ ไม่สร้างซ้ำ
+    const { staff, action } = await this.staffService.provision(
+      {
+        firstName: employee.firstName,
+        lastName: employee.lastName,
+        email: employee.email,
+        phone: (employee as any).phone ?? null,
+        role: resolvedRole,
+        department: resolvedDepartment,
+        employeeCode: (employee as any).employeeCode ?? null,
+        employeeId: employee.id,
+      },
+      tenantId,
+    );
 
-        return (tx.staff as any).create({
-          data: {
-            tenantId,
-            firstName: employee.firstName,
-            lastName: employee.lastName,
-            email: employee.email,
-            employeeCode: (employee as any).employeeCode ?? undefined,
-            department: resolvedDepartment,
-            role: resolvedRole,
-            status: 'active',
-            employeeId: employee.id,
-          },
-        });
-      });
-
-      this.logger.log(
-        `Staff ${staff.id} (${resolvedRole}) created and linked to Employee ${employee.id} (tenant: ${tenantId})`,
+    if (action === 'existing') {
+      throw new ConflictException(
+        `Employee ${employeeId} already has a linked Staff record (${staff.id})`,
       );
-
-      return {
-        success: true,
-        data: staff,
-        linkedEmployee: {
-          id: employee.id,
-          firstName: employee.firstName,
-          lastName: employee.lastName,
-          email: employee.email,
-        },
-      };
-    } catch (error: unknown) {
-      // Re-throw NestJS HTTP exceptions (ConflictException, NotFoundException, etc.) directly
-      if (
-        error instanceof ConflictException ||
-        error instanceof BadRequestException ||
-        error instanceof NotFoundException
-      ) {
-        throw error;
-      }
-      this.logger.error(
-        `Transaction rolled back — failed to create Staff from Employee ${employeeId}: ${(error as Error).message}`,
-      );
-      throw error;
     }
+
+    this.logger.log(
+      `Staff ${staff.id} (${resolvedRole}) ${action} for Employee ${employee.id} (tenant: ${tenantId})`,
+    );
+
+    return {
+      success: true,
+      data: staff,
+      action,
+      linkedEmployee: {
+        id: employee.id,
+        firstName: employee.firstName,
+        lastName: employee.lastName,
+        email: employee.email,
+      },
+    };
   }
 
   /**
-   * Bulk create Staff records for all HR employees that are not yet linked.
-   * Safe to run multiple times — already-linked employees are skipped.
+   * นำพนักงาน HR ขึ้นทะเบียนพนักงานปฏิบัติการทีเดียวหลายคน
    *
-   * Each employee's creation is wrapped in its own Prisma transaction so a failure
-   * for one employee does not affect others (partial-success is intentional here).
-   * The per-item transaction also prevents races: the linked-check and create are
-   * atomic for each employee.
+   * ของเดิมกวาด "พนักงานทุกคนใน tenant" แล้วยัดตำแหน่ง housekeeper /
+   * แผนก housekeeping ให้ทุกคนแบบตายตัว โรงแรมที่มีพนักงาน 54 คนจึงได้แม่บ้าน
+   * 54 คน รวมทั้งฝ่ายบัญชี ฝ่ายขาย และผู้บริหาร — ตอนนี้:
+   *  • ตั้งต้นเฉพาะแผนกที่มีหน้างานจริง (HK, ENG) ผู้เรียกขยายเองได้
+   *  • ตำแหน่งเดาจากแผนกรายคน (ENG → ช่าง, นอกนั้น → แม่บ้าน)
+   *  • ข้ามคนที่พ้นสภาพแล้ว
+   *  • คนที่มีอยู่บนทะเบียนแล้วจะถูก "ผูก" ไม่ใช่สร้างซ้ำ
+   *
+   * ยังคงเรียกซ้ำได้ปลอดภัย (idempotent) — คนที่ผูกแล้วจะถูกข้าม
    */
-  async bulkCreateStaffFromEmployees(tenantId: string): Promise<{
+  async bulkCreateStaffFromEmployees(
+    tenantId: string,
+    options: BulkCreateStaffOptions = {},
+  ): Promise<{
     created: number;
+    linked: number;
     skipped: number;
     results: Array<{
       employeeId: string;
       employeeName: string;
       staffId?: string;
-      status: 'created' | 'skipped';
+      status: 'created' | 'linked' | 'skipped';
+      role?: string;
       reason?: string;
     }>;
   }> {
@@ -428,61 +459,87 @@ export class HrService {
       throw new BadRequestException('Tenant ID is required');
     }
 
-    // Fetch all employees for this tenant (server-side check, not client-side)
+    const where: Prisma.EmployeeWhereInput = { tenantId };
+
+    if (options.employeeIds?.length) {
+      where.id = { in: options.employeeIds };
+    } else if (options.departmentIds?.length) {
+      where.departmentId = { in: options.departmentIds };
+    } else if (!options.allDepartments) {
+      // ค่าตั้งต้น: เฉพาะแผนกที่มีหน้างานในโรงแรม
+      where.hrDepartment = { code: { in: OPERATIONAL_DEPARTMENT_CODES } };
+    }
+
+    if (!options.includeInactive) {
+      where.status = { in: EMPLOYABLE_STATUSES };
+    }
+
     const employees = await this.prisma.employee.findMany({
-      where: { tenantId },
+      where,
+      include: { hrDepartment: true },
     });
 
     const results: Array<{
       employeeId: string;
       employeeName: string;
       staffId?: string;
-      status: 'created' | 'skipped';
+      status: 'created' | 'linked' | 'skipped';
+      role?: string;
       reason?: string;
     }> = [];
     let created = 0;
+    let linked = 0;
     let skipped = 0;
 
     for (const employee of employees) {
       const employeeName = `${employee.firstName} ${employee.lastName}`;
 
       try {
-        // Each employee gets its own transaction:
-        // - If the employee is already linked → ConflictException is caught below → skipped
-        // - If create fails mid-way → transaction rolls back automatically → no orphan record
-        const staff = await this.prisma.$transaction(async (tx) => {
-          // Atomic guard: check + create (prevents duplicate on concurrent calls)
-          const existingStaff = await (tx.staff as any).findUnique({
-            where: { employeeId: employee.id },
-          });
-          if (existingStaff) {
-            throw new ConflictException(`Already linked to Staff record ${existingStaff.id}`);
-          }
+        const role =
+          options.role ??
+          inferStaffRoleFromDepartment(
+            (employee as any).hrDepartment?.code,
+            (employee as any).hrDepartment?.name ?? employee.department,
+          );
 
-          return (tx.staff as any).create({
-            data: {
-              tenantId,
-              firstName: employee.firstName,
-              lastName: employee.lastName,
-              email: employee.email,
-              employeeCode: (employee as any).employeeCode ?? undefined,
-              department: 'housekeeping',
-              role: 'housekeeper',
-              status: 'active',
-              employeeId: employee.id,
-            },
+        const { staff, action } = await this.staffService.provision(
+          {
+            firstName: employee.firstName,
+            lastName: employee.lastName,
+            email: employee.email,
+            phone: employee.phone ?? null,
+            role,
+            department: role === 'technician' ? 'maintenance' : 'housekeeping',
+            employeeCode: employee.employeeCode ?? null,
+            employeeId: employee.id,
+          },
+          tenantId,
+        );
+
+        if (action === 'existing') {
+          results.push({
+            employeeId: employee.id,
+            employeeName,
+            staffId: staff.id,
+            status: 'skipped',
+            reason: 'Already linked to a Staff record',
           });
-        });
+          skipped++;
+          continue;
+        }
 
         results.push({
           employeeId: employee.id,
           employeeName,
           staffId: staff.id,
-          status: 'created',
+          status: action,
+          role,
         });
-        created++;
+        if (action === 'created') created++;
+        else linked++;
+
         this.logger.log(
-          `Bulk sync: Staff ${staff.id} created and linked to Employee ${employee.id}`,
+          `Bulk sync: Staff ${staff.id} ${action} for Employee ${employee.id} (role=${role})`,
         );
       } catch (error: unknown) {
         const reason =
@@ -496,19 +553,16 @@ export class HrService {
         skipped++;
 
         if (!(error instanceof ConflictException)) {
-          // Unexpected error (not a duplicate) — transaction already rolled back
-          this.logger.warn(
-            `Bulk sync: transaction rolled back for Employee ${employee.id} — ${reason}`,
-          );
+          this.logger.warn(`Bulk sync: skipped Employee ${employee.id} — ${reason}`);
         }
       }
     }
 
     this.logger.log(
-      `Bulk Staff sync complete for tenant ${tenantId}: ${created} created, ${skipped} skipped`,
+      `Bulk sync finished for tenant ${tenantId}: created=${created} linked=${linked} skipped=${skipped}`,
     );
 
-    return { created, skipped, results };
+    return { created, linked, skipped, results };
   }
 
   // ─── Private helpers ────────────────────────────────────────────────────────
