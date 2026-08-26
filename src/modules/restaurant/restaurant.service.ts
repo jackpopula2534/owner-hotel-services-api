@@ -115,6 +115,9 @@ export class RestaurantService {
     }
 
     const { layoutData, ...rest } = createRestaurantDto;
+    // ฟอร์มที่ไม่ได้เลือกคลังส่ง '' มา — ต้องแปลว่า "ไม่ผูก" ไม่ใช่ปล่อยไปชน FK เป็น 500
+    if (rest.warehouseId === '') rest.warehouseId = null;
+    await this.assertWarehouse(tenantId, rest.warehouseId);
 
     try {
       return await (this.prisma.restaurant as any).create({
@@ -162,6 +165,8 @@ export class RestaurantService {
     await this.findOne(id, tenantId);
 
     const { layoutData, ...rest } = updateRestaurantDto;
+    if (rest.warehouseId === '') rest.warehouseId = null;
+    await this.assertWarehouse(tenantId, rest.warehouseId);
 
     return this.prisma.restaurant.update({
       where: { id },
@@ -170,6 +175,32 @@ export class RestaurantService {
         ...(layoutData !== undefined && { layoutData: layoutData as any }),
       },
     });
+  }
+
+  /**
+   * คลังต้นทางต้องเป็นคลังของ tenant นี้เท่านั้น
+   *
+   * ถ้าปล่อยให้ตั้งเป็น id ที่ไม่ใช่ของตัวเอง การตัดสต๊อกตอนปิดบิลจะเงียบ ๆ
+   * ตกไปใช้คลังสำรองแทน (มีการตรวจ tenant อีกชั้นที่นั่น) แล้วคนตั้งค่าจะไม่รู้เลย
+   * ว่าที่ตั้งไว้ไม่มีผล — จึงต้องด่าตั้งแต่ตอนบันทึก
+   */
+  private async assertWarehouse(
+    tenantId: string | undefined,
+    warehouseId?: string | null,
+  ): Promise<void> {
+    if (!warehouseId) return;
+    // ไม่มี tenant = ตรวจความเป็นเจ้าของไม่ได้ ต้องปฏิเสธ ไม่ใช่ปล่อยผ่านให้ชนคลังของคนอื่น
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
+    const warehouse = await this.prisma.warehouse.findFirst({
+      where: { id: warehouseId, tenantId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!warehouse) {
+      throw new BadRequestException('ไม่พบคลังสินค้าที่เลือก');
+    }
   }
 
   async remove(id: string, tenantId?: string) {

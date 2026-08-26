@@ -514,26 +514,6 @@ export class SeederService {
         ],
       },
       {
-        moduleCode: 'HOUSEKEEPING_MODULE',
-        category: 'HOUSEKEEPING',
-        icon: 'Sparkles',
-        features: [
-          { code: 'hk_task_assignment', name: 'มอบหมายงานแม่บ้าน', description: 'สร้างและมอบหมายงานทำความสะอาดห้องให้ทีมแม่บ้าน' },
-          { code: 'room_inspection', name: 'ตรวจห้อง', description: 'เช็กลิสต์ตรวจห้องหลังทำความสะอาด อนุมัติห้องพร้อมขาย' },
-          { code: 'room_status_realtime', name: 'สถานะห้อง real-time', description: 'ติดตามสถานะห้อง (ว่าง/กำลังทำ/พร้อมขาย/ซ่อม) แบบ real-time' },
-        ],
-      },
-      {
-        moduleCode: 'MAINTENANCE_MODULE',
-        category: 'MAINTENANCE',
-        icon: 'Wrench',
-        features: [
-          { code: 'maintenance_ticket', name: 'ใบแจ้งซ่อม', description: 'แจ้งซ่อม/งานบำรุงรักษา ติดตามสถานะ มอบหมายช่าง' },
-          { code: 'preventive_schedule', name: 'Preventive Schedule', description: 'ตารางบำรุงรักษาเชิงป้องกันตามรอบเวลา แจ้งเตือนล่วงหน้า' },
-          { code: 'asset_register', name: 'Asset Register', description: 'ทะเบียนสินทรัพย์/อุปกรณ์ พร้อม QR code และประวัติการซ่อม' },
-        ],
-      },
-      {
         moduleCode: 'INVENTORY_MODULE',
         category: 'INVENTORY',
         icon: 'Package',
@@ -552,6 +532,14 @@ export class SeederService {
           { code: 'leave_management', name: 'การลา', description: 'ระบบขอลา อนุมัติลา และยอดวันลาคงเหลือ' },
           { code: 'hr_kpi', name: 'KPI', description: 'ประเมินผลงานพนักงานด้วย KPI template' },
           { code: 'gov_documents', name: 'เอกสารราชการ', description: 'จัดทำเอกสารราชการ (ภ.ง.ด. ประกันสังคม ฯลฯ)' },
+          // งานแม่บ้าน/แจ้งซ่อมเป็นการจัดการ "คน" ของแผนกปฏิบัติการ จึงอยู่ในระบบ HR
+          // (เดิมแยกขายเป็น HOUSEKEEPING_MODULE / MAINTENANCE_MODULE ซึ่งถอดออกจาก catalog แล้ว)
+          { code: 'hk_task_assignment', name: 'มอบหมายงานแม่บ้าน', description: 'สร้างและมอบหมายงานทำความสะอาดห้องให้ทีมแม่บ้าน' },
+          { code: 'room_inspection', name: 'ตรวจห้อง', description: 'เช็กลิสต์ตรวจห้องหลังทำความสะอาด อนุมัติห้องพร้อมขาย' },
+          { code: 'room_status_realtime', name: 'สถานะห้อง real-time', description: 'ติดตามสถานะห้อง (ว่าง/กำลังทำ/พร้อมขาย/ซ่อม) แบบ real-time' },
+          { code: 'maintenance_ticket', name: 'ใบแจ้งซ่อม', description: 'แจ้งซ่อม/งานบำรุงรักษา ติดตามสถานะ มอบหมายช่าง' },
+          { code: 'preventive_schedule', name: 'Preventive Schedule', description: 'ตารางบำรุงรักษาเชิงป้องกันตามรอบเวลา แจ้งเตือนล่วงหน้า' },
+          { code: 'asset_register', name: 'Asset Register', description: 'ทะเบียนสินทรัพย์/อุปกรณ์ พร้อม QR code และประวัติการซ่อม' },
         ],
       },
       {
@@ -668,37 +656,9 @@ export class SeederService {
         isActive: true,
       },
 
-      // ─── HOUSEKEEPING (โรงแรมเท่านั้น) ─────────────────────
-      {
-        code: 'HOUSEKEEPING_MODULE',
-        name: 'Housekeeping Module',
-        system: 'HOTEL',
-        description: 'ระบบจัดการแม่บ้าน: มอบหมายงาน, ตรวจห้อง, รายงานสภาพห้องแบบ real-time',
-        price: 590,
-        billingCycle: AddonBillingCycle.MONTHLY,
-        category: 'HOUSEKEEPING',
-        icon: 'Sparkles',
-        displayOrder: 210,
-        minQuantity: 1,
-        maxQuantity: 1,
-        isActive: true,
-      },
-
-      // ─── MAINTENANCE ──────────────────────────────────────
-      {
-        code: 'MAINTENANCE_MODULE',
-        name: 'Maintenance Module',
-        system: 'BOTH',
-        description: 'ระบบบำรุงรักษา: ใบแจ้งซ่อม, preventive schedule, asset register, QR code',
-        price: 490,
-        billingCycle: AddonBillingCycle.MONTHLY,
-        category: 'MAINTENANCE',
-        icon: 'Sparkles',
-        displayOrder: 310,
-        minQuantity: 1,
-        maxQuantity: 1,
-        isActive: true,
-      },
+      // HOUSEKEEPING_MODULE / MAINTENANCE_MODULE ถูกถอดออกจาก catalog แล้ว
+      // งานแม่บ้านและงานแจ้งซ่อมเป็นความสามารถของ HR_MODULE ไม่ขายแยก
+      // (ลบแถวเดิมในฐานข้อมูลด้วย migration 20260826060000)
 
       // ─── INVENTORY (รวม จัดซื้อ + คลัง + Retail POS) ───────
       {
@@ -723,7 +683,7 @@ export class SeederService {
         name: 'HR Module',
         system: 'BOTH',
         description:
-          'ระบบ HR ครบวงจร: จัดการพนักงาน เงินเดือน การลา KPI เอกสารราชการ และเชื่อมข้อมูลทีมแม่บ้าน/ช่าง',
+          'ระบบ HR ครบวงจร: จัดการพนักงาน เงินเดือน การลา KPI เอกสารราชการ รวมถึงงานแม่บ้านและใบแจ้งซ่อม',
         price: 1200,
         billingCycle: AddonBillingCycle.MONTHLY,
         category: 'HR',
@@ -938,11 +898,10 @@ export class SeederService {
     ).add_ons;
     const findAddon = async (code: string) => addOnsClient.findUnique({ where: { code } });
 
-    // 7 sellable modules (POS/Loyalty/USALI ถูกยุบเข้า Restaurant/CRM/Accounting แล้ว)
+    // 5 sellable modules (POS/Loyalty/USALI ยุบเข้า Restaurant/CRM/Accounting,
+    //  Housekeeping/Maintenance ยุบเข้า HR)
     const restaurantModule = await findAddon('RESTAURANT_MODULE');
     const hrModule = await findAddon('HR_MODULE');
-    const housekeepingModule = await findAddon('HOUSEKEEPING_MODULE');
-    const maintenanceModule = await findAddon('MAINTENANCE_MODULE');
     const inventoryModule = await findAddon('INVENTORY_MODULE');
     const accountingModule = await findAddon('ACCOUNTING_MODULE');
     const crmModule = await findAddon('CRM_MODULE');
@@ -951,8 +910,6 @@ export class SeederService {
     const allHotelModules = [
       restaurantModule,
       hrModule,
-      housekeepingModule,
-      maintenanceModule,
       inventoryModule,
       accountingModule,
       crmModule,
@@ -961,7 +918,6 @@ export class SeederService {
     const campApplicableModules = [
       restaurantModule,
       hrModule,
-      maintenanceModule,
       inventoryModule,
       accountingModule,
       crmModule,
@@ -973,18 +929,14 @@ export class SeederService {
     // ("ฟีเจอร์ครบทุกระบบ" ของแผน FREE หมายถึงครบทุกระบบ *ของโรงแรม*)
     await this.assignPlanAddons(planFree?.id, allHotelModules);
 
-    // Starter — Housekeeping
-    await this.assignPlanAddons(planS?.id, [housekeepingModule]);
+    // Starter — ไม่มี module add-on แถม (เดิมแถม Housekeeping ซึ่งยุบเข้า HR แล้ว)
+    // ยังไม่ผูก HR ให้แทน เพราะเป็นการตัดสินใจเรื่องราคา ไม่ใช่การย้ายโมดูล
 
-    // Professional — Housekeeping + Maintenance + Restaurant (POS+Kitchen) + CRM (รวม Loyalty)
-    await this.assignPlanAddons(planM?.id, [
-      housekeepingModule,
-      maintenanceModule,
-      restaurantModule,
-      crmModule,
-    ]);
+    // Professional — Restaurant (POS+Kitchen) + CRM (รวม Loyalty)
+    // งานแม่บ้าน/แจ้งซ่อมไม่อยู่ในนี้แล้ว — เป็นความสามารถของ HR_MODULE
+    await this.assignPlanAddons(planM?.id, [restaurantModule, crmModule]);
 
-    // Business — ครบทั้ง 7 module ของโรงแรม (รวม Inventory + HR + Accounting/USALI)
+    // Business — ครบทุก module ของโรงแรม (รวม Inventory + HR + Accounting/USALI)
     await this.assignPlanAddons(planL?.id, allHotelModules);
 
     // ── ลานกางเต็นท์ ────────────────────────────────────────
@@ -5412,6 +5364,71 @@ export class SeederService {
           },
         ],
       },
+      {
+        // ของสำเร็จรูป: หยิบจากตู้ ไม่ผ่านครัว และนับสต๊อกในตัวเมนูเอง
+        // (โหมดนี้ใช้ได้โดยไม่ต้องซื้อ INVENTORY_MODULE — ร้านที่ซื้อแล้วค่อยย้ายไป
+        // ผูก inventoryItemId ให้คลังกลางเป็นเจ้าของยอดแทน)
+        name: 'ของสำเร็จรูป & ของทานเล่น',
+        description: 'น้ำดื่ม เครื่องดื่มกระป๋อง ไอศกรีม ขนม — หยิบเสิร์ฟได้ทันที',
+        displayOrder: 6,
+        revenueType: RevenueType.RETAIL_GOODS,
+        items: [
+          {
+            name: 'น้ำดื่ม 600 มล.',
+            description: 'น้ำดื่มบรรจุขวด',
+            price: 20,
+            cost: 7,
+            preparationTime: 0,
+            isVegetarian: true,
+            isVegan: true,
+            isGlutenFree: true,
+            isAvailable: true,
+            itemKind: 'READY_MADE',
+            trackStock: true,
+            stockQty: 120,
+            lowStockThreshold: 24,
+          },
+          {
+            name: 'โค้กกระป๋อง',
+            description: 'น้ำอัดลมกระป๋อง 325 มล. แช่เย็น',
+            price: 30,
+            cost: 14,
+            preparationTime: 0,
+            isVegetarian: true,
+            isAvailable: true,
+            itemKind: 'READY_MADE',
+            trackStock: true,
+            stockQty: 72,
+            lowStockThreshold: 12,
+          },
+          {
+            name: 'ไอศกรีมแท่ง',
+            description: 'ไอศกรีมแท่งจากตู้แช่หน้าร้าน',
+            price: 35,
+            cost: 18,
+            preparationTime: 0,
+            isVegetarian: true,
+            isAvailable: true,
+            itemKind: 'READY_MADE',
+            trackStock: true,
+            stockQty: 48,
+            lowStockThreshold: 10,
+          },
+          {
+            name: 'ขนมถุง',
+            description: 'ขนมขบเคี้ยวบรรจุถุง',
+            price: 25,
+            cost: 12,
+            preparationTime: 0,
+            isVegetarian: true,
+            isAvailable: true,
+            itemKind: 'READY_MADE',
+            trackStock: true,
+            stockQty: 60,
+            lowStockThreshold: 12,
+          },
+        ],
+      },
     ];
 
     let categoryCount = 0;
@@ -5433,7 +5450,7 @@ export class SeederService {
 
       for (let i = 0; i < catData.items.length; i++) {
         const item = catData.items[i];
-        await this.prisma.menuItem.create({
+        const created = await this.prisma.menuItem.create({
           data: {
             tenantId,
             restaurantId: mainRestaurant.id,
@@ -5449,8 +5466,32 @@ export class SeederService {
             spicyLevel: (item as any).spicyLevel ?? null,
             isAvailable: item.isAvailable,
             displayOrder: i + 1,
+            itemKind: (item as any).itemKind ?? 'COOKED',
+            // ของสำเร็จรูปต้องมีต้นทุน ไม่งั้นรายงานกำไรอ่านเป็น 100% ทุกตัว
+            cost: (item as any).cost ?? null,
+            trackStock: (item as any).trackStock ?? false,
+            stockQty: (item as any).stockQty ?? 0,
+            lowStockThreshold: (item as any).lowStockThreshold ?? null,
           },
         });
+
+        // ยอดยกมาต้องมีบรรทัดในสมุดเดินสต๊อก ไม่งั้นหน้าประวัติจะโชว์ยอดที่อธิบายที่มาไม่ได้
+        if (created.trackStock && created.stockQty > 0) {
+          await this.prisma.menuItemStockMovement.create({
+            data: {
+              tenantId,
+              menuItemId: created.id,
+              type: 'OPENING',
+              quantity: created.stockQty,
+              balanceAfter: created.stockQty,
+              unitCost: created.cost ?? undefined,
+              referenceType: 'manual',
+              note: 'ยอดยกมาตอนเปิดร้าน (ข้อมูลตัวอย่าง)',
+              createdBy: 'seeder',
+            },
+          });
+        }
+
         itemCount++;
       }
     }
@@ -7049,11 +7090,32 @@ export class SeederService {
       'RT-MAGNET-MV': 120,
     };
 
+    // ราคาขายหน้าร้านของสินค้าสำเร็จรูป — ใช้ตั้งราคาเมนูตอนกด "สร้างเป็นเมนู"
+    // และเป็นตัวตั้งกำไรต่อชิ้นบนหน้า "สินค้าหน้าร้าน"
+    //
+    // ของฝากสองตัว (RT-POSTCARD-MV / RT-MAGNET-MV) จงใจไม่ตั้งราคา เพื่อให้ตัวนับ
+    // "ยังไม่ได้ตั้งราคาขาย" มีของให้ชี้จริง ไม่ใช่ศูนย์ตลอดเวลา
+    const retailSellingPriceBySku: Record<string, number> = {
+      'RT-WATER-600': 20,
+      'RT-SPARKLING-LEMON': 35,
+      'RT-ICED-TEA': 40,
+      'RT-CHIPS-SALT': 35,
+      'RT-NUTS-CASHEW': 60,
+      'RT-COOKIE-BOX': 90,
+      'RT-TOOTHBRUSH': 30,
+      'RT-TOOTHPASTE': 40,
+      'RT-RAINCOAT': 50,
+      'RT-REPELLENT': 90,
+    };
+
     const itemMap: Record<string, string> = {};
     let itemCount = 0;
     for (const item of itemDefs) {
       const catId = categoryMap[item.catCode];
       const maxStock = maxStockBySku[item.sku] ?? null;
+      // ของในหมวดร้านค้าคือของที่หยิบขายได้เลย ที่เหลือเป็นวัตถุดิบ/ของใช้ภายใน
+      const itemType = item.catCode.startsWith('CAT-RETAIL') ? 'FINISHED_GOOD' : 'RAW_MATERIAL';
+      const sellingPrice = retailSellingPriceBySku[item.sku] ?? null;
       const existing = await this.prisma.inventoryItem.findFirst({
         where: { tenantId, sku: item.sku },
       });
@@ -7066,6 +7128,8 @@ export class SeederService {
             name: item.name,
             categoryId: catId,
             unit: item.unit as any,
+            itemType: itemType as any,
+            sellingPrice,
             costMethod: item.costMethod as any,
             reorderPoint: item.reorderPoint,
             reorderQty: item.reorderQty,
@@ -7087,6 +7151,14 @@ export class SeederService {
           await this.prisma.inventoryItem.update({
             where: { id: itemId },
             data: { maxStock },
+          });
+        }
+        // เดิมทุกแถวเป็น RAW_MATERIAL ตาม default ของ migration — ซีดซ้ำโดยไม่ล้าง DB
+        // ต้องเลื่อนของหมวดร้านค้าขึ้นเป็นของสำเร็จรูป ไม่งั้นหน้า "สินค้าหน้าร้าน" ว่างเปล่า
+        if (existing.itemType !== itemType || (sellingPrice != null && existing.sellingPrice == null)) {
+          await this.prisma.inventoryItem.update({
+            where: { id: itemId },
+            data: { itemType: itemType as any, sellingPrice: sellingPrice ?? undefined },
           });
         }
       }

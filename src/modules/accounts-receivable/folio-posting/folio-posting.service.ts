@@ -64,6 +64,10 @@ export interface ChargeableRoom {
   guestName: string;
   bookingId: string;
   status: string;
+  /** ห้องจริงที่ผูกกับการจองนี้ — เลขห้องเป็นข้อความที่ถูกเปลี่ยนทีหลังได้ ประวัติจึงต้องยึด id */
+  roomId: string;
+  /** สาขาของห้อง — ฝั่งมินิบาร์ใช้หาคลังมินิบาร์ของสาขานั้นต่อ */
+  propertyId: string;
 }
 
 export interface PostedFolioCharge {
@@ -265,9 +269,10 @@ export class FolioPostingService {
       select: {
         id: true,
         status: true,
+        propertyId: true,
         guestFirstName: true,
         guestLastName: true,
-        room: { select: { number: true } },
+        room: { select: { id: true, number: true, propertyId: true } },
         guest: { select: { firstName: true, lastName: true } },
       },
       orderBy: { room: { number: 'asc' } },
@@ -285,6 +290,8 @@ export class FolioPostingService {
             .trim() || '-',
         bookingId: b.id,
         status: b.status,
+        roomId: b.room!.id,
+        propertyId: b.room!.propertyId,
       }));
   }
 

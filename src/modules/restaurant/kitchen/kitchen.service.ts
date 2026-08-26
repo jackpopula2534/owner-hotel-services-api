@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, Logger } from '@nes
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogService } from '../../../audit-log/audit-log.service';
 import { OrderItemStatus, KitchenPriority } from '@prisma/client';
+import { MenuStockService } from '../menu/menu-stock.service';
 
 @Injectable()
 export class KitchenService {
@@ -10,6 +11,7 @@ export class KitchenService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLogService: AuditLogService,
+    private readonly menuStockService: MenuStockService,
   ) {}
 
   // ─── Kitchen Queue ────────────────────────────────────────────────────────
@@ -166,9 +168,22 @@ export class KitchenService {
     if (status === 'READY') timestamps.preparedAt = now;
     if (status === 'SERVED') timestamps.servedAt = now;
 
-    const updated = await this.prisma.orderItem.update({
-      where: { id: itemId },
-      data: { status, ...timestamps },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      // ครัวยกเลิกรายการที่ของถูกหยิบออกไปแล้ว (ของสำเร็จรูปหักตอนสั่ง) ต้องคืนเข้าสต๊อก
+      // ไม่งั้นยอดหายทั้งที่ของไม่เคยออกจากร้าน
+      if (status === 'CANCELLED') {
+        await this.menuStockService.returnPlacedLines(tx, {
+          tenantId,
+          restaurantId,
+          orderId: item.orderId,
+          orderItemIds: [itemId],
+          userId,
+        });
+      }
+      return tx.orderItem.update({
+        where: { id: itemId },
+        data: { status, ...timestamps },
+      });
     });
 
     this.auditLogService.log({

@@ -1,6 +1,12 @@
 import { randomUUID } from 'crypto';
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { Prisma, RetailPaymentMethod, RevenueSourceModule } from '@prisma/client';
+import {
+  FolioChargeType,
+  Prisma,
+  RetailPaymentMethod,
+  RetailSaleChannel,
+  RevenueSourceModule,
+} from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
 import { daysOfMonth, shiftDate, toBangkokDate } from '@/common/utils/bangkok-day.util';
 import {
@@ -32,6 +38,28 @@ function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
 
+/**
+ * ช่องทางที่เรียกใช้ท่อขายนี้ — ตัดสต๊อก ออกใบเสร็จ ลงโฟลิโอ ลงสมุดรายได้ ใช้ของเดิมทั้งหมด
+ * ต่างกันแค่ป้ายบนใบเสร็จกับประเภทค่าใช้จ่ายที่ไปโผล่ในบิลแขก
+ *
+ * ตั้งใจไม่ให้มาจาก DTO — ฝั่งหน้าจอ POS ประกาศเองไม่ได้ว่า "ใบนี้เป็นมินิบาร์"
+ * ไม่งั้นยอดถูกย้ายข้ามช่องทางได้ด้วยการแก้ payload
+ */
+export interface RetailSaleOrigin {
+  channel: RetailSaleChannel;
+  /** ประเภทค่าใช้จ่ายที่จะไปขึ้นในโฟลิโอแขก */
+  folioChargeType: FolioChargeType;
+  /** คำอธิบายบนรายการในโฟลิโอ — แขกต้องอ่านออกว่าโดนคิดค่าอะไร */
+  describe: (receiptNo: string, roomNumber?: string | null) => string;
+  roomId?: string | null;
+}
+
+export const SHOP_ORIGIN: RetailSaleOrigin = {
+  channel: RetailSaleChannel.SHOP,
+  folioChargeType: FolioChargeType.OTHER,
+  describe: (receiptNo) => `ร้านค้า — ใบเสร็จ ${receiptNo}`,
+};
+
 @Injectable()
 export class RetailSalesService {
   private readonly logger = new Logger(RetailSalesService.name);
@@ -55,7 +83,12 @@ export class RetailSalesService {
    *
    * Money totals are recomputed server-side; the client's numbers are never trusted.
    */
-  async create(dto: CreateRetailSaleDto, userId: string, tenantId: string) {
+  async create(
+    dto: CreateRetailSaleDto,
+    userId: string,
+    tenantId: string,
+    channel: RetailSaleOrigin = SHOP_ORIGIN,
+  ) {
     // Validate the store/warehouse belongs to this tenant.
     const warehouse = await this.prisma.warehouse.findFirst({
       where: { id: dto.warehouseId, tenantId },
@@ -175,8 +208,8 @@ export class RetailSalesService {
             bookingId: dto.bookingId,
             roomNumber: dto.roomNumber,
             propertyId: warehouse.propertyId,
-            chargeType: 'OTHER',
-            description: `ร้านค้า — ใบเสร็จ ${receiptNo}`,
+            chargeType: channel.folioChargeType,
+            description: channel.describe(receiptNo, dto.roomNumber),
             netAmount: round2(taxable),
             vatRate,
             vatAmount,
@@ -193,7 +226,9 @@ export class RetailSalesService {
           tenantId,
           receiptNo,
           warehouseId: dto.warehouseId,
+          channel: channel.channel,
           paymentMethod: dto.paymentMethod,
+          roomId: channel.roomId ?? null,
           roomNumber: dto.roomNumber?.trim() || null,
           guestName: dto.guestName?.trim() || null,
           bookingId: posted?.bookingId ?? dto.bookingId ?? null,
@@ -239,6 +274,11 @@ export class RetailSalesService {
 
     const where: Prisma.RetailSaleWhereInput = { tenantId };
     if (query.warehouseId) where.warehouseId = query.warehouseId;
+    // ไม่กรองช่องทางโดยปริยาย — ประวัติที่ตัดยอดมินิบาร์ทิ้งเงียบ ๆ คือยอดที่หายไปจากหน้าจอ
+    // ให้ผู้เรียกระบุเองว่าจะดูช่องทางไหน แล้วทุกแถวติดป้ายช่องทางมาให้เห็น
+    if (query.channel) where.channel = query.channel;
+    if (query.bookingId) where.bookingId = query.bookingId;
+    if (query.roomId) where.roomId = query.roomId;
     if (query.paymentMethod) where.paymentMethod = query.paymentMethod;
     if (query.status) where.status = query.status;
     if (query.from || query.to) {
@@ -604,7 +644,9 @@ export class RetailSalesService {
     receiptNo: string;
     warehouseId: string;
     status: string;
+    channel?: string;
     paymentMethod: string;
+    roomId?: string | null;
     roomNumber: string | null;
     guestName: string | null;
     bookingId: string | null;
@@ -640,6 +682,8 @@ export class RetailSalesService {
       receiptNo: sale.receiptNo,
       warehouseId: sale.warehouseId,
       status: sale.status,
+      channel: sale.channel ?? RetailSaleChannel.SHOP,
+      roomId: sale.roomId ?? null,
       paymentMethod: sale.paymentMethod,
       roomNumber: sale.roomNumber,
       guestName: sale.guestName,

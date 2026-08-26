@@ -18,6 +18,7 @@ import { ConfigService } from '@nestjs/config';
 import { OrderService } from '../order.service';
 import { PrismaService } from '../../../../prisma/prisma.service';
 import { MenuService } from '../../menu/menu.service';
+import { menuStockProvider } from './menu-stock.stub';
 import { AuditLogService } from '../../../../audit-log/audit-log.service';
 import { FolioPostingService } from '@/modules/accounts-receivable/folio-posting/folio-posting.service';
 import { buildFolioPostingStub } from './folio-posting.stub';
@@ -210,6 +211,7 @@ describe('OrderService — outlet charge policy on a new bill', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: ConfigService, useValue: { get: () => 'http://localhost:9010' } },
         { provide: MenuService, useValue: {} },
+        menuStockProvider(),
         { provide: AuditLogService, useValue: { logOrderCreate: jest.fn() } },
         { provide: FolioPostingService, useValue: buildFolioPostingStub() },
         { provide: RevenuePostingService, useValue: buildRevenuePostingStub() },

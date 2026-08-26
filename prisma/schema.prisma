@@ -394,6 +394,11 @@ model Restaurant {
   serviceRate          Decimal           @default(10.00) @db.Decimal(5, 2)
   layoutData           Json?
   propertyId           String?
+  // Which warehouse this outlet draws retail stock from. A bottle of water sold
+  // at the lobby bar does not come out of the kitchen store, so the source is a
+  // per-outlet choice; null keeps the old behaviour (KITCHEN → default → any).
+  warehouseId          String?
+  warehouse            Warehouse?        @relation(fields: [warehouseId], references: [id])
   menuCategories       MenuCategory[]
   orders               Order[]
   tables               RestaurantTable[]
@@ -403,6 +408,7 @@ model Restaurant {
   @@unique([tenantId, code])
   @@index([tenantId])
   @@index([propertyId])
+  @@index([warehouseId])
   @@map("restaurants")
 }
 
@@ -499,43 +505,84 @@ model MenuCategory {
 }
 
 model MenuItem {
-  id              String          @id @default(uuid())
-  tenantId        String?
-  restaurantId    String
-  categoryId      String
-  name            String
-  description     String?         @db.Text
-  price           Decimal         @db.Decimal(10, 2)
-  cost            Decimal?        @db.Decimal(10, 2)
-  image           String?         @db.LongText
-  preparationTime Int?
-  calories        Int?
-  allergens       Json?
-  isVegetarian    Boolean         @default(false)
-  isVegan         Boolean         @default(false)
-  isGlutenFree    Boolean         @default(false)
-  isSpicy         Boolean         @default(false)
-  spicyLevel      Int?
-  isAvailable     Boolean         @default(true)
-  displayOrder    Int             @default(0)
+  id                String                  @id @default(uuid())
+  tenantId          String?
+  restaurantId      String
+  categoryId        String
+  name              String
+  description       String?                 @db.Text
+  price             Decimal                 @db.Decimal(10, 2)
+  cost              Decimal?                @db.Decimal(10, 2)
+  image             String?                 @db.LongText
+  preparationTime   Int?
+  calories          Int?
+  allergens         Json?
+  isVegetarian      Boolean                 @default(false)
+  isVegan           Boolean                 @default(false)
+  isGlutenFree      Boolean                 @default(false)
+  isSpicy           Boolean                 @default(false)
+  spicyLevel        Int?
+  isAvailable       Boolean                 @default(true)
+  displayOrder      Int                     @default(0)
+  /// COOKED = ต้องปรุง ส่งเข้าจอครัว · READY_MADE = สินค้าสำเร็จรูป หยิบเสิร์ฟได้เลย
+  /// ตัวเดียวที่ตัดสินว่ารายการนี้ขึ้นจอครัวไหม — ไม่ผูกกับการนับสต๊อก เพราะร้านที่
+  /// ขายน้ำขวดโดยไม่อยากนับสต๊อกก็ยังต้องไม่ให้บิลไปรอเชฟกด ready
+  itemKind          MenuItemKind            @default(COOKED)
+  /// นับสต๊อกในตัวเมนูเอง — สำหรับ tenant ที่ไม่ได้ซื้อ INVENTORY_MODULE
+  /// ห้ามเปิดพร้อม inventoryItemId (สองแหล่งความจริง) — ดู resolveStockMode()
+  trackStock        Boolean                 @default(false)
+  stockQty          Int                     @default(0)
+  /// ต่ำกว่าหรือเท่านี้ถือว่าใกล้หมด (null = ไม่เตือน)
+  lowStockThreshold Int?
   // inventoryItemId links a ready-made (retail) menu item — e.g. bottled water —
   // 1:1 to an inventory item. When set, completing an order deducts that item
   // directly (1 stock unit per menu qty) instead of going through a recipe.
   // Null for cooked dishes, whose deduction flows via MenuItemRecipe.
-  inventoryItemId String?
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
-  recipe          MenuItemRecipe?
-  category        MenuCategory    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-  inventoryItem   InventoryItem?  @relation(fields: [inventoryItemId], references: [id])
-  orderItems      OrderItem[]
+  inventoryItemId   String?
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  recipe            MenuItemRecipe?
+  category          MenuCategory            @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  inventoryItem     InventoryItem?          @relation(fields: [inventoryItemId], references: [id])
+  orderItems        OrderItem[]
+  stockMovements    MenuItemStockMovement[]
 
   @@index([tenantId])
   @@index([restaurantId])
   @@index([categoryId])
   @@index([isAvailable])
   @@index([inventoryItemId])
+  @@index([itemKind])
   @@map("menu_items")
+}
+
+/// สมุดเข้า-ออกสต๊อกของเมนูที่นับสต๊อกเอง (โหมด LOCAL — ไม่มี INVENTORY_MODULE)
+///
+/// ต้องมีสมุด ไม่ใช่เก็บแค่ตัวเลข `menu_items.stockQty` ลอย ๆ ไม่งั้นของหายแล้ว
+/// ตรวจย้อนไม่ได้ว่าหายตรงไหน — บทเรียนเดียวกับสมุดรายได้
+/// เมนูที่ผูกคลังกลาง (inventoryItemId) ไม่ใช้ตารางนี้ ไปใช้ stock_movements แทน
+model MenuItemStockMovement {
+  id            String                @id @default(uuid())
+  tenantId      String
+  menuItemId    String
+  type          MenuStockMovementType
+  /// บวก = เข้า, ลบ = ออก
+  quantity      Int
+  /// ยอดคงเหลือหลังรายการนี้ — เก็บไว้ตรวจย้อนหลังโดยไม่ต้องไล่บวกทั้งสมุด
+  balanceAfter  Int
+  unitCost      Decimal?              @db.Decimal(10, 2)
+  /// 'restaurant_order' | 'manual'
+  referenceType String?
+  referenceId   String?
+  note          String?               @db.Text
+  createdBy     String?
+  createdAt     DateTime              @default(now())
+  menuItem      MenuItem              @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([menuItemId, createdAt])
+  @@index([referenceType, referenceId])
+  @@map("menu_item_stock_movements")
 }
 
 model MenuItemRecipe {
@@ -645,6 +692,10 @@ model OrderItem {
   modifiers     Json?
   sentToKitchen Boolean         @default(false)
   sentAt        DateTime?
+  /// ของสำเร็จรูปถูกหักออกจากสต๊อกไปแล้วเมื่อไหร่ — ว่างแปลว่ายังกันไว้เฉย ๆ ยังไม่ได้หัก
+  /// ตัวนี้เป็นตัวชี้ขาดว่าบรรทัดนี้ "ถูกนับไปแล้ว" กันตัดซ้ำตอนปิดบิล และกันนับซ้อน
+  /// ตอนคำนวณของที่ค้างอยู่ในบิลที่ยังไม่ปิด
+  stockDeductedAt DateTime?
   preparedAt    DateTime?
   servedAt      DateTime?
   createdAt     DateTime        @default(now())
@@ -3078,6 +3129,7 @@ model Warehouse {
   stockCounts     StockCount[]
   stockMovements  StockMovement[]
   warehouseStocks WarehouseStock[]
+  restaurants     Restaurant[]
   property        Property         @relation(fields: [propertyId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, propertyId, code])
@@ -3116,6 +3168,11 @@ model InventoryItem {
   description                String?                     @db.Text
   categoryId                 String?
   unit                       ItemUnit                    @default(PIECE)
+  /// FINISHED_GOOD = ของที่ขายหน้าร้านได้ (น้ำขวด ขนม) — ของพวกนี้เท่านั้นที่ผูกเป็นเมนูได้
+  itemType                   InventoryItemType           @default(RAW_MATERIAL)
+  /// ราคาขายแนะนำต่อหน่วย — ใช้ตั้งราคาเมนูตอนกด "สร้างเป็นเมนู" และคิดกำไรต่อชิ้น
+  /// null = ยังไม่ตั้งราคา (วัตถุดิบทั่วไปไม่ต้องมี)
+  sellingPrice               Decimal?                    @db.Decimal(10, 2)
   costMethod                 CostMethod                  @default(WEIGHTED_AVG)
   reorderPoint               Int                         @default(0)
   reorderQty                 Int                         @default(0)
@@ -3155,6 +3212,7 @@ model InventoryItem {
   @@index([categoryId])
   @@index([barcode])
   @@index([deletedAt])
+  @@index([tenantId, itemType])
   @@map("inventory_items")
 }
 
@@ -3243,6 +3301,9 @@ model StockMovement {
   itemId              String
   type                StockMovementType
   quantity            Int
+  /// ส่วนที่ขายไปแล้วแต่คลังไม่มีของรองรับ (ขายเกินสต๊อก) — 0 = ปกติ
+  /// เก็บเป็นคอลัมน์ ไม่ใช่ข้อความใน notes เพื่อให้ query หาของที่ต้องตรวจนับได้
+  shortfallQty        Int               @default(0)
   unitCost            Decimal           @db.Decimal(10, 2)
   totalCost           Decimal           @db.Decimal(12, 2)
   referenceType       String?
@@ -3277,9 +3338,13 @@ model RetailSale {
   receiptNo     String
   warehouseId   String
   status        RetailSaleStatus    @default(COMPLETED)
+  channel       RetailSaleChannel   @default(SHOP)
   paymentMethod RetailPaymentMethod @default(CASH)
   // Room-charge metadata. roomNumber/guestName are display snapshots only —
   // the charge itself always hangs off bookingId → folioId → folioChargeId.
+  // roomId ผูกไว้เฉพาะฝั่งมินิบาร์ที่รู้ห้องแน่ ๆ ตั้งแต่ต้น — ใช้ไล่ประวัติรายห้อง
+  // ซึ่งเลขห้องเป็นข้อความทำแทนไม่ได้ (ห้องถูกเปลี่ยนเลขทีหลังประวัติจะขาด)
+  roomId        String?
   roomNumber    String?
   guestName     String?
   bookingId     String?
@@ -3309,6 +3374,8 @@ model RetailSale {
   @@index([soldAt])
   @@index([paymentMethod])
   @@index([status])
+  @@index([channel])
+  @@index([roomId])
   @@map("retail_sales")
 }
 
@@ -4581,6 +4648,28 @@ enum OrderPaymentStatus {
   REFUNDED
 }
 
+enum MenuItemKind {
+  /// ต้องปรุง — ส่งเข้าจอครัวตามปกติ
+  COOKED
+  /// สินค้าสำเร็จรูป (น้ำขวด/กระป๋อง/ไอติม/ขนมซอง) — ไม่ต้องปรุง ไม่ขึ้นจอครัว
+  READY_MADE
+}
+
+enum MenuStockMovementType {
+  /// ยอดยกมาตอนเปิดใช้การนับสต๊อก
+  OPENING
+  /// รับของเข้า
+  RECEIVE
+  /// ขายออกจากบิล
+  SALE
+  /// ปรับยอดหลังนับจริง
+  ADJUST
+  /// ตัดของเสีย/หมดอายุ
+  WASTE
+  /// คืนเข้าเมื่อยกเลิกบิลที่ตัดไปแล้ว
+  RETURN
+}
+
 enum OrderItemStatus {
   PENDING
   SENT
@@ -4884,6 +4973,15 @@ enum WarehouseType {
   MINIBAR
 }
 
+/// วัตถุดิบที่ต้องแปรรูปก่อน vs สินค้าสำเร็จรูปที่หยิบขายได้เลย
+/// แยกไว้เพื่อให้หน้า "สินค้าหน้าร้าน" กรองของขายออกจากของที่ใช้ทำอาหารได้
+enum InventoryItemType {
+  /// วัตถุดิบ — เข้าสูตรอาหาร ไม่ได้ขายตรง
+  RAW_MATERIAL
+  /// สินค้าสำเร็จรูป — ผูกเป็นเมนูขายได้ 1:1
+  FINISHED_GOOD
+}
+
 enum CostMethod {
   FIFO
   WEIGHTED_AVG
@@ -4929,6 +5027,14 @@ enum RetailPaymentMethod {
   QR
   CARD
   ROOM_CHARGE
+}
+
+/// ช่องทางที่ทำให้เกิดการขาย — ใช้ถังสินค้าและท่อตัดสต๊อกเดียวกัน ต่างกันที่หน้างาน
+/// SHOP ขายหน้าเคาน์เตอร์ ส่วน MINIBAR คือของในห้องพักที่แขกหยิบกินแล้วชาร์จเข้าโฟลิโอ
+/// แยกไว้เพื่อให้รายงานยอดร้านค้าไม่กลืนยอดมินิบาร์เข้าไปโดยไม่มีใครแยกออก
+enum RetailSaleChannel {
+  SHOP
+  MINIBAR
 }
 
 enum PurchaseOrderStatus {

@@ -1,15 +1,16 @@
 import {
-  IsString,
-  IsNotEmpty,
-  IsOptional,
-  IsInt,
   IsBoolean,
   IsEnum,
-  IsObject,
+  IsInt,
+  IsNotEmpty,
   IsNumber,
+  IsObject,
+  IsOptional,
+  IsString,
   Matches,
   Max,
   Min,
+  ValidateIf,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -35,6 +36,17 @@ export class CreateRestaurantDto {
   @IsString()
   @IsOptional()
   propertyId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'คลังต้นทางของสินค้าสำเร็จรูปที่ขายที่ร้านนี้ — น้ำขวดที่บาร์ไม่ได้มาจากคลังครัว ' +
+      'ไม่ระบุ = ใช้คลังครัวของ property นั้นตามเดิม',
+  })
+  // null = ล้างค่ากลับไปใช้คลังครัวตามเดิม จึงต้องข้าม IsString ตอนเป็น null
+  @ValidateIf((_, value) => value !== null)
+  @IsString()
+  @IsOptional()
+  warehouseId?: string | null;
 
   @ApiPropertyOptional({ example: 'REST001' })
   @IsString()

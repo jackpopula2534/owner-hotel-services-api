@@ -3,6 +3,7 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '@/prisma/prisma.service';
 import { AddonService } from '@/modules/addons/addon.service';
 import { IntegrationsService } from '@/modules/integrations/integrations.service';
+import { RestaurantStockDeductionService } from './restaurant-stock-deduction.service';
 import {
   INVENTORY_EVENTS,
   HousekeepingTaskCompletedEvent,
@@ -24,6 +25,7 @@ export class InventoryEventListener {
     private readonly prisma: PrismaService,
     private readonly addonService: AddonService,
     private readonly integrationsService: IntegrationsService,
+    private readonly restaurantDeduction: RestaurantStockDeductionService,
   ) {}
 
   /**
@@ -237,193 +239,37 @@ export class InventoryEventListener {
   }
 
   /**
-   * When restaurant order completes → deduct ingredients based on recipe/BOM.
+   * ปิดบิลร้านอาหาร → ตัดสต๊อกคลังกลาง
+   *
+   * ของสำเร็จรูปที่ผูกสินค้าคลังไว้ตัดเสมอ (การผูกคือการประกาศว่ายอดอยู่ที่คลัง)
+   * ส่วนวัตถุดิบตามสูตรยังต้องเปิดสวิตช์ใน Integration Hub ก่อน
    */
   @OnEvent(INVENTORY_EVENTS.RESTAURANT_ORDER_COMPLETED, { async: true })
   async handleRestaurantOrderCompleted(event: RestaurantOrderCompletedEvent): Promise<void> {
     try {
       const hasAddon = await this.addonService.hasActiveAddon(event.tenantId, 'INVENTORY_MODULE');
       if (!hasAddon) return;
+      if (!event.items?.length) return;
 
-      const connected = await this.integrationsService.isEnabled(
+      const recipesEnabled = await this.restaurantDeduction.isRecipeDeductionEnabled(
         event.tenantId,
-        'restaurant-inventory-autodeduct',
       );
-      if (!connected) return; // connection turned off in the Integration Hub
+      const lines = await this.restaurantDeduction.planDeduction(event, recipesEnabled);
+      if (!lines.length) return; // ไม่มีอะไรผูกกับคลัง — ไม่ต้องเปิด transaction เปล่า
 
-      if (!event.items || event.items.length === 0) return;
-
-      this.logger.log(
-        `Processing restaurant order: order=${event.orderId}, items=${event.items.length}`,
-      );
-
-      // Find kitchen warehouse
-      const warehouse = await this.findWarehouse(event.tenantId, event.propertyId, 'KITCHEN');
-      if (!warehouse) {
-        this.logger.warn(`No kitchen warehouse found — skipping ingredient deduction`);
+      const warehouseId = await this.restaurantDeduction.resolveWarehouseId(event);
+      if (!warehouseId) {
+        this.logger.warn(
+          `No usable warehouse for property ${event.propertyId} — skipping deduction for order ${event.orderId}`,
+        );
         return;
       }
 
-      // Get recipes for all menu items in the order. The menu-item recipe (edited
-      // in Menu → Recipe tab) is the single source of truth; only ingredients
-      // linked to an inventory item (itemId set) are stock-tracked. Quantities are
-      // stored for the whole `servings` batch, so per-plate = quantity / servings.
-      const menuItemIds = event.items.map((i) => i.menuItemId);
-      const recipes = await this.prisma.menuItemRecipe.findMany({
-        where: {
-          menuItemId: { in: menuItemIds },
-          ingredients: { some: { itemId: { not: null } } },
-        },
-        include: {
-          ingredients: {
-            where: { itemId: { not: null } },
-            include: {
-              item: { select: { id: true, name: true, sku: true } },
-            },
-          },
-        },
-      });
+      await this.prisma.$transaction((tx) =>
+        this.restaurantDeduction.applyPlan(tx, event, warehouseId, lines),
+      );
 
-      // Ready-made (retail) menu items — e.g. bottled water — are linked 1:1 to
-      // an inventory item via MenuItem.inventoryItemId and deduct that item
-      // directly (1 stock unit per menu qty) instead of going through a recipe.
-      const directItems = await this.prisma.menuItem.findMany({
-        where: {
-          id: { in: menuItemIds },
-          tenantId: event.tenantId,
-          inventoryItemId: { not: null },
-        },
-        select: {
-          id: true,
-          name: true,
-          inventoryItemId: true,
-          inventoryItem: { select: { id: true, name: true, sku: true } },
-        },
-      });
-
-      if (recipes.length === 0 && directItems.length === 0) {
-        this.logger.debug(`No stock-tracked recipes for ordered menu items — no deduction`);
-        return;
-      }
-
-      const recipeMap = new Map(recipes.map((r) => [r.menuItemId, r]));
-      const directMap = new Map(directItems.map((m) => [m.id, m]));
-
-      await this.prisma.$transaction(async (tx) => {
-        for (const orderItem of event.items) {
-          // Direct-linked retail item takes precedence — deduct the linked
-          // inventory item 1:1 with the ordered quantity and skip recipe math.
-          const direct = directMap.get(orderItem.menuItemId);
-          if (direct?.inventoryItemId) {
-            const totalQty = orderItem.quantity;
-            if (totalQty <= 0) continue;
-
-            const stock = await tx.warehouseStock.findUnique({
-              where: {
-                warehouseId_itemId: {
-                  warehouseId: warehouse.id,
-                  itemId: direct.inventoryItemId,
-                },
-              },
-            });
-
-            const currentQty = stock?.quantity || 0;
-            const deductQty = Math.min(totalQty, currentQty);
-            if (deductQty <= 0) continue;
-
-            const avgCost = stock ? Number(stock.avgCost) : 0;
-
-            await tx.stockMovement.create({
-              data: {
-                tenantId: event.tenantId,
-                warehouseId: warehouse.id,
-                itemId: direct.inventoryItemId,
-                type: 'GOODS_ISSUE',
-                quantity: deductQty,
-                unitCost: avgCost,
-                totalCost: deductQty * avgCost,
-                referenceType: 'restaurant_order',
-                referenceId: event.orderId,
-                notes: `Auto-deduct (retail): ${direct.inventoryItem?.name ?? direct.name} x${deductQty} for order ${event.orderId}`,
-                createdBy: event.completedBy,
-              },
-            });
-
-            const newQty = currentQty - deductQty;
-            await tx.warehouseStock.update({
-              where: {
-                warehouseId_itemId: {
-                  warehouseId: warehouse.id,
-                  itemId: direct.inventoryItemId,
-                },
-              },
-              data: {
-                quantity: newQty,
-                totalValue: newQty * avgCost,
-              },
-            });
-            continue;
-          }
-
-          const recipe = recipeMap.get(orderItem.menuItemId);
-          if (!recipe) continue;
-
-          const servings = recipe.servings && recipe.servings > 0 ? recipe.servings : 1;
-
-          for (const ingredient of recipe.ingredients) {
-            if (!ingredient.itemId) continue;
-
-            // per-plate qty = (batch qty / servings), then scale by order qty and wastage
-            const perPlate = Number(ingredient.quantity ?? 0) / servings;
-            const wastageMultiplier = 1 + Number(ingredient.wastagePercent) / 100;
-            const totalQty = Math.ceil(perPlate * orderItem.quantity * wastageMultiplier);
-
-            if (totalQty <= 0) continue;
-
-            const stock = await tx.warehouseStock.findUnique({
-              where: {
-                warehouseId_itemId: { warehouseId: warehouse.id, itemId: ingredient.itemId },
-              },
-            });
-
-            const currentQty = stock?.quantity || 0;
-            const deductQty = Math.min(totalQty, currentQty);
-
-            if (deductQty <= 0) continue;
-
-            const avgCost = stock ? Number(stock.avgCost) : 0;
-
-            await tx.stockMovement.create({
-              data: {
-                tenantId: event.tenantId,
-                warehouseId: warehouse.id,
-                itemId: ingredient.itemId,
-                type: 'GOODS_ISSUE',
-                quantity: deductQty,
-                unitCost: avgCost,
-                totalCost: deductQty * avgCost,
-                referenceType: 'restaurant_order',
-                referenceId: event.orderId,
-                notes: `Auto-deduct: ${ingredient.item?.name ?? ingredient.name} x${deductQty} for order ${event.orderId}`,
-                createdBy: event.completedBy,
-              },
-            });
-
-            const newQty = currentQty - deductQty;
-            await tx.warehouseStock.update({
-              where: {
-                warehouseId_itemId: { warehouseId: warehouse.id, itemId: ingredient.itemId },
-              },
-              data: {
-                quantity: newQty,
-                totalValue: newQty * avgCost,
-              },
-            });
-          }
-        }
-      });
-
-      this.logger.log(`Deducted ingredients for restaurant order ${event.orderId}`);
+      this.logger.log(`Deducted ${lines.length} stock line(s) for order ${event.orderId}`);
     } catch (error) {
       this.logger.error(
         `Failed to process restaurant deduction: ${(error as Error).message}`,

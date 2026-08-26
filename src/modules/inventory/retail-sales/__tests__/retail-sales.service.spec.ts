@@ -1,6 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import {
+  FolioChargeType,
+  RetailSaleChannel,
   RevenueSourceModule,
   RevenueSourceType,
   RevenueType,
@@ -352,6 +354,74 @@ describe('RetailSalesService', () => {
    * ตัวเลขจริงพิสูจน์กับฐานข้อมูลจริงใน `scripts/verify-revenue-ledger.ts` ตรงนี้
    * ตรึงว่า "ใบไหน ยอดเท่าไร ช่องทางอะไร" ถูกส่งให้สมุด และส่งใน tx เดียวกับที่ตัดสต็อก
    */
+  describe('ช่องทางการขาย', () => {
+    /** ผู้เรียกเดิมทุกคนต้องได้ SHOP โดยไม่ต้องแก้อะไร */
+    it('ไม่ระบุช่องทาง → ใบเสร็จเป็นของหน้าร้าน และค่าใช้จ่ายในโฟลิโอเป็น OTHER', async () => {
+      const prisma = buildPrisma();
+      const folioPosting = buildFolioPosting();
+      prisma.inventoryItem.findMany.mockResolvedValue([
+        { id: 'i1', tenantId: TENANT, sku: 'A', name: 'Cola', unit: 'CAN', isPerishable: false, requiresLotTracking: false },
+      ]);
+      prisma.warehouseStock.findFirst.mockResolvedValue({ id: 's1', quantity: 10, avgCost: 60 });
+
+      const service = await makeService(prisma, folioPosting);
+      const result = await service.create(
+        {
+          warehouseId: WH,
+          paymentMethod: 'ROOM_CHARGE' as any,
+          roomNumber: '101',
+          lines: [{ itemId: 'i1', quantity: 1, unitPrice: 100 }],
+        },
+        USER,
+        TENANT,
+      );
+
+      expect(prisma.retailSale.create.mock.calls[0][0].data.channel).toBe(RetailSaleChannel.SHOP);
+      expect(prisma.retailSale.create.mock.calls[0][0].data.roomId).toBeNull();
+      const charge = folioPosting.postChargeWithin.mock.calls[0][1];
+      expect(charge.chargeType).toBe('OTHER');
+      expect(charge.description).toContain('ร้านค้า');
+      expect(result.channel).toBe(RetailSaleChannel.SHOP);
+    });
+
+    it('ส่งช่องทางมินิบาร์มา → ติดป้ายช่องทาง ผูกห้อง และขึ้นเป็นค่ามินิบาร์ในโฟลิโอ', async () => {
+      const prisma = buildPrisma();
+      const folioPosting = buildFolioPosting();
+      prisma.inventoryItem.findMany.mockResolvedValue([
+        { id: 'i1', tenantId: TENANT, sku: 'A', name: 'Cola', unit: 'CAN', isPerishable: false, requiresLotTracking: false },
+      ]);
+      prisma.warehouseStock.findFirst.mockResolvedValue({ id: 's1', quantity: 10, avgCost: 60 });
+
+      const service = await makeService(prisma, folioPosting);
+      const result = await service.create(
+        {
+          warehouseId: WH,
+          paymentMethod: 'ROOM_CHARGE' as any,
+          roomNumber: '301',
+          lines: [{ itemId: 'i1', quantity: 1, unitPrice: 100 }],
+        },
+        USER,
+        TENANT,
+        {
+          channel: RetailSaleChannel.MINIBAR,
+          folioChargeType: FolioChargeType.MINIBAR,
+          describe: (receiptNo, roomNumber) => `มินิบาร์ ห้อง ${roomNumber} — ใบเสร็จ ${receiptNo}`,
+          roomId: 'room-9',
+        },
+      );
+
+      const created = prisma.retailSale.create.mock.calls[0][0].data;
+      expect(created.channel).toBe(RetailSaleChannel.MINIBAR);
+      expect(created.roomId).toBe('room-9');
+      const charge = folioPosting.postChargeWithin.mock.calls[0][1];
+      expect(charge.chargeType).toBe('MINIBAR');
+      // เลขใบเสร็จมีเดือนปีอยู่ในตัว จึงเทียบแค่ส่วนที่คงที่ ไม่งั้นเทสต์พังเองเมื่อขึ้นเดือนใหม่
+      expect(charge.description).toMatch(/^มินิบาร์ ห้อง 301 — ใบเสร็จ RCP-/);
+      expect(result.channel).toBe(RetailSaleChannel.MINIBAR);
+      expect(result.roomId).toBe('room-9');
+    });
+  });
+
   describe('revenue ledger', () => {
     const oneItem = (prisma: any) => {
       prisma.inventoryItem.findMany.mockResolvedValue([
@@ -453,6 +523,43 @@ describe('RetailSalesService', () => {
       expect(res.data).toHaveLength(1);
       expect(res.summary.totalSales).toBe(267.5);
       expect(res.summary.totalProfit).toBe(100);
+    });
+  });
+
+  describe('findAll — ตัวกรองช่องทาง', () => {
+    /**
+     * ยอดมินิบาร์เป็นยอดขายจริงของกิจการ ถ้าประวัติร้านค้ากรอง SHOP ทิ้งไว้เป็นค่าตั้งต้น
+     * ผลรวมบนหน้าจอจะน้อยกว่าสมุดรายได้โดยไม่มีใครเห็น — ซ้ำรอยบั๊กเดิมที่เคยเจอ
+     */
+    it('ไม่ระบุช่องทาง → ไม่กรองช่องทางเลย เห็นทั้งหน้าร้านและมินิบาร์', async () => {
+      const prisma = buildPrisma();
+      prisma.retailSale.findMany.mockResolvedValue([]);
+      prisma.retailSale.count.mockResolvedValue(0);
+      prisma.retailSale.aggregate.mockResolvedValue({ _sum: {} });
+
+      const service = await makeService(prisma);
+      await service.findAll(TENANT, {});
+
+      expect(prisma.retailSale.findMany.mock.calls[0][0].where.channel).toBeUndefined();
+    });
+
+    it('ระบุช่องทาง/ห้อง/การจอง → ส่งต่อเป็นเงื่อนไขค้นหา', async () => {
+      const prisma = buildPrisma();
+      prisma.retailSale.findMany.mockResolvedValue([]);
+      prisma.retailSale.count.mockResolvedValue(0);
+      prisma.retailSale.aggregate.mockResolvedValue({ _sum: {} });
+
+      const service = await makeService(prisma);
+      await service.findAll(TENANT, {
+        channel: RetailSaleChannel.MINIBAR,
+        roomId: 'room-9',
+        bookingId: 'booking-1',
+      });
+
+      const where = prisma.retailSale.findMany.mock.calls[0][0].where;
+      expect(where.channel).toBe(RetailSaleChannel.MINIBAR);
+      expect(where.roomId).toBe('room-9');
+      expect(where.bookingId).toBe('booking-1');
     });
   });
 

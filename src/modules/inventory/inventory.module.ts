@@ -5,6 +5,7 @@ import { IntegrationsModule } from '@/modules/integrations/integrations.module';
 import { CategoriesModule } from './categories/categories.module';
 import { ItemsModule } from './items/items.module';
 import { WarehousesModule } from './warehouses/warehouses.module';
+import { SourceWarehouseModule } from './warehouses/source-warehouse.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 import { StockMovementsModule } from './stock-movements/stock-movements.module';
 import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
@@ -20,6 +21,7 @@ import { PriceComparisonsModule } from './price-comparisons/price-comparisons.mo
 import { PurchaseRequisitionsModule } from './purchase-requisitions/purchase-requisitions.module';
 import { RfqsModule } from './rfqs/rfqs.module';
 import { InventoryEventListener } from './events/inventory-event.listener';
+import { RestaurantStockDeductionService } from './events/restaurant-stock-deduction.service';
 // New 2026-Q2 modules
 import { LotsModule } from './lots/lots.module';
 import { QRModule } from './qr/qr.module';
@@ -30,6 +32,9 @@ import { ProcurementStockModule } from './procurement-stock/procurement-stock.mo
 import { ProcurementEventsModule } from './procurement-events/procurement-events.module';
 // Retail / POS checkout + sales history
 import { RetailSalesModule } from './retail-sales/retail-sales.module';
+import { MinibarModule } from './minibar/minibar.module';
+// สินค้าหน้าร้าน — มุมมองของสินค้าสำเร็จรูปที่ขายได้ (ตั้งราคา / ผูกเป็นเมนู / กำไรต่อชิ้น)
+import { RetailProductsModule } from './retail-products/retail-products.module';
 import {
   InventoryDashboardController,
   InventoryReportsController,
@@ -46,6 +51,7 @@ import { PrismaModule } from '@/prisma/prisma.module';
     CategoriesModule,
     ItemsModule,
     WarehousesModule,
+    SourceWarehouseModule,
     SuppliersModule,
     StockMovementsModule,
     PurchaseOrdersModule,
@@ -67,10 +73,17 @@ import { PrismaModule } from '@/prisma/prisma.module';
     ProcurementStockModule,
     ProcurementEventsModule,
     RetailSalesModule,
+    RetailProductsModule,
+    MinibarModule,
     BullModule.registerQueue({ name: INVENTORY_QUEUE }),
   ],
   controllers: [InventoryDashboardController, InventoryReportsController],
-  providers: [InventoryEventListener, InventoryQueueProcessor, InventoryQueueScheduler],
+  providers: [
+    InventoryEventListener,
+    RestaurantStockDeductionService,
+    InventoryQueueProcessor,
+    InventoryQueueScheduler,
+  ],
   exports: [
     CategoriesModule,
     ItemsModule,

@@ -14,6 +14,7 @@ import { CreateOrderDto, OrderTypeEnum } from './dto/create-order.dto';
 import { AddOrderItemDto } from './dto/add-order-item.dto';
 import { ProcessPaymentDto, PaymentMethodEnum } from './dto/process-payment.dto';
 import { MenuService } from '../menu/menu.service';
+import { MenuStockService } from '../menu/menu-stock.service';
 import { KitchenGateway } from '../kitchen/kitchen.gateway';
 import { AuditLogService } from '../../../audit-log/audit-log.service';
 import {
@@ -64,6 +65,27 @@ const RESERVATION_LINK_SELECT = {
   seatedAt: true,
 } as const;
 
+/**
+ * บรรทัดที่ยัง "ค้างต้องตัดสต๊อก" ของบิลหนึ่งใบ
+ *
+ * ตัดออกสองแบบ: รายการที่ถูกยกเลิก (ไม่เคยขาย) และรายการที่ถูกหักไปแล้วตอนสั่ง
+ * (ของสำเร็จรูป) — ถ้าไม่กรองตัวหลัง ของจะโดนหักสองรอบตอนปิดบิล
+ */
+const saleLinesOf = (
+  items: {
+    id?: string;
+    menuItemId: string | null;
+    quantity: number;
+    status?: string | null;
+    stockDeductedAt?: Date | null;
+  }[],
+): { orderItemId?: string; menuItemId: string; quantity: number }[] =>
+  items
+    .filter(
+      (i) => i.menuItemId && i.quantity > 0 && i.status !== 'CANCELLED' && !i.stockDeductedAt,
+    )
+    .map((i) => ({ orderItemId: i.id, menuItemId: i.menuItemId as string, quantity: i.quantity }));
+
 @Injectable()
 export class OrderService {
   private readonly logger = new Logger(OrderService.name);
@@ -72,6 +94,7 @@ export class OrderService {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     private readonly menuService: MenuService,
+    private readonly menuStockService: MenuStockService,
     private readonly auditLogService: AuditLogService,
     private readonly folioPosting: FolioPostingService,
     private readonly revenuePosting: RevenuePostingService,
@@ -168,7 +191,15 @@ export class OrderService {
         table: true,
         items: {
           include: {
-            menuItem: { select: { id: true, name: true, image: true, preparationTime: true } },
+            menuItem: {
+              select: {
+                id: true,
+                name: true,
+                image: true,
+                preparationTime: true,
+                itemKind: true,
+              },
+            },
           },
           orderBy: { createdAt: 'asc' },
         },
@@ -270,6 +301,9 @@ export class OrderService {
       });
     }
 
+    // ของสำเร็จรูปที่นับสต๊อกเองต้องกันขายเกินตั้งแต่ตอนเปิดบิล ไม่ใช่ไปพังตอนปิดบิล
+    await this.assertStockForLines(tenantId, items);
+
     const subtotal = items.reduce((sum, item) => sum + item.totalPrice, 0);
     // The outlet's own policy decides what this bill charges; the rates are then
     // snapshotted onto the order so editing the policy never rewrites old bills.
@@ -319,6 +353,13 @@ export class OrderService {
       });
     }
 
+    // ตัวสร้างบิลคืนชนิดแบบกว้าง ๆ (include ถูกประกอบตอนรันไทม์) จึงบอกชนิดของบรรทัดตรงนี้
+    const created = order as {
+      items?: { id: string; menuItemId: string | null; quantity: number }[];
+    };
+    const placedLines = Array.isArray(created.items) ? created.items : [];
+    await this.deductPlacedStock(order.id, restaurantId, tenantId, placedLines, userId);
+
     this.auditLogService.logOrderCreate(order, userId, tenantId);
     return order;
   }
@@ -347,6 +388,9 @@ export class OrderService {
       throw new NotFoundException(`Menu item ${dto.menuItemId} not found or unavailable`);
     }
 
+    // ไม่ต้องกันบิลนี้ออกจากยอดจอง — บรรทัดเดิมในบิลเดียวกันก็กินสต๊อกอยู่จริง
+    await this.menuStockService.assertCanSell(tenantId, dto.menuItemId, dto.quantity);
+
     const unitPrice = Number(menuItem.price);
     const totalPrice = unitPrice * dto.quantity;
 
@@ -363,6 +407,8 @@ export class OrderService {
       },
       include: { menuItem: { select: { id: true, name: true } } },
     });
+
+    await this.deductPlacedStock(orderId, restaurantId, tenantId, [newItem], undefined);
 
     await this.recalculateTotals(orderId, order);
 
@@ -385,7 +431,17 @@ export class OrderService {
       throw new BadRequestException('Cannot remove an item that has been sent to kitchen');
     }
 
-    await this.prisma.orderItem.delete({ where: { id: itemId } });
+    // ของที่หักไปแล้วตอนสั่งต้องคืนก่อนลบแถวทิ้ง ไม่งั้นจะไม่เหลือข้อมูลว่าต้องคืนเท่าไร
+    // แล้วสต๊อกจะหายไปเฉย ๆ ทั้งที่ของยังอยู่ในตู้
+    await this.prisma.$transaction(async (tx) => {
+      await this.menuStockService.returnPlacedLines(tx, {
+        tenantId,
+        restaurantId,
+        orderId,
+        orderItemIds: [itemId],
+      });
+      await tx.orderItem.delete({ where: { id: itemId } });
+    });
     await this.recalculateTotals(orderId, order);
   }
 
@@ -402,46 +458,80 @@ export class OrderService {
     const pendingItems =
       order.items?.filter((i) => !i.sentToKitchen && i.status !== 'CANCELLED') ?? [];
 
+    // น้ำขวด ขนม ไอศกรีม ไม่ต้องรอเชฟกด ready — ถ้าปล่อยขึ้นจอครัวบิลจะค้างรอคนกด
+    // ให้เสิร์ฟทันทีตรงนี้แทน และบิลที่มีแต่ของสำเร็จรูปก็ต้องไม่ถูกปฏิเสธ
+    const toCook = pendingItems.filter((i) => (i as any).menuItem?.itemKind !== 'READY_MADE');
+    const readyMade = pendingItems.filter((i) => (i as any).menuItem?.itemKind === 'READY_MADE');
+
     if (pendingItems.length === 0) {
       throw new BadRequestException('No new items to send to kitchen');
     }
 
     const now = new Date();
 
-    const [, , kitchenOrder] = await this.prisma.$transaction([
-      // Mark items as sent
-      this.prisma.orderItem.updateMany({
-        where: { id: { in: pendingItems.map((i) => i.id) } },
-        data: { sentToKitchen: true, sentAt: now, status: 'SENT' },
-      }),
-      // Update order status
+    const writes: Prisma.PrismaPromise<unknown>[] = [];
+
+    if (readyMade.length > 0) {
+      writes.push(
+        this.prisma.orderItem.updateMany({
+          where: { id: { in: readyMade.map((i) => i.id) } },
+          data: { sentToKitchen: true, sentAt: now, status: 'SERVED', servedAt: now },
+        }),
+      );
+    }
+
+    if (toCook.length > 0) {
+      writes.push(
+        this.prisma.orderItem.updateMany({
+          where: { id: { in: toCook.map((i) => i.id) } },
+          data: { sentToKitchen: true, sentAt: now, status: 'SENT' },
+        }),
+      );
+    }
+
+    // บิลที่ไม่มีอะไรต้องปรุงข้าม PREPARING ไปเลย — ไม่มีครัวให้รอ
+    writes.push(
       this.prisma.order.update({
         where: { id: orderId },
-        data: { status: 'PREPARING', confirmedAt: order.confirmedAt ?? now },
+        data: {
+          status: toCook.length > 0 ? 'PREPARING' : order.status,
+          confirmedAt: order.confirmedAt ?? now,
+        },
       }),
-      // Create kitchen order ticket
-      this.prisma.kitchenOrder.create({
-        data: { orderId, tenantId, status: 'SENT', priority: 'NORMAL' },
-      }),
-    ]);
+    );
+
+    // ใบสั่งครัวออกเฉพาะเมื่อมีของต้องปรุงจริง ไม่งั้นจอครัวจะมีตั๋วเปล่าค้าง
+    if (toCook.length > 0) {
+      writes.push(
+        this.prisma.kitchenOrder.create({
+          data: { orderId, tenantId, status: 'SENT', priority: 'NORMAL' },
+        }),
+      );
+    }
+
+    const results = await this.prisma.$transaction(writes);
+    const kitchenOrder =
+      toCook.length > 0 ? (results[results.length - 1] as { id: string }) : null;
 
     const updatedOrder = await this.findOne(restaurantId, orderId, tenantId);
 
     // Emit real-time event to kitchen display
-    this.kitchenGateway?.emitNewOrder(tenantId, restaurantId, {
-      kitchenOrderId: kitchenOrder.id,
-      orderId,
-      orderNumber: updatedOrder.orderNumber,
-      tableNumber: updatedOrder.table?.tableNumber ?? null,
-      items: pendingItems.map((i) => ({
-        id: i.id,
-        name: (i as any).menuItem?.name ?? i.menuItemId,
-        quantity: i.quantity,
-        notes: i.notes,
-      })),
-      priority: 'NORMAL',
-      sentAt: now,
-    });
+    if (kitchenOrder) {
+      this.kitchenGateway?.emitNewOrder(tenantId, restaurantId, {
+        kitchenOrderId: kitchenOrder.id,
+        orderId,
+        orderNumber: updatedOrder.orderNumber,
+        tableNumber: updatedOrder.table?.tableNumber ?? null,
+        items: toCook.map((i) => ({
+          id: i.id,
+          name: (i as any).menuItem?.name ?? i.menuItemId,
+          quantity: i.quantity,
+          notes: i.notes,
+        })),
+        priority: 'NORMAL',
+        sentAt: now,
+      });
+    }
 
     return updatedOrder;
   }
@@ -481,13 +571,39 @@ export class OrderService {
       await this.closeOutTable(order, 'AVAILABLE');
     }
 
-    const updatedOrder = await this.prisma.order.update({
-      where: { id: orderId },
-      data: { status, ...timestamps },
-      include: {
-        table: { select: { id: true, tableNumber: true } },
-        items: true,
-      },
+    const updatedOrder = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.order.update({
+        where: { id: orderId },
+        data: { status, ...timestamps },
+        include: {
+          table: { select: { id: true, tableNumber: true } },
+          items: true,
+        },
+      });
+
+      // สต๊อกที่นับในตัวเมนูตัดพร้อมการปิดบิลในทรานแซกชันเดียว — ปิดบิลสำเร็จแต่
+      // สต๊อกไม่ลดคือของหายแบบเงียบ ๆ (คลังกลางยังเดินผ่าน event ตามเดิม)
+      // ของสำเร็จรูปส่วนใหญ่ถูกหักไปตั้งแต่ตอนสั่งแล้ว ตรงนี้จึงเหลือแค่บรรทัดที่ยังค้าง
+      if (status === 'COMPLETED') {
+        await this.menuStockService.deductForOrder(tx, {
+          tenantId,
+          orderId,
+          items: saleLinesOf(result.items),
+          userId,
+        });
+      }
+
+      // ยกเลิกบิล = ของที่หยิบออกจากตู้ไปแล้วต้องกลับเข้าสต๊อก ไม่งั้นยอดหายทั้งที่ไม่ได้ขาย
+      if (status === 'CANCELLED') {
+        await this.menuStockService.returnPlacedLines(tx, {
+          tenantId,
+          restaurantId,
+          orderId,
+          userId,
+        });
+      }
+
+      return result;
     });
 
     this.auditLogService.logOrderUpdate(
@@ -517,21 +633,92 @@ export class OrderService {
   }
 
   /**
+   * หักของสำเร็จรูปออกจากสต๊อกทันทีที่บรรทัดขึ้นบิล
+   *
+   * อยู่นอกทรานแซกชันของการเปิดบิลโดยตั้งใจ: ระบบคลังมีปัญหาต้องไม่ทำให้ "เปิดบิลไม่ได้"
+   * ที่หน้าเคาน์เตอร์ บรรทัดที่หักไม่สำเร็จจะไม่ถูกประทับเวลา แล้วตาข่ายตอนปิดบิล
+   * จะรับไปหักต่อเอง — เสียแค่ความสด ไม่เสียยอด
+   */
+  private async deductPlacedStock(
+    orderId: string,
+    restaurantId: string,
+    tenantId: string,
+    items: { id: string; menuItemId: string | null; quantity: number }[],
+    userId?: string,
+  ): Promise<void> {
+    const lines = items
+      .filter((i) => i.menuItemId && i.quantity > 0)
+      .map((i) => ({
+        orderItemId: i.id,
+        menuItemId: i.menuItemId as string,
+        quantity: i.quantity,
+      }));
+    if (!lines.length) return;
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await this.menuStockService.deductPlacedLines(tx, {
+          tenantId,
+          restaurantId,
+          orderId,
+          lines,
+          userId,
+        });
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Stock deduction at order time failed for order ${orderId}: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  /**
+   * กันขายเกินสต๊อกของหลายบรรทัดพร้อมกัน — รวมจำนวนต่อเมนูก่อนเช็ค
+   * ไม่งั้นบิลที่มีน้ำขวดสองบรรทัดจะผ่านทั้งที่รวมกันเกินของที่มี
+   */
+  private async assertStockForLines(
+    tenantId: string,
+    lines: { menuItemId: string; quantity: number }[],
+  ): Promise<void> {
+    const totals = new Map<string, number>();
+    for (const line of lines) {
+      totals.set(line.menuItemId, (totals.get(line.menuItemId) ?? 0) + line.quantity);
+    }
+
+    for (const [menuItemId, quantity] of totals) {
+      await this.menuStockService.assertCanSell(tenantId, menuItemId, quantity);
+    }
+  }
+
+  /**
    * Emit `restaurant.order.completed` for the inventory listener to auto-deduct
    * ingredients. Never throws — a failure here must not roll back the completed
    * order (the deduction listener is best-effort and idempotency-safe).
    */
   private async emitOrderCompleted(
-    order: { id: string; orderNumber: string; items?: { menuItemId: string; quantity: number }[] },
+    order: {
+      id: string;
+      orderNumber: string;
+      items?: {
+        id?: string;
+        menuItemId: string | null;
+        quantity: number;
+        status?: string | null;
+        stockDeductedAt?: Date | null;
+      }[];
+    },
     restaurantId: string,
     tenantId: string,
     userId?: string,
   ): Promise<void> {
     if (!this.eventEmitter) return;
     try {
-      const items = (order.items ?? [])
-        .filter((i) => i.menuItemId && i.quantity > 0)
-        .map((i) => ({ menuItemId: i.menuItemId, quantity: i.quantity }));
+      // ใช้ตัวกรองเดียวกับตอนปิดบิล: บรรทัดที่ถูกยกเลิก หรือถูกหักไปแล้วตอนสั่ง
+      // ต้องไม่ถูกส่งไปให้คลังหักซ้ำ
+      const items = saleLinesOf(order.items ?? []).map((i) => ({
+        menuItemId: i.menuItemId,
+        quantity: i.quantity,
+      }));
       if (items.length === 0) return;
 
       // The listener resolves the kitchen warehouse by propertyId, which lives
@@ -675,13 +862,32 @@ export class OrderService {
         propertyId: restaurant?.propertyId ?? null,
       });
 
+      if (becomesCompleted) {
+        await this.menuStockService.deductForOrder(tx, {
+          tenantId,
+          orderId,
+          items: saleLinesOf(order.items ?? []),
+          userId,
+        });
+      }
+
       return updated;
     });
 
     // Paying closes the bill without going through updateStatus, so the floor
     // has to be handed back here too — otherwise the table stays OCCUPIED forever.
+    //
+    // เหตุผลเดียวกันกับ event ตัดสต๊อกคลังกลาง: เส้นทางจ่ายเงิน→ปิดบิล (ซึ่งเป็นเส้นทาง
+    // จริงของ POS) ไม่เคยยิง restaurant.order.completed เลย วัตถุดิบจึงไม่เคยถูกตัด
+    // ถ้าร้านไม่ได้เดินสถานะผ่าน SERVED→COMPLETED ด้วยมือ
     if (becomesCompleted) {
       await this.closeOutTable(order, 'CLEANING');
+      await this.emitOrderCompleted(
+        { id: orderId, orderNumber: order.orderNumber, items: order.items ?? [] },
+        restaurantId,
+        tenantId,
+        userId,
+      );
     }
 
     this.auditLogService.logOrderUpdate(

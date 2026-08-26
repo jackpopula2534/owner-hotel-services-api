@@ -7,6 +7,8 @@ import { OrderService } from '../modules/restaurant/order/order.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { KitchenGateway } from '../modules/restaurant/kitchen/kitchen.gateway';
 import { MenuService } from '../modules/restaurant/menu/menu.service';
+import { MenuStockService } from '@/modules/restaurant/menu/menu-stock.service';
+import { buildMenuStockStub } from '@/modules/restaurant/order/__tests__/menu-stock.stub';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { INVENTORY_EVENTS } from '../modules/inventory/events/inventory.events';
 import { FolioPostingService } from '../modules/accounts-receivable/folio-posting/folio-posting.service';
@@ -167,6 +169,8 @@ describe('OrderService', () => {
         { provide: PrismaService, useValue: prismaMock },
         { provide: KitchenGateway, useValue: gatewayMock },
         { provide: MenuService, useValue: makeMenuServiceMock() },
+        // ตัวแทนกลาง — เพิ่มเมธอดใหม่ที่เดียว สเปกที่ไม่ได้ทดสอบสต๊อกจะได้ไม่พังตามทีหลัง
+        { provide: MenuStockService, useValue: buildMenuStockStub() },
         { provide: AuditLogService, useValue: makeAuditMock() },
         { provide: FolioPostingService, useValue: buildFolioPostingStub() },
         { provide: RevenuePostingService, useValue: buildRevenuePostingStub() },

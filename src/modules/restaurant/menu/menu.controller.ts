@@ -21,6 +21,8 @@ import {
   ApiQuery,
 } from '@nestjs/swagger';
 import { MenuService } from './menu.service';
+import { MenuStockService } from './menu-stock.service';
+import { MenuInventoryPromoteService } from './menu-inventory-promote.service';
 import { CreateMenuCategoryDto } from './dto/create-menu-category.dto';
 import { UpdateMenuCategoryDto } from './dto/update-menu-category.dto';
 import { ReorderCategoriesDto } from './dto/reorder-categories.dto';
@@ -28,6 +30,9 @@ import { AutoMockupCategoriesDto } from './dto/auto-mockup-categories.dto';
 import { CreateMenuItemDto } from './dto/create-menu-item.dto';
 import { UpdateMenuItemDto } from './dto/update-menu-item.dto';
 import { CreateRecipeDto } from './dto/create-recipe.dto';
+import { MenuStockMovementDto } from './dto/menu-stock.dto';
+import { PromoteToInventoryDto } from './dto/promote-to-inventory.dto';
+import { DemoteFromInventoryDto } from './dto/demote-from-inventory.dto';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../../common/guards/roles.guard';
 import { AddonGuard } from '../../../common/guards/addon.guard';
@@ -43,7 +48,11 @@ import { AllowSystems } from '../../../common/decorators/allow-systems.decorator
 @AllowSystems('pos')
 @Controller({ path: 'restaurants/:restaurantId', version: '1' })
 export class MenuController {
-  constructor(private readonly menuService: MenuService) {}
+  constructor(
+    private readonly menuService: MenuService,
+    private readonly menuStockService: MenuStockService,
+    private readonly promoteService: MenuInventoryPromoteService,
+  ) {}
 
   // ─── Menu (Full) ──────────────────────────────────────────────────────────
 
@@ -189,6 +198,37 @@ export class MenuController {
     return this.menuService.findAllItems(restaurantId, query, user.tenantId);
   }
 
+  // ต้องมาก่อน `menu-items/:itemId` ไม่งั้น Nest อ่าน "by-barcode" เป็น itemId แล้วตอบ 404
+  @Get('menu-items/by-barcode')
+  @ApiOperation({
+    summary: 'ยิงบาร์โค้ดที่หน้าขาย → เมนูที่ผูกกับสินค้าชิ้นนั้น',
+    description:
+      'บาร์โค้ดผูกอยู่กับสินค้าในคลัง ไม่ได้ผูกกับเมนู — endpoint นี้วิ่งย้อนกลับมาให้ ' +
+      'ใช้ตอนหน้าขายยิงของสำเร็จรูป (น้ำ ขนม ไอติม) ที่โหลดไม่ครบในหน้าจอ',
+  })
+  @ApiParam({ name: 'restaurantId' })
+  @ApiQuery({ name: 'code', required: true, type: String, example: '8850001000011' })
+  @ApiResponse({ status: 404, description: 'ไม่มีเมนูในร้านนี้ที่ผูกกับบาร์โค้ดนี้' })
+  @ApiResponse({ status: 409, description: 'บาร์โค้ดผูกกับหลายเมนู — ต้องไปแก้ข้อมูลเมนูก่อน' })
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'chef',
+    'waiter',
+    'staff',
+    'cashier',
+    'bartender',
+  )
+  async findItemByBarcode(
+    @Param('restaurantId') restaurantId: string,
+    @Query('code') code: string,
+    @CurrentUser() user: { tenantId: string },
+  ) {
+    return this.menuService.findItemByBarcode(restaurantId, code ?? '', user.tenantId);
+  }
+
   @Get('menu-items/:itemId')
   @ApiOperation({ summary: 'Get menu item by ID' })
   @ApiParam({ name: 'restaurantId' })
@@ -262,6 +302,87 @@ export class MenuController {
     @CurrentUser() user: { tenantId: string; id?: string },
   ) {
     return this.menuService.removeItem(restaurantId, itemId, user.tenantId, user?.id);
+  }
+
+  // ─── สต๊อกในตัวเมนู (ร้านที่ไม่ได้ซื้อระบบคลัง) ─────────────────────────────
+
+  @Get('menu-items/:itemId/stock-movements')
+  @ApiOperation({ summary: 'ประวัติการเข้า-ออกสต๊อกของเมนูที่นับสต๊อกเอง' })
+  @ApiParam({ name: 'restaurantId' })
+  @ApiParam({ name: 'itemId' })
+  @ApiQuery({ name: 'limit', required: false, example: 50 })
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'staff')
+  async listStockMovements(
+    @Param('restaurantId') restaurantId: string,
+    @Param('itemId') itemId: string,
+    @Query('limit') limit: string,
+    @CurrentUser() user: { tenantId: string },
+  ) {
+    return this.menuStockService.listMovements(
+      restaurantId,
+      itemId,
+      user.tenantId,
+      limit ? Number(limit) : undefined,
+    );
+  }
+
+  @Post('menu-items/:itemId/stock')
+  @ApiOperation({ summary: 'บันทึกรับของ / ปรับยอด / ตัดของเสีย ของเมนูที่นับสต๊อกเอง' })
+  @ApiParam({ name: 'restaurantId' })
+  @ApiParam({ name: 'itemId' })
+  @ApiResponse({ status: 201, description: 'บันทึกแล้ว พร้อมยอดคงเหลือใหม่' })
+  @ApiResponse({ status: 400, description: 'เมนูผูกคลังกลาง / ไม่ได้เปิดนับสต๊อก / ยอดติดลบ' })
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef')
+  async applyStockMovement(
+    @Param('restaurantId') restaurantId: string,
+    @Param('itemId') itemId: string,
+    @Body() dto: MenuStockMovementDto,
+    @CurrentUser() user: { tenantId: string; id?: string },
+  ) {
+    return this.menuStockService.applyMovement(restaurantId, itemId, dto, user.tenantId, user?.id);
+  }
+
+  @Post('menu-items/:itemId/promote-to-inventory')
+  @ApiOperation({
+    summary: 'ย้ายเมนูที่นับสต๊อกเองเข้าคลังกลาง',
+    description:
+      'สร้างสินค้าสำเร็จรูปในคลัง ยกยอดคงเหลือของเมนูไปเป็นใบรับของ แล้วปิดการนับในเมนู — ทำในรายการเดียว',
+  })
+  @ApiParam({ name: 'restaurantId' })
+  @ApiParam({ name: 'itemId' })
+  @ApiResponse({ status: 201, description: 'ย้ายแล้ว คืนรหัสสินค้าและคลังปลายทาง' })
+  @ApiResponse({ status: 400, description: 'ไม่มีระบบคลัง / ไม่มีคลังที่ใช้งานได้' })
+  @ApiResponse({ status: 409, description: 'เมนูผูกกับสินค้าในคลังอยู่แล้ว' })
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager')
+  async promoteToInventory(
+    @Param('restaurantId') restaurantId: string,
+    @Param('itemId') itemId: string,
+    @Body() dto: PromoteToInventoryDto,
+    @CurrentUser() user: { tenantId: string; id?: string },
+  ) {
+    return this.promoteService.promote(restaurantId, itemId, dto, user.tenantId, user?.id);
+  }
+
+  @Post('menu-items/:itemId/demote-from-inventory')
+  @ApiOperation({
+    summary: 'ถอดเมนูออกจากคลังกลาง กลับมานับในตัวเมนูเอง',
+    description:
+      'เบิกของที่ค้างในคลังกลับมาเป็นยอดของเมนู แล้วตัดสายกับสินค้าในคลัง — ทำในรายการเดียว ' +
+      'ส่ง returnStock=false ถ้าต้องการตัดสายเฉย ๆ โดยให้ของยังอยู่ในคลัง',
+  })
+  @ApiParam({ name: 'restaurantId' })
+  @ApiParam({ name: 'itemId' })
+  @ApiResponse({ status: 201, description: 'ถอดแล้ว คืนจำนวนที่ดึงกลับและโหมดใหม่' })
+  @ApiResponse({ status: 400, description: 'ดึงเกินของที่มี / มีเมนูอื่นผูกอยู่ ต้องระบุจำนวนเอง' })
+  @ApiResponse({ status: 409, description: 'เมนูนี้ไม่ได้ผูกกับสินค้าในคลัง' })
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager')
+  async demoteFromInventory(
+    @Param('restaurantId') restaurantId: string,
+    @Param('itemId') itemId: string,
+    @Body() dto: DemoteFromInventoryDto,
+    @CurrentUser() user: { tenantId: string; id?: string },
+  ) {
+    return this.promoteService.demote(restaurantId, itemId, dto, user.tenantId, user?.id);
   }
 
   // ─── Recipe ───────────────────────────────────────────────────────────────

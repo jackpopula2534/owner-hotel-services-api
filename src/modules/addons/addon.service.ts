@@ -17,11 +17,13 @@ import {
 import { UpdateAddonDto } from './dto/update-addon.dto';
 import { QueryAddonDto } from './dto/query-addon.dto';
 
+// งานแม่บ้าน/แจ้งซ่อมไม่มีโค้ดของตัวเองแล้ว — เป็นความสามารถของ HR_MODULE
+// (HOUSEKEEPING_MODULE / HOUSEKEEPING_MANAGEMENT / MAINTENANCE_MODULE ถูกลบทิ้ง
+//  ด้วย migration 20260826060000 อย่าเพิ่มกลับเข้ามา)
 export const ADDON_CODES = {
   HR_MODULE: 'HR_MODULE',
   POS_MODULE: 'POS_MODULE',
   RESTAURANT_MODULE: 'RESTAURANT_MODULE',
-  HOUSEKEEPING_MODULE: 'HOUSEKEEPING_MODULE',
   CHANNEL_MANAGER: 'CHANNEL_MANAGER',
   LOYALTY_MODULE: 'LOYALTY_MODULE',
   INVENTORY_MODULE: 'INVENTORY_MODULE',

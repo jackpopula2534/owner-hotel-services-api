@@ -78,6 +78,33 @@ export class AdminPlansService {
   }
 
   /**
+   * ราคารายปี + ส่วนที่ประหยัดได้ — mirror ของ `PlansController.toPublicPlan()`
+   *
+   * `plans.price_yearly` เป็น null ได้ (แผนเก่าที่สร้างก่อนมีคอลัมน์นี้ หรือแผนที่
+   * แอดมินกรอกแต่ % ส่วนลด) ถ้าคืนค่าดิบไปตรง ๆ การ์ดฝั่งแอดมินจะโชว์ "฿/ปี"
+   * ที่ไม่มีตัวเลข — จึงคำนวณจาก % ส่วนลดให้เหมือนหน้าราคาสาธารณะ
+   */
+  private resolveYearlyPricing(
+    priceMonthly: number,
+    rawPriceYearly: number | null | undefined,
+    yearlyDiscountPercent: number | null | undefined,
+  ): { priceYearly?: number; yearlySavings?: number } {
+    const discount = yearlyDiscountPercent || 0;
+
+    let priceYearly: number | undefined;
+    if (rawPriceYearly) {
+      priceYearly = Number(rawPriceYearly);
+    } else if (discount > 0) {
+      priceYearly = Math.round(priceMonthly * 12 * (1 - discount / 100));
+    }
+
+    if (!priceYearly) return {};
+
+    const savings = Math.round(priceMonthly * 12 - priceYearly);
+    return { priceYearly, yearlySavings: savings > 0 ? savings : undefined };
+  }
+
+  /**
    * GET /api/v1/admin/plans
    * Get all plans with statistics
    */
@@ -92,29 +119,39 @@ export class AdminPlansService {
 
     const addonCounts = await this.countAddonsByPlanIds(plans.map((p) => p.id));
 
-    const data: AdminPlanItemDto[] = plans.map((plan) => ({
-      id: plan.id,
-      code: plan.code,
-      system: plan.system ?? 'HOTEL',
-      name: plan.name,
-      priceMonthly: Number(plan.priceMonthly || 0),
-      priceYearly: plan.priceYearly ? Number(plan.priceYearly) : undefined,
-      yearlyDiscountPercent: plan.yearlyDiscountPercent,
-      maxRooms: plan.maxRooms,
-      maxUsers: plan.maxUsers,
-      isActive: plan.isActive !== false,
-      subscriptionCount: plan.subscriptions?.length || 0,
-      featureCount: plan.planFeatures?.length || 0,
-      addonCount: addonCounts.get(plan.id) ?? 0,
-      // Sales Page fields
-      description: plan.description,
-      displayOrder: plan.displayOrder,
-      isPopular: plan.isPopular,
-      badge: plan.badge,
-      highlightColor: plan.highlightColor,
-      features: plan.features,
-      buttonText: plan.buttonText,
-    }));
+    const data: AdminPlanItemDto[] = plans.map((plan) => {
+      const priceMonthly = Number(plan.priceMonthly || 0);
+      const yearly = this.resolveYearlyPricing(
+        priceMonthly,
+        plan.priceYearly,
+        plan.yearlyDiscountPercent,
+      );
+
+      return {
+        id: plan.id,
+        code: plan.code,
+        system: plan.system ?? 'HOTEL',
+        name: plan.name,
+        priceMonthly,
+        priceYearly: yearly.priceYearly,
+        yearlySavings: yearly.yearlySavings,
+        yearlyDiscountPercent: plan.yearlyDiscountPercent,
+        maxRooms: plan.maxRooms,
+        maxUsers: plan.maxUsers,
+        isActive: plan.isActive !== false,
+        subscriptionCount: plan.subscriptions?.length || 0,
+        featureCount: plan.planFeatures?.length || 0,
+        addonCount: addonCounts.get(plan.id) ?? 0,
+        // Sales Page fields
+        description: plan.description,
+        displayOrder: plan.displayOrder,
+        isPopular: plan.isPopular,
+        badge: plan.badge,
+        highlightColor: plan.highlightColor,
+        features: plan.features,
+        buttonText: plan.buttonText,
+      };
+    });
 
     return {
       data,
@@ -146,13 +183,21 @@ export class AdminPlansService {
 
     const addonCountMap = await this.countAddonsByPlanIds([plan.id]);
 
+    const detailPriceMonthly = Number(plan.priceMonthly || 0);
+    const detailYearly = this.resolveYearlyPricing(
+      detailPriceMonthly,
+      plan.priceYearly,
+      plan.yearlyDiscountPercent,
+    );
+
     return {
       id: plan.id,
       code: plan.code,
       system: plan.system ?? 'HOTEL',
       name: plan.name,
-      priceMonthly: Number(plan.priceMonthly || 0),
-      priceYearly: plan.priceYearly ? Number(plan.priceYearly) : undefined,
+      priceMonthly: detailPriceMonthly,
+      priceYearly: detailYearly.priceYearly,
+      yearlySavings: detailYearly.yearlySavings,
       yearlyDiscountPercent: plan.yearlyDiscountPercent,
       maxRooms: plan.maxRooms,
       maxUsers: plan.maxUsers,

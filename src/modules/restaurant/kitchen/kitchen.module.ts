@@ -4,9 +4,10 @@ import { KitchenService } from './kitchen.service';
 import { KitchenGateway } from './kitchen.gateway';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { AddonModule } from '../../addons/addon.module';
+import { MenuModule } from '../menu/menu.module';
 
 @Module({
-  imports: [PrismaModule, AddonModule],
+  imports: [PrismaModule, AddonModule, MenuModule],
   controllers: [KitchenController],
   providers: [KitchenService, KitchenGateway],
   exports: [KitchenService, KitchenGateway],

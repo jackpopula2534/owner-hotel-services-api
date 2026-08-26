@@ -10,6 +10,7 @@ import { CreateItemDto } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
 import { QueryItemDto, SortField, SortOrder } from './dto/query-item.dto';
 import { SearchItemDto } from './dto/search-item.dto';
+import { ScanBarcodeDto } from './dto/scan-barcode.dto';
 
 export interface PaginatedResponse<T> {
   data: T[];
@@ -29,6 +30,10 @@ export interface ItemWithStock {
   description: string | null;
   categoryId: string | null;
   unit: string;
+  /** RAW_MATERIAL = วัตถุดิบ · FINISHED_GOOD = ของสำเร็จรูปที่ผูกเป็นเมนูขายได้ */
+  itemType: string;
+  /** ราคาขายแนะนำต่อหน่วย — null = ยังไม่ตั้ง */
+  sellingPrice: unknown;
   costMethod: string;
   reorderPoint: number;
   reorderQty: number;
@@ -54,6 +59,12 @@ export interface ItemSearchResult {
   name: string;
   unit: string;
   barcode: string | null;
+  /**
+   * ราคาขายที่ตั้งไว้กับตัวสินค้า — null = ยังไม่ตั้ง
+   * ต้องติดมากับผลค้นหาด้วย ไม่ใช่เฉพาะ findAll เพราะหน้าขายหยิบของจากช่องค้นหา
+   * แล้วเข้าตะกร้าเลย ถ้าไม่มีราคามาให้ หน้าจอจะไปเดาราคาเอง
+   */
+  sellingPrice: number | null;
   categoryId: string | null;
   category: { id: string; name: string } | null;
   imageUrl: string | null;
@@ -67,6 +78,21 @@ export interface ItemSearchResult {
    * the source warehouse.
    */
   stockQuantity?: number | null;
+}
+
+/** ผลของการยิงบาร์โค้ดหนึ่งครั้ง — ต้องเป็นของชิ้นเดียวเสมอ ไม่ใช่รายการให้เลือก */
+export interface ScannedItem {
+  id: string;
+  sku: string;
+  name: string;
+  unit: string;
+  barcode: string | null;
+  imageUrl: string | null;
+  /** ราคาขายที่ผูกกับตัวสินค้า — null = ยังไม่ตั้ง หน้าขายต้องไม่เดาราคาเอง */
+  sellingPrice: number | null;
+  category: { id: string; name: string } | null;
+  /** ยอดคงเหลือของคลังที่ส่ง warehouseId มา — null = ไม่ได้ระบุคลัง */
+  stockQuantity: number | null;
 }
 
 export interface StockSummary {
@@ -152,6 +178,10 @@ export class ItemsService {
 
       if (query.isPerishable !== undefined) {
         where.isPerishable = query.isPerishable;
+      }
+
+      if (query.itemType) {
+        where.itemType = query.itemType;
       }
 
       // When filtering by warehouse, only return items that hold stock in it.
@@ -256,6 +286,7 @@ export class ItemsService {
           name: true,
           unit: true,
           barcode: true,
+          sellingPrice: true,
           categoryId: true,
           imageUrl: true,
           isPerishable: true,
@@ -285,6 +316,8 @@ export class ItemsService {
         return {
           ...rest,
           category: item.category ?? null,
+          // Decimal → number ตั้งแต่ตรงนี้ หน้าจอจะได้ไม่ต้องแปลงเอง (แล้วลืมแปลง)
+          sellingPrice: item.sellingPrice === null ? null : Number(item.sellingPrice),
           stockQuantity: dto.warehouseId
             ? (warehouseStocks ?? []).reduce((sum, ws) => sum + ws.quantity, 0)
             : null,
@@ -295,6 +328,104 @@ export class ItemsService {
       const stack = error instanceof Error ? error.stack : undefined;
       this.logger.error(`Error searching items: ${message}`, stack);
       throw error;
+    }
+  }
+
+  /**
+   * ยิงบาร์โค้ดหนึ่งครั้ง = ได้ของชิ้นเดียว หรือไม่ได้เลย
+   *
+   * ทำไมไม่ใช้ `searchItems`: ตัวนั้นเทียบ name/sku แบบ contains ด้วย แล้วเรียงตามชื่อ
+   * ยิงบาร์โค้ด "8850001000011" จึงมีโอกาสได้ของตัวอื่นมาเป็นรายการแรก ถ้าหน้าขาย
+   * หยิบตัวแรกเข้าตะกร้าอัตโนมัติ แขกจะโดนคิดเงินของผิดตัวโดยไม่มีใครอ่านซ้ำ
+   *
+   * เจอมากกว่าหนึ่ง = ข้อมูลผิดตั้งแต่ต้นทาง ต้องหยุดแล้วบอกว่าไปแก้ที่ไหน
+   * ไม่ใช่เลือกให้เองเงียบ ๆ (กันไว้ตอนสร้าง/แก้สินค้าอีกชั้นด้วย)
+   */
+  async findByBarcode(tenantId: string, dto: ScanBarcodeDto): Promise<ScannedItem> {
+    const code = dto.code.trim();
+
+    const matches = await this.prisma.inventoryItem.findMany({
+      where: { tenantId, deletedAt: null, isActive: true, barcode: code },
+      select: {
+        id: true,
+        sku: true,
+        name: true,
+        unit: true,
+        barcode: true,
+        imageUrl: true,
+        sellingPrice: true,
+        category: { select: { id: true, name: true } },
+        ...(dto.warehouseId
+          ? {
+              warehouseStocks: {
+                where: { warehouseId: dto.warehouseId },
+                select: { quantity: true, reservedQty: true },
+              },
+            }
+          : {}),
+      },
+      take: 2,
+    });
+
+    if (matches.length === 0) {
+      throw new NotFoundException(`ไม่พบสินค้าที่ผูกกับบาร์โค้ด ${code}`);
+    }
+
+    if (matches.length > 1) {
+      throw new ConflictException(
+        `บาร์โค้ด ${code} ผูกอยู่กับสินค้ามากกว่าหนึ่งรายการ — แก้ที่หน้ารายการสินค้าก่อนจึงจะยิงขายได้`,
+      );
+    }
+
+    const item = matches[0] as (typeof matches)[number] & {
+      warehouseStocks?: Array<{ quantity: number; reservedQty: number }>;
+    };
+
+    return {
+      id: item.id,
+      sku: item.sku,
+      name: item.name,
+      unit: item.unit,
+      barcode: item.barcode,
+      imageUrl: item.imageUrl,
+      sellingPrice: item.sellingPrice === null ? null : Number(item.sellingPrice),
+      category: item.category ?? null,
+      // ยอดที่หยิบได้จริงคือคงเหลือหักที่ถูกกันไว้ ไม่ใช่คงเหลือดิบ
+      stockQuantity: dto.warehouseId
+        ? (item.warehouseStocks ?? []).reduce(
+            (sum, ws) => sum + Math.max(ws.quantity - ws.reservedQty, 0),
+            0,
+          )
+        : null,
+    };
+  }
+
+  /**
+   * บาร์โค้ดต้องชี้ไปที่ของชิ้นเดียวในกิจการเดียวกัน
+   * ปล่อยให้ซ้ำได้เมื่อไหร่ หน้าขายจะยิงแล้วได้ของผิดตัวทันที
+   */
+  private async assertBarcodeIsFree(
+    tenantId: string,
+    barcode: string | null | undefined,
+    excludeItemId?: string,
+  ): Promise<void> {
+    const code = typeof barcode === 'string' ? barcode.trim() : '';
+    if (!code) return;
+
+    const clash = await this.prisma.inventoryItem.findFirst({
+      where: {
+        tenantId,
+        barcode: code,
+        deletedAt: null,
+        ...(excludeItemId ? { id: { not: excludeItemId } } : {}),
+      },
+      select: { sku: true, name: true },
+    });
+
+    if (clash) {
+      throw new ConflictException(
+        `บาร์โค้ด ${code} ถูกใช้กับ "${clash.name}" (${clash.sku}) อยู่แล้ว`,
+      );
     }
   }
 
@@ -368,6 +499,8 @@ export class ItemsService {
         throw new ConflictException(`Item with SKU ${dto.sku} already exists for this tenant`);
       }
 
+      await this.assertBarcodeIsFree(tenantId, dto.barcode);
+
       // Validate categoryId exists if provided
       if (dto.categoryId) {
         const category = await this.prisma.itemCategory.findFirst({
@@ -387,6 +520,8 @@ export class ItemsService {
           description: dto.description || null,
           categoryId: dto.categoryId || null,
           unit: dto.unit || 'PIECE',
+          itemType: dto.itemType || 'RAW_MATERIAL',
+          sellingPrice: dto.sellingPrice ?? null,
           costMethod: dto.costMethod || 'WEIGHTED_AVG',
           reorderPoint: dto.reorderPoint || 0,
           reorderQty: dto.reorderQty || 0,
@@ -440,6 +575,10 @@ export class ItemsService {
         }
       }
 
+      if (dto.barcode !== undefined && dto.barcode !== item.barcode) {
+        await this.assertBarcodeIsFree(tenantId, dto.barcode, id);
+      }
+
       // Validate categoryId if being changed
       if (dto.categoryId && dto.categoryId !== item.categoryId) {
         const category = await this.prisma.itemCategory.findFirst({
@@ -459,6 +598,9 @@ export class ItemsService {
           ...(dto.description !== undefined && { description: dto.description }),
           ...(dto.categoryId !== undefined && { categoryId: dto.categoryId }),
           ...(dto.unit && { unit: dto.unit }),
+          ...(dto.itemType && { itemType: dto.itemType }),
+          // null = ล้างราคาขายทิ้ง ต้องเช็ค undefined ไม่ใช่ truthy (0 บาทก็เป็นราคาที่ตั้งได้)
+          ...(dto.sellingPrice !== undefined && { sellingPrice: dto.sellingPrice }),
           ...(dto.costMethod && { costMethod: dto.costMethod }),
           ...(dto.reorderPoint !== undefined && { reorderPoint: dto.reorderPoint }),
           ...(dto.reorderQty !== undefined && { reorderQty: dto.reorderQty }),

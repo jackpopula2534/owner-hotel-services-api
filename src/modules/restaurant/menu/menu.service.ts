@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogService } from '../../../audit-log/audit-log.service';
 import { CreateMenuCategoryDto } from './dto/create-menu-category.dto';
@@ -240,7 +240,7 @@ export class MenuService {
         orderBy: [{ displayOrder: 'asc' }, { name: 'asc' }],
         include: {
           category: { select: { id: true, name: true } },
-          inventoryItem: { select: { id: true, name: true, sku: true, unit: true } },
+          inventoryItem: { select: { id: true, name: true, sku: true, unit: true, barcode: true } },
         },
       }),
       this.prisma.menuItem.count({ where }),
@@ -259,7 +259,7 @@ export class MenuService {
       where: { id: itemId, restaurantId, tenantId },
       include: {
         category: true,
-        inventoryItem: { select: { id: true, name: true, sku: true, unit: true } },
+        inventoryItem: { select: { id: true, name: true, sku: true, unit: true, barcode: true } },
       },
     });
 
@@ -270,6 +270,50 @@ export class MenuService {
     return this.parseItemAllergens(item);
   }
 
+  /**
+   * ยิงบาร์โค้ดที่หน้าขายร้านอาหาร → เมนูที่ผูกกับสินค้าชิ้นนั้น
+   *
+   * บาร์โค้ดอยู่ที่ตัวสินค้าในคลัง ไม่ได้อยู่ที่เมนู — เมนูของสำเร็จรูปเป็นแค่หน้าร้าน
+   * ของสินค้าตัวเดียวกัน ที่นี่จึงวิ่งจากบาร์โค้ดผ่าน inventoryItem กลับมาที่เมนู
+   *
+   * ทำไมต้องมี endpoint ทั้งที่หน้าจอโหลดเมนูไว้แล้ว: หน้าขายโหลดมาแค่ 100 รายการแรก
+   * ร้านที่มีเมนูมากกว่านั้นจะยิงของจริงแล้วขึ้นว่า "ไม่พบ" ทั้งที่ของมีอยู่
+   */
+  async findItemByBarcode(restaurantId: string, code: string, tenantId: string) {
+    await this.validateRestaurant(restaurantId, tenantId);
+
+    const barcode = code.trim();
+    if (barcode.length < 3) {
+      throw new BadRequestException('บาร์โค้ดสั้นเกินไป');
+    }
+
+    const matches = await this.prisma.menuItem.findMany({
+      where: {
+        restaurantId,
+        tenantId,
+        inventoryItem: { barcode, tenantId, deletedAt: null },
+      },
+      include: {
+        category: { select: { id: true, name: true } },
+        inventoryItem: { select: { id: true, name: true, sku: true, unit: true, barcode: true } },
+      },
+      take: 2,
+    });
+
+    if (matches.length === 0) {
+      throw new NotFoundException(`ไม่พบเมนูที่ผูกกับบาร์โค้ด ${barcode} ในร้านนี้`);
+    }
+
+    // ของชิ้นเดียวถูกผูกไว้สองเมนู = ยิงแล้วไม่รู้ว่าจะคิดราคาไหน ต้องหยุดไม่ใช่เดา
+    if (matches.length > 1) {
+      throw new ConflictException(
+        `บาร์โค้ด ${barcode} ผูกอยู่กับเมนูมากกว่าหนึ่งรายการในร้านนี้ — แก้ที่หน้าจัดการเมนูก่อน`,
+      );
+    }
+
+    return this.parseItemAllergens(matches[0]);
+  }
+
   async createItem(
     restaurantId: string,
     dto: CreateMenuItemDto,
@@ -278,6 +322,7 @@ export class MenuService {
   ) {
     await this.validateRestaurant(restaurantId, tenantId);
     await this.findCategoryOrFail(dto.categoryId, restaurantId, tenantId);
+    this.assertStockConfigValid(dto);
     if (dto.inventoryItemId) {
       await this.validateInventoryItem(dto.inventoryItemId, tenantId);
     }
@@ -302,9 +347,14 @@ export class MenuService {
       },
       include: {
         category: { select: { id: true, name: true } },
-        inventoryItem: { select: { id: true, name: true, sku: true, unit: true } },
+        inventoryItem: { select: { id: true, name: true, sku: true, unit: true, barcode: true } },
       },
     });
+
+    // ยอดยกมาต้องมีบรรทัดในสมุดเดินสต๊อกด้วย ไม่งั้นยอดคงเหลือจะอธิบายที่มาไม่ได้
+    if (item.trackStock && item.stockQty > 0) {
+      await this.recordOpeningStock(item.id, item.stockQty, tenantId, userId);
+    }
 
     this.auditLogService.log({
       action: 'menu_create' as any,
@@ -326,27 +376,40 @@ export class MenuService {
     tenantId: string,
     userId?: string,
   ) {
-    await this.findOneItem(restaurantId, itemId, tenantId);
+    const current = await this.findOneItem(restaurantId, itemId, tenantId);
 
     if (dto.categoryId) {
       await this.findCategoryOrFail(dto.categoryId, restaurantId, tenantId);
     }
+    this.assertStockConfigValid({ ...current, ...dto });
     if (dto.inventoryItemId) {
       await this.validateInventoryItem(dto.inventoryItemId, tenantId);
+      await this.assertNoRecipe(itemId);
     }
+
+    // จำนวนคงเหลือแก้ตรง ๆ ผ่าน PATCH ไม่ได้ — ต้องเดินผ่าน /stock เพื่อให้มีบรรทัดอธิบาย
+    // ข้อยกเว้นเดียวคือตอนเพิ่งเปิดการนับสต๊อก ซึ่งนับเป็นยอดยกมา
+    const enablingTracking = dto.trackStock === true && !current.trackStock;
+    const openingQty = enablingTracking ? dto.stockQty ?? 0 : undefined;
+    const { stockQty: _ignoredStockQty, ...rest } = dto;
 
     const item = await this.prisma.menuItem.update({
       where: { id: itemId },
       data: {
-        ...dto,
+        ...rest,
+        ...(openingQty !== undefined ? { stockQty: openingQty } : {}),
         // allergens is a Json? column — pass the array directly, no stringify needed
         allergens: dto.allergens !== undefined ? dto.allergens : undefined,
       },
       include: {
         category: { select: { id: true, name: true } },
-        inventoryItem: { select: { id: true, name: true, sku: true, unit: true } },
+        inventoryItem: { select: { id: true, name: true, sku: true, unit: true, barcode: true } },
       },
     });
+
+    if (openingQty !== undefined && openingQty > 0) {
+      await this.recordOpeningStock(itemId, openingQty, tenantId, userId);
+    }
 
     this.auditLogService.log({
       action: 'menu_update' as any,
@@ -427,7 +490,14 @@ export class MenuService {
     tenantId: string,
     userId?: string,
   ) {
-    await this.findOneItem(restaurantId, itemId, tenantId);
+    const item = await this.findOneItem(restaurantId, itemId, tenantId);
+
+    // สูตรอาหารตัดวัตถุดิบเอง จึงซ้อนกับการผูกสินค้าสำเร็จรูป 1:1 ไม่ได้ — ตัดสองรอบ
+    if (item.inventoryItemId) {
+      throw new BadRequestException(
+        'เมนูนี้ผูกกับสินค้าในคลังโดยตรงแล้ว จึงเพิ่มสูตรอาหารไม่ได้ — ยกเลิกการผูกก่อนถ้าจะตั้งสูตร',
+      );
+    }
 
     const { ingredients, ...recipeData } = dto;
 
@@ -578,6 +648,73 @@ export class MenuService {
     }
 
     return item;
+  }
+
+  /**
+   * สต๊อกของเมนูหนึ่งรายการต้องมีเจ้าของแหล่งเดียว
+   *
+   * - ผูกคลังกลาง (`inventoryItemId`) + นับเอง (`trackStock`) พร้อมกัน = สองแหล่งความจริง
+   *   ตัดสองรอบหรือชนกันเมื่อสิทธิ์คลังหมดอายุ
+   * - เมนูที่ผูกคลังกลางต้องเป็นของสำเร็จรูป เพราะของที่ต้องปรุงตัดวัตถุดิบผ่านสูตรอยู่แล้ว
+   * - ตั้งเกณฑ์ใกล้หมดโดยไม่นับสต๊อกก็ไม่มีอะไรให้เตือน
+   */
+  private assertStockConfigValid(config: {
+    inventoryItemId?: string | null;
+    trackStock?: boolean | null;
+    itemKind?: string | null;
+    lowStockThreshold?: number | null;
+  }) {
+    if (config.inventoryItemId && config.trackStock) {
+      throw new BadRequestException(
+        'เมนูนี้ผูกกับคลังสินค้าแล้ว จึงเปิด "นับสต๊อกในเมนูนี้" พร้อมกันไม่ได้ — เลือกอย่างใดอย่างหนึ่ง',
+      );
+    }
+
+    if (config.inventoryItemId && config.itemKind === 'COOKED') {
+      throw new BadRequestException(
+        'เมนูที่ต้องปรุงตัดวัตถุดิบผ่านสูตรอาหาร — ถ้าจะผูกกับสินค้าในคลังโดยตรง ให้ตั้งเป็น "สินค้าสำเร็จรูป"',
+      );
+    }
+
+    if (config.lowStockThreshold != null && !config.trackStock && !config.inventoryItemId) {
+      throw new BadRequestException(
+        'ตั้งเกณฑ์แจ้งเตือนใกล้หมดได้เฉพาะเมนูที่นับสต๊อก — เปิด "นับสต๊อกในเมนูนี้" ก่อน',
+      );
+    }
+  }
+
+  private async assertNoRecipe(menuItemId: string) {
+    const recipe = await this.prisma.menuItemRecipe.findUnique({
+      where: { menuItemId },
+      select: { id: true },
+    });
+
+    if (recipe) {
+      throw new BadRequestException(
+        'เมนูนี้มีสูตรอาหารอยู่แล้ว จึงผูกกับสินค้าในคลังโดยตรงไม่ได้ — ลบสูตรก่อนถ้าจะเปลี่ยนเป็นสินค้าสำเร็จรูป',
+      );
+    }
+  }
+
+  /** ยอดยกมาตอนเปิดการนับสต๊อก — บันทึกเป็นบรรทัด OPENING ไม่ใช่การเซ็ตตัวเลขลอย ๆ */
+  private async recordOpeningStock(
+    menuItemId: string,
+    quantity: number,
+    tenantId: string,
+    userId?: string,
+  ) {
+    await this.prisma.menuItemStockMovement.create({
+      data: {
+        tenantId,
+        menuItemId,
+        type: 'OPENING',
+        quantity,
+        balanceAfter: quantity,
+        referenceType: 'manual',
+        note: 'ยอดยกมาตอนเปิดการนับสต๊อก',
+        createdBy: userId ?? 'system',
+      },
+    });
   }
 
   private async findCategoryOrFail(categoryId: string, restaurantId: string, tenantId: string) {

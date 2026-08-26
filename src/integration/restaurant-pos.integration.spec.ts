@@ -6,6 +6,8 @@ import { ReservationService } from '../modules/restaurant/reservation/reservatio
 import { ReservationSortEnum } from '../modules/restaurant/reservation/dto/query-reservations.dto';
 import { OrderService } from '../modules/restaurant/order/order.service';
 import { KitchenService } from '../modules/restaurant/kitchen/kitchen.service';
+import { MenuStockService } from '../modules/restaurant/menu/menu-stock.service';
+import { buildMenuStockStub } from '../modules/restaurant/order/__tests__/menu-stock.stub';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { ConfigService } from '@nestjs/config';
@@ -710,6 +712,8 @@ describe('KitchenService', () => {
         KitchenService,
         { provide: PrismaService, useValue: prismaMock },
         auditLogProvider(),
+        // ครัวยกเลิกรายการแล้วต้องคืนของเข้าสต๊อก — สเปกนี้ไม่ได้ทดสอบสต๊อก จึงใช้ตัวแทนปล่อยผ่าน
+        { provide: MenuStockService, useValue: buildMenuStockStub() },
       ],
     }).compile();
 

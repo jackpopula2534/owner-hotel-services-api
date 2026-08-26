@@ -29,6 +29,7 @@ import {
   ItemsService,
   ItemWithStock,
   ItemSearchResult,
+  ScannedItem,
   StockSummary,
   PaginatedResponse,
 } from './items.service';
@@ -36,6 +37,7 @@ import { CreateItemDto } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
 import { QueryItemDto } from './dto/query-item.dto';
 import { SearchItemDto } from './dto/search-item.dto';
+import { ScanBarcodeDto } from './dto/scan-barcode.dto';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AddonGuard } from '@/common/guards/addon.guard';
 import { RequireAddon } from '@/common/decorators/require-addon.decorator';
@@ -240,6 +242,47 @@ export class ItemsController {
     @Query() query: SearchItemDto,
   ): Promise<{ success: boolean; data: ItemSearchResult[] }> {
     const data = await this.itemsService.searchItems(user.tenantId, query);
+    return { success: true, data };
+  }
+
+  // ต้องประกาศก่อน `:id` เสมอ ไม่งั้น Nest จะอ่าน "by-barcode" เป็น id แล้วตอบ 404
+  @Get('by-barcode')
+  @ApiOperation({
+    summary: 'ยิงบาร์โค้ดที่หน้าขาย — คืนสินค้าชิ้นเดียวแบบเทียบตรงตัว',
+    description:
+      'ต่างจาก /search ตรงที่เทียบบาร์โค้ดเท่ากันเป๊ะ และคืนได้ไม่เกินหนึ่งชิ้น ' +
+      'เพราะของที่ยิงเข้าตะกร้าไม่มีใครอ่านซ้ำก่อนคิดเงิน ' +
+      'ใส่ warehouseId มาด้วยจะได้ยอดคงเหลือของคลังนั้น (หักที่ถูกกันไว้แล้ว) ติดกลับไป',
+  })
+  @ApiQuery({ name: 'code', required: true, type: String, example: '8850001000011' })
+  @ApiQuery({ name: 'warehouseId', required: false, type: String })
+  @ApiResponse({
+    status: 200,
+    description: 'สินค้าที่ผูกกับบาร์โค้ดนี้',
+    schema: {
+      example: {
+        success: true,
+        data: {
+          id: 'uuid',
+          sku: 'SKU-001',
+          name: 'น้ำดื่ม 600ml',
+          unit: 'BOTTLE',
+          barcode: '8850001000011',
+          imageUrl: null,
+          sellingPrice: 20,
+          category: { id: 'uuid', name: 'เครื่องดื่ม' },
+          stockQuantity: 144,
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 404, description: 'ไม่มีสินค้าที่ผูกกับบาร์โค้ดนี้' })
+  @ApiResponse({ status: 409, description: 'บาร์โค้ดซ้ำกันหลายรายการ — ต้องไปแก้ข้อมูลสินค้าก่อน' })
+  async scanBarcode(
+    @CurrentUser() user: JwtPayload,
+    @Query() query: ScanBarcodeDto,
+  ): Promise<{ success: boolean; data: ScannedItem }> {
+    const data = await this.itemsService.findByBarcode(user.tenantId, query);
     return { success: true, data };
   }
 

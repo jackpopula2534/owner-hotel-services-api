@@ -121,6 +121,8 @@ export class AdminSubscriptionFeaturesService {
               description: string | null;
               price: string | number | null;
               is_active: number | boolean | null;
+              category: string | null;
+              system: string | null;
             }>
           >;
         };
@@ -129,7 +131,8 @@ export class AdminSubscriptionFeaturesService {
 
     const bundledPlanAddons = subscription.planId
       ? await planAddonsClient.query(
-          `SELECT a.id AS addon_id, a.code, a.name, a.description, a.price, a.is_active
+          `SELECT a.id AS addon_id, a.code, a.name, a.description, a.price, a.is_active,
+                  a.category, a.system
              FROM plan_addons pa
              INNER JOIN add_ons a ON a.id = pa.addon_id
              WHERE pa.plan_id = ?`,
@@ -152,6 +155,9 @@ export class AdminSubscriptionFeaturesService {
         createdAt: subscription.createdAt?.toISOString().split('T')[0] || 'N/A',
         source: 'plan',
         includedInPlan: true,
+        code: addon.code,
+        category: addon.category ?? null,
+        system: addon.system ?? 'BOTH',
       }));
 
     const totalAddonPrice = addons.reduce((sum, a) => sum + a.totalPrice, 0);
@@ -163,6 +169,10 @@ export class AdminSubscriptionFeaturesService {
         subscription.subscriptionCode || `SUB-${subscription.id.slice(0, 3).toUpperCase()}`,
       hotelName: subscription.tenant?.name || 'N/A',
       planName: subscription.plan?.name || 'No Plan',
+      planId: subscription.planId || undefined,
+      planCode: subscription.plan?.code || undefined,
+      // สายธุรกิจของแพ็กเกจ — หน้า Admin ใช้กรอง add-on ให้ตรงสายเหมือนหน้า "แผนบริการ"
+      planSystem: (subscription.plan?.system || 'HOTEL').toUpperCase(),
       planPrice,
       addons,
       includedFeatures,

@@ -3,6 +3,7 @@ import {
   IsString,
   IsOptional,
   IsInt,
+  IsNumber,
   IsEnum,
   IsBoolean,
   Min,
@@ -35,6 +36,12 @@ export enum CostMethodEnum {
   WEIGHTED_AVG = 'WEIGHTED_AVG',
 }
 
+/** วัตถุดิบที่ต้องแปรรูป vs ของสำเร็จรูปที่หยิบขายได้เลย */
+export enum InventoryItemTypeEnum {
+  RAW_MATERIAL = 'RAW_MATERIAL',
+  FINISHED_GOOD = 'FINISHED_GOOD',
+}
+
 export class CreateItemDto {
   @ApiProperty({ description: 'Stock Keeping Unit (unique per tenant)', example: 'SKU-001' })
   @IsNotEmpty()
@@ -65,6 +72,25 @@ export class CreateItemDto {
   @IsOptional()
   @IsEnum(CostMethodEnum)
   costMethod?: CostMethodEnum;
+
+  @ApiPropertyOptional({
+    enum: InventoryItemTypeEnum,
+    default: InventoryItemTypeEnum.RAW_MATERIAL,
+    description: 'FINISHED_GOOD = ขายหน้าร้านได้ ผูกเป็นเมนูได้',
+  })
+  @IsOptional()
+  @IsEnum(InventoryItemTypeEnum)
+  itemType?: InventoryItemTypeEnum;
+
+  @ApiPropertyOptional({
+    description: 'ราคาขายแนะนำต่อหน่วย (ใช้ตั้งราคาเมนูและคิดกำไรต่อชิ้น)',
+    example: 20,
+  })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Type(() => Number)
+  sellingPrice?: number;
 
   @ApiPropertyOptional({
     description: 'Reorder point (minimum quantity before alert)',

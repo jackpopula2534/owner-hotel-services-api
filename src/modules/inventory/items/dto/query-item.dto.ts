@@ -1,6 +1,7 @@
 import { IsOptional, IsString, IsInt, IsBoolean, IsEnum, Min, Max } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
+import { InventoryItemTypeEnum } from './create-item.dto';
 
 export enum SortField {
   CREATED_AT = 'createdAt',
@@ -70,6 +71,14 @@ export class QueryItemDto {
   @IsBoolean()
   @Type(() => Boolean)
   isPerishable?: boolean;
+
+  @ApiPropertyOptional({
+    enum: InventoryItemTypeEnum,
+    description: 'กรองเฉพาะวัตถุดิบ หรือเฉพาะของสำเร็จรูปที่ขายหน้าร้านได้',
+  })
+  @IsOptional()
+  @IsEnum(InventoryItemTypeEnum)
+  itemType?: InventoryItemTypeEnum;
 
   @ApiPropertyOptional({
     enum: SortField,

@@ -330,6 +330,12 @@ export class AdminPlanItemDto {
   @ApiPropertyOptional({ example: 15 })
   yearlyDiscountPercent?: number;
 
+  @ApiPropertyOptional({
+    example: 5382,
+    description: 'ส่วนต่างที่ประหยัดได้เมื่อจ่ายรายปี (priceMonthly * 12 - priceYearly)',
+  })
+  yearlySavings?: number;
+
   @ApiProperty({ example: 50 })
   maxRooms: number;
 
@@ -407,6 +413,12 @@ export class PlanResponseDto {
 
   @ApiPropertyOptional({ example: 15 })
   yearlyDiscountPercent?: number;
+
+  @ApiPropertyOptional({
+    example: 5382,
+    description: 'ส่วนต่างที่ประหยัดได้เมื่อจ่ายรายปี (priceMonthly * 12 - priceYearly)',
+  })
+  yearlySavings?: number;
 
   @ApiProperty({ example: 50 })
   maxRooms: number;
