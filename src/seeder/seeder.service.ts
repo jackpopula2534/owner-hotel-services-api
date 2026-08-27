@@ -16,6 +16,7 @@ import { SubscriptionStatus } from '../subscriptions/entities/subscription.entit
 import { InvoiceStatus } from '../invoices/entities/invoice.entity';
 import { PaymentMethod, PaymentStatus } from '../payments/entities/payment.entity';
 import { PrismaService } from '../prisma/prisma.service';
+import { ReadyMadeGoodsSeeder } from './ready-made-goods.seeder';
 import {
   CostCenterType,
   CostCategory,
@@ -52,6 +53,7 @@ export class SeederService {
     private subscriptionFeaturesService: SubscriptionFeaturesService,
     private addonService: AddonService,
     private prisma: PrismaService,
+    private readyMadeGoods: ReadyMadeGoodsSeeder,
   ) {}
 
   /**
@@ -82,6 +84,8 @@ export class SeederService {
       await this.seedHrPerformanceData();
       await this.seedRestaurantData();
       await this.seedInventoryData();
+      // ต้องอยู่หลังคลัง — เมนูของสำเร็จรูปผูกกับสินค้าในคลัง จึงต้องมีสินค้าก่อน
+      await this.readyMadeGoods.seed();
       await this.seedRestaurantRecipes();
       await this.seedProcurementUsersAndFlows();
       await this.seedPurchaseRequisitionData();
