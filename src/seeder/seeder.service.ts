@@ -1692,6 +1692,9 @@ export class SeederService {
 
       let bookingCount = 0;
       const today = new Date();
+      // เที่ยงคืนของวันนี้แบบ UTC — ใช้เทียบว่าการเข้าพักยังคร่อมวันนี้อยู่ไหม
+      // ต้องเป็นฐานเดียวกับที่ checkIn/checkOut ถูกเขียน (midnight UTC) ไม่งั้นเพี้ยนไปหนึ่งวัน
+      const todayUtcMidnight = new Date(`${today.toISOString().split('T')[0]}T00:00:00.000Z`);
 
       // สร้างการจองสำหรับแต่ละโรงแรม
       for (const tenant of allTenants) {
@@ -1740,16 +1743,25 @@ export class SeederService {
 
         // สร้าง 3-5 การจองต่อโรงแรม
         const bookingsPerHotel = Math.floor(Math.random() * 3) + 3; // 3-5 bookings
+
+        // สองใบแรกของทุกโรงแรมล็อกไว้ว่าต้องเป็นแขกที่นอนอยู่จริง "วันนี้"
+        // วันที่สุ่มได้คือ -30..+30 ซึ่งตกในช่วง checked_in แค่ 4 ค่า (~6% ต่อใบ)
+        // เดโมส่วนใหญ่จึงไม่มีแขกอยู่ในห้องเลยสักคน แล้วทุกอย่างที่ต้องมีคนอยู่ในห้อง
+        // (มินิบาร์ ลงบิลห้อง เซ็นชื่อลงห้องจากหน้าร้าน) ก็เปิดมาเจอจอว่างเปล่า ทดสอบไม่ได้
+        const forcedInHouse = Math.min(2, rooms.length);
+
         for (let b = 0; b < bookingsPerHotel && rooms.length > 0; b++) {
-          const room = rooms[Math.floor(Math.random() * rooms.length)];
+          const inHouse = b < forcedInHouse;
+          const room = inHouse ? rooms[b] : rooms[Math.floor(Math.random() * rooms.length)];
           const guest = allGuests[Math.floor(Math.random() * allGuests.length)];
 
           // สร้างวันที่จอง — ใช้เวลามาตรฐาน Bangkok (14:00 เช็คอิน, 12:00 เช็คเอาท์)
           // เพื่อให้ availability check (overlap + cleaning buffer) ทำงานถูกต้อง
           // ห้าม use raw `new Date(today)` เพราะจะติด time ของวินาทีที่ seed รัน
           // ทำให้ scheduledCheckIn/Out ผิด และห้องดูเหมือนถูกจองทั้งวัน
-          const daysOffset = Math.floor(Math.random() * 60) - 30; // -30 to +30 days
-          const nightCount = Math.floor(Math.random() * 4) + 1; // 1-4 nights
+          // เข้าเมื่อวาน อยู่ยาว 3 คืน — คร่อมวันนี้แน่นอน ไม่ว่าจะ seed ตอนกี่โมง
+          const daysOffset = inHouse ? -1 : Math.floor(Math.random() * 60) - 30; // -30 to +30 days
+          const nightCount = inHouse ? 3 : Math.floor(Math.random() * 4) + 1; // 1-4 nights
 
           // Build date-only strings (YYYY-MM-DD) based on today + offset (in UTC-safe way)
           const checkInBase = new Date(today);
@@ -1803,6 +1815,17 @@ export class SeederService {
               },
             });
             bookingCount++;
+
+            // แขกที่ยังเช็คอินค้างอยู่ต้องทำให้ห้องเป็น "ไม่ว่าง" ด้วย
+            // ตอนเช็คอินจริง bookings.service อัปเดตให้เอง แต่ seeder เขียน booking ตรงเข้าตาราง
+            // จึงข้ามขั้นนั้นไป ผลคือจอจัดการห้องพักขึ้น "ว่าง" ทั้งที่มีคนนอนอยู่
+            // ส่วนหน้าที่อ่านจาก booking (มินิบาร์ / ลงบิลห้อง) กลับเห็นแขก — สองจอเถียงกันเอง
+            if (status === 'checked_in' && checkOutDate >= todayUtcMidnight) {
+              await this.prisma.room.update({
+                where: { id: room.id },
+                data: { status: 'occupied' },
+              });
+            }
 
             // Create Audit Log for Activity Feed (WOW moment for dashboard)
             await this.prisma.auditLog
