@@ -154,8 +154,7 @@ export class AuthService {
 
     // Auto-create Tenant + Trial Subscription (Step 2 & 3 of registration flow)
     let onboardingResult = null;
-    const tenantName =
-      hotelName || `${firstName}'s ${system === 'CAMP' ? 'Campground' : 'Hotel'}`;
+    const tenantName = hotelName || `${firstName}'s ${system === 'CAMP' ? 'Campground' : 'Hotel'}`;
 
     try {
       onboardingResult = await this.onboardingService.registerHotel(
@@ -499,6 +498,34 @@ export class AuthService {
   }
 
   /**
+   * Role to place in the token for a terminal login: the `user_terminal_access`
+   * grant for (userId, systemContext) when one exists, otherwise `users.role`.
+   * Never throws — a missing table (pre-migration) or any DB hiccup falls back
+   * to the legacy role so login keeps working.
+   */
+  private async resolveTerminalRole(
+    userId: string,
+    systemContext: string,
+    fallbackRole: string,
+  ): Promise<string> {
+    if (!systemContext || systemContext === 'main') return fallbackRole;
+    try {
+      const grant = await (this.prisma as any).userTerminalAccess?.findFirst({
+        where: { userId, terminal: systemContext, revokedAt: null },
+        select: { role: true },
+      });
+      return grant?.role || fallbackRole;
+    } catch (error) {
+      this.logger.warn(
+        `resolveTerminalRole fallback for user=${userId} system=${systemContext}: ${
+          (error as Error)?.message ?? error
+        }`,
+      );
+      return fallbackRole;
+    }
+  }
+
+  /**
    * Build the full login success payload (tokens + user object + property) for a
    * validated user. Shared by login() and completeLoginWith2FA().
    */
@@ -532,10 +559,17 @@ export class AuthService {
       }
     }
 
+    // ── Effective role per terminal ────────────────────────────────────────
+    // `users.role` is a single string, but one person may hold a different
+    // role on each terminal (user_terminal_access). When logging into a
+    // terminal, the role in the JWT/response is the one granted for THAT
+    // terminal; `users.role` stays the dashboard role and the fallback.
+    const effectiveRole = await this.resolveTerminalRole(user.id, systemContext, user.role);
+
     const tokens = await this.generateTokens(
       user.id,
       user.email,
-      user.role,
+      effectiveRole,
       tenantId,
       'user',
       deviceInfo,
@@ -653,7 +687,7 @@ export class AuthService {
         email: user.email,
         firstName: user.firstName,
         lastName: user.lastName,
-        role: user.role,
+        role: effectiveRole,
         tenantId: tenantId,
         defaultPropertyId: defaultProperty?.id ?? null,
         isPlatformAdmin: false,
@@ -1063,7 +1097,9 @@ export class AuthService {
     // Refuse an ordinary access token: only the matching launch claim qualifies,
     // so a POS link can never be traded for a purchasing session and vice versa.
     if (!claims?.[claimFlag] || !claims.sub) {
-      this.logger.warn(`${systemLabel} launch exchange rejected: token is not a ${claimFlag} token`);
+      this.logger.warn(
+        `${systemLabel} launch exchange rejected: token is not a ${claimFlag} token`,
+      );
       throw new UnauthorizedException(`${systemLabel} launch link is invalid or has expired`);
     }
 
@@ -1075,7 +1111,9 @@ export class AuthService {
 
     // The account may have been suspended in the 5 minutes since the link was made.
     if (user.status !== 'active') {
-      this.logger.warn(`${systemLabel} launch exchange blocked: ${user.email} status=${user.status}`);
+      this.logger.warn(
+        `${systemLabel} launch exchange blocked: ${user.email} status=${user.status}`,
+      );
       switch (user.status) {
         case 'suspended':
           throw AuthErrors.accountSuspended();
@@ -1196,7 +1234,7 @@ export class AuthService {
         role: claims.role ?? session.user.role,
         permissions: claims.permissions?.length
           ? claims.permissions
-          : (session.user as { permissions?: string[] }).permissions ?? [],
+          : ((session.user as { permissions?: string[] }).permissions ?? []),
       },
     };
   }
@@ -1321,7 +1359,7 @@ export class AuthService {
         role: claims.role ?? session.user.role,
         permissions: claims.permissions?.length
           ? claims.permissions
-          : sessionUser.permissions ?? HOTEL_MANAGER_PERMISSIONS,
+          : (sessionUser.permissions ?? HOTEL_MANAGER_PERMISSIONS),
         propertyId: sessionUser.propertyId ?? claims.propertyId ?? null,
         propertyName: sessionUser.propertyName ?? claims.propertyName ?? null,
       },

@@ -34,6 +34,7 @@
     "verify:revenue": "ts-node -r tsconfig-paths/register scripts/verify-revenue-ledger.ts",
     "seed:check": "ts-node -r tsconfig-paths/register scripts/check-restaurant-seed.ts",
     "cleanup:phantom-orders": "ts-node -r tsconfig-paths/register scripts/cleanup-phantom-order-tickets.ts",
+    "users:backfill-access": "ts-node -r tsconfig-paths/register scripts/backfill-terminal-access.ts",
     "seed:backfill-scheduled": "ts-node -r tsconfig-paths/register src/seeder/backfill-scheduled-times.ts",
     "db:refresh": "ts-node -r tsconfig-paths/register src/seeder/refresh-seed.ts",
     "prisma:generate": "prisma generate",

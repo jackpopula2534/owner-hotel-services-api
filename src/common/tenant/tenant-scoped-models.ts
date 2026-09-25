@@ -94,6 +94,7 @@ export const TENANT_SCOPED_MODELS: Readonly<Record<string, TenantScopeField>> = 
   TableReservation: 'tenantId',
   User: 'tenantId',
   UserTenant: 'tenantId',
+  UserTerminalAccess: 'tenantId',
   Warehouse: 'tenantId',
   WasteRecord: 'tenantId',
   addon_trial_requests: 'tenant_id',

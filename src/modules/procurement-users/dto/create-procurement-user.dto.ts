@@ -24,6 +24,34 @@ export const PROCUREMENT_ROLES = ['procurement_manager', 'buyer', 'approver', 'r
 
 export type ProcurementRole = (typeof PROCUREMENT_ROLES)[number];
 
+/** Default per-role approval ceilings (THB). null = unlimited. */
+export const DEFAULT_PROCUREMENT_LIMITS: Record<ProcurementRole, number | null> = {
+  procurement_manager: null,
+  buyer: 50_000,
+  approver: 500_000,
+  receiver: 0,
+};
+
+/** Default permission matrix by role. */
+export const DEFAULT_PROCUREMENT_PERMISSIONS: Record<ProcurementRole, string[]> = {
+  procurement_manager: [
+    'pr.create',
+    'pr.approve',
+    'rfq.create',
+    'quote.compare',
+    'po.create',
+    'po.approve',
+    'supplier.manage',
+    'grn.view',
+    'report.view',
+    'approval-flow.manage',
+    'user.manage',
+  ],
+  buyer: ['pr.create', 'rfq.create', 'quote.compare', 'po.create', 'supplier.view', 'report.view'],
+  approver: ['pr.approve', 'po.approve', 'quote.compare', 'report.view'],
+  receiver: ['grn.create', 'grn.view', 'qc.inspect'],
+};
+
 export class CreateProcurementUserDto {
   @ApiProperty({ example: 'buyer@hotel.com', description: 'Login email' })
   @IsEmail()

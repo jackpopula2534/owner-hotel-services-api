@@ -12,6 +12,7 @@ import * as bcrypt from 'bcrypt';
 import type { Prisma } from '@prisma/client';
 import {
   CreateHotelTerminalUserDto,
+  DEFAULT_HOTEL_TERMINAL_PERMISSIONS,
   HOTEL_TERMINAL_ROLES,
   type HotelTerminalRole,
 } from './dto/create-hotel-terminal-user.dto';
@@ -55,37 +56,6 @@ interface HotelTerminalMetadata {
   propertyId?: string | null;
   permissions?: string[];
 }
-
-/** Default permission matrix by role. */
-const DEFAULT_ROLE_PERMISSIONS: Record<HotelTerminalRole, string[]> = {
-  hotel_manager: [
-    'property.view',
-    'property.manage',
-    'rooms.view',
-    'rooms.manage',
-    'frontdesk.view',
-    'frontdesk.manage',
-    'bookings.view',
-    'bookings.manage',
-    'guests.view',
-    'guests.manage',
-    'housekeeping.view',
-    'housekeeping.manage',
-    'maintenance.view',
-    'maintenance.manage',
-  ],
-  front_desk: [
-    'frontdesk.view',
-    'frontdesk.manage',
-    'bookings.view',
-    'bookings.manage',
-    'guests.view',
-    'guests.manage',
-    'rooms.view',
-  ],
-  housekeeper: ['housekeeping.view', 'housekeeping.manage', 'rooms.view'],
-  maintenance: ['maintenance.view', 'maintenance.manage', 'rooms.view'],
-};
 
 @Injectable()
 export class HotelTerminalUsersService {
@@ -143,7 +113,12 @@ export class HotelTerminalUsersService {
    * ตามไปด้วย แต่ต้องมี log ไว้ให้ตามได้
    */
   private async syncRoster(
-    user: { firstName: string | null; lastName: string | null; email: string; phone?: string | null },
+    user: {
+      firstName: string | null;
+      lastName: string | null;
+      email: string;
+      phone?: string | null;
+    },
     role: HotelTerminalRole,
     tenantId: string,
     opts: { employeeCode?: string | null; hrEmployeeId?: string | null } = {},
@@ -223,9 +198,7 @@ export class HotelTerminalUsersService {
       if (Object.keys(data).length === 0) return;
 
       await this.prisma.staff.update({ where: { id: staff.id }, data });
-      this.logger.log(
-        `Roster role sync: staff ${staff.id} → ${rosterRole} (tenant=${tenantId})`,
-      );
+      this.logger.log(`Roster role sync: staff ${staff.id} → ${rosterRole} (tenant=${tenantId})`);
     } catch (error) {
       this.logger.warn(
         `Roster role sync failed for ${user.email} tenant=${tenantId}: ${(error as Error)?.message ?? error}`,
@@ -238,17 +211,15 @@ export class HotelTerminalUsersService {
    *
    * บัญชีที่ถูกระงับแล้วยังโผล่ให้เลือกมอบหมายงานได้ = มอบงานให้คนที่ล็อกอินไม่ได้
    */
-  private async syncRosterStatus(
-    email: string,
-    status: string,
-    tenantId: string,
-  ): Promise<void> {
+  private async syncRosterStatus(email: string, status: string, tenantId: string): Promise<void> {
     const rosterStatus = status === 'active' ? 'active' : 'inactive';
     try {
       const staff = await this.prisma.staff.findFirst({ where: { email, tenantId } });
       if (!staff || staff.status === rosterStatus || staff.status === 'on_leave') return;
       await this.prisma.staff.update({ where: { id: staff.id }, data: { status: rosterStatus } });
-      this.logger.log(`Roster status sync: staff ${staff.id} → ${rosterStatus} (tenant=${tenantId})`);
+      this.logger.log(
+        `Roster status sync: staff ${staff.id} → ${rosterStatus} (tenant=${tenantId})`,
+      );
     } catch (error) {
       this.logger.warn(
         `Roster status sync failed for ${email} tenant=${tenantId}: ${(error as Error)?.message ?? error}`,
@@ -268,7 +239,7 @@ export class HotelTerminalUsersService {
     }
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
-    const permissions = dto.permissions ?? DEFAULT_ROLE_PERMISSIONS[dto.role];
+    const permissions = dto.permissions ?? DEFAULT_HOTEL_TERMINAL_PERMISSIONS[dto.role];
     const metadata: HotelTerminalMetadata = {
       hrEmployeeId: dto.hrEmployeeId ?? null,
       propertyId: dto.propertyId ?? null,
@@ -297,7 +268,8 @@ export class HotelTerminalUsersService {
     // ถ้าเป็นแม่บ้าน/ช่าง ให้ขึ้นทะเบียนพนักงานปฏิบัติการด้วย จะได้มอบหมายงานได้เลย
     // hrEmployeeId ที่ผู้เรียกส่งมาต้องพิสูจน์ก่อนว่าเป็นพนักงานของ tenant นี้จริง
     const verifiedHrEmployeeId = dto.hrEmployeeId
-      ? (await this.prisma.employee.findFirst({ where: { id: dto.hrEmployeeId, tenantId } }))?.id ?? null
+      ? ((await this.prisma.employee.findFirst({ where: { id: dto.hrEmployeeId, tenantId } }))
+          ?.id ?? null)
       : null;
     await this.syncRoster(user as unknown as UserLike, dto.role, tenantId, {
       employeeCode: dto.employeeId ?? null,
@@ -318,7 +290,11 @@ export class HotelTerminalUsersService {
       throw new NotFoundException('Employee not found or does not belong to your tenant');
     }
 
-    if (await this.tenantContext.runUnscoped(() => this.prisma.user.findFirst({ where: { email: employee.email } }))) {
+    if (
+      await this.tenantContext.runUnscoped(() =>
+        this.prisma.user.findFirst({ where: { email: employee.email } }),
+      )
+    ) {
       throw new ConflictException(
         `A user with email "${employee.email}" already exists. Use the regular flow to update it.`,
       );
@@ -326,7 +302,7 @@ export class HotelTerminalUsersService {
 
     const propertyId = dto.propertyId ?? employee.propertyId ?? undefined;
     const hashedPassword = await bcrypt.hash(dto.password, 10);
-    const permissions = DEFAULT_ROLE_PERMISSIONS[dto.role];
+    const permissions = DEFAULT_HOTEL_TERMINAL_PERMISSIONS[dto.role];
     const metadata: HotelTerminalMetadata = {
       hrEmployeeId: employee.id,
       propertyId: propertyId ?? null,
@@ -399,7 +375,7 @@ export class HotelTerminalUsersService {
       }
 
       const propertyId = item.propertyId ?? employee.propertyId ?? null;
-      const permissions = DEFAULT_ROLE_PERMISSIONS[item.role];
+      const permissions = DEFAULT_HOTEL_TERMINAL_PERMISSIONS[item.role];
       const metadata: HotelTerminalMetadata = {
         hrEmployeeId: employee.id,
         propertyId,
@@ -507,7 +483,8 @@ export class HotelTerminalUsersService {
     if (dto.role) {
       await this.reconcileRosterRole(updated as unknown as UserLike, dto.role, tenantId, {
         employeeCode: (updated as unknown as UserLike).employeeId ?? null,
-        hrEmployeeId: this.parseMetadata((updated as unknown as UserLike).metadata).hrEmployeeId ?? null,
+        hrEmployeeId:
+          this.parseMetadata((updated as unknown as UserLike).metadata).hrEmployeeId ?? null,
       });
     }
     if (dto.status) {

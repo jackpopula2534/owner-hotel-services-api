@@ -45,7 +45,9 @@ describe('HotelTerminalUsersService.listImportableEmployees', () => {
    * พนักงานให้ด้วย (StaffService) — ตัวแทนสองตัวนี้ทำให้ประกอบโมดูลได้โดยไม่ต้องมี DB
    */
   const tenantContext = { runUnscoped: jest.fn((fn: () => unknown) => fn()) };
-  const staffService = { provision: jest.fn().mockResolvedValue({ staff: { id: 'staff-1' }, action: 'created' }) };
+  const staffService = {
+    provision: jest.fn().mockResolvedValue({ staff: { id: 'staff-1' }, action: 'created' }),
+  };
 
   beforeEach(async () => {
     prisma = createMockPrisma();

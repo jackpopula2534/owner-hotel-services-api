@@ -106,6 +106,17 @@ export enum AuditAction {
   USER_EXPIRATION_SET = 'user_expiration_set',
   USER_AUTO_EXPIRED = 'user_auto_expired',
 
+  // Tenant user management (unified /tenant-users API) — dotted names per API contract
+  TENANT_USER_CREATE = 'user.create',
+  TENANT_USER_UPDATE = 'user.update',
+  TENANT_USER_ACCESS_GRANT = 'user.access.grant',
+  TENANT_USER_ACCESS_REVOKE = 'user.access.revoke',
+  TENANT_USER_SUSPEND = 'user.suspend',
+  TENANT_USER_ACTIVATE = 'user.activate',
+  TENANT_USER_DELETE = 'user.delete',
+  TENANT_USER_PASSWORD_RESET = 'user.password.reset',
+  TENANT_USER_IMPORT = 'user.import',
+
   // Procurement — Price Comparison approval workflow
   PRICE_COMPARISON_SUBMITTED = 'price_comparison_submitted',
   PRICE_COMPARISON_APPROVED = 'price_comparison_approved',
@@ -216,6 +227,7 @@ export enum AuditCategory {
   PROPERTIES = 'properties',
   SETTINGS = 'settings',
   USERS = 'users',
+  USER_MANAGEMENT = 'user-management',
   PROCUREMENT = 'procurement',
   GENERAL = 'general',
 }

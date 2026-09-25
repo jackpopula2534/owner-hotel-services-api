@@ -90,6 +90,7 @@ import { WarehouseUsersModule } from './modules/warehouse-users/warehouse-users.
 import { AccountingUsersModule } from './modules/accounting-users/accounting-users.module';
 import { HotelTerminalUsersModule } from './modules/hotel-terminal-users/hotel-terminal-users.module';
 import { HrTerminalUsersModule } from './modules/hr-terminal-users/hr-terminal-users.module';
+import { TenantUsersModule } from './modules/tenant-users/tenant-users.module';
 import { SubSystemsModule } from './modules/sub-systems/sub-systems.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { CostAccountingModule } from './modules/cost-accounting/cost-accounting.module';
@@ -214,6 +215,7 @@ import { TenantGuard } from './common/guards/tenant.guard';
     AccountingUsersModule,
     HotelTerminalUsersModule,
     HrTerminalUsersModule,
+    TenantUsersModule,
     SubSystemsModule,
     IntegrationsModule,
     CostAccountingModule,

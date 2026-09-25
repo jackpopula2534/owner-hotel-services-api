@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEmail, IsString, MinLength, IsOptional, IsIn } from 'class-validator';
 
-const POS_ROLES = [
+export const POS_ROLES = [
   'waiter',
   'chef',
   'cashier',
@@ -11,6 +11,8 @@ const POS_ROLES = [
   'maintenance',
   'manager',
 ] as const;
+
+export type PosRole = (typeof POS_ROLES)[number];
 
 export class CreatePosUserDto {
   @ApiProperty({ example: 'staff@hotel.com', description: 'Employee email for POS login' })

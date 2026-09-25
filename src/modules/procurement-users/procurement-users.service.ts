@@ -11,6 +11,8 @@ import * as bcrypt from 'bcrypt';
 import type { Prisma } from '@prisma/client';
 import {
   CreateProcurementUserDto,
+  DEFAULT_PROCUREMENT_LIMITS,
+  DEFAULT_PROCUREMENT_PERMISSIONS,
   PROCUREMENT_ROLES,
   type ProcurementRole,
 } from './dto/create-procurement-user.dto';
@@ -51,34 +53,6 @@ interface UserLike {
   updatedAt?: Date;
 }
 
-/** Default per-role approval ceilings (THB). null = unlimited. */
-const DEFAULT_ROLE_LIMITS: Record<ProcurementRole, number | null> = {
-  procurement_manager: null,
-  buyer: 50_000,
-  approver: 500_000,
-  receiver: 0,
-};
-
-/** Default permission matrix by role. */
-const DEFAULT_ROLE_PERMISSIONS: Record<ProcurementRole, string[]> = {
-  procurement_manager: [
-    'pr.create',
-    'pr.approve',
-    'rfq.create',
-    'quote.compare',
-    'po.create',
-    'po.approve',
-    'supplier.manage',
-    'grn.view',
-    'report.view',
-    'approval-flow.manage',
-    'user.manage',
-  ],
-  buyer: ['pr.create', 'rfq.create', 'quote.compare', 'po.create', 'supplier.view', 'report.view'],
-  approver: ['pr.approve', 'po.approve', 'quote.compare', 'report.view'],
-  receiver: ['grn.create', 'grn.view', 'qc.inspect'],
-};
-
 @Injectable()
 export class ProcurementUsersService {
   private readonly logger = new Logger(ProcurementUsersService.name);
@@ -107,8 +81,8 @@ export class ProcurementUsersService {
     }
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
-    const permissions = dto.permissions ?? DEFAULT_ROLE_PERMISSIONS[dto.role];
-    const approvalLimit = dto.approvalLimit ?? DEFAULT_ROLE_LIMITS[dto.role] ?? null;
+    const permissions = dto.permissions ?? DEFAULT_PROCUREMENT_PERMISSIONS[dto.role];
+    const approvalLimit = dto.approvalLimit ?? DEFAULT_PROCUREMENT_LIMITS[dto.role] ?? null;
 
     const user = await this.prisma.user.create({
       data: {

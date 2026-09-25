@@ -26,6 +26,37 @@ export const HOTEL_TERMINAL_ROLES = [
 
 export type HotelTerminalRole = (typeof HOTEL_TERMINAL_ROLES)[number];
 
+/** Default permission matrix by role. */
+export const DEFAULT_HOTEL_TERMINAL_PERMISSIONS: Record<HotelTerminalRole, string[]> = {
+  hotel_manager: [
+    'property.view',
+    'property.manage',
+    'rooms.view',
+    'rooms.manage',
+    'frontdesk.view',
+    'frontdesk.manage',
+    'bookings.view',
+    'bookings.manage',
+    'guests.view',
+    'guests.manage',
+    'housekeeping.view',
+    'housekeeping.manage',
+    'maintenance.view',
+    'maintenance.manage',
+  ],
+  front_desk: [
+    'frontdesk.view',
+    'frontdesk.manage',
+    'bookings.view',
+    'bookings.manage',
+    'guests.view',
+    'guests.manage',
+    'rooms.view',
+  ],
+  housekeeper: ['housekeeping.view', 'housekeeping.manage', 'rooms.view'],
+  maintenance: ['maintenance.view', 'maintenance.manage', 'rooms.view'],
+};
+
 export class CreateHotelTerminalUserDto {
   @ApiProperty({ example: 'frontdesk@hotel.com', description: 'Login email' })
   @IsEmail()

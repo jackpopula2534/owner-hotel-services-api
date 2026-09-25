@@ -366,10 +366,27 @@ export class TenantsController {
     return this.tenantsService.findOne(id);
   }
 
+  /**
+   * แก้ไขข้อมูลกิจการ
+   * - Platform Admin: แก้ได้ทุก tenant (รวม status / trialEndsAt)
+   * - Tenant Admin: ต้องเป็น owner/admin ของ tenant นั้น (ตรวจจาก user_tenants)
+   *   และแก้ได้เฉพาะฟิลด์โปรไฟล์กิจการ — ดู TenantsService.update
+   */
   @Patch(':id')
   @Roles('platform_admin', 'tenant_admin')
-  update(@Param('id') id: string, @Body() updateTenantDto: UpdateTenantDto) {
-    return this.tenantsService.update(id, updateTenantDto);
+  @ApiOperation({ summary: 'Update tenant/company profile' })
+  update(
+    @Param('id') id: string,
+    @Body() updateTenantDto: UpdateTenantDto,
+    @CurrentUser()
+    user: { userId?: string; role?: string; tenantId?: string; isPlatformAdmin?: boolean },
+  ) {
+    return this.tenantsService.update(id, updateTenantDto, {
+      userId: user?.userId,
+      role: user?.role,
+      tenantId: user?.tenantId,
+      isPlatformAdmin: user?.isPlatformAdmin,
+    });
   }
 
   @Delete(':id')

@@ -41,6 +41,7 @@ model User {
   notifications           Notification[]
   refreshTokens           RefreshToken[]
   userTenants             UserTenant[]
+  terminalAccess          UserTerminalAccess[]
 
   @@map("users")
 }
@@ -2261,6 +2262,28 @@ model UserTenant {
   @@index([userId])
   @@index([tenantId])
   @@map("user_tenants")
+}
+
+/// สิทธิ์เข้าใช้ต่อระบบย่อย (terminal) หนึ่งแถวต่อ (user, terminal)
+/// แหล่งความจริงของ "ใครเข้าระบบไหนได้ในบทบาทอะไร" — service layer ต้อง sync
+/// กลับไปที่ `User.allowedSystems` ทุกครั้งที่เขียน เพราะ SystemGuard/auth.service อ่านฟิลด์นั้น
+model UserTerminalAccess {
+  id            String    @id @default(uuid())
+  userId        String
+  tenantId      String
+  terminal      String    @db.VarChar(32) // 'hotel-terminal' | 'pos' | 'procurement' | ...
+  role          String    @db.VarChar(64)
+  permissions   Json? // override; null = ใช้ default ของ role
+  approvalLimit Decimal?  @db.Decimal(12, 2) // เฉพาะ procurement
+  scopeIds      Json? // เช่น warehouseIds
+  grantedBy     String?
+  grantedAt     DateTime  @default(now())
+  revokedAt     DateTime?
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, terminal])
+  @@index([tenantId, terminal])
+  @@map("user_terminal_access")
 }
 
 model tenants {
