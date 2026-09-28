@@ -77,7 +77,17 @@ export class TenantsController {
    * Get all companies/tenants for the current user
    */
   @Get('my-companies')
-  @Roles('tenant_admin', 'admin', 'manager', 'hr', 'receptionist', 'staff', 'user')
+  @Roles(
+    'tenant_admin',
+    'admin',
+    'manager',
+    'hr',
+    'receptionist',
+    'staff',
+    'user',
+    'hotel_manager',
+    'front_desk',
+  )
   @ApiOperation({ summary: 'Get all tenants accessible to the current user' })
   @ApiResponse({
     status: 200,
@@ -100,7 +110,17 @@ export class TenantsController {
    * Switch the current user's active tenant
    */
   @Post('switch')
-  @Roles('tenant_admin', 'admin', 'manager', 'hr', 'receptionist', 'staff', 'user')
+  @Roles(
+    'tenant_admin',
+    'admin',
+    'manager',
+    'hr',
+    'receptionist',
+    'staff',
+    'user',
+    'hotel_manager',
+    'front_desk',
+  )
   @ApiOperation({ summary: 'Switch the current active tenant' })
   @ApiResponse({
     status: 200,
@@ -214,6 +234,8 @@ export class TenantsController {
     'receptionist',
     'staff',
     'user',
+    'hotel_manager',
+    'front_desk',
   )
   getHotelList(
     @Query() query: HotelListQueryDto,
@@ -245,6 +267,8 @@ export class TenantsController {
     'receptionist',
     'staff',
     'user',
+    'hotel_manager',
+    'front_desk',
   )
   async getHotelDetail(
     @Param('id') id: string,
@@ -313,6 +337,8 @@ export class TenantsController {
     'receptionist',
     'staff',
     'user',
+    'hotel_manager',
+    'front_desk',
   )
   findAll(@CurrentUser() user: { tenantId?: string; role?: string }) {
     // Platform admin เห็นทั้งหมด, คนอื่นเห็นแค่ tenant ตัวเอง
@@ -335,6 +361,8 @@ export class TenantsController {
     'receptionist',
     'staff',
     'user',
+    'hotel_manager',
+    'front_desk',
   )
   getHotelDetailLegacy(
     @Param('id') id: string,
@@ -357,6 +385,8 @@ export class TenantsController {
     'receptionist',
     'staff',
     'user',
+    'hotel_manager',
+    'front_desk',
   )
   findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string; role?: string }) {
     // Platform admin ดูได้ทุก tenant, คนอื่นดูได้แค่ tenant ตัวเอง

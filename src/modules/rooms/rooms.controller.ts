@@ -51,7 +51,17 @@ export class RoomsController {
   @Get()
   @ApiOperation({ summary: 'Get all rooms' })
   @ApiResponse({ status: 200, description: 'List of rooms' })
-  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
+  @Roles(
+    'admin',
+    'manager',
+    'tenant_admin',
+    'receptionist',
+    'platform_admin',
+    'staff',
+    'user',
+    'hotel_manager',
+    'front_desk',
+  )
   async findAll(@Query() query: any, @CurrentUser() user: { tenantId?: string }) {
     return this.roomsService.findAll(query, user?.tenantId);
   }
@@ -59,7 +69,17 @@ export class RoomsController {
   @Get('available')
   @ApiOperation({ summary: 'Get available rooms for date range with optional time override' })
   @ApiResponse({ status: 200, description: 'List of available rooms' })
-  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
+  @Roles(
+    'admin',
+    'manager',
+    'tenant_admin',
+    'receptionist',
+    'platform_admin',
+    'staff',
+    'user',
+    'hotel_manager',
+    'front_desk',
+  )
   async getAvailableRooms(
     @Query('checkIn') checkIn: string,
     @Query('checkOut') checkOut: string,
@@ -82,7 +102,17 @@ export class RoomsController {
   @ApiOperation({ summary: 'Get room by ID' })
   @ApiResponse({ status: 200, description: 'Room details' })
   @ApiResponse({ status: 404, description: 'Room not found' })
-  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
+  @Roles(
+    'admin',
+    'manager',
+    'tenant_admin',
+    'receptionist',
+    'platform_admin',
+    'staff',
+    'user',
+    'hotel_manager',
+    'front_desk',
+  )
   async findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.roomsService.findOne(id, user?.tenantId);
   }
@@ -90,7 +120,7 @@ export class RoomsController {
   @Post()
   @ApiOperation({ summary: 'Create a new room' })
   @ApiResponse({ status: 201, description: 'Room created successfully' })
-  @Roles('admin', 'manager', 'tenant_admin', 'platform_admin')
+  @Roles('admin', 'manager', 'tenant_admin', 'platform_admin', 'hotel_manager')
   async create(
     @Body() createRoomDto: CreateRoomDto,
     @CurrentUser() user: { tenantId?: string; id?: string },
@@ -101,7 +131,7 @@ export class RoomsController {
   @Patch(':id')
   @ApiOperation({ summary: 'Update room' })
   @ApiResponse({ status: 200, description: 'Room updated successfully' })
-  @Roles('admin', 'manager', 'tenant_admin', 'platform_admin')
+  @Roles('admin', 'manager', 'tenant_admin', 'platform_admin', 'hotel_manager')
   async update(
     @Param('id') id: string,
     @Body() updateRoomDto: UpdateRoomDto,
@@ -113,7 +143,17 @@ export class RoomsController {
   @Patch(':id/status')
   @ApiOperation({ summary: 'Update room status' })
   @ApiResponse({ status: 200, description: 'Room status updated' })
-  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
+  @Roles(
+    'admin',
+    'manager',
+    'tenant_admin',
+    'receptionist',
+    'platform_admin',
+    'staff',
+    'user',
+    'hotel_manager',
+    'front_desk',
+  )
   async updateStatus(
     @Param('id') id: string,
     @Body('status') status: string,
@@ -134,7 +174,7 @@ export class RoomsController {
   @ApiOperation({ summary: 'Upload room images' })
   @ApiConsumes('multipart/form-data')
   @ApiResponse({ status: 201, description: 'Images uploaded successfully' })
-  @Roles('admin', 'manager', 'tenant_admin', 'platform_admin')
+  @Roles('admin', 'manager', 'tenant_admin', 'platform_admin', 'hotel_manager')
   @UseInterceptors(
     FilesInterceptor('images', 8, {
       storage: memoryStorage(),

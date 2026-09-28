@@ -38,11 +38,16 @@ export type UserRole =
   | 'receiver'
   | 'warehouse_manager'
   | 'hotel_manager'
+  // Hotel Terminal front desk (tenant-users terminal-registry) — exact match only.
+  | 'front_desk'
   | 'accounting_manager'
   | 'crm_manager'
   | 'crm_agent'
   | 'sales_rep'
   | 'owner'
+  // Camp Terminal roles (tenant-users terminal-registry) — exact match only.
+  | 'camp_manager'
+  | 'camp_staff'
   // POS floor roles. `create-pos-user.dto.ts` lets a tenant create these, so they
   // are real. Neither is in ROLE_LEVELS: they reach POS endpoints by exact match
   // only and inherit nothing else. See ROLE_LEVELS in guards/roles.guard.ts.

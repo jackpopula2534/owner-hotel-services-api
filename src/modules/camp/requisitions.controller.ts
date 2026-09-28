@@ -20,24 +20,9 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { AddonGuard } from '../../common/guards/addon.guard';
 import { RequireAddon } from '../../common/decorators/require-addon.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
-import type { UserRole } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { CAMP_READ_ROLES, CAMP_OPS_WRITE_ROLES } from './camp-roles';
 
-const READ_ROLES: UserRole[] = [
-  'admin',
-  'manager',
-  'tenant_admin',
-  'platform_admin',
-  'staff',
-  'user',
-];
-const WRITE_ROLES: UserRole[] = [
-  'admin',
-  'manager',
-  'tenant_admin',
-  'platform_admin',
-  'staff',
-];
 
 interface AuthUser {
   id?: string;
@@ -54,7 +39,7 @@ export class RequisitionsController {
 
   @Get()
   @ApiOperation({ summary: 'List camp requisitions (ใบเบิก/ใบโอน)' })
-  @Roles(...READ_ROLES)
+  @Roles(...CAMP_READ_ROLES)
   findAll(
     @Query('campgroundId') campgroundId: string | undefined,
     @CurrentUser() user: AuthUser,
@@ -64,7 +49,7 @@ export class RequisitionsController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Get camp requisition by id' })
-  @Roles(...READ_ROLES)
+  @Roles(...CAMP_READ_ROLES)
   findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.findOne(id, user?.tenantId);
   }
@@ -72,7 +57,7 @@ export class RequisitionsController {
   @Post()
   @ApiOperation({ summary: 'Create camp requisition (draft)' })
   @ApiResponse({ status: 201, description: 'Created (draft)' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_OPS_WRITE_ROLES)
   create(@Body() dto: CreateCampRequisitionDto, @CurrentUser() user: AuthUser) {
     return this.service.create(dto, user?.tenantId, user?.id);
   }
@@ -81,14 +66,14 @@ export class RequisitionsController {
   @ApiOperation({
     summary: 'Confirm requisition — perform stock movement + replenish addons',
   })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_OPS_WRITE_ROLES)
   confirm(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.confirm(id, user?.tenantId, user?.id);
   }
 
   @Post(':id/cancel')
   @ApiOperation({ summary: 'Cancel a draft requisition' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_OPS_WRITE_ROLES)
   cancel(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.cancel(id, user?.tenantId, user?.id);
   }

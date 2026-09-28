@@ -35,7 +35,7 @@ export class PromptPayController {
 
   @Post('generate-qr')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('platform_admin', 'tenant_admin', 'manager', 'receptionist')
+  @Roles('platform_admin', 'tenant_admin', 'manager', 'receptionist', 'hotel_manager', 'front_desk')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Generate PromptPay QR code for payment' })
   @ApiResponse({ status: 200, description: 'QR code generated successfully' })

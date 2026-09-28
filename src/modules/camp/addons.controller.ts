@@ -29,11 +29,9 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { AddonGuard } from '../../common/guards/addon.guard';
 import { RequireAddon } from '../../common/decorators/require-addon.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
-import type { UserRole } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { CAMP_READ_ROLES, CAMP_MASTER_WRITE_ROLES } from './camp-roles';
 
-const READ_ROLES: UserRole[] = ['admin', 'manager', 'tenant_admin', 'platform_admin', 'staff', 'user'];
-const WRITE_ROLES: UserRole[] = ['admin', 'manager', 'tenant_admin', 'platform_admin'];
 
 interface MulterFile {
   originalname: string;
@@ -56,7 +54,7 @@ export class AddonsController {
 
   @Get()
   @ApiOperation({ summary: 'List rental addons by campgroundId' })
-  @Roles(...READ_ROLES)
+  @Roles(...CAMP_READ_ROLES)
   findAll(
     @Query('campgroundId') campgroundId: string,
     @CurrentUser() user: { tenantId?: string },
@@ -66,21 +64,21 @@ export class AddonsController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Get addon by id' })
-  @Roles(...READ_ROLES)
+  @Roles(...CAMP_READ_ROLES)
   findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.service.findOne(id, user?.tenantId);
   }
 
   @Post()
   @ApiOperation({ summary: 'Create rental addon' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
   create(@Body() dto: CreateAddonDto, @CurrentUser() user: { tenantId?: string }) {
     return this.service.create(dto, user?.tenantId);
   }
 
   @Put(':id')
   @ApiOperation({ summary: 'Update rental addon' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
   update(
     @Param('id') id: string,
     @Body() dto: UpdateAddonDto,
@@ -93,7 +91,7 @@ export class AddonsController {
   @ApiOperation({ summary: 'Upload addon images (multiple) from device' })
   @ApiConsumes('multipart/form-data')
   @ApiResponse({ status: 201, description: 'Images uploaded' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
   @UseInterceptors(
     FilesInterceptor('images', 10, {
       storage: memoryStorage(),
@@ -124,7 +122,7 @@ export class AddonsController {
 
   @Delete(':id')
   @ApiOperation({ summary: 'Delete rental addon' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
   remove(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.service.remove(id, user?.tenantId);
   }

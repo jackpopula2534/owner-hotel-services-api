@@ -17,11 +17,9 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { AddonGuard } from '../../common/guards/addon.guard';
 import { RequireAddon } from '../../common/decorators/require-addon.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
-import type { UserRole } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { CAMP_READ_ROLES, CAMP_MASTER_WRITE_ROLES } from './camp-roles';
 
-const READ_ROLES: UserRole[] = ['admin', 'manager', 'tenant_admin', 'platform_admin', 'staff', 'user'];
-const WRITE_ROLES: UserRole[] = ['admin', 'manager', 'tenant_admin', 'platform_admin'];
 
 @ApiTags('camp-zones')
 @ApiBearerAuth('JWT-auth')
@@ -33,7 +31,7 @@ export class ZonesController {
 
   @Get()
   @ApiOperation({ summary: 'List zones by campgroundId' })
-  @Roles(...READ_ROLES)
+  @Roles(...CAMP_READ_ROLES)
   findAll(
     @Query('campgroundId') campgroundId: string,
     @CurrentUser() user: { tenantId?: string },
@@ -43,21 +41,21 @@ export class ZonesController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Get zone by id' })
-  @Roles(...READ_ROLES)
+  @Roles(...CAMP_READ_ROLES)
   findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.service.findOne(id, user?.tenantId);
   }
 
   @Post()
   @ApiOperation({ summary: 'Create zone' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
   create(@Body() dto: CreateZoneDto, @CurrentUser() user: { tenantId?: string }) {
     return this.service.create(dto, user?.tenantId);
   }
 
   @Put(':id')
   @ApiOperation({ summary: 'Update zone' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
   update(
     @Param('id') id: string,
     @Body() dto: UpdateZoneDto,
@@ -68,7 +66,7 @@ export class ZonesController {
 
   @Delete(':id')
   @ApiOperation({ summary: 'Delete zone' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
   remove(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.service.remove(id, user?.tenantId);
   }

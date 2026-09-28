@@ -39,14 +39,34 @@ export class BookingsController {
   ) {}
 
   @Get('ping-test')
-  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
+  @Roles(
+    'admin',
+    'manager',
+    'tenant_admin',
+    'receptionist',
+    'platform_admin',
+    'staff',
+    'user',
+    'hotel_manager',
+    'front_desk',
+  )
   ping() {
     return { message: 'pong' };
   }
 
   @Get()
   @ApiOperation({ summary: 'Get all bookings' })
-  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
+  @Roles(
+    'admin',
+    'manager',
+    'tenant_admin',
+    'receptionist',
+    'platform_admin',
+    'staff',
+    'user',
+    'hotel_manager',
+    'front_desk',
+  )
   async findAll(@Query() query: any, @CurrentUser() user: { tenantId?: string }) {
     return this.bookingsService.findAll(query, user?.tenantId);
   }
@@ -54,7 +74,17 @@ export class BookingsController {
   @Post()
   @Throttle({ default: { limit: 20, ttl: 60 } })
   @ApiOperation({ summary: 'Create a new booking' })
-  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
+  @Roles(
+    'admin',
+    'manager',
+    'tenant_admin',
+    'receptionist',
+    'platform_admin',
+    'staff',
+    'user',
+    'hotel_manager',
+    'front_desk',
+  )
   async create(
     @Body() createBookingDto: CreateBookingDto,
     @CurrentUser() user: { tenantId?: string },
@@ -64,14 +94,34 @@ export class BookingsController {
 
   @Get(':id/checkout-summary')
   @ApiOperation({ summary: 'Get checkout summary with charges and payment status' })
-  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
+  @Roles(
+    'admin',
+    'manager',
+    'tenant_admin',
+    'receptionist',
+    'platform_admin',
+    'staff',
+    'user',
+    'hotel_manager',
+    'front_desk',
+  )
   async getCheckoutSummary(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.bookingsService.getCheckoutSummary(id, user?.tenantId);
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get booking by ID' })
-  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
+  @Roles(
+    'admin',
+    'manager',
+    'tenant_admin',
+    'receptionist',
+    'platform_admin',
+    'staff',
+    'user',
+    'hotel_manager',
+    'front_desk',
+  )
   async findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.bookingsService.findOne(id, user?.tenantId);
   }
@@ -79,7 +129,17 @@ export class BookingsController {
   @Put(':id')
   @Throttle({ default: { limit: 20, ttl: 60 } })
   @ApiOperation({ summary: 'Update booking (Full)' })
-  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
+  @Roles(
+    'admin',
+    'manager',
+    'tenant_admin',
+    'receptionist',
+    'platform_admin',
+    'staff',
+    'user',
+    'hotel_manager',
+    'front_desk',
+  )
   async updatePut(
     @Param('id') id: string,
     @Body() updateBookingDto: any,
@@ -90,7 +150,17 @@ export class BookingsController {
 
   @Patch(':id')
   @ApiOperation({ summary: 'Update booking (Partial)' })
-  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
+  @Roles(
+    'admin',
+    'manager',
+    'tenant_admin',
+    'receptionist',
+    'platform_admin',
+    'staff',
+    'user',
+    'hotel_manager',
+    'front_desk',
+  )
   async updatePatch(
     @Param('id') id: string,
     @Body() updateBookingDto: any,
@@ -101,13 +171,29 @@ export class BookingsController {
 
   @Post(':id/checkin')
   @ApiOperation({ summary: 'Check-in booking' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'receptionist')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'receptionist',
+    'hotel_manager',
+    'front_desk',
+  )
   async checkIn(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.bookingsService.checkIn(id, user?.tenantId);
   }
 
   @Post('walk-in')
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'receptionist')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'receptionist',
+    'hotel_manager',
+    'front_desk',
+  )
   @ApiOperation({ summary: 'Walk-in guest — create booking + check-in in one step' })
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   async walkIn(
@@ -119,7 +205,15 @@ export class BookingsController {
 
   @Post(':id/checkout')
   @ApiOperation({ summary: 'Check-out booking' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'receptionist')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'receptionist',
+    'hotel_manager',
+    'front_desk',
+  )
   async checkOut(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.bookingsService.checkOut(id, user?.tenantId);
   }
@@ -129,7 +223,7 @@ export class BookingsController {
   @ApiResponse({ status: 400, description: 'ไม่ได้เช็คเอาต์ หรือข้ามวันทำการไปแล้ว' })
   @ApiResponse({ status: 409, description: 'ห้องถูกจองต่อไปแล้ว' })
   // ไม่มี receptionist — การย้อนสถานะแตะสมุดรายได้กับบัญชี จึงเป็นงานระดับหัวหน้ากะ
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hotel_manager')
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async undoCheckOut(
     @Param('id') id: string,
@@ -140,8 +234,10 @@ export class BookingsController {
   }
 
   @Post('admin/backfill-journal-entries')
-  @ApiOperation({ summary: 'Backfill journal entries for checked-out bookings that have no accounting entry yet' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager')
+  @ApiOperation({
+    summary: 'Backfill journal entries for checked-out bookings that have no accounting entry yet',
+  })
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hotel_manager')
   async backfillJournalEntries(
     @CurrentUser() user: { tenantId?: string; defaultPropertyId?: string },
     @Query('propertyId') propertyId?: string,
@@ -155,21 +251,47 @@ export class BookingsController {
   @Delete(':id')
   @Throttle({ default: { limit: 10, ttl: 60 } })
   @ApiOperation({ summary: 'Cancel booking' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'receptionist')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'receptionist',
+    'hotel_manager',
+    'front_desk',
+  )
   async remove(@Param('id') id: string, @CurrentUser() user: { tenantId?: string; id?: string }) {
     return this.bookingsService.remove(id, user?.tenantId, user?.id);
   }
 
   @Get(':id/folio')
   @ApiOperation({ summary: 'Get guest folio (running tab of charges)' })
-  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff')
+  @Roles(
+    'admin',
+    'manager',
+    'tenant_admin',
+    'receptionist',
+    'platform_admin',
+    'staff',
+    'hotel_manager',
+    'front_desk',
+  )
   async getFolio(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.folioService.getFolio(id, user?.tenantId);
   }
 
   @Post(':id/folio/charges')
   @ApiOperation({ summary: 'Add charge to guest folio' })
-  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff')
+  @Roles(
+    'admin',
+    'manager',
+    'tenant_admin',
+    'receptionist',
+    'platform_admin',
+    'staff',
+    'hotel_manager',
+    'front_desk',
+  )
   async addFolioCharge(
     @Param('id') id: string,
     @Body() dto: AddFolioChargeDto,
@@ -180,7 +302,15 @@ export class BookingsController {
 
   @Post(':id/folio/finalize')
   @ApiOperation({ summary: 'Finalize guest folio for checkout' })
-  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin')
+  @Roles(
+    'admin',
+    'manager',
+    'tenant_admin',
+    'receptionist',
+    'platform_admin',
+    'hotel_manager',
+    'front_desk',
+  )
   async finalizeFolio(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.folioService.finalizeFolio(id, user?.tenantId);
   }
@@ -188,7 +318,15 @@ export class BookingsController {
   @Post(':id/folio/payments')
   @ApiOperation({ summary: 'Record a payment against guest folio' })
   @ApiResponse({ status: 201, description: 'Payment recorded successfully' })
-  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin')
+  @Roles(
+    'admin',
+    'manager',
+    'tenant_admin',
+    'receptionist',
+    'platform_admin',
+    'hotel_manager',
+    'front_desk',
+  )
   async addFolioPayment(
     @Param('id') id: string,
     @Body() dto: AddFolioPaymentDto,
@@ -200,7 +338,16 @@ export class BookingsController {
   @Get(':id/folio/receipt')
   @ApiOperation({ summary: 'Get receipt data for guest folio' })
   @ApiResponse({ status: 200, description: 'Receipt data' })
-  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff')
+  @Roles(
+    'admin',
+    'manager',
+    'tenant_admin',
+    'receptionist',
+    'platform_admin',
+    'staff',
+    'hotel_manager',
+    'front_desk',
+  )
   async getFolioReceipt(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.folioService.getReceiptData(id, user?.tenantId);
   }
@@ -208,7 +355,15 @@ export class BookingsController {
   @Delete(':id/folio/charges/:itemId')
   @ApiOperation({ summary: 'Delete a charge from guest folio' })
   @ApiResponse({ status: 200, description: 'Charge deleted, updated folio returned' })
-  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin')
+  @Roles(
+    'admin',
+    'manager',
+    'tenant_admin',
+    'receptionist',
+    'platform_admin',
+    'hotel_manager',
+    'front_desk',
+  )
   async deleteFolioCharge(
     @Param('id') id: string,
     @Param('itemId') itemId: string,
@@ -229,7 +384,17 @@ export class BookingsController {
   @ApiResponse({ status: 200, description: 'Early check-in requested/approved successfully' })
   @ApiResponse({ status: 400, description: 'Invalid state or early check-in not enabled' })
   @ApiResponse({ status: 404, description: 'Booking not found' })
-  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
+  @Roles(
+    'admin',
+    'manager',
+    'tenant_admin',
+    'receptionist',
+    'platform_admin',
+    'staff',
+    'user',
+    'hotel_manager',
+    'front_desk',
+  )
   async requestEarlyCheckIn(
     @Param('id') id: string,
     @Body() dto: RequestEarlyCheckInDto,
@@ -245,7 +410,7 @@ export class BookingsController {
   })
   @ApiResponse({ status: 200, description: 'Early check-in approved successfully' })
   @ApiResponse({ status: 400, description: 'No request pending or already approved' })
-  @Roles('admin', 'manager', 'tenant_admin', 'platform_admin')
+  @Roles('admin', 'manager', 'tenant_admin', 'platform_admin', 'hotel_manager')
   async approveEarlyCheckIn(
     @Param('id') id: string,
     @CurrentUser() user: { tenantId?: string; id?: string },
@@ -263,7 +428,17 @@ export class BookingsController {
   @ApiResponse({ status: 200, description: 'Late check-out requested/approved successfully' })
   @ApiResponse({ status: 400, description: 'Invalid state or late check-out not enabled' })
   @ApiResponse({ status: 404, description: 'Booking not found' })
-  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
+  @Roles(
+    'admin',
+    'manager',
+    'tenant_admin',
+    'receptionist',
+    'platform_admin',
+    'staff',
+    'user',
+    'hotel_manager',
+    'front_desk',
+  )
   async requestLateCheckOut(
     @Param('id') id: string,
     @Body() dto: RequestLateCheckOutDto,
@@ -279,7 +454,7 @@ export class BookingsController {
   })
   @ApiResponse({ status: 200, description: 'Late check-out approved successfully' })
   @ApiResponse({ status: 400, description: 'No request pending or already approved' })
-  @Roles('admin', 'manager', 'tenant_admin', 'platform_admin')
+  @Roles('admin', 'manager', 'tenant_admin', 'platform_admin', 'hotel_manager')
   async approveLateCheckOut(
     @Param('id') id: string,
     @CurrentUser() user: { tenantId?: string; id?: string },
@@ -297,7 +472,17 @@ export class BookingsController {
   })
   @ApiResponse({ status: 200, description: 'Activity timeline returned successfully' })
   @ApiResponse({ status: 404, description: 'Booking not found' })
-  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
+  @Roles(
+    'admin',
+    'manager',
+    'tenant_admin',
+    'receptionist',
+    'platform_admin',
+    'staff',
+    'user',
+    'hotel_manager',
+    'front_desk',
+  )
   async getActivities(
     @Param('id') id: string,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,

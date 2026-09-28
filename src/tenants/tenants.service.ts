@@ -396,6 +396,7 @@ export class TenantsService {
         tenant: {
           include: {
             subscriptions: {
+              orderBy: { created_at: 'desc' }, // [0] = latest subscription
               include: {
                 plans_subscriptions_plan_idToplans: true,
               },

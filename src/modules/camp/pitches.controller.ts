@@ -30,11 +30,9 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { AddonGuard } from '../../common/guards/addon.guard';
 import { RequireAddon } from '../../common/decorators/require-addon.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
-import type { UserRole } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { CAMP_READ_ROLES, CAMP_MASTER_WRITE_ROLES } from './camp-roles';
 
-const READ_ROLES: UserRole[] = ['admin', 'manager', 'tenant_admin', 'platform_admin', 'staff', 'user'];
-const WRITE_ROLES: UserRole[] = ['admin', 'manager', 'tenant_admin', 'platform_admin'];
 
 interface MulterFile {
   originalname: string;
@@ -57,7 +55,7 @@ export class PitchesController {
 
   @Get()
   @ApiOperation({ summary: 'List pitches by campgroundId' })
-  @Roles(...READ_ROLES)
+  @Roles(...CAMP_READ_ROLES)
   findAll(
     @Query('campgroundId') campgroundId: string,
     @CurrentUser() user: { tenantId?: string },
@@ -67,7 +65,7 @@ export class PitchesController {
 
   @Get('availability')
   @ApiOperation({ summary: 'Pitch availability for a date range (for 2D map)' })
-  @Roles(...READ_ROLES)
+  @Roles(...CAMP_READ_ROLES)
   availability(
     @Query('campgroundId') campgroundId: string,
     @Query('checkIn') checkIn: string,
@@ -79,21 +77,21 @@ export class PitchesController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Get pitch by id' })
-  @Roles(...READ_ROLES)
+  @Roles(...CAMP_READ_ROLES)
   findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.service.findOne(id, user?.tenantId);
   }
 
   @Post()
   @ApiOperation({ summary: 'Create pitch' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
   create(@Body() dto: CreatePitchDto, @CurrentUser() user: { tenantId?: string }) {
     return this.service.create(dto, user?.tenantId);
   }
 
   @Post('bulk')
   @ApiOperation({ summary: 'Bulk create pitches (e.g. A4–A20) for a zone in one request' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
   bulkCreate(
     @Body() dto: BulkCreatePitchDto,
     @CurrentUser() user: { tenantId?: string },
@@ -105,7 +103,7 @@ export class PitchesController {
   @ApiOperation({
     summary: 'Bulk delete pitches — all in a campground (Clear all) or all in one zone',
   })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
   bulkDelete(
     @Body() dto: BulkDeletePitchDto,
     @CurrentUser() user: { tenantId?: string },
@@ -115,7 +113,7 @@ export class PitchesController {
 
   @Put(':id')
   @ApiOperation({ summary: 'Update pitch' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
   update(
     @Param('id') id: string,
     @Body() dto: UpdatePitchDto,
@@ -128,7 +126,7 @@ export class PitchesController {
   @ApiOperation({ summary: 'Upload pitch gallery images (multiple) from device' })
   @ApiConsumes('multipart/form-data')
   @ApiResponse({ status: 201, description: 'Pitch images uploaded' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
   @UseInterceptors(
     FilesInterceptor('images', 12, {
       storage: memoryStorage(),
@@ -159,7 +157,7 @@ export class PitchesController {
 
   @Patch(':id/position')
   @ApiOperation({ summary: 'Update pitch position on 2D map (owner drag & drop)' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
   updatePosition(
     @Param('id') id: string,
     @Body() dto: UpdatePitchPositionDto,
@@ -170,7 +168,7 @@ export class PitchesController {
 
   @Delete(':id')
   @ApiOperation({ summary: 'Delete pitch' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
   remove(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.service.remove(id, user?.tenantId);
   }

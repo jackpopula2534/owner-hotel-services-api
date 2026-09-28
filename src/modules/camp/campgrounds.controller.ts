@@ -34,11 +34,9 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { AddonGuard } from '../../common/guards/addon.guard';
 import { RequireAddon } from '../../common/decorators/require-addon.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
-import type { UserRole } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { CAMP_READ_ROLES, CAMP_MASTER_WRITE_ROLES } from './camp-roles';
 
-const READ_ROLES: UserRole[] = ['admin', 'manager', 'tenant_admin', 'platform_admin', 'staff', 'user'];
-const WRITE_ROLES: UserRole[] = ['admin', 'manager', 'tenant_admin', 'platform_admin'];
 
 // Minimal multer file shape — avoids depending on @types/multer
 interface MulterFile {
@@ -63,14 +61,14 @@ export class CampgroundsController {
   @Get()
   @ApiOperation({ summary: 'List campgrounds' })
   @ApiResponse({ status: 200, description: 'List of campgrounds' })
-  @Roles(...READ_ROLES)
+  @Roles(...CAMP_READ_ROLES)
   findAll(@CurrentUser() user: { tenantId?: string }) {
     return this.service.findAll(user?.tenantId);
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get campground by id (with zones + pitches)' })
-  @Roles(...READ_ROLES)
+  @Roles(...CAMP_READ_ROLES)
   findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.service.findOne(id, user?.tenantId);
   }
@@ -78,14 +76,14 @@ export class CampgroundsController {
   @Post()
   @ApiOperation({ summary: 'Create campground' })
   @ApiResponse({ status: 201, description: 'Created' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
   create(@Body() dto: CreateCampgroundDto, @CurrentUser() user: { tenantId?: string }) {
     return this.service.create(dto, user?.tenantId);
   }
 
   @Put(':id')
   @ApiOperation({ summary: 'Update campground' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
   update(
     @Param('id') id: string,
     @Body() dto: UpdateCampgroundDto,
@@ -96,7 +94,7 @@ export class CampgroundsController {
 
   @Patch(':id/map')
   @ApiOperation({ summary: 'Set campground map image + canvas size' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
   setMap(
     @Param('id') id: string,
     @Body() dto: UploadMapDto,
@@ -109,7 +107,7 @@ export class CampgroundsController {
   @ApiOperation({ summary: 'Upload campground layout image from device' })
   @ApiConsumes('multipart/form-data')
   @ApiResponse({ status: 201, description: 'Map image uploaded' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),
@@ -143,7 +141,7 @@ export class CampgroundsController {
   @ApiOperation({ summary: 'Upload campground gallery images (multiple) from device' })
   @ApiConsumes('multipart/form-data')
   @ApiResponse({ status: 201, description: 'Images uploaded' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
   @UseInterceptors(
     FilesInterceptor('images', 12, {
       storage: memoryStorage(),
@@ -177,7 +175,7 @@ export class CampgroundsController {
     summary: 'Connect campground to Inventory Module (auto-create sub-warehouse)',
   })
   @ApiResponse({ status: 201, description: 'Connected; warehouse ensured' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
   connectInventory(
     @Param('id') id: string,
     @CurrentUser() user: { tenantId?: string },
@@ -187,7 +185,7 @@ export class CampgroundsController {
 
   @Post(':id/inventory/disconnect')
   @ApiOperation({ summary: 'Disconnect campground from Inventory Module' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
   disconnectInventory(
     @Param('id') id: string,
     @CurrentUser() user: { tenantId?: string },
@@ -197,7 +195,7 @@ export class CampgroundsController {
 
   @Post(':id/pos/connect')
   @ApiOperation({ summary: 'Connect campground to POS Module (manual per-campground)' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
   connectPos(
     @Param('id') id: string,
     @CurrentUser() user: { tenantId?: string },
@@ -207,7 +205,7 @@ export class CampgroundsController {
 
   @Post(':id/pos/disconnect')
   @ApiOperation({ summary: 'Disconnect campground from POS Module' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
   disconnectPos(
     @Param('id') id: string,
     @CurrentUser() user: { tenantId?: string },
@@ -217,7 +215,7 @@ export class CampgroundsController {
 
   @Post(':id/kitchen/connect')
   @ApiOperation({ summary: 'Connect campground to Kitchen Display (KDS) — manual per-campground' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
   connectKitchen(
     @Param('id') id: string,
     @CurrentUser() user: { tenantId?: string },
@@ -227,7 +225,7 @@ export class CampgroundsController {
 
   @Post(':id/kitchen/disconnect')
   @ApiOperation({ summary: 'Disconnect campground from Kitchen Display (KDS)' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
   disconnectKitchen(
     @Param('id') id: string,
     @CurrentUser() user: { tenantId?: string },
@@ -237,7 +235,7 @@ export class CampgroundsController {
 
   @Delete(':id')
   @ApiOperation({ summary: 'Delete campground' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
   remove(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.service.remove(id, user?.tenantId);
   }

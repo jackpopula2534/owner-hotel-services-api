@@ -1558,6 +1558,34 @@ export class SeederService {
    * 7️⃣ Seed Demo Guests
    * สร้างแขกตัวอย่าง (Thai + International names)
    */
+  /**
+   * Hotel-only seeders (rooms + bookings, hotel staff, housekeeping roster) must
+   * skip Campground tenants — otherwise re-running the seeder plants hotel rooms
+   * and housekeepers into a camp tenant registered in the same DB.
+   * A tenant is CAMP when its latest subscription's plan is on the CAMP line,
+   * or (no subscription yet) when it signed up as a campground.
+   */
+  private isCampTenant(tenant: any): boolean {
+    const subs: any[] = Array.isArray(tenant?.subscriptions) ? [...tenant.subscriptions] : [];
+    subs.sort((a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime());
+    const plan = subs[0]?.plans_subscriptions_plan_idToplans;
+    if (plan) {
+      return (
+        String(plan.system ?? '').toUpperCase() === 'CAMP' ||
+        String(plan.code ?? '').toUpperCase().startsWith('CAMP')
+      );
+    }
+    return String(tenant?.property_type ?? '').toLowerCase() === 'campground';
+  }
+
+  private async findHotelTenants(): Promise<any[]> {
+    const all = await this.tenantsService.findAll();
+    const hotels = all.filter((t) => !this.isCampTenant(t));
+    const skipped = all.length - hotels.length;
+    if (skipped > 0) this.logger.log(`  ⊘ Skipping ${skipped} campground tenant(s) (hotel-only seed)`);
+    return hotels;
+  }
+
   private async seedDemoGuests(): Promise<void> {
     this.logger.log('👥 Seeding Demo Guests...');
 
@@ -1680,7 +1708,7 @@ export class SeederService {
 
     try {
       // ดึง tenant ทั้งหมด
-      const allTenants = await this.tenantsService.findAll();
+      const allTenants = await this.findHotelTenants();
       if (allTenants.length === 0) {
         this.logger.warn('  ⚠️ No tenants found, skipping demo bookings');
         return;
@@ -1931,7 +1959,7 @@ export class SeederService {
     this.logger.log('👷 Seeding Hotel Staff (User table)...');
 
     // ดึง tenant ทั้งหมดที่มีอยู่
-    const allTenants = await this.tenantsService.findAll();
+    const allTenants = await this.findHotelTenants();
 
     if (allTenants.length === 0) {
       this.logger.warn('  ⚠️ No tenants found, skipping hotel staff seeding');
@@ -2126,7 +2154,7 @@ export class SeederService {
   private async seedOperationalStaff(): Promise<void> {
     this.logger.log('🧹 Seeding Operational Staff (staff table)...');
 
-    const allTenants = await this.tenantsService.findAll();
+    const allTenants = await this.findHotelTenants();
     if (allTenants.length === 0) {
       this.logger.warn('  ⚠️ No tenants found, skipping operational staff seeding');
       return;

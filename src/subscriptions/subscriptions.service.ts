@@ -146,6 +146,10 @@ export class SubscriptionsService {
   findByTenantId(tenantId: string) {
     return this.prisma.subscriptions.findFirst({
       where: { tenant_id: tenantId },
+      // Latest subscription wins — same rule as AddonGuard. Without an order the
+      // DB may return an older row (e.g. a previous HOTEL plan) and the UI shows
+      // the wrong product line.
+      orderBy: { created_at: 'desc' },
       include: {
         plans_subscriptions_plan_idToplans: {
           include: { plan_features: { include: { features: true } } },

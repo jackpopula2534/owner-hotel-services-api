@@ -29,21 +29,51 @@ export class GuestsController {
 
   @Get()
   @ApiOperation({ summary: 'Get all guests' })
-  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
+  @Roles(
+    'admin',
+    'manager',
+    'tenant_admin',
+    'receptionist',
+    'platform_admin',
+    'staff',
+    'user',
+    'hotel_manager',
+    'front_desk',
+  )
   async findAll(@Query() query: any, @CurrentUser() user: { tenantId?: string }) {
     return this.guestsService.findAll(query, user?.tenantId);
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get guest by ID' })
-  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
+  @Roles(
+    'admin',
+    'manager',
+    'tenant_admin',
+    'receptionist',
+    'platform_admin',
+    'staff',
+    'user',
+    'hotel_manager',
+    'front_desk',
+  )
   async findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.guestsService.findOne(id, user?.tenantId);
   }
 
   @Post()
   @ApiOperation({ summary: 'Create a new guest' })
-  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
+  @Roles(
+    'admin',
+    'manager',
+    'tenant_admin',
+    'receptionist',
+    'platform_admin',
+    'staff',
+    'user',
+    'hotel_manager',
+    'front_desk',
+  )
   async create(
     @Body() createGuestDto: CreateGuestDto,
     @CurrentUser() user: { id?: string; tenantId?: string },
@@ -55,7 +85,17 @@ export class GuestsController {
 
   @Put(':id')
   @ApiOperation({ summary: 'Update guest (PUT)' })
-  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
+  @Roles(
+    'admin',
+    'manager',
+    'tenant_admin',
+    'receptionist',
+    'platform_admin',
+    'staff',
+    'user',
+    'hotel_manager',
+    'front_desk',
+  )
   async updatePut(
     @Param('id') id: string,
     @Body() updateGuestDto: UpdateGuestDto,
@@ -66,7 +106,17 @@ export class GuestsController {
 
   @Patch(':id')
   @ApiOperation({ summary: 'Update guest (PATCH)' })
-  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
+  @Roles(
+    'admin',
+    'manager',
+    'tenant_admin',
+    'receptionist',
+    'platform_admin',
+    'staff',
+    'user',
+    'hotel_manager',
+    'front_desk',
+  )
   async updatePatch(
     @Param('id') id: string,
     @Body() updateGuestDto: UpdateGuestDto,

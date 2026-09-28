@@ -28,11 +28,9 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { AddonGuard } from '../../common/guards/addon.guard';
 import { RequireAddon } from '../../common/decorators/require-addon.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
-import type { UserRole } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { CAMP_READ_ROLES, CAMP_OPS_WRITE_ROLES } from './camp-roles';
 
-const READ_ROLES: UserRole[] = ['admin', 'manager', 'tenant_admin', 'platform_admin', 'staff', 'user'];
-const WRITE_ROLES: UserRole[] = ['admin', 'manager', 'tenant_admin', 'platform_admin', 'staff'];
 
 interface MulterFile {
   originalname: string;
@@ -67,7 +65,7 @@ export class ReservationsController {
 
   @Get()
   @ApiOperation({ summary: 'List reservations' })
-  @Roles(...READ_ROLES)
+  @Roles(...CAMP_READ_ROLES)
   findAll(
     @Query('campgroundId') campgroundId: string,
     @Query('status') status: string,
@@ -78,21 +76,21 @@ export class ReservationsController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Get reservation by id' })
-  @Roles(...READ_ROLES)
+  @Roles(...CAMP_READ_ROLES)
   findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.service.findOne(id, user?.tenantId);
   }
 
   @Post()
   @ApiOperation({ summary: 'Create reservation (prevents double-booking)' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_OPS_WRITE_ROLES)
   create(@Body() dto: CreateReservationDto, @CurrentUser() user: { tenantId?: string }) {
     return this.service.create(dto, user?.tenantId);
   }
 
   @Put(':id')
   @ApiOperation({ summary: 'Update reservation' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_OPS_WRITE_ROLES)
   update(
     @Param('id') id: string,
     @Body() dto: UpdateReservationDto,
@@ -105,7 +103,7 @@ export class ReservationsController {
   @ApiOperation({
     summary: 'Replace reservation add-ons (stock-aware; recalculates total)',
   })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_OPS_WRITE_ROLES)
   updateAddons(
     @Param('id') id: string,
     @Body() dto: UpdateReservationAddonsDto,
@@ -116,28 +114,28 @@ export class ReservationsController {
 
   @Post(':id/check-in')
   @ApiOperation({ summary: 'Check-in reservation' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_OPS_WRITE_ROLES)
   checkIn(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.service.checkIn(id, user?.tenantId);
   }
 
   @Post(':id/check-out')
   @ApiOperation({ summary: 'Check-out reservation' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_OPS_WRITE_ROLES)
   checkOut(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.service.checkOut(id, user?.tenantId);
   }
 
   @Post(':id/cancel')
   @ApiOperation({ summary: 'Cancel reservation' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_OPS_WRITE_ROLES)
   cancel(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.service.cancel(id, user?.tenantId);
   }
 
   @Post(':id/payment')
   @ApiOperation({ summary: 'Record a payment against a reservation' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_OPS_WRITE_ROLES)
   recordPayment(
     @Param('id') id: string,
     @Body() dto: RecordPaymentDto,
@@ -150,7 +148,7 @@ export class ReservationsController {
   @ApiOperation({ summary: 'Upload a bank-transfer slip image; returns its URL to attach on /payment' })
   @ApiConsumes('multipart/form-data')
   @ApiResponse({ status: 201, description: 'Slip uploaded' })
-  @Roles(...WRITE_ROLES)
+  @Roles(...CAMP_OPS_WRITE_ROLES)
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),

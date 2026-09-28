@@ -35,7 +35,7 @@ export class PropertiesController {
   @Get()
   @ApiOperation({ summary: 'Get all properties' })
   @ApiResponse({ status: 200, description: 'List of properties' })
-  @Roles('admin', 'manager', 'tenant_admin', 'platform_admin')
+  @Roles('admin', 'manager', 'tenant_admin', 'platform_admin', 'hotel_manager', 'front_desk')
   async findAll(@Query() query: any, @CurrentUser() user: { tenantId?: string }) {
     if (!user?.tenantId) {
       throw new BadRequestException(
@@ -49,7 +49,7 @@ export class PropertiesController {
   @ApiOperation({ summary: 'Get property by ID' })
   @ApiResponse({ status: 200, description: 'Property details' })
   @ApiResponse({ status: 404, description: 'Property not found' })
-  @Roles('admin', 'manager', 'tenant_admin', 'platform_admin')
+  @Roles('admin', 'manager', 'tenant_admin', 'platform_admin', 'hotel_manager', 'front_desk')
   async findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     if (!user?.tenantId) {
       throw new BadRequestException(
@@ -146,7 +146,15 @@ export class PropertiesController {
   })
   @ApiResponse({ status: 200, description: 'Time settings retrieved successfully' })
   @ApiResponse({ status: 404, description: 'Property not found' })
-  @Roles('admin', 'manager', 'tenant_admin', 'platform_admin', 'receptionist')
+  @Roles(
+    'admin',
+    'manager',
+    'tenant_admin',
+    'platform_admin',
+    'receptionist',
+    'hotel_manager',
+    'front_desk',
+  )
   async getTimeSettings(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     if (!user?.tenantId) {
       throw new BadRequestException(

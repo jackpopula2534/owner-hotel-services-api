@@ -6,6 +6,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { DashboardService } from './dashboard.service';
 import { BusinessOverview, BusinessOverviewService } from './business-overview.service';
+import { TonightBoard, TonightBoardService } from './tonight-board.service';
 
 interface CurrentUserType {
   tenantId?: string;
@@ -20,7 +21,44 @@ export class DashboardController {
   constructor(
     private readonly dashboardService: DashboardService,
     private readonly businessOverviewService: BusinessOverviewService,
+    private readonly tonightBoardService: TonightBoardService,
   ) {}
+
+  @Get('tonight')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'receptionist',
+    'staff',
+    'hotel_manager',
+    'front_desk',
+  )
+  @ApiOperation({
+    summary: "Tonight's unit map + recent guest activity for the Owner Console home",
+    description:
+      'HOTEL → rooms grouped by floor; CAMP → pitches grouped by zone. Each unit carries one ' +
+      'status for the Bangkok night that starts today (available / occupied / arriving / ' +
+      'reserved / dirty / blocked). `activity` lists bookings, check-ins/outs, payments and ' +
+      'cancellations, newest first. Pass `line` to skip product-line inference.',
+  })
+  @ApiQuery({ name: 'line', required: false, enum: ['HOTEL', 'CAMP'] })
+  @ApiQuery({ name: 'propertyId', required: false })
+  @ApiQuery({ name: 'limit', required: false, type: 'number' })
+  @ApiResponse({ status: 200, description: 'Tonight board retrieved' })
+  async getTonight(
+    @CurrentUser() user: CurrentUserType,
+    @Query('line') line?: string,
+    @Query('propertyId') propertyId?: string,
+    @Query('limit') limit?: string,
+  ): Promise<TonightBoard> {
+    return this.tonightBoardService.getBoard(user.tenantId, {
+      line,
+      propertyId: propertyId || user.defaultPropertyId,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
+  }
 
   @Get('business-overview')
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager')
@@ -55,7 +93,15 @@ export class DashboardController {
   }
 
   @Get('today-actions')
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'receptionist')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'receptionist',
+    'hotel_manager',
+    'front_desk',
+  )
   @ApiOperation({ summary: 'Get today action items for dashboard' })
   @ApiResponse({ status: 200, description: 'Today actions retrieved successfully' })
   async getTodayActions(
@@ -88,7 +134,15 @@ export class DashboardController {
   }
 
   @Get('metrics')
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'receptionist')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'receptionist',
+    'hotel_manager',
+    'front_desk',
+  )
   @ApiOperation({ summary: 'Get KPI metrics (occupancy, ADR, RevPAR, revenue)' })
   @ApiResponse({ status: 200, description: 'Metrics retrieved successfully' })
   async getMetrics(
@@ -113,7 +167,15 @@ export class DashboardController {
   }
 
   @Get('timeline')
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'receptionist')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'receptionist',
+    'hotel_manager',
+    'front_desk',
+  )
   @ApiOperation({ summary: 'Get today timeline (arrivals/departures sorted by time)' })
   @ApiResponse({ status: 200, description: 'Timeline retrieved successfully' })
   async getTimeline(
@@ -134,7 +196,16 @@ export class DashboardController {
   }
 
   @Get('room-heatmap')
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'receptionist', 'staff')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'receptionist',
+    'staff',
+    'hotel_manager',
+    'front_desk',
+  )
   @ApiOperation({ summary: 'Get room status summary grouped by floor' })
   @ApiResponse({ status: 200, description: 'Room heatmap retrieved successfully' })
   async getRoomHeatmap(
@@ -166,7 +237,16 @@ export class DashboardController {
   }
 
   @Get('activity-feed')
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'receptionist', 'staff')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'receptionist',
+    'staff',
+    'hotel_manager',
+    'front_desk',
+  )
   @ApiOperation({ summary: 'Get recent activity feed' })
   @ApiQuery({
     name: 'limit',
