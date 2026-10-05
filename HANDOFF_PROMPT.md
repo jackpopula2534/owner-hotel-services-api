@@ -11,7 +11,7 @@ Project is a hotel SaaS called **StaySync**, two repos on the same machine:
 - Backend (NestJS 10 + Prisma + MySQL): `/Users/todsapornsaelow/Documents/GitHub/owner-hotel-services-api`
 - Frontend (Next.js 14 + Zustand): `/Users/todsapornsaelow/Documents/GitHub/owner-hotel-services`
 - Backend runs on `http://localhost:9011`, Frontend on `http://localhost:9010`
-- MySQL on port `9012`, DB name `hotel_services_db`
+- MySQL (Homebrew `mysql@9.7`) on port `3306`, DB name `hotel_services_db`
 
 Test user being debugged:
 

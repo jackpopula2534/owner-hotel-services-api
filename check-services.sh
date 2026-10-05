@@ -5,12 +5,12 @@ echo "  StaySync — เช็คสถานะ services"
 echo "=========================================="
 echo ""
 
-echo "--- 1) Port 9012 (MySQL) ---"
-if lsof -nP -iTCP:9012 -sTCP:LISTEN >/dev/null 2>&1; then
-  echo "✅ มี process ฟัง port 9012"
-  lsof -nP -iTCP:9012 -sTCP:LISTEN | head -5
+echo "--- 1) Port 3306 (MySQL) ---"
+if lsof -nP -iTCP:3306 -sTCP:LISTEN >/dev/null 2>&1; then
+  echo "✅ มี process ฟัง port 3306"
+  lsof -nP -iTCP:3306 -sTCP:LISTEN | head -5
 else
-  echo "❌ ไม่มี process ฟัง port 9012 (MySQL ไม่รัน)"
+  echo "❌ ไม่มี process ฟัง port 3306 (MySQL ไม่รัน)"
 fi
 echo ""
 
@@ -52,7 +52,7 @@ else
 fi
 echo ""
 
-echo "--- 6) MAMP MySQL? ---"
+echo "--- 6) Homebrew MySQL (mysql@9.7) ---"
 if pgrep -fl mysqld | head -3 ; then
   :
 else

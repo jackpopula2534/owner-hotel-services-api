@@ -287,20 +287,37 @@ this.logger.error(`Error in findOne: ${error.message}`, error.stack);
 
 ---
 
-## Docker Dev Environment
+## Local Dev Environment
+
+Local dev รันบนเครื่องตรง ๆ ไม่ผ่าน Docker — DB และ Redis เป็นของ Homebrew
 
 ```bash
-# รัน stack ทั้งหมด (จาก GitHub root)
-cd /path/to/GitHub
-docker compose -f docker-compose.dev.yml up --build
+# Services (Homebrew)
+brew services start mysql@9.7   # MySQL  → localhost:3306, DB hotel_services_db
+brew services start redis       # Redis  → localhost:6379
+
+# Backend
+cd owner-hotel-services-api && npm run start:dev   # → 9011 (+ Prisma Studio 5555)
+
+# Frontend
+cd owner-hotel-services && npm run dev             # → 9010
 
 # Port:
 # 9010 → Frontend (Next.js)
 # 9011 → Backend (NestJS API)
-# 9012 → MySQL
-# 9013 → Redis
-# 9014 → Adminer (DB admin UI)
+# 3306 → MySQL (Homebrew mysql@9.7)
+# 6379 → Redis (Homebrew)
 ```
+
+- `.env` ของ backend ต้องเป็น `DB_PORT=3306` และ `DATABASE_URL=mysql://...@localhost:3306/hotel_services_db`
+- ห้าม start formula `mysql` (26.x) — ใช้ `mysql@9.7` เท่านั้น
+- ตรวจสถานะ services: `./check-services.sh`
+
+### Docker (ไม่ใช้กับ local dev แล้ว)
+
+- Container `staysync-mysql` / `hotel-mysql` (port 9012 เดิม) ถูกหยุดไว้ตั้งแต่ 2026-10-05 ข้อมูลย้ายเข้า Homebrew แล้ว — อย่า start กลับมาใช้เป็น DB หลัก
+- `docker-compose.yml` ใน repo นี้ใช้ `${DB_PORT}` เป็น host port → ถ้า `docker compose up mysql` ขณะ `.env` เป็น 3306 จะชนกับ Homebrew MySQL
+- `docker-compose.dev.yml` ที่ GitHub root (9012 MySQL / 9013 Redis / 9014 Adminer) ยังอยู่ แต่เป็น DB คนละชุดกับที่ใช้งานจริง
 
 ---
 
