@@ -35,7 +35,34 @@ export class PitchesService {
     return { success: true, data: pitch };
   }
 
+  /**
+   * โควตาจุดกางเต็นท์ตามแพ็กเกจ — ใช้คอลัมน์ plans.max_rooms ร่วมกับห้องพักของโรงแรม
+   * (แพ็กเกจ Camp นับเป็น "จุด") · max_rooms <= 0 = ไม่จำกัด
+   */
+  private async assertPitchQuota(tenantId: string | undefined, adding: number): Promise<void> {
+    if (!tenantId) return;
+
+    const subscription = await this.prisma.subscriptions.findFirst({
+      where: { tenant_id: tenantId, status: { in: ['active', 'trial'] } },
+      include: { plans_subscriptions_plan_idToplans: true },
+      orderBy: { created_at: 'desc' },
+    });
+    const plan = subscription?.plans_subscriptions_plan_idToplans;
+    if (!plan || plan.max_rooms <= 0) return;
+
+    const current = await this.prisma.campPitch.count({ where: { tenantId } });
+    if (current + adding > plan.max_rooms) {
+      const remaining = Math.max(0, plan.max_rooms - current);
+      throw new BadRequestException(
+        `ถึงขีดจำกัดจำนวนจุดกางเต็นท์ของแพ็กเกจแล้ว (${plan.max_rooms} จุด สำหรับแพ็กเกจ ${plan.name}) — ` +
+          `ตอนนี้มี ${current} จุด เพิ่มได้อีก ${remaining} จุด กรุณาอัปเกรดแพ็กเกจเพื่อเพิ่มจุดได้มากขึ้น`,
+      );
+    }
+  }
+
   async create(dto: CreatePitchDto, tenantId?: string) {
+    await this.assertPitchQuota(tenantId, 1);
+
     const data = await this.prisma.campPitch.create({
       data: { ...dto, tenantId: tenantId ?? null },
     });
@@ -83,6 +110,8 @@ export class PitchesService {
         data: { created: [], createdCount: 0, skipped, skippedCount: skipped.length },
       };
     }
+
+    await this.assertPitchQuota(tenantId, toCreate.length);
 
     const created = await this.prisma.$transaction(
       toCreate.map((code) =>

@@ -110,6 +110,12 @@ export class PropertiesService {
 
     const plan = subscription.plans_subscriptions_plan_idToplans;
 
+    // แพ็กเกจ Camp ใช้ max_rooms เป็นโควตาจุดกางเต็นท์ — นับ pitch แทนห้องพัก
+    const unitsCurrent =
+      String(plan.system ?? '').toUpperCase() === 'CAMP'
+        ? await this.prisma.campPitch.count({ where: { tenantId } })
+        : roomsCurrent;
+
     // Check property add-ons
     const propertyAddOns = await this.prisma.subscription_features.findMany({
       where: {
@@ -126,7 +132,7 @@ export class PropertiesService {
       max: Number(plan.max_properties),
       addOns,
       totalLimit: Number(plan.max_properties) + addOns,
-      roomsCurrent,
+      roomsCurrent: unitsCurrent,
       roomsMax: Number(plan.max_rooms),
       usersCurrent,
       usersMax: Number(plan.max_users),

@@ -247,7 +247,14 @@ export class SelfServicePlanService {
       p.property?.count({ where: { tenantId } }).catch(() => 0) ?? Promise.resolve(0),
     ]);
 
-    if (newPlan.max_rooms > 0 && roomCount > newPlan.max_rooms) {
+    // แพ็กเกจ Camp ใช้ max_rooms เป็นโควตาจุดกางเต็นท์ — นับ pitch แทนห้องพัก
+    if (String(newPlan.system ?? '').toUpperCase() === 'CAMP') {
+      const pitchCount: number =
+        (await p.campPitch?.count({ where: { tenantId } }).catch(() => 0)) ?? 0;
+      if (newPlan.max_rooms > 0 && pitchCount > newPlan.max_rooms) {
+        reasons.push(`มีจุดกางเต็นท์ ${pitchCount} จุด (แพ็กเกจใหม่จำกัด ${newPlan.max_rooms})`);
+      }
+    } else if (newPlan.max_rooms > 0 && roomCount > newPlan.max_rooms) {
       reasons.push(`มีห้องพัก ${roomCount} ห้อง (แพ็กเกจใหม่จำกัด ${newPlan.max_rooms})`);
     }
     if (newPlan.max_users > 0 && userCount > newPlan.max_users) {
