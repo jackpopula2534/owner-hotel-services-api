@@ -315,9 +315,9 @@ cd owner-hotel-services && npm run dev             # → 9010
 
 ### Docker (ไม่ใช้กับ local dev แล้ว)
 
-- Container `staysync-mysql` / `hotel-mysql` (port 9012 เดิม) ถูกหยุดไว้ตั้งแต่ 2026-10-05 ข้อมูลย้ายเข้า Homebrew แล้ว — อย่า start กลับมาใช้เป็น DB หลัก
+- Container `staysync-*` / `hotel-*` และ volume ของมัน (port 9012 เดิม) ถูกลบแล้วเมื่อ 2026-10-05 ข้อมูลย้ายเข้า Homebrew แล้ว — dump สุดท้ายอยู่ที่ `~/db-backups/`
 - `docker-compose.yml` ใน repo นี้ใช้ `${DB_PORT}` เป็น host port → ถ้า `docker compose up mysql` ขณะ `.env` เป็น 3306 จะชนกับ Homebrew MySQL
-- `docker-compose.dev.yml` ที่ GitHub root (9012 MySQL / 9013 Redis / 9014 Adminer) ยังอยู่ แต่เป็น DB คนละชุดกับที่ใช้งานจริง
+- `docker-compose.dev.yml` ที่ GitHub root (9012 MySQL / 9013 Redis / 9014 Adminer) ยังอยู่ แต่ถ้า `up` จะได้ DB เปล่าชุดใหม่ ไม่ใช่ชุดที่ใช้งานจริง
 
 ---
 
