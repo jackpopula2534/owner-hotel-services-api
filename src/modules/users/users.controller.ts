@@ -23,6 +23,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 import { SetUserExpirationDto } from './dto/set-user-expiration.dto';
 import { SuspendUserDto } from './dto/suspend-user.dto';
@@ -63,9 +64,15 @@ export class UsersController {
   // --------------------------------------------------------------------------
   // Self-service (/users/me) — any logged-in user, own account only.
   // Declared before the `:id` routes so "me" is never read as a user id.
+  //
+  // `@AllowSystems('pos')`: a terminal session (staff login or an owner's SSO
+  // hand-off) is the same `users` row, so the terminal shows and edits the same
+  // profile as the main console. Password change is deliberately left out — the
+  // POS is a shared tablet at the counter.
   // --------------------------------------------------------------------------
 
   @Get('me')
+  @AllowSystems('pos')
   @ApiOperation({ summary: 'Get my own profile' })
   @ApiResponse({ status: 200, description: 'Profile of the logged-in user' })
   async getMe(@CurrentUser() user: CallerUser) {
@@ -73,6 +80,7 @@ export class UsersController {
   }
 
   @Patch('me')
+  @AllowSystems('pos')
   @ApiOperation({ summary: 'Update my own name and phone' })
   @ApiResponse({ status: 200, description: 'Profile updated' })
   async updateMe(@Body() dto: UpdateMyProfileDto, @CurrentUser() user: CallerUser) {
@@ -80,6 +88,7 @@ export class UsersController {
   }
 
   @Post('me/avatar')
+  @AllowSystems('pos')
   @HttpCode(200)
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @ApiOperation({ summary: 'Upload my profile picture (JPG, PNG or WebP, max 2 MB)' })
@@ -97,6 +106,7 @@ export class UsersController {
   }
 
   @Delete('me/avatar')
+  @AllowSystems('pos')
   @ApiOperation({ summary: 'Remove my profile picture' })
   @ApiResponse({ status: 200, description: 'Profile without an avatar' })
   async removeMyAvatar(@CurrentUser() user: CallerUser) {
