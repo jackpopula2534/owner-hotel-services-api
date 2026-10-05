@@ -9,7 +9,9 @@ import {
   Query,
   UseGuards,
   Req,
+  HttpCode,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { Request } from 'express';
 import { UsersService } from './users.service';
@@ -21,6 +23,8 @@ import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 import { SetUserExpirationDto } from './dto/set-user-expiration.dto';
 import { SuspendUserDto } from './dto/suspend-user.dto';
 import { AdminListUsersQueryDto } from './dto/admin-list-users-query.dto';
+import { UpdateMyProfileDto } from './dto/update-my-profile.dto';
+import { ChangeMyPasswordDto } from './dto/change-my-password.dto';
 
 type CallerUser = {
   id?: string;
@@ -50,6 +54,35 @@ export class UsersController {
   async findAll(@Query() query: AdminListUsersQueryDto, @CurrentUser() user: CallerUser) {
     const tenantId = user.role === 'platform_admin' ? undefined : user?.tenantId;
     return this.usersService.findAll(query, tenantId);
+  }
+
+  // --------------------------------------------------------------------------
+  // Self-service (/users/me) — any logged-in user, own account only.
+  // Declared before the `:id` routes so "me" is never read as a user id.
+  // --------------------------------------------------------------------------
+
+  @Get('me')
+  @ApiOperation({ summary: 'Get my own profile' })
+  @ApiResponse({ status: 200, description: 'Profile of the logged-in user' })
+  async getMe(@CurrentUser() user: CallerUser) {
+    return this.usersService.getMyProfile(user.id, user.tenantId);
+  }
+
+  @Patch('me')
+  @ApiOperation({ summary: 'Update my own name and phone' })
+  @ApiResponse({ status: 200, description: 'Profile updated' })
+  async updateMe(@Body() dto: UpdateMyProfileDto, @CurrentUser() user: CallerUser) {
+    return this.usersService.updateMyProfile(user.id, dto, user.tenantId);
+  }
+
+  @Post('me/password')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Change my own password' })
+  @ApiResponse({ status: 200, description: 'Password changed' })
+  @ApiResponse({ status: 400, description: 'Current password is wrong' })
+  async changeMyPassword(@Body() dto: ChangeMyPasswordDto, @CurrentUser() user: CallerUser) {
+    return this.usersService.changeMyPassword(user.id, dto, user.tenantId);
   }
 
   @Get(':id')

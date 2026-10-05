@@ -7,6 +7,7 @@ export enum AuditAction {
   LOGOUT = 'logout',
   LOGIN_FAILED = 'login_failed',
   PASSWORD_RESET = 'password_reset',
+  PASSWORD_CHANGE = 'password_change',
   TWO_FA_ENABLED = '2fa_enabled',
   TWO_FA_DISABLED = '2fa_disabled',
 

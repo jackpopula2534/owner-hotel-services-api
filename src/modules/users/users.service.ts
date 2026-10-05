@@ -13,6 +13,10 @@ import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 import { SetUserExpirationDto } from './dto/set-user-expiration.dto';
 import { SuspendUserDto } from './dto/suspend-user.dto';
 import { AdminListUsersQueryDto } from './dto/admin-list-users-query.dto';
+import { UpdateMyProfileDto } from './dto/update-my-profile.dto';
+import { ChangeMyPasswordDto } from './dto/change-my-password.dto';
+import * as bcrypt from 'bcrypt';
+import { AuditAction, AuditCategory, AuditResource } from '../../audit-log/dto/audit-log.dto';
 
 const SAFE_USER_SELECT = {
   id: true,
@@ -31,6 +35,22 @@ const SAFE_USER_SELECT = {
   tenantId: true,
   createdAt: true,
   updatedAt: true,
+} as const;
+
+/** What a user sees of their own account. */
+const MY_PROFILE_SELECT = {
+  id: true,
+  email: true,
+  firstName: true,
+  lastName: true,
+  phone: true,
+  role: true,
+  status: true,
+  tenantId: true,
+  language: true,
+  timezone: true,
+  lastLoginAt: true,
+  createdAt: true,
 } as const;
 
 type CallerContext = {
@@ -225,6 +245,79 @@ export class UsersService {
 
     await this.auditLogService.logUserUpdate(id, oldData, result, userId, tenantId);
     return result;
+  }
+
+  // ==========================================================================
+  // Self-service — the logged-in user's own account (/users/me)
+  // ==========================================================================
+
+  private myAccountWhere(userId: string, tenantId?: string): Prisma.UserWhereInput {
+    const where: Prisma.UserWhereInput = { id: userId };
+    if (tenantId != null) where.tenantId = tenantId;
+    return where;
+  }
+
+  async getMyProfile(userId: string, tenantId?: string) {
+    const user = await this.prisma.user.findFirst({
+      where: this.myAccountWhere(userId, tenantId),
+      select: MY_PROFILE_SELECT,
+    });
+    if (!user) throw new NotFoundException('ไม่พบบัญชีผู้ใช้');
+    return user;
+  }
+
+  async updateMyProfile(userId: string, dto: UpdateMyProfileDto, tenantId?: string) {
+    const before = await this.getMyProfile(userId, tenantId);
+
+    const data: Prisma.UserUpdateInput = {};
+    if (dto.firstName !== undefined) {
+      const firstName = dto.firstName.trim();
+      if (!firstName) throw new BadRequestException('กรุณากรอกชื่อ');
+      data.firstName = firstName;
+    }
+    if (dto.lastName !== undefined) data.lastName = dto.lastName.trim() || null;
+    if (dto.phone !== undefined) data.phone = dto.phone.trim() || null;
+
+    const result = await this.prisma.user.update({
+      where: { id: before.id },
+      data,
+      select: MY_PROFILE_SELECT,
+    });
+
+    await this.auditLogService.logUserUpdate(userId, before, result, userId, tenantId);
+    return result;
+  }
+
+  async changeMyPassword(userId: string, dto: ChangeMyPasswordDto, tenantId?: string) {
+    const user = await this.prisma.user.findFirst({
+      where: this.myAccountWhere(userId, tenantId),
+      select: { id: true, password: true },
+    });
+    if (!user) throw new NotFoundException('ไม่พบบัญชีผู้ใช้');
+
+    const matches = await bcrypt.compare(dto.currentPassword, user.password);
+    if (!matches) throw new BadRequestException('รหัสผ่านปัจจุบันไม่ถูกต้อง');
+    if (dto.currentPassword === dto.newPassword) {
+      throw new BadRequestException('รหัสผ่านใหม่ต้องไม่ซ้ำกับรหัสผ่านเดิม');
+    }
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { password: await bcrypt.hash(dto.newPassword, 10) },
+    });
+    // Sign out every other device; the current access token lives until it expires.
+    await this.revokeAllUserRefreshTokens(user.id);
+    await this.auditLogService.log({
+      action: AuditAction.PASSWORD_CHANGE,
+      resource: AuditResource.USER,
+      category: AuditCategory.AUTH,
+      resourceId: user.id,
+      userId: user.id,
+      tenantId,
+      description: 'User changed their own password',
+    });
+
+    return { message: 'เปลี่ยนรหัสผ่านเรียบร้อยแล้ว' };
   }
 
   async remove(id: string, tenantId?: string) {

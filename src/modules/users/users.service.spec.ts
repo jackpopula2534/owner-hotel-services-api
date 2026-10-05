@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import * as bcrypt from 'bcrypt';
 import { UsersService } from './users.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogService } from '../../audit-log/audit-log.service';
@@ -44,6 +45,7 @@ describe('UsersService — lifecycle management', () => {
   };
 
   const auditMock = {
+    log: jest.fn(),
     logUserUpdate: jest.fn(),
     logUserStatusChange: jest.fn(),
     logUserExpirationSet: jest.fn(),
@@ -61,6 +63,108 @@ describe('UsersService — lifecycle management', () => {
   });
 
   afterEach(() => jest.clearAllMocks());
+
+  describe('self-service (/users/me)', () => {
+    it('getMyProfile looks the user up by id AND tenant', async () => {
+      prismaMock.user.findFirst.mockResolvedValue({ ...baseUser, phone: '0812345678' });
+
+      const result = await service.getMyProfile('user-1', 'tenant-1');
+
+      expect(prismaMock.user.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'user-1', tenantId: 'tenant-1' } }),
+      );
+      expect(result.phone).toBe('0812345678');
+    });
+
+    it('getMyProfile throws when the account is not in the caller tenant', async () => {
+      prismaMock.user.findFirst.mockResolvedValue(null);
+      await expect(service.getMyProfile('user-1', 'other-tenant')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('updateMyProfile writes only name and phone, trimmed, and audits', async () => {
+      prismaMock.user.findFirst.mockResolvedValue(baseUser);
+      prismaMock.user.update.mockResolvedValue({ ...baseUser, firstName: 'Bob' });
+
+      await service.updateMyProfile(
+        'user-1',
+        { firstName: '  Bob ', lastName: ' ', phone: ' 081 234 5678 ', role: 'admin' } as never,
+        'tenant-1',
+      );
+
+      expect(prismaMock.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'user-1' },
+          data: { firstName: 'Bob', lastName: null, phone: '081 234 5678' },
+        }),
+      );
+      expect(auditMock.logUserUpdate).toHaveBeenCalled();
+    });
+
+    it('updateMyProfile rejects a blank first name', async () => {
+      prismaMock.user.findFirst.mockResolvedValue(baseUser);
+      await expect(
+        service.updateMyProfile('user-1', { firstName: '   ' }, 'tenant-1'),
+      ).rejects.toThrow(BadRequestException);
+      expect(prismaMock.user.update).not.toHaveBeenCalled();
+    });
+
+    it('changeMyPassword rejects a wrong current password', async () => {
+      prismaMock.user.findFirst.mockResolvedValue({
+        id: 'user-1',
+        password: await bcrypt.hash('right-password', 4),
+      });
+
+      await expect(
+        service.changeMyPassword(
+          'user-1',
+          { currentPassword: 'wrong', newPassword: 'new-password-1' },
+          'tenant-1',
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(prismaMock.user.update).not.toHaveBeenCalled();
+    });
+
+    it('changeMyPassword rejects reusing the same password', async () => {
+      prismaMock.user.findFirst.mockResolvedValue({
+        id: 'user-1',
+        password: await bcrypt.hash('same-password', 4),
+      });
+
+      await expect(
+        service.changeMyPassword(
+          'user-1',
+          { currentPassword: 'same-password', newPassword: 'same-password' },
+          'tenant-1',
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(prismaMock.user.update).not.toHaveBeenCalled();
+    });
+
+    it('changeMyPassword stores a bcrypt hash, revokes refresh tokens and audits', async () => {
+      prismaMock.user.findFirst.mockResolvedValue({
+        id: 'user-1',
+        password: await bcrypt.hash('old-password', 4),
+      });
+      prismaMock.user.update.mockResolvedValue({});
+      prismaMock.refreshToken.updateMany.mockResolvedValue({ count: 2 });
+
+      await service.changeMyPassword(
+        'user-1',
+        { currentPassword: 'old-password', newPassword: 'new-password-1' },
+        'tenant-1',
+      );
+
+      const stored = prismaMock.user.update.mock.calls[0][0].data.password;
+      expect(stored).not.toBe('new-password-1');
+      expect(await bcrypt.compare('new-password-1', stored)).toBe(true);
+      expect(prismaMock.refreshToken.updateMany).toHaveBeenCalled();
+      expect(auditMock.log).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'password_change', resourceId: 'user-1' }),
+      );
+    });
+  });
 
   describe('updateStatus', () => {
     it('suspends a user, revokes refresh tokens, and writes audit log', async () => {
