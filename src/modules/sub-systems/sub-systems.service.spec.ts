@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { SubSystemsService } from './sub-systems.service';
 import { AddonService } from '../addons/addon.service';
+import { PrismaService } from '../../prisma/prisma.service';
 import { SUB_SYSTEM_ADDON_META, CORE_SUB_SYSTEMS } from './sub-systems.catalog';
 
 /** Product line each seeded sub-system add-on belongs to (mirrors seedAddOns). */
@@ -48,6 +49,7 @@ async function build(activeCodes: string[], tenantSystem: 'HOTEL' | 'CAMP' = 'HO
     providers: [
       SubSystemsService,
       { provide: AddonService, useValue: mockAddonService(activeCodes, tenantSystem) },
+      { provide: PrismaService, useValue: {} },
     ],
   }).compile();
   return moduleRef.get(SubSystemsService);

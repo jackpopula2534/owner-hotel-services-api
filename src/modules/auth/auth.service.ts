@@ -5,6 +5,7 @@ import {
   BadRequestException,
   Logger,
 } from '@nestjs/common';
+import { assertSubSystemReady } from '../sub-systems/sub-system-readiness';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -687,6 +688,7 @@ export class AuthService {
         email: user.email,
         firstName: user.firstName,
         lastName: user.lastName,
+        avatarUrl: user.avatarUrl ?? null,
         role: effectiveRole,
         tenantId: tenantId,
         defaultPropertyId: defaultProperty?.id ?? null,
@@ -1042,6 +1044,7 @@ export class AuthService {
     if (!restaurant) {
       throw new BadRequestException('Restaurant not found or does not belong to your account');
     }
+    await assertSubSystemReady(this.prisma, caller.tenantId, 'pos');
 
     const payload = {
       sub: caller.userId,
@@ -1295,6 +1298,8 @@ export class AuthService {
     caller: { userId: string; email: string; role: string; tenantId: string },
     originIp?: string,
   ) {
+    await assertSubSystemReady(this.prisma, caller.tenantId, 'hotel-terminal');
+
     // Resolve default property so the terminal header can show "Property: ..."
     let property: { id: string; name: string } | null = null;
     if (caller.tenantId) {

@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { AddonService, isAddonAvailableForSystem } from '../addons/addon.service';
 import { CORE_SUB_SYSTEMS, type SubSystemCard } from './sub-systems.catalog';
+import { PrismaService } from '../../prisma/prisma.service';
+import { getSubSystemReadiness, type SubSystemReadinessMap } from './sub-system-readiness';
 
 export interface SubSystemsResponse {
   success: true;
@@ -14,7 +16,15 @@ export interface SubSystemsResponse {
 
 @Injectable()
 export class SubSystemsService {
-  constructor(private readonly addonService: AddonService) {}
+  constructor(
+    private readonly addonService: AddonService,
+    private readonly prisma: PrismaService,
+  ) {}
+
+  /** Which terminals still need master data before staff can use them. */
+  async getReadiness(tenantId: string): Promise<{ success: true; data: SubSystemReadinessMap }> {
+    return { success: true, data: await getSubSystemReadiness(this.prisma, tenantId) };
+  }
 
   /**
    * Build the Sub Systems page cards for a tenant.

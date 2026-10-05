@@ -33,4 +33,18 @@ export class SubSystemsController {
   async list(@CurrentUser() caller: AuthenticatedCaller) {
     return this.service.getForTenant(caller?.tenantId ?? '');
   }
+
+  @Get('readiness')
+  @Throttle({ default: { limit: 60, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Setup readiness of each terminal for the current tenant',
+    description:
+      'Keyed by sub-system id. `ready: false` means the terminal has no master data yet ' +
+      '(e.g. POS with no restaurant); `missing` lists what to set up and where. ' +
+      'SSO launch endpoints refuse (409 SUB_SYSTEM_NOT_READY) while a terminal is not ready.',
+  })
+  @ApiResponse({ status: 200, description: 'Readiness map keyed by sub-system id' })
+  async readiness(@CurrentUser() caller: AuthenticatedCaller) {
+    return this.service.getReadiness(caller?.tenantId ?? '');
+  }
 }
