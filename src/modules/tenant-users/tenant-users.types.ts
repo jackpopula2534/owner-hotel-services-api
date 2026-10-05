@@ -40,6 +40,7 @@ export interface TenantUser {
   firstName: string | null;
   lastName: string | null;
   fullName: string;
+  avatarUrl: string | null;
   phone: string | null;
   primaryRole: string;
   status: UserStatus;

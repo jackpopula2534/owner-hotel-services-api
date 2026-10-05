@@ -10,11 +10,15 @@ import {
   UseGuards,
   Req,
   HttpCode,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { Throttle } from '@nestjs/throttler';
-import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse, ApiConsumes } from '@nestjs/swagger';
 import { Request } from 'express';
-import { UsersService } from './users.service';
+import { UsersService, AVATAR_MAX_BYTES } from './users.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -73,6 +77,30 @@ export class UsersController {
   @ApiResponse({ status: 200, description: 'Profile updated' })
   async updateMe(@Body() dto: UpdateMyProfileDto, @CurrentUser() user: CallerUser) {
     return this.usersService.updateMyProfile(user.id, dto, user.tenantId);
+  }
+
+  @Post('me/avatar')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Upload my profile picture (JPG, PNG or WebP, max 2 MB)' })
+  @ApiConsumes('multipart/form-data')
+  @ApiResponse({ status: 200, description: 'Profile with the new avatarUrl' })
+  @ApiResponse({ status: 400, description: 'Missing, oversized or unsupported file' })
+  @UseInterceptors(
+    FileInterceptor('avatar', { storage: memoryStorage(), limits: { fileSize: AVATAR_MAX_BYTES, files: 1 } }),
+  )
+  async uploadMyAvatar(
+    @UploadedFile() file: { buffer: Buffer; size?: number } | undefined,
+    @CurrentUser() user: CallerUser,
+  ) {
+    return this.usersService.setMyAvatar(user.id, file, user.tenantId);
+  }
+
+  @Delete('me/avatar')
+  @ApiOperation({ summary: 'Remove my profile picture' })
+  @ApiResponse({ status: 200, description: 'Profile without an avatar' })
+  async removeMyAvatar(@CurrentUser() user: CallerUser) {
+    return this.usersService.removeMyAvatar(user.id, user.tenantId);
   }
 
   @Post('me/password')

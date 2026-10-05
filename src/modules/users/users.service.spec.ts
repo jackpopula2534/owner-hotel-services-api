@@ -3,6 +3,7 @@ import { BadRequestException, ForbiddenException, NotFoundException } from '@nes
 import * as bcrypt from 'bcrypt';
 import { UsersService } from './users.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { StorageService } from '../../common/storage/storage.service';
 import { AuditLogService } from '../../audit-log/audit-log.service';
 import { UserStatus } from './constants/user-status.enum';
 
@@ -51,18 +52,82 @@ describe('UsersService — lifecycle management', () => {
     logUserExpirationSet: jest.fn(),
   };
 
+  const storageMock = {
+    save: jest.fn(),
+    remove: jest.fn(),
+  };
+
   beforeEach(async () => {
     const moduleRef: TestingModule = await Test.createTestingModule({
       providers: [
         UsersService,
         { provide: PrismaService, useValue: prismaMock },
         { provide: AuditLogService, useValue: auditMock },
+        { provide: StorageService, useValue: storageMock },
       ],
     }).compile();
     service = moduleRef.get(UsersService);
   });
 
   afterEach(() => jest.clearAllMocks());
+
+  describe('profile picture (/users/me/avatar)', () => {
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(32)]);
+
+    it('stores the image under a server-chosen name and replaces the old file', async () => {
+      prismaMock.user.findFirst.mockResolvedValue({ ...baseUser, avatarUrl: '/uploads/avatars/avatar-1-1.jpg' });
+      storageMock.save.mockResolvedValue({ path: '/uploads/avatars/avatar-2-2.png' });
+      prismaMock.user.update.mockResolvedValue({ ...baseUser, avatarUrl: '/uploads/avatars/avatar-2-2.png' });
+
+      const result = await service.setMyAvatar('u1', { buffer: png }, 't1');
+
+      expect(prismaMock.user.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'u1', tenantId: 't1' } }),
+      );
+      expect(storageMock.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          folder: 'avatars',
+          file: expect.objectContaining({ originalname: 'avatar.png', mimetype: 'image/png' }),
+        }),
+      );
+      expect(storageMock.remove).toHaveBeenCalledWith('avatars/avatar-1-1.jpg');
+      expect(result.avatarUrl).toBe('/uploads/avatars/avatar-2-2.png');
+      expect(auditMock.log).toHaveBeenCalled();
+    });
+
+    it('rejects a file whose bytes are not JPG/PNG/WebP, whatever it is named', async () => {
+      const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+      await expect(service.setMyAvatar('u1', { buffer: svg }, 't1')).rejects.toThrow('รองรับเฉพาะไฟล์');
+      expect(storageMock.save).not.toHaveBeenCalled();
+    });
+
+    it('rejects a missing file and an oversized one', async () => {
+      await expect(service.setMyAvatar('u1', undefined, 't1')).rejects.toThrow('กรุณาเลือกไฟล์');
+      const big = Buffer.concat([png, Buffer.alloc(2 * 1024 * 1024)]);
+      await expect(service.setMyAvatar('u1', { buffer: big }, 't1')).rejects.toThrow('ไม่เกิน 2 MB');
+    });
+
+    it('removeMyAvatar clears the column and deletes the file', async () => {
+      prismaMock.user.findFirst.mockResolvedValue({ ...baseUser, avatarUrl: '/uploads/avatars/avatar-1-1.jpg' });
+      prismaMock.user.update.mockResolvedValue({ ...baseUser, avatarUrl: null });
+
+      await service.removeMyAvatar('u1', 't1');
+
+      expect(prismaMock.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'user-1' }, data: { avatarUrl: null } }),
+      );
+      expect(storageMock.remove).toHaveBeenCalledWith('avatars/avatar-1-1.jpg');
+    });
+
+    it('never deletes outside the avatars folder', async () => {
+      prismaMock.user.findFirst.mockResolvedValue({ ...baseUser, avatarUrl: '/uploads/payment-slips/slip-1.jpg' });
+      prismaMock.user.update.mockResolvedValue({ ...baseUser, avatarUrl: null });
+
+      await service.removeMyAvatar('u1', 't1');
+
+      expect(storageMock.remove).not.toHaveBeenCalled();
+    });
+  });
 
   describe('self-service (/users/me)', () => {
     it('getMyProfile looks the user up by id AND tenant', async () => {

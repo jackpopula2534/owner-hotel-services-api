@@ -8,6 +8,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 import { AuditLogService } from '../../audit-log/audit-log.service';
+import { StorageService } from '../../common/storage/storage.service';
 import { UserStatus } from './constants/user-status.enum';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 import { SetUserExpirationDto } from './dto/set-user-expiration.dto';
@@ -44,6 +45,7 @@ const MY_PROFILE_SELECT = {
   firstName: true,
   lastName: true,
   phone: true,
+  avatarUrl: true,
   role: true,
   status: true,
   tenantId: true,
@@ -52,6 +54,23 @@ const MY_PROFILE_SELECT = {
   lastLoginAt: true,
   createdAt: true,
 } as const;
+
+/** Avatar formats accepted, keyed by the extension we store them under. */
+const AVATAR_SIGNATURES: Array<{ ext: string; mimetype: string; matches: (b: Buffer) => boolean }> = [
+  { ext: 'jpg', mimetype: 'image/jpeg', matches: (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff },
+  {
+    ext: 'png',
+    mimetype: 'image/png',
+    matches: (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+  },
+  {
+    ext: 'webp',
+    mimetype: 'image/webp',
+    matches: (b) => b.subarray(0, 4).toString('ascii') === 'RIFF' && b.subarray(8, 12).toString('ascii') === 'WEBP',
+  },
+];
+const AVATAR_FOLDER = 'avatars';
+export const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
 
 type CallerContext = {
   callerId?: string;
@@ -83,6 +102,7 @@ export class UsersService {
   constructor(
     private prisma: PrismaService,
     private auditLogService: AuditLogService,
+    private storage: StorageService,
   ) {}
 
   /**
@@ -286,6 +306,72 @@ export class UsersService {
 
     await this.auditLogService.logUserUpdate(userId, before, result, userId, tenantId);
     return result;
+  }
+
+  /**
+   * Replace my profile picture. The type is decided from the file's own bytes —
+   * the client-sent mimetype and filename are not trusted (an SVG/HTML file
+   * renamed to .png would otherwise be served from our origin).
+   */
+  async setMyAvatar(userId: string, file: { buffer: Buffer; size?: number } | undefined, tenantId?: string) {
+    if (!file?.buffer?.length) throw new BadRequestException('กรุณาเลือกไฟล์รูปภาพ');
+    if (file.buffer.length > AVATAR_MAX_BYTES) {
+      throw new BadRequestException('รูปภาพต้องมีขนาดไม่เกิน 2 MB');
+    }
+    const format = AVATAR_SIGNATURES.find((signature) => signature.matches(file.buffer));
+    if (!format) throw new BadRequestException('รองรับเฉพาะไฟล์ JPG, PNG หรือ WebP');
+
+    const before = await this.getMyProfile(userId, tenantId);
+    const saved = await this.storage.save({
+      folder: AVATAR_FOLDER,
+      prefix: 'avatar',
+      file: { buffer: file.buffer, originalname: `avatar.${format.ext}`, mimetype: format.mimetype },
+    });
+
+    const result = await this.prisma.user.update({
+      where: { id: before.id },
+      data: { avatarUrl: saved.path },
+      select: MY_PROFILE_SELECT,
+    });
+    await this.removeAvatarFile(before.avatarUrl);
+    await this.auditLogService.log({
+      action: AuditAction.USER_UPDATE,
+      resource: AuditResource.USER,
+      category: AuditCategory.USERS,
+      resourceId: before.id,
+      userId: before.id,
+      tenantId,
+      description: 'User updated their own profile picture',
+    });
+    return result;
+  }
+
+  async removeMyAvatar(userId: string, tenantId?: string) {
+    const before = await this.getMyProfile(userId, tenantId);
+    if (!before.avatarUrl) return before;
+
+    const result = await this.prisma.user.update({
+      where: { id: before.id },
+      data: { avatarUrl: null },
+      select: MY_PROFILE_SELECT,
+    });
+    await this.removeAvatarFile(before.avatarUrl);
+    await this.auditLogService.log({
+      action: AuditAction.USER_UPDATE,
+      resource: AuditResource.USER,
+      category: AuditCategory.USERS,
+      resourceId: before.id,
+      userId: before.id,
+      tenantId,
+      description: 'User removed their own profile picture',
+    });
+    return result;
+  }
+
+  /** Only ever deletes inside the avatars folder, whatever the stored value says. */
+  private async removeAvatarFile(storedPath: string | null): Promise<void> {
+    const filename = storedPath?.match(/\/avatars\/([A-Za-z0-9._-]+)$/)?.[1];
+    if (filename) await this.storage.remove(`${AVATAR_FOLDER}/${filename}`);
   }
 
   async changeMyPassword(userId: string, dto: ChangeMyPasswordDto, tenantId?: string) {

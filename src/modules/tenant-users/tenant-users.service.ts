@@ -981,6 +981,7 @@ export class TenantUsersService {
       firstName: u.firstName ?? null,
       lastName: u.lastName ?? null,
       fullName,
+      avatarUrl: u.avatarUrl ?? null,
       phone: u.phone ?? null,
       primaryRole: u.role,
       status: this.effectiveStatus(u),

@@ -37,6 +37,7 @@ model User {
   suspendedBy             String?                    @db.VarChar(36)
   suspendedReason         String?                    @db.Text
   deactivatedAt           DateTime?
+  avatarUrl               String?                    @db.VarChar(500)
   approvalStepAssignments ApprovalFlowStepApprover[]
   notifications           Notification[]
   refreshTokens           RefreshToken[]
