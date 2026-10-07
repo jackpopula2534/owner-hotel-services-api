@@ -4,6 +4,7 @@ import { PlansService } from '../plans/plans.service';
 import { InvoicesService } from '../invoices/invoices.service';
 import { InvoiceStatus } from '../invoices/entities/invoice.entity';
 import { SubscriptionActor } from './subscription-actor';
+import { assertPlanChangeAllowed } from '../subscription/plan-change-policy';
 
 @Injectable()
 export class SubscriptionManagementService {
@@ -42,6 +43,12 @@ export class SubscriptionManagementService {
     if (!newPlan) {
       throw new NotFoundException('Plan not found');
     }
+
+    // checkout เรียก endpoint นี้ทันทีที่เปิดหน้า — ต้องกันเปลี่ยนข้ามสาย
+    // (HOTEL ↔ CAMP) และกันกลับไปแพ็กเกจทดลองฟรีซ้ำ ก่อนแตะ subscription
+    assertPlanChangeAllowed(subscription.plans_subscriptions_plan_idToplans, newPlan, {
+      isPlatformAdmin: actor?.isPlatformAdmin,
+    });
 
     // คำนวณ prorate
     const proratedAmount = this.calculateProrate(

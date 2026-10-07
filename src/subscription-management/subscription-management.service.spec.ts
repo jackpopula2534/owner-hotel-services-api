@@ -6,7 +6,7 @@
  * tenants' rows from findOne() for tenant users, but platform admins skip that
  * middleware entirely — assertCanManage() is the barrier that covers both.
  */
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { SubscriptionManagementService } from './subscription-management.service';
 import { SubscriptionActor } from './subscription-actor';
 
@@ -18,7 +18,7 @@ const subscriptionOf = (tenantId: string) => ({
   tenant_id: tenantId,
   start_date: new Date('2026-07-01'),
   end_date: new Date('2026-08-01'),
-  plans_subscriptions_plan_idToplans: { price_monthly: 1000 },
+  plans_subscriptions_plan_idToplans: { id: 'plan-1', code: 'PROFESSIONAL', system: 'HOTEL', price_monthly: 1000 },
 });
 
 describe('SubscriptionManagementService', () => {
@@ -74,6 +74,31 @@ describe('SubscriptionManagementService', () => {
       const actor = { tenantId: TENANT_B, role: 'admin' } as SubscriptionActor;
 
       await expect(upgrade(actor)).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('product line + trial policy', () => {
+    const tenant = { tenantId: TENANT_A, isPlatformAdmin: false };
+
+    it('rejects a hotel subscription switching to a camp plan, leaving it untouched', async () => {
+      plans.findOne.mockResolvedValue({ id: 'plan-2', code: 'CAMP', system: 'CAMP', price_monthly: 199 });
+
+      await expect(upgrade(tenant)).rejects.toThrow(BadRequestException);
+      expect(subscriptions.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects moving back onto the free-trial plan', async () => {
+      plans.findOne.mockResolvedValue({ id: 'plan-2', code: 'FREE', system: 'HOTEL', price_monthly: 0 });
+
+      await expect(upgrade(tenant)).rejects.toThrow(BadRequestException);
+      expect(subscriptions.update).not.toHaveBeenCalled();
+    });
+
+    it('lets a platform admin move a tenant to the other line', async () => {
+      plans.findOne.mockResolvedValue({ id: 'plan-2', code: 'CAMP', system: 'CAMP', price_monthly: 199 });
+
+      await expect(upgrade({ isPlatformAdmin: true })).resolves.toBeDefined();
+      expect(subscriptions.update).toHaveBeenCalledWith('sub-1', { planId: 'plan-2' });
     });
   });
 

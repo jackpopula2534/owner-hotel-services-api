@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AddonService } from '@/modules/addons/addon.service';
+import { assertPlanChangeAllowed } from './plan-change-policy';
 
 export type ChangePlanIntent = 'upgrade' | 'downgrade' | 'same';
 
@@ -216,6 +217,9 @@ export class SelfServicePlanService {
     if (newPlan.is_active !== 1) {
       throw new BadRequestException('Target plan is not active');
     }
+    // Same product line only, and no second free trial — runs on preview too
+    // so the UI learns before the user reaches the confirm button.
+    assertPlanChangeAllowed(currentPlan, newPlan);
 
     const effectiveDate = input.effectiveDate ? new Date(input.effectiveDate) : new Date();
     if (Number.isNaN(effectiveDate.getTime())) {

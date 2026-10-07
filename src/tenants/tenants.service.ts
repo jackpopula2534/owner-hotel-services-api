@@ -10,6 +10,7 @@ import { TenantContextService } from '../common/tenant/tenant-context.service';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { CreateCompanyDto } from './dto/create-company.dto';
+import { PlanProductLine, planProductLine } from '../subscription/plan-change-policy';
 import { InviteUserDto } from './dto/invite-user.dto';
 
 export interface TenantWithUserRole {
@@ -101,6 +102,13 @@ export const TENANT_MANAGER_ROLES: ReadonlyArray<string> = Object.freeze([
   'admin',
   'tenant_admin',
 ]);
+
+
+/** Mirrors onboarding: `tenants.property_type` remembers the tenant's product line. */
+const PROPERTY_TYPE_BY_LINE: Record<PlanProductLine, string> = {
+  HOTEL: 'hotel',
+  CAMP: 'campground',
+};
 
 @Injectable()
 export class TenantsService {
@@ -319,11 +327,31 @@ export class TenantsService {
         throw new NotFoundException('User not found');
       }
 
+      // 1 account = 1 product line: an extra company (e.g. another hotel
+      // branch) stays on the line the user already runs. A user who wants the
+      // other line registers a new account instead.
+      const userLine = await this.resolveUserProductLine(userId);
+      const requestedType = createCompanyDto.propertyType?.trim().toLowerCase();
+      if (userLine && requestedType) {
+        const requestedLine: PlanProductLine = requestedType === 'campground' ? 'CAMP' : 'HOTEL';
+        if (requestedLine !== userLine) {
+          throw new BadRequestException({
+            code: 'CROSS_PRODUCT_LINE',
+            message:
+              'บริษัทที่สร้างเพิ่มต้องเป็นธุรกิจประเภทเดียวกับบัญชีนี้ — หากต้องการใช้อีกระบบ กรุณาสมัครบัญชีใหม่',
+            details: { currentLine: userLine, requestedLine },
+          });
+        }
+      }
+      const propertyType = userLine
+        ? PROPERTY_TYPE_BY_LINE[userLine]
+        : createCompanyDto.propertyType;
+
       const data: any = {
         name: createCompanyDto.name,
         status: 'trial',
         name_en: createCompanyDto.nameEn,
-        property_type: createCompanyDto.propertyType,
+        property_type: propertyType,
         location: createCompanyDto.location,
         website: createCompanyDto.website,
         description: createCompanyDto.description,
@@ -380,6 +408,42 @@ export class TenantsService {
 
       return { ...newTenant, property: defaultProperty };
     });
+  }
+
+  /**
+   * The product line of the companies a user already belongs to — the latest
+   * subscription's plan wins, `tenants.property_type` covers a company that
+   * has no subscription yet. Null for a user with no company at all.
+   */
+  private async resolveUserProductLine(userId: string): Promise<PlanProductLine | null> {
+    const memberships = await this.prisma.userTenant.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'asc' },
+      include: {
+        tenant: {
+          select: {
+            property_type: true,
+            subscriptions: {
+              orderBy: { created_at: 'desc' },
+              take: 1,
+              select: {
+                plans_subscriptions_plan_idToplans: { select: { code: true, system: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    for (const membership of memberships) {
+      const plan = membership.tenant?.subscriptions?.[0]?.plans_subscriptions_plan_idToplans;
+      if (plan) return planProductLine(plan);
+    }
+    for (const membership of memberships) {
+      const type = membership.tenant?.property_type?.toLowerCase();
+      if (type) return type === 'campground' ? 'CAMP' : 'HOTEL';
+    }
+    return null;
   }
 
   /**
