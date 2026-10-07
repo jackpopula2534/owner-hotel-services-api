@@ -3357,40 +3357,50 @@ model StockMovement {
 /// Stock is deducted via StockMovement (GOODS_ISSUE, referenceType RETAIL_SALE)
 /// inside the same transaction that creates this record.
 model RetailSale {
-  id            String              @id @default(uuid())
-  tenantId      String
-  receiptNo     String
-  warehouseId   String
-  status        RetailSaleStatus    @default(COMPLETED)
-  channel       RetailSaleChannel   @default(SHOP)
-  paymentMethod RetailPaymentMethod @default(CASH)
+  id              String              @id @default(uuid())
+  tenantId        String
+  receiptNo       String
+  warehouseId     String
+  status          RetailSaleStatus    @default(COMPLETED)
+  channel         RetailSaleChannel   @default(SHOP)
+  paymentMethod   RetailPaymentMethod @default(CASH)
   // Room-charge metadata. roomNumber/guestName are display snapshots only —
   // the charge itself always hangs off bookingId → folioId → folioChargeId.
   // roomId ผูกไว้เฉพาะฝั่งมินิบาร์ที่รู้ห้องแน่ ๆ ตั้งแต่ต้น — ใช้ไล่ประวัติรายห้อง
   // ซึ่งเลขห้องเป็นข้อความทำแทนไม่ได้ (ห้องถูกเปลี่ยนเลขทีหลังประวัติจะขาด)
-  roomId        String?
-  roomNumber    String?
-  guestName     String?
-  bookingId     String?
-  folioId       String?
-  folioChargeId String?
+  roomId          String?
+  roomNumber      String?
+  guestName       String?
+  bookingId       String?
+  folioId         String?
+  folioChargeId   String?
   // Money — all server-computed, never trusted from the client.
-  subtotal      Decimal             @default(0.00) @db.Decimal(12, 2)
-  discountTotal Decimal             @default(0.00) @db.Decimal(12, 2)
-  vatRate       Decimal             @default(7.00) @db.Decimal(5, 2)
-  vatAmount     Decimal             @default(0.00) @db.Decimal(12, 2)
-  grandTotal    Decimal             @default(0.00) @db.Decimal(12, 2)
-  costTotal     Decimal             @default(0.00) @db.Decimal(12, 2)
-  profitTotal   Decimal             @default(0.00) @db.Decimal(12, 2)
-  notes         String?             @db.Text
-  soldBy        String
-  soldAt        DateTime            @default(now())
-  voidedBy      String?
-  voidedAt      DateTime?
-  voidReason    String?             @db.Text
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
-  items         RetailSaleItem[]
+  subtotal        Decimal             @default(0.00) @db.Decimal(12, 2)
+  discountTotal   Decimal             @default(0.00) @db.Decimal(12, 2)
+  vatRate         Decimal             @default(7.00) @db.Decimal(5, 2)
+  vatAmount       Decimal             @default(0.00) @db.Decimal(12, 2)
+  grandTotal      Decimal             @default(0.00) @db.Decimal(12, 2)
+  costTotal       Decimal             @default(0.00) @db.Decimal(12, 2)
+  profitTotal     Decimal             @default(0.00) @db.Decimal(12, 2)
+  notes           String?             @db.Text
+  soldBy          String
+  soldAt          DateTime            @default(now())
+  voidedBy        String?
+  voidedAt        DateTime?
+  voidReason      String?             @db.Text
+  // ── สมาชิก + โปรโมชั่น ─────────────────────────────────────────────
+  // สมาชิก = Guest ของระบบหลัก (ไม่มีตารางสมาชิกแยก) — contact คือโปรไฟล์ CRM ของ guest นั้น
+  memberGuestId   String?
+  memberContactId String?
+  promotionId     String?
+  promoCode       String?             @db.VarChar(40)
+  /// ส่วนลดจากโปร (รวมอยู่ใน discountTotal แล้ว) แยกเก็บไว้ทำรายงาน
+  promoDiscount   Decimal             @default(0.00) @db.Decimal(12, 2)
+  /// ต้นทุนของแถม = ค่าใช้จ่ายส่งเสริมการขาย ไม่รวมใน costTotal (ต้นทุนขาย)
+  promoGiftCost   Decimal             @default(0.00) @db.Decimal(12, 2)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  items           RetailSaleItem[]
 
   @@unique([tenantId, receiptNo])
   @@index([tenantId])
@@ -3400,30 +3410,188 @@ model RetailSale {
   @@index([status])
   @@index([channel])
   @@index([roomId])
+  @@index([memberGuestId])
+  @@index([promotionId])
   @@map("retail_sales")
 }
 
 /// Line item on a RetailSale. Product fields are snapshotted at sale time
 /// (sku/name/unit/price) so receipts stay stable even if the item later changes.
 model RetailSaleItem {
-  id           String     @id @default(uuid())
-  saleId       String
-  itemId       String
-  sku          String
-  name         String
-  unit         String
-  quantity     Int
-  unitPrice    Decimal    @db.Decimal(10, 2)
-  lineDiscount Decimal    @default(0.00) @db.Decimal(10, 2)
-  lineTotal    Decimal    @db.Decimal(12, 2)
-  unitCost     Decimal    @default(0.00) @db.Decimal(10, 2)
-  lineCost     Decimal    @default(0.00) @db.Decimal(12, 2)
-  createdAt    DateTime   @default(now())
-  sale         RetailSale @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  id                String     @id @default(uuid())
+  saleId            String
+  itemId            String
+  sku               String
+  name              String
+  unit              String
+  quantity          Int
+  unitPrice         Decimal    @db.Decimal(10, 2)
+  lineDiscount      Decimal    @default(0.00) @db.Decimal(10, 2)
+  lineTotal         Decimal    @db.Decimal(12, 2)
+  unitCost          Decimal    @default(0.00) @db.Decimal(10, 2)
+  lineCost          Decimal    @default(0.00) @db.Decimal(12, 2)
+  /// บรรทัดของแถม: ราคา 0 แต่ lineCost เป็นต้นทุนจริง ตัดจาก sourceWarehouseId (คลังของแถม)
+  isGift            Boolean    @default(false)
+  promotionId       String?
+  sourceWarehouseId String?
+  createdAt         DateTime   @default(now())
+  sale              RetailSale @relation(fields: [saleId], references: [id], onDelete: Cascade)
 
   @@index([saleId])
   @@index([itemId])
   @@map("retail_sale_items")
+}
+
+// ============================================================
+// RETAIL PROMOTIONS — โค้ดส่วนลด / ของแถม ที่ POS
+// แผน: docs/RETAIL_PROMOTIONS_PLAN.md
+// ============================================================
+
+enum RetailPromotionStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum RetailPromoDiscountType {
+  NONE
+  PERCENT
+  FIXED
+}
+
+enum RetailPromoCodeKind {
+  /// โค้ดเดียวใช้ร่วมกันหลายคน เช่น SUMMER10
+  SHARED
+  /// โค้ดเฉพาะคน/ใช้ครั้งเดียว — สุ่มเป็นชุด หรือออกให้สมาชิกรายคน
+  UNIQUE
+}
+
+enum RetailPromotionRedemptionStatus {
+  APPLIED
+  REVERSED
+}
+
+model RetailPromotion {
+  id               String                      @id @default(uuid())
+  tenantId         String
+  name             String                      @db.VarChar(150)
+  description      String?                     @db.Text
+  status           RetailPromotionStatus       @default(DRAFT)
+  discountType     RetailPromoDiscountType     @default(NONE)
+  /// PERCENT: 0-100 · FIXED: บาท
+  discountValue    Decimal                     @default(0.00) @db.Decimal(10, 2)
+  /// เพดานส่วนลด (ใช้กับ PERCENT)
+  maxDiscount      Decimal?                    @db.Decimal(10, 2)
+  /// ยอดซื้อขั้นต่ำ (หลังหักส่วนลดรายบรรทัด)
+  minSpend         Decimal                     @default(0.00) @db.Decimal(12, 2)
+  /// string[] ของ InventoryItem.id — ว่าง = ทุกสินค้า; ส่วนลดคิดจากยอดสินค้าที่ร่วมรายการเท่านั้น
+  eligibleItemIds  Json?
+  /// string[] ของ LoyaltyPoint.tier — ว่าง = ทุก tier
+  eligibleTiers    Json?
+  /// string[] ของ CrmContact.segment — ว่าง = ทุก segment
+  eligibleSegments Json?
+  /// คลังของแถม (Warehouse.type = PROMOTION) — ต้องมีถ้าโปรมีของแถม
+  giftWarehouseId  String?
+  startsAt         DateTime?
+  endsAt           DateTime?
+  /// โควตาใช้รวมทั้งโปร (null = ไม่จำกัด)
+  usageLimit       Int?
+  usedCount        Int                         @default(0)
+  /// โควตาต่อสมาชิก (null = ไม่จำกัด)
+  perMemberLimit   Int?
+  createdBy        String?
+  createdAt        DateTime                    @default(now())
+  updatedAt        DateTime                    @updatedAt
+  codes            RetailPromoCode[]
+  gifts            RetailPromotionGift[]
+  redemptions      RetailPromotionRedemption[]
+
+  @@index([tenantId, status])
+  @@map("retail_promotions")
+}
+
+model RetailPromoCode {
+  id              String              @id @default(uuid())
+  tenantId        String
+  promotionId     String
+  /// เก็บเป็นตัวพิมพ์ใหญ่เสมอ
+  code            String              @db.VarChar(40)
+  kind            RetailPromoCodeKind @default(SHARED)
+  /// null = ไม่จำกัด (UNIQUE ตั้งเป็น 1)
+  maxUses         Int?
+  usedCount       Int                 @default(0)
+  isActive        Boolean             @default(true)
+  /// โค้ดที่ออกให้สมาชิกคนเดียว — คนอื่นใช้ไม่ได้
+  issuedToGuestId String?
+  expiresAt       DateTime?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  promotion       RetailPromotion     @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, code])
+  @@index([promotionId])
+  @@map("retail_promo_codes")
+}
+
+model RetailPromotionGift {
+  id          String          @id @default(uuid())
+  tenantId    String
+  promotionId String
+  itemId      String
+  /// จำนวนที่แจกต่อการใช้ 1 ครั้ง
+  quantity    Int             @default(1)
+  /// งบจำนวนชิ้นที่กันไว้ให้โปรนี้ (null = เท่าที่คลังของแถมมี)
+  budgetQty   Int?
+  issuedQty   Int             @default(0)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  promotion   RetailPromotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+
+  @@unique([promotionId, itemId])
+  @@index([tenantId])
+  @@map("retail_promotion_gifts")
+}
+
+/// ตัวนับการใช้ต่อสมาชิก — แถวเดียวต่อ (โปร, guest) ให้ conditional increment กัน race ได้
+model RetailPromotionMemberUsage {
+  id          String   @id @default(uuid())
+  tenantId    String
+  promotionId String
+  guestId     String
+  usedCount   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([promotionId, guestId])
+  @@index([tenantId])
+  @@map("retail_promotion_member_usage")
+}
+
+model RetailPromotionRedemption {
+  id             String                          @id @default(uuid())
+  tenantId       String
+  promotionId    String
+  promoCodeId    String
+  code           String                          @db.VarChar(40)
+  saleId         String                          @unique
+  guestId        String
+  contactId      String?
+  discountAmount Decimal                         @default(0.00) @db.Decimal(12, 2)
+  giftCost       Decimal                         @default(0.00) @db.Decimal(12, 2)
+  /// ลูกค้าเลือกรับเฉพาะส่วนลดเพราะของแถมไม่พอ
+  giftSkipped    Boolean                         @default(false)
+  status         RetailPromotionRedemptionStatus @default(APPLIED)
+  redeemedBy     String
+  createdAt      DateTime                        @default(now())
+  reversedAt     DateTime?
+  promotion      RetailPromotion                 @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@index([promotionId])
+  @@index([guestId])
+  @@index([contactId])
+  @@map("retail_promotion_redemptions")
 }
 
 model PurchaseOrder {
@@ -4995,6 +5163,8 @@ enum WarehouseType {
   HOUSEKEEPING
   MAINTENANCE
   MINIBAR
+  /// คลังของแถม — แยกสต็อกที่กันไว้แจกในโปรโมชั่นออกจากสต็อกที่ตั้งใจขาย
+  PROMOTION
 }
 
 /// วัตถุดิบที่ต้องแปรรูปก่อน vs สินค้าสำเร็จรูปที่หยิบขายได้เลย

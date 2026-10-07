@@ -3,6 +3,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsEnum,
   IsInt,
   IsNumber,
@@ -87,4 +88,20 @@ export class CreateRetailSaleDto {
   @IsString()
   @MaxLength(500)
   notes?: string;
+
+  @ApiPropertyOptional({ description: 'โค้ดโปรโมชั่น (1 โค้ดต่อบิล) — ต้องมี memberGuestId' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  promoCode?: string;
+
+  @ApiPropertyOptional({ description: 'สมาชิก (Guest id ของระบบหลัก) ที่ผูกกับบิล' })
+  @IsOptional()
+  @IsString()
+  memberGuestId?: string;
+
+  @ApiPropertyOptional({ description: 'ลูกค้ายอมรับเฉพาะส่วนลดเมื่อของแถมไม่พอ', default: false })
+  @IsOptional()
+  @IsBoolean()
+  acceptWithoutGift?: boolean;
 }

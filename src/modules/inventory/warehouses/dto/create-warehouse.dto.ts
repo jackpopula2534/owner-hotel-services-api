@@ -7,6 +7,8 @@ export enum WarehouseType {
   HOUSEKEEPING = 'HOUSEKEEPING',
   MAINTENANCE = 'MAINTENANCE',
   MINIBAR = 'MINIBAR',
+  /** คลังของแถม — สต็อกที่กันไว้แจกในโปรโมชั่น POS */
+  PROMOTION = 'PROMOTION',
 }
 
 export class CreateWarehouseDto {

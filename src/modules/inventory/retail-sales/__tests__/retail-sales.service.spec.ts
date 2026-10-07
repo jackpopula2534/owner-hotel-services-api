@@ -8,6 +8,7 @@ import {
   RevenueType,
   SettlementType,
 } from '@prisma/client';
+import { RetailPromotionsService } from '../../retail-promotions/retail-promotions.service';
 import { RetailSalesService } from '../retail-sales.service';
 import { PrismaService } from '@/prisma/prisma.service';
 import { FolioPostingService } from '@/modules/accounts-receivable/folio-posting/folio-posting.service';
@@ -100,6 +101,7 @@ async function makeService(
       { provide: FolioPostingService, useValue: folioPosting },
       { provide: RevenuePostingService, useValue: revenuePosting },
       { provide: RevenueQueryService, useValue: revenueQuery },
+      RetailPromotionsService,
     ],
   }).compile();
   return moduleRef.get(RetailSalesService);
@@ -346,6 +348,20 @@ describe('RetailSalesService', () => {
         ),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
+
+    it('refuses to sell straight out of the gift warehouse', async () => {
+      const prisma = buildPrisma();
+      prisma.warehouse.findFirst.mockResolvedValue({ id: WH, tenantId: TENANT, type: 'PROMOTION' });
+      const service = await makeService(prisma);
+      await expect(
+        service.create(
+          { warehouseId: WH, paymentMethod: 'CASH' as any, lines: [{ itemId: 'i1', quantity: 1, unitPrice: 100 }] },
+          USER,
+          TENANT,
+        ),
+      ).rejects.toMatchObject({ response: expect.objectContaining({ code: 'GIFT_WAREHOUSE_NOT_SELLABLE' }) });
+      expect(prisma.retailSale.create).not.toHaveBeenCalled();
+    });
   });
 
   /**
@@ -500,6 +516,132 @@ describe('RetailSalesService', () => {
       // ใบเสร็จยังออก สต็อกยังตัด — แค่ไม่มีรายได้ให้ลง
       expect(prisma.retailSale.create).toHaveBeenCalledTimes(1);
       expect(revenuePosting.postWithin).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('create — โปรโมชั่น / สมาชิก', () => {
+    const GIFT_WH = 'wh-gift';
+    const member = { guestId: 'g1', name: 'Ann B', phone: '0811111111', email: null, tier: 'gold', segment: 'loyal', contactId: 'c1' };
+    const evaluated = (over: { discount?: number; availableQty?: number } = {}) => ({
+      promotion: {
+        id: 'promo-1', name: 'ลด 10%', discountType: 'PERCENT', discountValue: 10, maxDiscount: null,
+        minSpend: 0, usageLimit: 100, perMemberLimit: 1, giftWarehouseId: GIFT_WH,
+      },
+      code: { id: 'code-1', code: 'SUMMER10', maxUses: null },
+      member,
+      netSubtotal: 200,
+      discount: over.discount ?? 20,
+      gifts: [{
+        giftId: 'gift-1', itemId: 'tote', name: 'Tote', sku: 'T', unit: 'PCS',
+        quantity: 1, budgetQty: 50, availableQty: over.availableQty ?? 5,
+      }],
+    });
+
+    async function setup(ev = evaluated()) {
+      const prisma = buildPrisma();
+      prisma.inventoryItem.findMany.mockResolvedValue([
+        { id: 'i1', tenantId: TENANT, sku: 'A', name: 'Cola', unit: 'CAN', isPerishable: false, requiresLotTracking: false },
+      ]);
+      prisma.inventoryItem.findFirst = jest.fn().mockResolvedValue(
+        { id: 'tote', tenantId: TENANT, sku: 'T', name: 'Tote', unit: 'PCS', isPerishable: false, requiresLotTracking: false },
+      );
+      prisma.warehouseStock.findFirst
+        .mockResolvedValueOnce({ id: 's1', quantity: 10, avgCost: 60 }) // ขาย
+        .mockResolvedValueOnce({ id: 'sg', quantity: 5, avgCost: 40 }); // คลังของแถม
+      const service = await makeService(prisma);
+      const promotions = {
+        resolveMember: jest.fn().mockResolvedValue(member),
+        evaluate: jest.fn().mockResolvedValue(ev),
+        ensureContact: jest.fn().mockResolvedValue('c1'),
+        recordRedemptionWithin: jest.fn().mockResolvedValue(undefined),
+      };
+      (service as any).promotions = promotions;
+      return { prisma, service, promotions };
+    }
+
+    const dto = (over: Record<string, unknown> = {}) => ({
+      warehouseId: WH,
+      paymentMethod: 'CASH' as any,
+      lines: [{ itemId: 'i1', quantity: 2, unitPrice: 100 }],
+      promoCode: 'summer10',
+      memberGuestId: 'g1',
+      ...over,
+    });
+
+    it('ลดราคา + ตัดของแถมจากคลังของแถมเป็นบรรทัด ฿0 แยกต้นทุนออกจาก costTotal', async () => {
+      const { prisma, service, promotions } = await setup();
+      const result = await service.create(dto(), USER, TENANT);
+
+      // subtotal 200 − โปร 20 = 180, VAT 12.6
+      expect(result.discountTotal).toBe(20);
+      expect(result.promoDiscount).toBe(20);
+      expect(result.grandTotal).toBe(192.6);
+      // costTotal = สินค้าที่ขายเท่านั้น (2×60); ของแถม 40 หักจากกำไร
+      expect(result.costTotal).toBe(120);
+      expect(result.promoGiftCost).toBe(40);
+      expect(result.profitTotal).toBe(180 - 120 - 40);
+      expect(result.memberGuestId).toBe('g1');
+      expect(result.memberContactId).toBe('c1');
+      expect(result.promoCode).toBe('SUMMER10');
+
+      const gift = result.items.find((i: any) => i.isGift);
+      expect(gift).toMatchObject({ itemId: 'tote', unitPrice: 0, lineTotal: 0, lineCost: 40, sourceWarehouseId: GIFT_WH });
+
+      const giftMove = prisma.stockMovement.create.mock.calls[1][0].data;
+      expect(giftMove).toMatchObject({ warehouseId: GIFT_WH, itemId: 'tote', referenceType: 'PROMO_GIFT' });
+      expect(prisma.warehouseStock.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'sg' }, data: expect.objectContaining({ quantity: 4 }) }),
+      );
+      expect(promotions.recordRedemptionWithin).toHaveBeenCalledWith(
+        prisma,
+        expect.objectContaining({ giftSkipped: false, giftCost: 40, contactId: 'c1' }),
+      );
+    });
+
+    it('ของแถมไม่พอและลูกค้ายังไม่ยอมรับ → PROMO_GIFT_SHORTAGE ไม่ออกใบเสร็จ', async () => {
+      const { prisma, service } = await setup(evaluated({ availableQty: 0 }));
+      await expect(service.create(dto(), USER, TENANT)).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'PROMO_GIFT_SHORTAGE' }),
+      });
+      expect(prisma.retailSale.create).not.toHaveBeenCalled();
+    });
+
+    it('ลูกค้าเลือก "รับเฉพาะส่วนลด" → ได้ส่วนลด ไม่มีบรรทัดของแถม และบันทึกว่าข้ามของแถม', async () => {
+      const { prisma, service, promotions } = await setup(evaluated({ availableQty: 0 }));
+      const result = await service.create(dto({ acceptWithoutGift: true }), USER, TENANT);
+      expect(result.promoDiscount).toBe(20);
+      expect(result.items.some((i: any) => i.isGift)).toBe(false);
+      expect(prisma.stockMovement.create).toHaveBeenCalledTimes(1);
+      expect(promotions.recordRedemptionWithin).toHaveBeenCalledWith(
+        prisma,
+        expect.objectContaining({ giftSkipped: true, grantedGifts: [], giftCost: 0 }),
+      );
+    });
+
+    it('ส่วนลดโปรไม่ทำให้ยอดติดลบเมื่อมีส่วนลดท้ายบิลอยู่แล้ว', async () => {
+      const { service, promotions } = await setup(evaluated({ discount: 50 }));
+      const result = await service.create(dto({ billDiscount: 180 }), USER, TENANT);
+      expect(result.promoDiscount).toBe(20);
+      expect(result.discountTotal).toBe(200);
+      expect(promotions.recordRedemptionWithin.mock.calls[0][1].evaluated.discount).toBe(20);
+    });
+
+    it('มีโค้ดแต่ไม่ผูกสมาชิก → PROMO_MEMBER_REQUIRED ก่อนแตะสต็อก', async () => {
+      const { prisma, service } = await setup();
+      await expect(service.create(dto({ memberGuestId: undefined }), USER, TENANT)).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'PROMO_MEMBER_REQUIRED' }),
+      });
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('ผูกสมาชิกโดยไม่มีโค้ด → บันทึกสมาชิกและ upsert CRM contact แต่ไม่แตะโปร', async () => {
+      const { service, promotions } = await setup();
+      const result = await service.create(dto({ promoCode: undefined }), USER, TENANT);
+      expect(result.memberGuestId).toBe('g1');
+      expect(result.promoDiscount).toBe(0);
+      expect(promotions.evaluate).not.toHaveBeenCalled();
+      expect(promotions.ensureContact).toHaveBeenCalledWith(expect.anything(), TENANT, 'g1');
+      expect(promotions.recordRedemptionWithin).not.toHaveBeenCalled();
     });
   });
 

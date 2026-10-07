@@ -6,6 +6,7 @@ import {
   RetailPaymentMethod,
   RetailSaleChannel,
   RevenueSourceModule,
+  WarehouseType,
 } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
 import { daysOfMonth, shiftDate, toBangkokDate } from '@/common/utils/bangkok-day.util';
@@ -27,6 +28,13 @@ import { buildRetailSaleRevenueInput } from '@/modules/revenue/sources/retail-sa
 import { CreateRetailSaleDto } from './dto/create-retail-sale.dto';
 import { QueryRetailSaleDto } from './dto/query-retail-sale.dto';
 import { DashboardRetailSaleDto, RetailDashboardPeriod } from './dto/dashboard-retail-sale.dto';
+import {
+  EvaluatedGift,
+  EvaluatedPromotion,
+  PromoMember,
+  RetailPromotionsService,
+} from '../retail-promotions/retail-promotions.service';
+import { promoError, resolveGiftGrant } from '../retail-promotions/promotion-engine';
 
 const MONTHS_TH_SHORT = [
   'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
@@ -69,6 +77,7 @@ export class RetailSalesService {
     private readonly folioPosting: FolioPostingService,
     private readonly revenuePosting: RevenuePostingService,
     private readonly revenue: RevenueQueryService,
+    private readonly promotions: RetailPromotionsService,
   ) {}
 
   /**
@@ -79,7 +88,10 @@ export class RetailSalesService {
    *   2. for each line — deduct WarehouseStock and (for lot-tracked items) the
    *      FEFO InventoryLot remainingQty, writing a GOODS_ISSUE StockMovement
    *      (referenceType RETAIL_SALE) that the stock-balance report reads
-   *   3. create the RetailSale header + snapshotted line items
+   *   3. promo code (optional) — re-priced on this transaction's snapshot, gifts
+   *      issued from the promotion's gift warehouse (referenceType PROMO_GIFT),
+   *      quotas consumed race-safely, redemption recorded against the member
+   *   4. create the RetailSale header + snapshotted line items
    *
    * Money totals are recomputed server-side; the client's numbers are never trusted.
    */
@@ -95,6 +107,10 @@ export class RetailSalesService {
     });
     if (!warehouse) {
       throw new BadRequestException('ไม่พบคลัง/ร้านค้านี้ หรือไม่ได้อยู่ในองค์กรของคุณ');
+    }
+    // คลังของแถมกันไว้แจกในโปรโมชั่นเท่านั้น — ขายตรงจากคลังนี้ = ของแถมหมดโดยไม่ผ่านโควตาโปร
+    if (warehouse.type === WarehouseType.PROMOTION) {
+      throw promoError('GIFT_WAREHOUSE_NOT_SELLABLE', 'คลังของแถมใช้ขายไม่ได้ — เลือกคลังร้านค้า');
     }
 
     const isRoomCharge = dto.paymentMethod === RetailPaymentMethod.ROOM_CHARGE;
@@ -112,6 +128,10 @@ export class RetailSalesService {
       if (!itemMap.has(line.itemId)) {
         throw new BadRequestException(`ไม่พบสินค้า (itemId: ${line.itemId}) ในองค์กรของคุณ`);
       }
+    }
+
+    if (dto.promoCode?.trim() && !dto.memberGuestId) {
+      throw promoError('PROMO_MEMBER_REQUIRED', 'ต้องเลือกสมาชิกก่อนใช้โค้ดโปรโมชั่น');
     }
 
     const saleId = randomUUID();
@@ -192,13 +212,52 @@ export class RetailSalesService {
         });
       }
 
+      // ── สมาชิก + โปรโมชั่น ── คิดใหม่บน snapshot ของ transaction นี้ ไม่เชื่อตัวเลข preview
+      let member: PromoMember | null = null;
+      let evaluated: EvaluatedPromotion | null = null;
+      let grantedGifts: EvaluatedGift[] = [];
+      let giftSkipped = false;
+      let promoGiftCost = 0;
+      if (dto.memberGuestId) {
+        member = await this.promotions.resolveMember(tx, tenantId, dto.memberGuestId);
+      }
+      if (dto.promoCode?.trim()) {
+        evaluated = await this.promotions.evaluate(tx, tenantId, {
+          code: dto.promoCode,
+          guestId: dto.memberGuestId,
+          lines: dto.lines,
+        });
+        const grant = resolveGiftGrant(evaluated.gifts, evaluated.discount, dto.acceptWithoutGift ?? false);
+        grantedGifts = grant.granted;
+        giftSkipped = grant.skipped.length > 0;
+        for (const gift of grantedGifts) {
+          const row = await this.issueGiftLine(tx, {
+            tenantId,
+            userId,
+            saleId,
+            promotionId: evaluated.promotion.id,
+            warehouseId: evaluated.promotion.giftWarehouseId!,
+            gift,
+          });
+          promoGiftCost += Number(row.lineCost);
+          lineRows.push(row);
+        }
+        promoGiftCost = round2(promoGiftCost);
+      }
+      const contactId = member ? await this.promotions.ensureContact(tx, tenantId, member.guestId) : null;
+
       subtotal = round2(subtotal);
-      const discountTotal = round2(Math.min(subtotal, itemDiscountTotal + billDiscount));
+      // ส่วนลดโปรใช้ได้เท่าที่ยังเหลือยอดหลังส่วนลดรายบรรทัด + ส่วนลดท้ายบิล
+      const promoDiscount = evaluated
+        ? round2(Math.min(evaluated.discount, Math.max(subtotal - itemDiscountTotal - billDiscount, 0)))
+        : 0;
+      const discountTotal = round2(Math.min(subtotal, itemDiscountTotal + billDiscount + promoDiscount));
       const taxable = Math.max(subtotal - discountTotal, 0);
       const vatAmount = round2((taxable * vatRate) / 100);
       const grandTotal = round2(taxable + vatAmount);
       costTotal = round2(costTotal);
-      const profitTotal = round2(taxable - costTotal);
+      // ต้นทุนของแถมเป็นค่าใช้จ่ายส่งเสริมการขาย — แยกจาก costTotal แต่หักจากกำไรของบิล
+      const profitTotal = round2(taxable - costTotal - promoGiftCost);
 
       // Room charges join this transaction: if the room cannot take the charge,
       // the stock issue rolls back with it rather than leaving a sale nobody bills.
@@ -243,10 +302,29 @@ export class RetailSalesService {
           profitTotal,
           notes: dto.notes?.trim() || null,
           soldBy: userId,
+          memberGuestId: member?.guestId ?? null,
+          memberContactId: contactId,
+          promotionId: evaluated?.promotion.id ?? null,
+          promoCode: evaluated?.code.code ?? null,
+          promoDiscount,
+          promoGiftCost,
           items: { createMany: { data: lineRows } },
         },
         include: { items: true },
       });
+
+      if (evaluated) {
+        await this.promotions.recordRedemptionWithin(tx, {
+          tenantId,
+          userId,
+          saleId,
+          evaluated: { ...evaluated, discount: promoDiscount },
+          grantedGifts,
+          giftSkipped,
+          giftCost: promoGiftCost,
+          contactId,
+        });
+      }
 
       // ลงสมุดรายได้กลางในทรานแซกชันเดียวกับการตัดสต็อกและออกใบเสร็จ — ใบเสร็จที่
       // ออกสำเร็จแต่รายได้ไม่ถูกบันทึกคือยอดขายที่หายไปจากทุกรายงานแบบเงียบ ๆ
@@ -426,6 +504,7 @@ export class RetailSalesService {
       }
 
       for (const it of sale.items) {
+        if (it.isGift) continue; // ของแถมไม่ใช่ยอดขาย
         itemsSold += it.quantity;
         const cur =
           itemMap.get(it.itemId) ??
@@ -568,9 +647,12 @@ export class RetailSalesService {
       quantity: number;
       avgCost: number;
       needsLot: boolean;
+      /** RETAIL_SALE (ขาย) หรือ PROMO_GIFT (ของแถมจากคลังของแถม) */
+      referenceType?: 'RETAIL_SALE' | 'PROMO_GIFT';
     },
   ): Promise<void> {
     const { tenantId, userId, saleId, warehouseId, itemId, quantity, avgCost, needsLot } = params;
+    const referenceType = params.referenceType ?? 'RETAIL_SALE';
 
     if (needsLot) {
       const lots = await tx.inventoryLot.findMany({
@@ -604,7 +686,7 @@ export class RetailSalesService {
               quantity: take,
               unitCost,
               totalCost: round2(take * unitCost),
-              referenceType: 'RETAIL_SALE',
+              referenceType,
               referenceId: saleId,
               createdBy: userId,
               lotId: lot.id,
@@ -631,11 +713,72 @@ export class RetailSalesService {
         quantity,
         unitCost: avgCost,
         totalCost: round2(quantity * avgCost),
-        referenceType: 'RETAIL_SALE',
+        referenceType,
         referenceId: saleId,
         createdBy: userId,
       },
     });
+  }
+
+  /**
+   * Issue one promotion gift from the gift warehouse (type PROMOTION) and return
+   * its ฿0 receipt line. The real cost stays on the line so promo spend is
+   * reportable, but it is kept out of costTotal (goods sold).
+   */
+  private async issueGiftLine(
+    tx: Prisma.TransactionClient,
+    params: {
+      tenantId: string;
+      userId: string;
+      saleId: string;
+      promotionId: string;
+      warehouseId: string;
+      gift: EvaluatedGift;
+    },
+  ): Promise<Prisma.RetailSaleItemCreateManySaleInput> {
+    const { tenantId, userId, saleId, promotionId, warehouseId, gift } = params;
+    const item = await tx.inventoryItem.findFirst({ where: { id: gift.itemId, tenantId, deletedAt: null } });
+    const stock = await tx.warehouseStock.findFirst({ where: { warehouseId, itemId: gift.itemId } });
+    const currentQty = Number(stock?.quantity ?? 0);
+    if (!item || !stock || currentQty < gift.quantity) {
+      throw promoError('PROMO_GIFT_SHORTAGE', `ของแถม "${gift.name}" ในคลังของแถมไม่พอ`, {
+        skippedItemIds: [gift.itemId],
+        canAcceptWithoutGift: true,
+      });
+    }
+    const avgCost = Number(stock.avgCost) || 0;
+    await this.issueStockForLine(tx, {
+      tenantId,
+      userId,
+      saleId,
+      warehouseId,
+      itemId: gift.itemId,
+      quantity: gift.quantity,
+      avgCost,
+      needsLot: item.isPerishable || item.requiresLotTracking,
+      referenceType: 'PROMO_GIFT',
+    });
+    const newQty = currentQty - gift.quantity;
+    await tx.warehouseStock.update({
+      where: { id: stock.id },
+      data: { quantity: newQty, totalValue: round2(newQty * avgCost), updatedAt: new Date() },
+    });
+    return {
+      id: randomUUID(),
+      itemId: item.id,
+      sku: item.sku,
+      name: item.name,
+      unit: item.unit,
+      quantity: gift.quantity,
+      unitPrice: 0,
+      lineDiscount: 0,
+      lineTotal: 0,
+      unitCost: round2(avgCost),
+      lineCost: round2(gift.quantity * avgCost),
+      isGift: true,
+      promotionId,
+      sourceWarehouseId: warehouseId,
+    };
   }
 
   /** Map a Prisma RetailSale (+items) to a number-normalized API shape. */
@@ -659,6 +802,12 @@ export class RetailSalesService {
     grandTotal: Prisma.Decimal;
     costTotal: Prisma.Decimal;
     profitTotal: Prisma.Decimal;
+    memberGuestId?: string | null;
+    memberContactId?: string | null;
+    promotionId?: string | null;
+    promoCode?: string | null;
+    promoDiscount?: Prisma.Decimal;
+    promoGiftCost?: Prisma.Decimal;
     notes: string | null;
     soldBy: string;
     soldAt: Date;
@@ -675,6 +824,9 @@ export class RetailSalesService {
       lineTotal: Prisma.Decimal;
       unitCost: Prisma.Decimal;
       lineCost: Prisma.Decimal;
+      isGift?: boolean;
+      promotionId?: string | null;
+      sourceWarehouseId?: string | null;
     }>;
   }) {
     return {
@@ -697,6 +849,12 @@ export class RetailSalesService {
       grandTotal: Number(sale.grandTotal),
       costTotal: Number(sale.costTotal),
       profitTotal: Number(sale.profitTotal),
+      memberGuestId: sale.memberGuestId ?? null,
+      memberContactId: sale.memberContactId ?? null,
+      promotionId: sale.promotionId ?? null,
+      promoCode: sale.promoCode ?? null,
+      promoDiscount: Number(sale.promoDiscount ?? 0),
+      promoGiftCost: Number(sale.promoGiftCost ?? 0),
       notes: sale.notes,
       soldBy: sale.soldBy,
       soldAt: sale.soldAt,
@@ -713,6 +871,9 @@ export class RetailSalesService {
         lineTotal: Number(it.lineTotal),
         unitCost: Number(it.unitCost),
         lineCost: Number(it.lineCost),
+        isGift: it.isGift ?? false,
+        promotionId: it.promotionId ?? null,
+        sourceWarehouseId: it.sourceWarehouseId ?? null,
       })),
     };
   }
