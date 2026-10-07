@@ -152,3 +152,11 @@ Guest (guests)              ← ตัวตนสมาชิก: ชื่อ 
 - ทดสอบสด: walk-in ได้ของแถมอัตโนมัติ · ยอดไม่ถึง shortBy 120 · โค้ดบนโปรอัตโนมัติ = `PROMO_AUTO_NO_CODE` · โค้ด + อัตโนมัติในบิลเดียว · โปรไม่ร่วม = NOT_STACKABLE · โปรจำกัดสิทธิ์ walk-in = MEMBER_REQUIRED, ครบโควตา = NOT_ELIGIBLE · ขายได้ 3 แต้ม/2 redemption → void คืนทั้งคู่ + ของแถม + แต้ม (pointsReversed 3) · แลกแต้มได้ `PT-XARVNMWU` points 3→0 lifetime คง 3
 - เทสต์: backend retail-sales/promotions/loyalty 145 ผ่าน, frontend POS 18 + Phase 4 14 + Phase 1–3 ผ่านทั้งหมด (87), tsc ทั้งสอง repo 0 error (ยกเว้น drift ของ goods ที่มีอยู่ก่อน)
 - โปรทดสอบชื่อ "P4 …" ตั้งเป็น PAUSED ไว้ในฐานข้อมูล local
+
+### 2026-10-07 — ข้อมูลตัวอย่างเฟส 4 ใน seeder
+- `src/seeder/retail-promotions.seeder.ts` เพิ่มต่อกิจการที่มี WH-RETAIL:
+  - ของแถม `GIFT-CUP` (แก้วที่ระลึก 15 ใบ)
+  - โปรอัตโนมัติ "ซื้อครบ ฿500 แถมถุงผ้า (อัตโนมัติ)" (เปิดทั่วไป) และ "สมาชิก Gold รับแก้วที่ระลึก (อัตโนมัติ)" (gold/platinum, คนละ 1 ครั้ง)
+  - ของรางวัลแลกแต้ม "แลก 50 แต้ม ลด ฿50" และ "แลก 200 แต้ม ลด 20% (ไม่ร่วมโปรอื่น)" (stackable=false)
+  - สมาชิก วิภา 0890000101 (250 แต้ม, สะสม 6000, gold) / ธนา 0890000102 (30 แต้ม, standard) + CRM contact + ประวัติแต้มยอดยกมา
+- `db:refresh` แล้ว curl: walk-in ฿600 ได้ถุงผ้า + Gold = MEMBER_REQUIRED · ฿380 = shortBy 120 · วิภา ฿600 ได้ถุงผ้า + แก้ว · วิภาแลกได้ทั้ง 2 รางวัล · ธนาแลกไม่ได้ (affordable=false)
