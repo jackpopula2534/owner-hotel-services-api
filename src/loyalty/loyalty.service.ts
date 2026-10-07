@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   AdjustPointsDto,
@@ -9,11 +10,32 @@ import {
 
 export type LoyaltyTier = 'standard' | 'silver' | 'gold' | 'platinum';
 
+type LoyaltyTxnType = 'earn' | 'redeem' | 'expire' | 'adjust';
+
+/** Tier thresholds on lifetime earned points. Standard 0-999 · Silver 1000+ · Gold 5000+ · Platinum 10000+ */
+export function tierForLifetimePoints(lifetimePoints: number): LoyaltyTier {
+  if (lifetimePoints >= 10000) return 'platinum';
+  if (lifetimePoints >= 5000) return 'gold';
+  if (lifetimePoints >= 1000) return 'silver';
+  return 'standard';
+}
+
+/** แต้มที่ได้จากยอดเงิน — 1 แต้มต่อ 100 บาท (ห้องพักและร้านค้าใช้อัตราเดียวกัน) */
+export function pointsForAmount(amount: number): number {
+  return Math.max(Math.floor(amount / LOYALTY_POINTS_PER_THB_DIVISOR), 0);
+}
+
+export const LOYALTY_POINTS_PER_THB_DIVISOR = 100;
+/** เหตุผลบนรายการแต้มของบิลร้านค้า */
+export const RETAIL_SALE_EARN_REASON = 'retail_sale';
+export const RETAIL_SALE_VOID_REASON = 'retail_sale_void';
+
 export interface PointsResult {
   guestId: string;
   tenantId: string;
   pointsDelta: number;
   balance: number;
+  lifetimePoints: number;
   tier: LoyaltyTier;
   transactionId?: string;
 }
@@ -22,8 +44,6 @@ export interface PointsResult {
 export class LoyaltyService {
   private readonly logger = new Logger(LoyaltyService.name);
 
-  // Points per THB (1 point per 100 THB by default)
-  private static readonly POINTS_PER_THB_DIVISOR = 100;
   /** เหตุผลบนรายการดึงแต้มคืน — ใช้เป็นตัวกันดึงซ้ำด้วย */
   private static readonly CHECKOUT_UNDO_REASON = 'checkout_undo';
 
@@ -72,6 +92,7 @@ export class LoyaltyService {
         tenantId,
         guestId,
         points: 0,
+        lifetimePoints: 0,
         tier: 'standard' as LoyaltyTier,
         updatedAt: new Date(),
       }
@@ -126,7 +147,7 @@ export class LoyaltyService {
         return null;
       }
 
-      const pointsEarned = Math.floor(bookingAmount / LoyaltyService.POINTS_PER_THB_DIVISOR);
+      const pointsEarned = pointsForAmount(bookingAmount);
       if (pointsEarned <= 0) {
         this.logger.debug(`Booking amount ${bookingAmount} too low to earn points`);
         return null;
@@ -197,9 +218,12 @@ export class LoyaltyService {
         );
       }
 
+      // แต้มสะสมตลอดชีพหักเต็มจำนวนที่เคยให้ แม้ยอดคงเหลือจะดึงคืนได้ไม่ครบ —
+      // ไม่งั้นแขกได้ tier จากเช็คเอาต์ที่ถูกย้อนไปแล้ว
       return await this.applyPointsDelta(tenantId, guestId, -clawback, 'adjust', {
         bookingId,
         reason: LoyaltyService.CHECKOUT_UNDO_REASON,
+        lifetimeDelta: -awarded,
       });
     } catch (error) {
       this.logger.error(
@@ -274,72 +298,154 @@ export class LoyaltyService {
   // ──────────────────────────────────────────────────────────
 
   /**
-   * Atomically update LoyaltyPoint balance + insert LoyaltyTransaction row.
-   * Returns the post-update snapshot.
+   * แต้มจากบิลร้านค้า — 1 แต้ม/100฿ ของยอดที่ลูกค้าจ่ายจริงหลังหักส่วนลด
+   *
+   * รันใน transaction ของการขาย: บิลกับแต้มสำเร็จหรือล้มด้วยกัน ไม่มีบิลที่ "ขายแล้วแต่แต้มไม่เข้า"
+   * คืน 0 เมื่อยอดไม่ถึง 100 บาท
    */
+  async earnForRetailSaleWithin(
+    tx: Prisma.TransactionClient,
+    params: { tenantId: string; guestId: string; saleId: string; amount: number; contactId?: string | null },
+  ): Promise<number> {
+    const points = pointsForAmount(params.amount);
+    if (points <= 0) return 0;
+    await this.applyPointsDeltaWithin(tx, params.tenantId, params.guestId, points, 'earn', {
+      retailSaleId: params.saleId,
+      contactId: params.contactId,
+      reason: RETAIL_SALE_EARN_REASON,
+    });
+    return points;
+  }
+
+  /**
+   * บิลร้านค้าถูก void — ดึงแต้มที่บิลนั้นให้คืน (ดึงได้เท่าที่ยอดคงเหลือมี เหมือนย้อนเช็คเอาต์)
+   * แต้มสะสมตลอดชีพหักเต็มจำนวน เรียกซ้ำได้ (เคยดึงแล้ว = 0)
+   */
+  async reverseRetailSaleWithin(
+    tx: Prisma.TransactionClient,
+    params: { tenantId: string; guestId: string; saleId: string },
+  ): Promise<number> {
+    const { tenantId, guestId, saleId } = params;
+    const txns = await tx.loyaltyTransaction.findMany({
+      where: { tenantId, guestId, retailSaleId: saleId },
+      select: { type: true, points: true, reason: true },
+    });
+    if (txns.some((t) => t.reason === RETAIL_SALE_VOID_REASON)) return 0;
+    const awarded = txns.filter((t) => t.type === 'earn').reduce((sum, t) => sum + t.points, 0);
+    if (awarded <= 0) return 0;
+
+    const account = await tx.loyaltyPoint.findFirst({ where: { tenantId, guestId }, select: { points: true } });
+    const clawback = Math.min(awarded, account?.points ?? 0);
+    if (clawback < awarded) {
+      this.logger.warn(`Partial retail clawback for sale ${saleId}: ${clawback}/${awarded} pts (rest already redeemed)`);
+    }
+    await this.applyPointsDeltaWithin(tx, tenantId, guestId, -clawback, 'adjust', {
+      retailSaleId: saleId,
+      reason: RETAIL_SALE_VOID_REASON,
+      lifetimeDelta: -awarded,
+    });
+    return clawback;
+  }
+
+  /**
+   * หักแต้มเพื่อแลกของ (เช่นโค้ดโปรร้านค้า) ใน transaction ของผู้เรียก
+   * ยอดไม่พอ = โยน INSUFFICIENT_POINTS แต้มสะสมตลอดชีพไม่ลด (tier ไม่ตก)
+   */
+  async redeemWithin(
+    tx: Prisma.TransactionClient,
+    params: { tenantId: string; guestId: string; points: number; reason: string; metadata?: Record<string, unknown> },
+  ): Promise<PointsResult> {
+    if (params.points <= 0) throw new BadRequestException('Points to redeem must be positive');
+    return this.applyPointsDeltaWithin(tx, params.tenantId, params.guestId, -params.points, 'redeem', {
+      reason: params.reason,
+      metadata: params.metadata,
+    });
+  }
+
+  /** {@link applyPointsDeltaWithin} in its own transaction. */
   private async applyPointsDelta(
     tenantId: string,
     guestId: string,
     pointsDelta: number,
-    type: 'earn' | 'redeem' | 'expire' | 'adjust',
-    extras: { bookingId?: string; reason?: string },
+    type: LoyaltyTxnType,
+    extras: LoyaltyDeltaExtras,
   ): Promise<PointsResult> {
-    return this.prisma.$transaction(async (tx) => {
-      let account = await tx.loyaltyPoint.findFirst({ where: { tenantId, guestId } });
-
-      if (!account) {
-        account = await tx.loyaltyPoint.create({
-          data: { tenantId, guestId, points: 0, tier: 'standard' },
-        });
-      }
-
-      const newBalance = account.points + pointsDelta;
-      if (newBalance < 0) {
-        throw new BadRequestException('Balance cannot go below zero');
-      }
-      const newTier = this.calculateTier(newBalance);
-
-      const updated = await tx.loyaltyPoint.update({
-        where: { id: account.id },
-        data: { points: newBalance, tier: newTier },
-      });
-
-      const transaction = await tx.loyaltyTransaction.create({
-        data: {
-          tenantId,
-          guestId,
-          type,
-          points: pointsDelta,
-          bookingId: extras.bookingId ?? null,
-          reason: extras.reason ?? null,
-          balanceAfter: newBalance,
-          tierAfter: newTier,
-        },
-      });
-
-      this.logger.log(
-        `${type.toUpperCase()} ${pointsDelta} pts · guest=${guestId} · balance=${newBalance} · tier=${newTier}`,
-      );
-
-      return {
-        guestId,
-        tenantId,
-        pointsDelta,
-        balance: updated.points,
-        tier: newTier as LoyaltyTier,
-        transactionId: transaction.id,
-      };
-    });
+    return this.prisma.$transaction((tx) => this.applyPointsDeltaWithin(tx, tenantId, guestId, pointsDelta, type, extras));
   }
 
   /**
-   * Tier thresholds (lifetime balance based).
-   * Standard: 0-999 · Silver: 1000-4999 · Gold: 5000-9999 · Platinum: 10000+
+   * Update LoyaltyPoint balance + lifetime + tier and insert the LoyaltyTransaction row.
+   *
+   * ยอดคงเหลือหักแบบมีเงื่อนไข (`points >= ต้องหัก`) — สองเครื่องแลกแต้มพร้อมกันได้คนเดียว
+   * แต้มสะสมตลอดชีพ: earn/adjust เปลี่ยนตาม delta (หรือ lifetimeDelta), redeem/expire ไม่เปลี่ยน
    */
-  private calculateTier(points: number): LoyaltyTier {
-    if (points >= 10000) return 'platinum';
-    if (points >= 5000) return 'gold';
-    if (points >= 1000) return 'silver';
-    return 'standard';
+  async applyPointsDeltaWithin(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    guestId: string,
+    pointsDelta: number,
+    type: LoyaltyTxnType,
+    extras: LoyaltyDeltaExtras,
+  ): Promise<PointsResult> {
+    let account = await tx.loyaltyPoint.findFirst({ where: { tenantId, guestId } });
+    if (!account) {
+      account = await tx.loyaltyPoint.create({
+        data: { tenantId, guestId, points: 0, lifetimePoints: 0, tier: 'standard' },
+      });
+    }
+
+    const lifetimeDelta = extras.lifetimeDelta ?? (type === 'earn' || type === 'adjust' ? pointsDelta : 0);
+    const moved = await tx.loyaltyPoint.updateMany({
+      where: { id: account.id, tenantId, ...(pointsDelta < 0 ? { points: { gte: -pointsDelta } } : {}) },
+      data: { points: { increment: pointsDelta }, lifetimePoints: { increment: lifetimeDelta } },
+    });
+    if (moved.count === 0) {
+      throw new BadRequestException({
+        code: 'INSUFFICIENT_POINTS',
+        message: `แต้มไม่พอ: ต้องใช้ ${-pointsDelta} แต้ม มีอยู่ ${account.points} แต้ม`,
+      });
+    }
+
+    const after = await tx.loyaltyPoint.findFirst({ where: { id: account.id, tenantId } });
+    const balance = after?.points ?? account.points + pointsDelta;
+    // lifetime ห้ามติดลบ (ข้อมูลเก่าก่อนมีคอลัมน์นี้) — ตรึงที่ 0 แล้วคิด tier
+    const lifetimePoints = Math.max(after?.lifetimePoints ?? 0, 0);
+    const tier = tierForLifetimePoints(lifetimePoints);
+    await tx.loyaltyPoint.update({
+      where: { id: account.id },
+      data: { tier, ...(lifetimePoints !== after?.lifetimePoints ? { lifetimePoints } : {}) },
+    });
+
+    const transaction = await tx.loyaltyTransaction.create({
+      data: {
+        tenantId,
+        guestId,
+        contactId: extras.contactId ?? null,
+        type,
+        points: pointsDelta,
+        bookingId: extras.bookingId ?? null,
+        retailSaleId: extras.retailSaleId ?? null,
+        reason: extras.reason ?? null,
+        metadata: extras.metadata ? JSON.stringify(extras.metadata) : null,
+        balanceAfter: balance,
+        tierAfter: tier,
+      },
+    });
+
+    this.logger.log(
+      `${type.toUpperCase()} ${pointsDelta} pts · guest=${guestId} · balance=${balance} · lifetime=${lifetimePoints} · tier=${tier}`,
+    );
+
+    return { guestId, tenantId, pointsDelta, balance, lifetimePoints, tier, transactionId: transaction.id };
   }
+}
+
+interface LoyaltyDeltaExtras {
+  bookingId?: string;
+  retailSaleId?: string;
+  contactId?: string | null;
+  reason?: string;
+  metadata?: Record<string, unknown>;
+  /** ค่าที่จะบวกเข้าแต้มสะสมตลอดชีพ (ไม่ระบุ = ตามกฎของ type) */
+  lifetimeDelta?: number;
 }

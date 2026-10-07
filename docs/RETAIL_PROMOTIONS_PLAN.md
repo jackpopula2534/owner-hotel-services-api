@@ -7,11 +7,14 @@
 
 | # | คำถาม | คำตอบ |
 |---|---|---|
-| 1 | 1 บิลใช้ได้กี่โค้ด | **1 โค้ดต่อบิล** (เฟส 1) |
+| 1 | 1 บิลใช้ได้กี่โค้ด | **1 โค้ด + โปรอัตโนมัติ** — โค้ดได้ 1 ใบต่อบิล, โปรอัตโนมัติ (ของแถม) ซ้อนได้หลายโปร, ตั้งต่อโปรได้ว่า "ใช้ร่วมกับโปรอื่นได้" หรือไม่ (เฟส 4) |
 | 2 | ของแถมหมด | **ให้ลูกค้าเลือกรับเฉพาะส่วนลดได้** (แคชเชียร์ต้องกดยืนยันเอง — ระบบไม่ตัดของแถมทิ้งเงียบ ๆ) |
 | 3 | ผูกสมาชิก | **ต้องผูกสมาชิกทุกครั้งที่ใช้โค้ด** โดยใช้ระบบสมาชิกของระบบหลัก — ห้ามสร้างตารางสมาชิกใหม่ |
 | 4 | ของแถมตัดจากคลังไหน | **แยกคลังของแถมโดยเฉพาะ** (Warehouse type `PROMOTION`) |
 | 5 | เริ่มเฟส 1 | ✅ เริ่มแล้ว |
+| 6 | โปรอัตโนมัติต้องผูกสมาชิกไหม | **บังคับเฉพาะโปรที่จำกัดสิทธิ์** (tier / segment / โควตาต่อสมาชิก) — โปรเปิดทั่วไปลูกค้า walk-in ได้ด้วย (เฟส 4) |
+| 7 | อัตราให้แต้ม | **1 แต้ม / 100 ฿ ของยอดสุทธิหลังหักส่วนลด** เฉพาะบิลสมาชิก, ยกเลิกบิล = ดึงแต้มคืน (เฟส 4) |
+| 8 | tier คิดจากอะไร | **แต้มสะสมตลอดชีพ** — แลกแต้มแล้ว tier ไม่ตก (เฟส 4) |
 
 ## 2. "สมาชิก" ของระบบหลักคืออะไร (ไม่สร้างใหม่)
 
@@ -108,10 +111,19 @@ Guest (guests)              ← ตัวตนสมาชิก: ชื่อ 
 - [x] หน้า Contact 360 แสดงประวัติการใช้โปร — `GET /crm/contacts/:id/promotions` + ปุ่ม 🏷 ในการ์ดผู้ติดต่อ (`ContactPromoHistoryModal`)
 - ข้อจำกัดที่รู้: journey dedupe ต่อ (journey, guest, booking=null) → journey โปรลงทะเบียนสมาชิกได้ครั้งเดียว; tag `promo-redeemer` ไม่ถูกถอดตอน void (ถือเป็นประวัติ)
 
-### Phase 4 — ทางเลือก
-- [ ] Loyalty: แลกแต้มเป็นโค้ด / ให้แต้มจากยอดหลังส่วนลด
-- [ ] GIFT_WITH_PURCHASE อัตโนมัติ (ไม่ต้องกรอกโค้ด)
-- [ ] ใช้หลายโปรร่วมกัน (stacking rules)
+### Phase 4 — Loyalty / โปรอัตโนมัติ / Stacking ✅ (2026-10-07)
+- [x] Loyalty: แลกแต้มเป็นโค้ด / ให้แต้มจากยอดหลังส่วนลด
+  - `RetailPromotion.pointsCost` (ว่าง = แลกไม่ได้) → `GET /inventory/retail/members/:guestId/rewards`, `POST /inventory/retail/promotions/:id/redeem-points` ออกโค้ด UNIQUE `PT-XXXXXXXX` อายุ 30 วัน (หรือถึงวันจบโปร) หักแต้มกับออกโค้ดใน transaction เดียว (`LoyaltyService.redeemWithin`)
+  - ขายบิลสมาชิก → `earnForRetailSaleWithin` floor(grandTotal/100) แต้ม, void → `reverseRetailSaleWithin` ดึงแต้มคืน (`pointsReversed`), `lifetimePoints` ไม่ลดตอนแลก
+  - FE: `MemberRewardsPanel` ที่ POS (แลก 2 จังหวะ: กด → ยืนยันหัก) โค้ดที่ได้ถูกส่งเข้าช่องโค้ดตรวจทันที, สรุปบิลแสดง "+N แต้ม"
+- [x] GIFT_WITH_PURCHASE อัตโนมัติ (ไม่ต้องกรอกโค้ด)
+  - `autoApply` = ของแถมล้วนเท่านั้น (`PROMO_AUTO_GIFT_ONLY`), ห้ามมีโค้ด/แต้ม (`PROMO_AUTO_NO_CODE`, `PROMO_AUTO_HAS_CODES`, `PROMO_AUTO_NO_POINTS`)
+  - `POST /inventory/retail/promotions/checkout-preview` คืนโปรที่ได้ + `skippedAutoPromotions` (MIN_SPEND + shortBy, MEMBER_REQUIRED, GIFT_OUT, NOT_STACKABLE, CODE_NOT_STACKABLE ฯลฯ)
+  - `RetailPromotionRedemption.promoCodeId` nullable → 1 บิลมีหลาย redemption; void ถอนครบทุกตัว
+  - FE: `AutoPromotionsPanel` (debounce 400ms, ชวน "ซื้อเพิ่มอีก ฿X"), ฟอร์มโปรเลือก "ใช้โค้ด / อัตโนมัติ" (`PromotionModeFields`), รายงาน/ประวัติ CRM แสดง "อัตโนมัติ"
+- [x] ใช้หลายโปรร่วมกัน (stacking rules)
+  - โค้ด 1 ใบ + โปรอัตโนมัติหลายตัว; `stackable=false` = บิลที่มีโปรนั้นไม่รับโปรอื่นเพิ่ม (โปรอัตโนมัติที่หลุดแจ้งเป็น `NOT_STACKABLE` / `CODE_NOT_STACKABLE`)
+- ข้อจำกัดที่รู้: แต้มยังไม่ถูกตัดตอนคืนสินค้าบางส่วน (ระบบยังไม่มี partial refund มีแต่ void ทั้งบิล); ตัวเลขที่ POS เป็นตัวอย่าง backend คิดใหม่ตอนตัดขาย
 
 ## 7. คำถามค้าง
 - VAT ของแถมตามมูลค่าตลาด — รอฝ่ายบัญชี
@@ -134,3 +146,9 @@ Guest (guests)              ← ตัวตนสมาชิก: ชื่อ 
 - ทดสอบสด: แคมเปญ VIP อีเมล 2 คน → โค้ด UNIQUE 2 ใบ (14 วัน) · สมาชิกอื่นใช้โค้ด = `PROMO_CODE_NOT_YOURS` · เจ้าของใช้ได้ (RCP-202610-0001 ลด 50) · ใช้ซ้ำ = `PROMO_CODE_USED_UP` · LTV 481.50 + tag · stats issued 2 / redeemed 1 · void → LTV 0, redeemed 0, โค้ดกลับเป็น available
 - แก้ระหว่างทาง: หน้าสร้างแคมเปญ CRM เดิมส่ง `bodyText` (ฟิลด์ไม่มีใน DTO → 400 ทุกครั้ง) และ audienceQuery ผิดรูป — แก้เป็น `bodyOverride` + JSON string แล้ว
 - เทสต์: backend crm + retail 22 suites / 258 ผ่าน, frontend Phase 3 12 ผ่าน (+ Phase 1–2 29, CRM terminal 8), tsc ทั้งสอง repo 0 error
+
+### 2026-10-07 — Phase 4 เสร็จ (ยังไม่ commit)
+- Backend: migration `20261007180000_retail_promotion_stacking_loyalty` (autoApply/stackable/pointsCost, redemption.promoCodeId nullable, promoCode.pointsSpent), `RetailPromotionCheckoutService` (คิดโค้ด + โปรอัตโนมัติ + stacking), `RetailPromotionRewardsService` (แลกแต้ม), `retail-stock-issue.ts`, `LoyaltyService.earnForRetailSaleWithin/reverseRetailSaleWithin/redeemWithin/applyPointsDeltaWithin`, void ดึงแต้มคืน, CRM ประวัตินับบิลไม่ซ้ำ
+- ทดสอบสด: walk-in ได้ของแถมอัตโนมัติ · ยอดไม่ถึง shortBy 120 · โค้ดบนโปรอัตโนมัติ = `PROMO_AUTO_NO_CODE` · โค้ด + อัตโนมัติในบิลเดียว · โปรไม่ร่วม = NOT_STACKABLE · โปรจำกัดสิทธิ์ walk-in = MEMBER_REQUIRED, ครบโควตา = NOT_ELIGIBLE · ขายได้ 3 แต้ม/2 redemption → void คืนทั้งคู่ + ของแถม + แต้ม (pointsReversed 3) · แลกแต้มได้ `PT-XARVNMWU` points 3→0 lifetime คง 3
+- เทสต์: backend retail-sales/promotions/loyalty 145 ผ่าน, frontend POS 18 + Phase 4 14 + Phase 1–3 ผ่านทั้งหมด (87), tsc ทั้งสอง repo 0 error (ยกเว้น drift ของ goods ที่มีอยู่ก่อน)
+- โปรทดสอบชื่อ "P4 …" ตั้งเป็น PAUSED ไว้ในฐานข้อมูล local

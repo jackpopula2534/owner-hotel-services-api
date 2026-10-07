@@ -8,7 +8,8 @@ import {
   FOLIO_SOURCE_TYPE,
 } from '@/modules/accounts-receivable/folio-posting/folio-posting.service';
 import { RevenuePostingService } from '@/modules/revenue/revenue-posting.service';
-import { RetailPromotionsService } from '../retail-promotions/retail-promotions.service';
+import { RetailPromotionCheckoutService } from '../retail-promotions/retail-promotion-checkout.service';
+import { LoyaltyService } from '@/loyalty/loyalty.service';
 import { emitRetailSaleVoided } from './retail-sale-events';
 
 /** referenceType ของการตัดสต็อกตอนขาย → referenceType ของการคืนสต็อกตอน void */
@@ -31,6 +32,8 @@ export interface VoidRetailSaleResult {
   restockedQty: number;
   folioReversed: boolean;
   promoReversed: boolean;
+  /** แต้มที่หักคืนจากสมาชิก (น้อยกว่าที่ได้ ถ้าสมาชิกแลกแต้มไปแล้ว) */
+  pointsReversed: number;
 }
 
 /**
@@ -43,7 +46,8 @@ export interface VoidRetailSaleResult {
  *   2. คืนสต็อกทุกการเคลื่อนไหวที่ใบนี้ตัดออก (ทั้งสินค้าและของแถม) กลับคลังเดิม
  *      ล็อตเดิม ที่ต้นทุนเดิม เป็น ADJUSTMENT_IN — ไม่ใช่คิดจากบรรทัดใบเสร็จ
  *      เพราะบรรทัดเดียวอาจตัดจากหลายล็อตคนละต้นทุน
- *   3. คืนโควตาโปร/โค้ด/สมาชิก/งบของแถม และตี redemption เป็น REVERSED
+ *   3. คืนโควตาโปร/โค้ด/สมาชิก/งบของแถม ของทุกโปรในบิล และตี redemption เป็น REVERSED
+ *      แล้วหักแต้มสะสมที่บิลนี้ให้สมาชิกคืน
  *   4. กลับรายการในโฟลิโอห้อง (เฉพาะโฟลิโอที่ยังเปิด)
  *   5. ยกเลิกรายได้ในสมุดกลาง (วันเดียวกัน = VOIDED, ข้ามวัน = แถวติดลบ)
  */
@@ -55,7 +59,8 @@ export class RetailSaleVoidService {
     private readonly prisma: PrismaService,
     private readonly folioPosting: FolioPostingService,
     private readonly revenuePosting: RevenuePostingService,
-    private readonly promotions: RetailPromotionsService,
+    private readonly promoCheckout: RetailPromotionCheckoutService,
+    private readonly loyalty: LoyaltyService,
     private readonly events: EventEmitter2,
   ) {}
 
@@ -91,11 +96,22 @@ export class RetailSaleVoidService {
 
       const restockedQty = await this.restock(tx, { tenantId, userId, saleId: sale.id });
 
-      const promo = await this.promotions.reverseRedemptionWithin(tx, {
+      const promos = await this.promoCheckout.reverseRedemptionsWithin(tx, {
         tenantId,
         saleId: sale.id,
-        giftLines: sale.items.filter((it) => it.isGift).map((it) => ({ itemId: it.itemId, quantity: it.quantity })),
+        giftLines: sale.items
+          .filter((it) => it.isGift)
+          .map((it) => ({ itemId: it.itemId, quantity: it.quantity, promotionId: it.promotionId ?? null })),
       });
+
+      const pointsReversed =
+        sale.memberGuestId && sale.pointsEarned > 0
+          ? await this.loyalty.reverseRetailSaleWithin(tx, {
+              tenantId,
+              guestId: sale.memberGuestId,
+              saleId: sale.id,
+            })
+          : 0;
 
       const folio = await this.folioPosting.reverseChargeWithin(tx, {
         tenantId,
@@ -113,7 +129,7 @@ export class RetailSaleVoidService {
         at: voidedAt,
       });
 
-      return { restockedQty, folioReversed: folio != null, promoReversed: promo != null };
+      return { restockedQty, folioReversed: folio != null, promoReversed: promos.length > 0, pointsReversed };
     });
 
     this.logger.log(

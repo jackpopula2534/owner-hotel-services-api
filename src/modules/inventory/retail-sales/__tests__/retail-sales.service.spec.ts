@@ -12,6 +12,8 @@ import {
 import { RetailPromotionsService } from '../../retail-promotions/retail-promotions.service';
 import { RetailSalesService } from '../retail-sales.service';
 import { RetailPromotionHealthService } from '../../retail-promotions/retail-promotion-health.service';
+import { RetailPromotionCheckoutService } from '../../retail-promotions/retail-promotion-checkout.service';
+import { LoyaltyService } from '@/loyalty/loyalty.service';
 import { PrismaService } from '@/prisma/prisma.service';
 import { FolioPostingService } from '@/modules/accounts-receivable/folio-posting/folio-posting.service';
 import { RevenuePostingService } from '@/modules/revenue/revenue-posting.service';
@@ -44,6 +46,8 @@ function buildPrisma() {
     inventoryLot: { findMany: jest.fn(), update: jest.fn() },
     stockMovement: { create: jest.fn() },
     documentSequence: { upsert: jest.fn() },
+    // โปรอัตโนมัติ — ค่าเริ่มต้นไม่มี
+    retailPromotion: { findMany: jest.fn().mockResolvedValue([]) },
     retailSale: {
       create: jest.fn(),
       findMany: jest.fn(),
@@ -97,6 +101,15 @@ function buildPromotionHealth() {
   return { autoPauseIfExhaustedWithin: jest.fn().mockResolvedValue(false) };
 }
 
+/** แต้มสะสม — stub ผูกกับเมธอดจริง ให้ 1 แต้ม/100฿ แบบเดียวกับของจริง */
+function buildLoyalty() {
+  const real = LoyaltyService.prototype as unknown as Record<string, unknown>;
+  expect(typeof real.earnForRetailSaleWithin).toBe('function');
+  return {
+    earnForRetailSaleWithin: jest.fn(async (_tx: unknown, p: { amount: number }) => Math.floor(p.amount / 100)),
+  };
+}
+
 /** CRM events — ส่งหลัง commit */
 const events = { emit: jest.fn() };
 
@@ -106,6 +119,7 @@ async function makeService(
   revenuePosting: RevenuePostingStub = buildRevenuePostingStub(),
   revenueQuery: RevenueQueryStub = buildRevenueQueryStub(),
   promotionHealth: ReturnType<typeof buildPromotionHealth> = buildPromotionHealth(),
+  loyalty: ReturnType<typeof buildLoyalty> = buildLoyalty(),
 ): Promise<RetailSalesService> {
   const moduleRef: TestingModule = await Test.createTestingModule({
     providers: [
@@ -117,6 +131,8 @@ async function makeService(
       { provide: RevenueQueryService, useValue: revenueQuery },
       RetailPromotionsService,
       { provide: RetailPromotionHealthService, useValue: promotionHealth },
+      RetailPromotionCheckoutService,
+      { provide: LoyaltyService, useValue: loyalty },
     ],
   }).compile();
   return moduleRef.get(RetailSalesService);
@@ -540,7 +556,7 @@ describe('RetailSalesService', () => {
     const evaluated = (over: { discount?: number; availableQty?: number } = {}) => ({
       promotion: {
         id: 'promo-1', name: 'ลด 10%', discountType: 'PERCENT', discountValue: 10, maxDiscount: null,
-        minSpend: 0, usageLimit: 100, perMemberLimit: 1, giftWarehouseId: GIFT_WH,
+        minSpend: 0, usageLimit: 100, perMemberLimit: 1, giftWarehouseId: GIFT_WH, stackable: true,
       },
       code: { id: 'code-1', code: 'SUMMER10', maxUses: null },
       member,
@@ -568,11 +584,19 @@ describe('RetailSalesService', () => {
         resolveMember: jest.fn().mockResolvedValue(member),
         evaluate: jest.fn().mockResolvedValue(ev),
         ensureContact: jest.fn().mockResolvedValue('c1'),
-        recordRedemptionWithin: jest.fn().mockResolvedValue(undefined),
+        evaluateGifts: jest.fn().mockResolvedValue([]),
+        memberUsedCount: jest.fn().mockResolvedValue(0),
       };
+      // ตัวคิดโปรทั้งบิลของจริง (กติกาใช้ร่วม/ของแถม) — แทนเฉพาะการเขียนตัวนับลง DB
+      const checkout = new RetailPromotionCheckoutService(prisma, promotions as any);
+      const recordRedemptionsWithin = jest
+        .spyOn(checkout, 'recordRedemptionsWithin')
+        .mockResolvedValue(undefined);
       (service as any).promotions = promotions;
+      (service as any).promoCheckout = checkout;
       const promotionHealth = (service as any).promotionHealth as { autoPauseIfExhaustedWithin: jest.Mock };
-      return { prisma, service, promotions, promotionHealth };
+      const loyalty = (service as any).loyalty as { earnForRetailSaleWithin: jest.Mock };
+      return { prisma, service, promotions, promotionHealth, recordRedemptionsWithin, loyalty };
     }
 
     const dto = (over: Record<string, unknown> = {}) => ({
@@ -586,7 +610,7 @@ describe('RetailSalesService', () => {
 
     it('ลดราคา + ตัดของแถมจากคลังของแถมเป็นบรรทัด ฿0 แยกต้นทุนออกจาก costTotal', async () => {
       events.emit.mockClear();
-      const { prisma, service, promotions } = await setup();
+      const { prisma, service, recordRedemptionsWithin } = await setup();
       const result = await service.create(dto(), USER, TENANT);
 
       // subtotal 200 − โปร 20 = 180, VAT 12.6
@@ -609,10 +633,16 @@ describe('RetailSalesService', () => {
       expect(prisma.warehouseStock.update).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: 'sg' }, data: expect.objectContaining({ quantity: 4 }) }),
       );
-      expect(promotions.recordRedemptionWithin).toHaveBeenCalledWith(
+      expect(recordRedemptionsWithin).toHaveBeenCalledWith(
         prisma,
-        expect.objectContaining({ giftSkipped: false, giftCost: 40, contactId: 'c1' }),
+        expect.objectContaining({
+          contactId: 'c1',
+          applied: [expect.objectContaining({ giftSkipped: false, giftCost: 40, discount: 20 })],
+        }),
       );
+      expect(result.appliedPromotions).toEqual([
+        expect.objectContaining({ promotionId: 'promo-1', code: 'SUMMER10', autoApplied: false, discount: 20 }),
+      ]);
       // หลัง commit → CRM: ยอดสมาชิก (LTV) + ใช้โค้ด (tag/journey)
       expect(events.emit).toHaveBeenCalledWith(
         'retail.member_sale.completed',
@@ -625,11 +655,11 @@ describe('RetailSalesService', () => {
     });
 
     it('แจกของแถมแล้ว → เช็คหยุดโปรอัตโนมัติในทรานแซกชันเดียวกัน หลังบันทึกการใช้โปร', async () => {
-      const { prisma, service, promotions, promotionHealth } = await setup();
+      const { prisma, service, recordRedemptionsWithin, promotionHealth } = await setup();
       await service.create(dto(), USER, TENANT);
-      expect(promotionHealth.autoPauseIfExhaustedWithin).toHaveBeenCalledWith(prisma, TENANT, expect.any(String));
+      expect(promotionHealth.autoPauseIfExhaustedWithin).toHaveBeenCalledWith(prisma, TENANT, 'promo-1');
       expect(promotionHealth.autoPauseIfExhaustedWithin.mock.invocationCallOrder[0]).toBeGreaterThan(
-        promotions.recordRedemptionWithin.mock.invocationCallOrder[0],
+        recordRedemptionsWithin.mock.invocationCallOrder[0],
       );
     });
 
@@ -648,23 +678,25 @@ describe('RetailSalesService', () => {
     });
 
     it('ลูกค้าเลือก "รับเฉพาะส่วนลด" → ได้ส่วนลด ไม่มีบรรทัดของแถม และบันทึกว่าข้ามของแถม', async () => {
-      const { prisma, service, promotions } = await setup(evaluated({ availableQty: 0 }));
+      const { prisma, service, recordRedemptionsWithin } = await setup(evaluated({ availableQty: 0 }));
       const result = await service.create(dto({ acceptWithoutGift: true }), USER, TENANT);
       expect(result.promoDiscount).toBe(20);
       expect(result.items.some((i: any) => i.isGift)).toBe(false);
       expect(prisma.stockMovement.create).toHaveBeenCalledTimes(1);
-      expect(promotions.recordRedemptionWithin).toHaveBeenCalledWith(
+      expect(recordRedemptionsWithin).toHaveBeenCalledWith(
         prisma,
-        expect.objectContaining({ giftSkipped: true, grantedGifts: [], giftCost: 0 }),
+        expect.objectContaining({
+          applied: [expect.objectContaining({ giftSkipped: true, grantedGifts: [], giftCost: 0 })],
+        }),
       );
     });
 
     it('ส่วนลดโปรไม่ทำให้ยอดติดลบเมื่อมีส่วนลดท้ายบิลอยู่แล้ว', async () => {
-      const { service, promotions } = await setup(evaluated({ discount: 50 }));
+      const { service, recordRedemptionsWithin } = await setup(evaluated({ discount: 50 }));
       const result = await service.create(dto({ billDiscount: 180 }), USER, TENANT);
       expect(result.promoDiscount).toBe(20);
       expect(result.discountTotal).toBe(200);
-      expect(promotions.recordRedemptionWithin.mock.calls[0][1].evaluated.discount).toBe(20);
+      expect(recordRedemptionsWithin.mock.calls[0][1].applied[0].discount).toBe(20);
     });
 
     it('มีโค้ดแต่ไม่ผูกสมาชิก → PROMO_MEMBER_REQUIRED ก่อนแตะสต็อก', async () => {
@@ -676,13 +708,13 @@ describe('RetailSalesService', () => {
     });
 
     it('ผูกสมาชิกโดยไม่มีโค้ด → บันทึกสมาชิกและ upsert CRM contact แต่ไม่แตะโปร', async () => {
-      const { service, promotions } = await setup();
+      const { service, promotions, recordRedemptionsWithin } = await setup();
       const result = await service.create(dto({ promoCode: undefined }), USER, TENANT);
       expect(result.memberGuestId).toBe('g1');
       expect(result.promoDiscount).toBe(0);
       expect(promotions.evaluate).not.toHaveBeenCalled();
       expect(promotions.ensureContact).toHaveBeenCalledWith(expect.anything(), TENANT, 'g1');
-      expect(promotions.recordRedemptionWithin).not.toHaveBeenCalled();
+      expect(recordRedemptionsWithin).not.toHaveBeenCalled();
     });
 
     it('บิลสมาชิกไม่มีโค้ด → ส่งเฉพาะ event ยอดสมาชิก ไม่ส่ง promo redeemed', async () => {
@@ -691,6 +723,50 @@ describe('RetailSalesService', () => {
       await service.create(dto({ promoCode: undefined }), USER, TENANT);
       const names = events.emit.mock.calls.map((c) => c[0]);
       expect(names).toEqual(['retail.member_sale.completed']);
+    });
+
+    it('แต้มสะสมคิดจากยอดสุทธิหลังหักส่วนลดทุกชนิด และเก็บไว้บนใบเสร็จ', async () => {
+      const { service, loyalty } = await setup();
+      const result = await service.create(dto(), USER, TENANT);
+      // grandTotal 192.6 → 1 แต้ม
+      expect(loyalty.earnForRetailSaleWithin).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ tenantId: TENANT, guestId: 'g1', amount: 192.6, contactId: 'c1' }),
+      );
+      expect(result.pointsEarned).toBe(1);
+    });
+
+    it('ลูกค้าทั่วไป (ไม่ผูกสมาชิก) → ไม่ได้แต้ม', async () => {
+      const { service, loyalty } = await setup();
+      const result = await service.create(dto({ promoCode: undefined, memberGuestId: undefined }), USER, TENANT);
+      expect(loyalty.earnForRetailSaleWithin).not.toHaveBeenCalled();
+      expect(result.pointsEarned).toBe(0);
+    });
+
+    it('โปรของแถมอัตโนมัติ (ไม่จำกัดสิทธิ์) แจกให้ลูกค้าทั่วไปได้ แยกบรรทัดของแถมตามโปร', async () => {
+      const { prisma, service, promotions, recordRedemptionsWithin } = await setup();
+      prisma.retailPromotion.findMany.mockResolvedValue([
+        {
+          id: 'auto-1', name: 'ครบ 100 รับถุง', autoApply: true, stackable: true, status: 'ACTIVE',
+          discountType: 'NONE', discountValue: 0, maxDiscount: null, minSpend: 100, eligibleItemIds: null,
+          eligibleTiers: null, eligibleSegments: null, perMemberLimit: null, usageLimit: null, usedCount: 0,
+          giftWarehouseId: GIFT_WH, gifts: [],
+        },
+      ]);
+      promotions.evaluateGifts.mockResolvedValue([
+        { giftId: 'gift-a', itemId: 'tote', name: 'Tote', sku: 'T', unit: 'PCS', quantity: 1, budgetQty: null, availableQty: 3 },
+      ]);
+      const result = await service.create(dto({ promoCode: undefined, memberGuestId: undefined }), USER, TENANT);
+
+      expect(result.promoCode).toBeNull();
+      expect(result.promotionId).toBe('auto-1');
+      expect(result.promoDiscount).toBe(0);
+      expect(result.items.find((i: any) => i.isGift)).toMatchObject({ itemId: 'tote', promotionId: 'auto-1' });
+      expect(recordRedemptionsWithin).toHaveBeenCalledWith(
+        prisma,
+        expect.objectContaining({ member: null, applied: [expect.objectContaining({ autoApplied: true, code: null })] }),
+      );
+      expect(result.appliedPromotions).toEqual([expect.objectContaining({ promotionId: 'auto-1', autoApplied: true })]);
     });
   });
 

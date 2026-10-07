@@ -1,11 +1,14 @@
 import { BadRequestException } from '@nestjs/common';
 import { RetailPromoDiscountType } from '@prisma/client';
 import {
+  audienceError,
   computePromoDiscount,
+  isRestrictedPromotion,
   jsonStringList,
   normalizeCode,
   PromoDiscountRule,
   resolveGiftGrant,
+  selectStackedPromotions,
 } from '../promotion-engine';
 
 const rule = (over: Partial<PromoDiscountRule> = {}): PromoDiscountRule => ({
@@ -97,5 +100,62 @@ describe('promotion-engine', () => {
     expect(normalizeCode('  summer10 ')).toBe('SUMMER10');
     expect(jsonStringList(['a', 1, '', 'b'])).toEqual(['a', 'b']);
     expect(jsonStringList(null)).toEqual([]);
+  });
+});
+
+describe('audience rules', () => {
+  const open = { eligibleTiers: [], eligibleSegments: [], perMemberLimit: null };
+  const codeOf = (e: BadRequestException | null) => (e?.getResponse() as { code?: string } | undefined)?.code;
+
+  it('a promotion without tier/segment/per-member limit is open to non-members', () => {
+    expect(isRestrictedPromotion(open)).toBe(false);
+    expect(isRestrictedPromotion({ ...open, eligibleTiers: ['gold'] })).toBe(true);
+    expect(isRestrictedPromotion({ ...open, eligibleSegments: ['vip'] })).toBe(true);
+    expect(isRestrictedPromotion({ ...open, perMemberLimit: 1 })).toBe(true);
+  });
+
+  it('checks tier, then segment, then the per-member limit', () => {
+    const member = { tier: 'silver', segment: 'vip' };
+    expect(audienceError(open, member, 99)).toBeNull();
+    expect(codeOf(audienceError({ ...open, eligibleTiers: ['gold'] }, member, 0))).toBe('PROMO_TIER_NOT_ELIGIBLE');
+    expect(codeOf(audienceError({ ...open, eligibleSegments: ['new'] }, member, 0))).toBe('PROMO_SEGMENT_NOT_ELIGIBLE');
+    expect(codeOf(audienceError({ ...open, eligibleSegments: ['vip'] }, { tier: 'silver', segment: null }, 0))).toBe(
+      'PROMO_SEGMENT_NOT_ELIGIBLE',
+    );
+    expect(codeOf(audienceError({ ...open, perMemberLimit: 2 }, member, 2))).toBe('PROMO_MEMBER_LIMIT');
+    expect(audienceError({ ...open, perMemberLimit: 2 }, member, 1)).toBeNull();
+  });
+});
+
+describe('selectStackedPromotions', () => {
+  const a = { id: 'a', stackable: true };
+  const b = { id: 'b', stackable: true };
+  const solo = { id: 'solo', stackable: false };
+  const ids = (r: ReturnType<typeof selectStackedPromotions>) => ({
+    selected: r.selected.map((p) => p.id),
+    blocked: r.blocked.map((x) => `${x.promotion.id}:${x.reason}`),
+  });
+
+  it('a stackable code combines with every stackable auto promotion', () => {
+    expect(ids(selectStackedPromotions({ id: 'code', stackable: true }, [a, solo, b]))).toEqual({
+      selected: ['a', 'b'],
+      blocked: ['solo:NOT_STACKABLE'],
+    });
+  });
+
+  it('a non-stackable code wins alone', () => {
+    expect(ids(selectStackedPromotions({ id: 'code', stackable: false }, [a, b]))).toEqual({
+      selected: [],
+      blocked: ['a:CODE_NOT_STACKABLE', 'b:CODE_NOT_STACKABLE'],
+    });
+  });
+
+  it('without a code, stackable autos win; a lone non-stackable auto still applies', () => {
+    expect(ids(selectStackedPromotions(null, [solo, a]))).toEqual({ selected: ['a'], blocked: ['solo:NOT_STACKABLE'] });
+    expect(ids(selectStackedPromotions(null, [solo, { id: 'solo2', stackable: false }]))).toEqual({
+      selected: ['solo'],
+      blocked: ['solo2:NOT_STACKABLE'],
+    });
+    expect(ids(selectStackedPromotions(null, []))).toEqual({ selected: [], blocked: [] });
   });
 });

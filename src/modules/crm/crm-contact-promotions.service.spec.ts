@@ -146,4 +146,45 @@ describe('CrmContactPromotionsService', () => {
       ['EFGH5678', 'available', null],
     ]);
   });
+  it('บิลเดียวที่มีโค้ด + โปรอัตโนมัติ: นับเป็น 1 บิล ยอดบิลไม่ซ้ำ ส่วนลดรวมทุกโปร', async () => {
+    prisma.crmContact.findFirst.mockResolvedValue({ id: 'ct1', guestId: 'g1' });
+    const base = {
+      status: 'APPLIED',
+      giftCost: dec(0),
+      giftSkipped: false,
+      createdAt: new Date(),
+      reversedAt: null,
+      saleId: 's1',
+    };
+    prisma.retailPromotionRedemption.findMany.mockResolvedValue([
+      {
+        ...base,
+        id: 'r1',
+        promotionId: 'p1',
+        promoCodeId: 'pc1',
+        promotion: { name: 'ลด 50' },
+        code: 'X1',
+        discountAmount: dec(50),
+      },
+      {
+        ...base,
+        id: 'r2',
+        promotionId: 'p2',
+        promoCodeId: null,
+        promotion: { name: 'แถมแก้ว' },
+        code: null,
+        discountAmount: dec(0),
+      },
+    ]);
+    prisma.retailPromoCode.findMany.mockResolvedValue([]);
+    prisma.retailSale.findMany.mockResolvedValue([{ id: 's1', receiptNo: 'RS-0001', grandTotal: dec(450) }]);
+
+    const r = await service.history('ct1', 't1');
+
+    expect(r.summary).toMatchObject({ redeemed: 1, reversed: 0, discountTotal: 50, salesTotal: 450 });
+    expect(r.redemptions.map((x) => [x.code, x.autoApplied])).toEqual([
+      ['X1', false],
+      [null, true],
+    ]);
+  });
 });

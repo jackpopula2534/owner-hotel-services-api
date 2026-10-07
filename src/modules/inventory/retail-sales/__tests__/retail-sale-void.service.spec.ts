@@ -4,6 +4,8 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { RevenueSourceType } from '@prisma/client';
 import { RetailSaleVoidService } from '../retail-sale-void.service';
 import { RetailPromotionsService } from '../../retail-promotions/retail-promotions.service';
+import { RetailPromotionCheckoutService } from '../../retail-promotions/retail-promotion-checkout.service';
+import { LoyaltyService } from '@/loyalty/loyalty.service';
 import { PrismaService } from '@/prisma/prisma.service';
 import { FolioPostingService } from '@/modules/accounts-receivable/folio-posting/folio-posting.service';
 import { RevenuePostingService } from '@/modules/revenue/revenue-posting.service';
@@ -25,8 +27,10 @@ const SALE = {
   status: 'COMPLETED',
   items: [
     { itemId: 'item-water', quantity: 3, isGift: false },
-    { itemId: 'item-tote', quantity: 1, isGift: true },
+    { itemId: 'item-tote', quantity: 1, isGift: true, promotionId: 'promo-1' },
   ],
+  memberGuestId: null,
+  pointsEarned: 0,
 };
 
 /** การตัดสต็อกของใบนี้: น้ำ 3 ขวดจาก 2 ล็อตคนละต้นทุน + ถุงผ้า 1 ใบจากคลังของแถม */
@@ -42,7 +46,7 @@ function buildPrisma() {
     stockMovement: { findMany: jest.fn(), create: jest.fn() },
     inventoryLot: { findFirst: jest.fn(), update: jest.fn() },
     warehouseStock: { findFirst: jest.fn(), update: jest.fn(), create: jest.fn() },
-    retailPromotionRedemption: { findFirst: jest.fn(), updateMany: jest.fn() },
+    retailPromotionRedemption: { findMany: jest.fn(), updateMany: jest.fn() },
     retailPromotion: { updateMany: jest.fn() },
     retailPromoCode: { updateMany: jest.fn() },
     retailPromotionMemberUsage: { updateMany: jest.fn() },
@@ -65,7 +69,7 @@ function buildPrisma() {
     ),
   );
   mock.warehouseStock.update.mockResolvedValue({});
-  mock.retailPromotionRedemption.findFirst.mockResolvedValue(null);
+  mock.retailPromotionRedemption.findMany.mockResolvedValue([]);
   mock.retailPromotionRedemption.updateMany.mockResolvedValue({ count: 1 });
   for (const model of ['retailPromotion', 'retailPromoCode', 'retailPromotionMemberUsage', 'retailPromotionGift']) {
     mock[model].updateMany.mockResolvedValue({ count: 1 });
@@ -79,6 +83,13 @@ function buildFolioPosting() {
   return { reverseChargeWithin: jest.fn().mockResolvedValue(null) };
 }
 
+/** แต้มสะสม — stub ผูกกับเมธอดจริง */
+function buildLoyalty() {
+  const real = LoyaltyService.prototype as unknown as Record<string, unknown>;
+  expect(typeof real.reverseRetailSaleWithin).toBe('function');
+  return { reverseRetailSaleWithin: jest.fn().mockResolvedValue(0) };
+}
+
 /** CRM events — ส่งหลัง commit */
 const events = { emit: jest.fn() };
 
@@ -86,18 +97,21 @@ async function makeService(
   prisma: any,
   folio = buildFolioPosting(),
   revenue: RevenuePostingStub = buildRevenuePostingStub(),
+  loyalty = buildLoyalty(),
 ) {
   const moduleRef = await Test.createTestingModule({
     providers: [
       RetailSaleVoidService,
       RetailPromotionsService,
+      RetailPromotionCheckoutService,
+      { provide: LoyaltyService, useValue: loyalty },
       { provide: PrismaService, useValue: prisma },
       { provide: EventEmitter2, useValue: events },
       { provide: FolioPostingService, useValue: folio },
       { provide: RevenuePostingService, useValue: revenue },
     ],
   }).compile();
-  return { service: moduleRef.get(RetailSaleVoidService), folio, revenue };
+  return { service: moduleRef.get(RetailSaleVoidService), folio, revenue, loyalty };
 }
 
 describe('RetailSaleVoidService', () => {
@@ -205,18 +219,15 @@ describe('RetailSaleVoidService', () => {
 
   it('บิลที่ใช้โค้ด: คืนโควตาโปร/โค้ด/สมาชิก และงบของแถมตามบรรทัดของแถมจริง', async () => {
     const prisma = buildPrisma();
-    prisma.retailPromotionRedemption.findFirst.mockResolvedValue({
-      id: 'red-1',
-      promotionId: 'promo-1',
-      promoCodeId: 'code-1',
-      guestId: 'guest-1',
-    });
+    prisma.retailPromotionRedemption.findMany.mockResolvedValue([
+      { id: 'red-1', promotionId: 'promo-1', promoCodeId: 'code-1', guestId: 'guest-1' },
+    ]);
     const { service } = await makeService(prisma);
     const result = await service.void(SALE_ID, TENANT, USER, 'ขายผิด');
 
     expect(result.promoReversed).toBe(true);
     expect(prisma.retailPromotionRedemption.updateMany).toHaveBeenCalledWith({
-      where: { id: 'red-1', status: 'APPLIED' },
+      where: { id: 'red-1', tenantId: TENANT, status: 'APPLIED' },
       data: expect.objectContaining({ status: 'REVERSED' }),
     });
     expect(prisma.retailPromotion.updateMany).toHaveBeenCalledWith({
@@ -270,5 +281,51 @@ describe('RetailSaleVoidService', () => {
     const result = await service.void(SALE_ID, TENANT, USER, 'ขายผิด');
     expect(result.promoReversed).toBe(false);
     expect(prisma.retailPromotion.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('บิลที่มีโค้ด + โปรอัตโนมัติ: คืนทุกโปร งบของแถมคืนตามโปรของบรรทัด', async () => {
+    const prisma = buildPrisma();
+    prisma.retailSale.findFirst.mockResolvedValue({
+      ...SALE,
+      items: [...SALE.items, { itemId: 'item-mug', quantity: 2, isGift: true, promotionId: 'auto-1' }],
+    });
+    prisma.retailPromotionRedemption.findMany.mockResolvedValue([
+      { id: 'red-1', promotionId: 'promo-1', promoCodeId: 'code-1', guestId: 'guest-1' },
+      { id: 'red-2', promotionId: 'auto-1', promoCodeId: null, guestId: null },
+    ]);
+    const { service } = await makeService(prisma);
+    await service.void(SALE_ID, TENANT, USER, 'ขายผิด');
+
+    expect(prisma.retailPromotion.updateMany).toHaveBeenCalledTimes(2);
+    expect(prisma.retailPromoCode.updateMany).toHaveBeenCalledTimes(1);
+    expect(prisma.retailPromotionGift.updateMany).toHaveBeenCalledWith({
+      where: { tenantId: TENANT, promotionId: 'auto-1', itemId: 'item-mug', issuedQty: { gte: 2 } },
+      data: { issuedQty: { decrement: 2 } },
+    });
+    expect(prisma.retailPromotionGift.updateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ promotionId: 'auto-1', itemId: 'item-tote' }) }),
+    );
+  });
+
+  it('บิลสมาชิกที่ได้แต้ม: หักแต้มคืนในทรานแซกชันเดียวกัน', async () => {
+    const prisma = buildPrisma();
+    prisma.retailSale.findFirst.mockResolvedValue({ ...SALE, memberGuestId: 'guest-1', pointsEarned: 4 });
+    const loyalty = buildLoyalty();
+    loyalty.reverseRetailSaleWithin.mockResolvedValue(4);
+    const { service } = await makeService(prisma, buildFolioPosting(), buildRevenuePostingStub(), loyalty);
+    const result = await service.void(SALE_ID, TENANT, USER, 'ขายผิด');
+    expect(loyalty.reverseRetailSaleWithin).toHaveBeenCalledWith(prisma, {
+      tenantId: TENANT,
+      guestId: 'guest-1',
+      saleId: SALE_ID,
+    });
+    expect(result.pointsReversed).toBe(4);
+  });
+
+  it('บิลที่ไม่ได้แต้ม = ไม่แตะแต้มสะสม', async () => {
+    const { service, loyalty } = await makeService(buildPrisma());
+    const result = await service.void(SALE_ID, TENANT, USER, 'ขายผิด');
+    expect(loyalty.reverseRetailSaleWithin).not.toHaveBeenCalled();
+    expect(result.pointsReversed).toBe(0);
   });
 });

@@ -91,6 +91,7 @@ describe('RetailPromotionsService.evaluate', () => {
     ['used-up code', () => { const db = buildDb(); db.retailPromoCode.findFirst.mockResolvedValue(code({ maxUses: 1, usedCount: 1 })); return db; }, 'g1', 'PROMO_CODE_USED_UP'],
     ['paused promo', () => { const db = buildDb(); db.retailPromoCode.findFirst.mockResolvedValue(code({}, { status: 'PAUSED' })); return db; }, 'g1', 'PROMO_NOT_ACTIVE'],
     ['quota reached', () => { const db = buildDb(); db.retailPromoCode.findFirst.mockResolvedValue(code({}, { usageLimit: 3, usedCount: 3 })); return db; }, 'g1', 'PROMO_SOLD_OUT'],
+    ['code of an automatic promotion', () => { const db = buildDb(); db.retailPromoCode.findFirst.mockResolvedValue(code({}, { autoApply: true })); return db; }, 'g1', 'PROMO_AUTO_NO_CODE'],
     ['code issued to someone else', () => { const db = buildDb(); db.retailPromoCode.findFirst.mockResolvedValue(code({ issuedToGuestId: 'g2' })); return db; }, 'g1', 'PROMO_CODE_NOT_YOURS'],
     ['tier not eligible', () => { const db = buildDb(); db.retailPromoCode.findFirst.mockResolvedValue(code({}, { eligibleTiers: ['gold'] })); return db; }, 'g1', 'PROMO_TIER_NOT_ELIGIBLE'],
     ['member limit reached', () => {
@@ -108,56 +109,5 @@ describe('RetailPromotionsService.evaluate', () => {
     const db = buildDb();
     await run(db);
     expect(db.guest.findFirst).toHaveBeenCalledWith({ where: { id: 'g1', tenantId: TENANT, anonymizedAt: null } });
-  });
-});
-
-describe('RetailPromotionsService.recordRedemptionWithin', () => {
-  async function record(db: ReturnType<typeof buildDb>) {
-    const service = new RetailPromotionsService(db as never);
-    const evaluated = await service.evaluate(db as never, TENANT, { code: 'SUMMER10', guestId: 'g1', lines });
-    return service.recordRedemptionWithin(db as never, {
-      tenantId: TENANT,
-      userId: 'u1',
-      saleId: 's1',
-      evaluated,
-      grantedGifts: evaluated.gifts,
-      giftSkipped: false,
-      giftCost: 40,
-      contactId: 'ct1',
-    });
-  }
-
-  it('consumes every quota conditionally and writes the redemption', async () => {
-    const db = buildDb();
-    db.retailPromoCode.findFirst.mockResolvedValue(code({ maxUses: 5 }, { usageLimit: 10, perMemberLimit: 2 }));
-    await record(db);
-    expect(db.retailPromotion.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ usedCount: { lt: 10 } }) }),
-    );
-    expect(db.retailPromoCode.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ usedCount: { lt: 5 }, isActive: true }) }),
-    );
-    expect(db.retailPromotionMemberUsage.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ usedCount: { lt: 2 } }) }),
-    );
-    // budget 10, ต้องการ 1 → issuedQty ต้อง ≤ 9 ก่อนบวก
-    expect(db.retailPromotionGift.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ issuedQty: { lte: 9 } }) }),
-    );
-    expect(db.retailPromotionRedemption.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ saleId: 's1', guestId: 'g1', contactId: 'ct1', discountAmount: 20, giftCost: 40 }),
-    });
-  });
-
-  it.each([
-    ['retailPromotion', 'PROMO_SOLD_OUT'],
-    ['retailPromoCode', 'PROMO_CODE_USED_UP'],
-    ['retailPromotionMemberUsage', 'PROMO_MEMBER_LIMIT'],
-    ['retailPromotionGift', 'PROMO_GIFT_SHORTAGE'],
-  ] as const)('a lost race on %s aborts the sale with %s', async (model, expected) => {
-    const db = buildDb();
-    db[model].updateMany.mockResolvedValue({ count: 0 });
-    expect(await errorCode(record(db))).toBe(expected);
-    expect(db.retailPromotionRedemption.create).not.toHaveBeenCalled();
   });
 });

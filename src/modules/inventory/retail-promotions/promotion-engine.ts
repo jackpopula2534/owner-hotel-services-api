@@ -151,3 +151,76 @@ export function randomPromoCode(length: number): string {
   for (let i = 0; i < length; i++) out += CODE_ALPHABET[bytes[i] % CODE_ALPHABET.length];
   return out;
 }
+
+// ───────────────────────── Audience (tier / segment / per-member) ─────────────────────────
+
+export interface PromoAudienceRule {
+  eligibleTiers: string[];
+  eligibleSegments: string[];
+  perMemberLimit: number | null;
+}
+
+/**
+ * โปรที่ "จำกัดสิทธิ์" = จำกัด tier/segment หรือโควตาต่อสมาชิก — ต้องรู้ว่าลูกค้าเป็นใคร
+ * โปรอัตโนมัติที่ไม่จำกัดสิทธิ์แจกให้ลูกค้าทั่วไปได้โดยไม่ต้องผูกสมาชิก
+ */
+export function isRestrictedPromotion(rule: PromoAudienceRule): boolean {
+  return rule.eligibleTiers.length > 0 || rule.eligibleSegments.length > 0 || rule.perMemberLimit != null;
+}
+
+/** สมาชิกคนนี้ใช้โปรนี้ได้ไหม — คืน error (ยังไม่ throw) ให้ผู้เรียกเลือกว่าจะโยนหรือข้าม */
+export function audienceError(
+  rule: PromoAudienceRule,
+  member: { tier: string; segment: string | null },
+  memberUsedCount: number,
+): BadRequestException | null {
+  if (rule.eligibleTiers.length && !rule.eligibleTiers.includes(member.tier)) {
+    return promoError('PROMO_TIER_NOT_ELIGIBLE', `โปรนี้สำหรับสมาชิกระดับ ${rule.eligibleTiers.join(', ')} เท่านั้น`, {
+      tier: member.tier,
+    });
+  }
+  if (rule.eligibleSegments.length && (!member.segment || !rule.eligibleSegments.includes(member.segment))) {
+    return promoError('PROMO_SEGMENT_NOT_ELIGIBLE', 'สมาชิกท่านนี้ไม่อยู่ในกลุ่มเป้าหมายของโปรนี้');
+  }
+  if (rule.perMemberLimit != null && memberUsedCount >= rule.perMemberLimit) {
+    return promoError('PROMO_MEMBER_LIMIT', `สมาชิกท่านนี้ใช้โปรนี้ครบ ${rule.perMemberLimit} ครั้งแล้ว`);
+  }
+  return null;
+}
+
+// ─────────────────────────────────── Stacking ───────────────────────────────────
+
+export interface StackCandidate {
+  id: string;
+  stackable: boolean;
+}
+
+export type StackBlockReason = 'CODE_NOT_STACKABLE' | 'NOT_STACKABLE';
+
+/**
+ * กติกาใช้ร่วม: บิลละ 1 โค้ด + โปรอัตโนมัติ — ทุกโปรในบิลต้อง "ใช้ร่วมได้" ทั้งหมด
+ *
+ *   • มีโค้ดที่ใช้ร่วมไม่ได้ → โค้ดตัวเดียว (ลูกค้าตั้งใจใช้โค้ด จึงชนะโปรอัตโนมัติ)
+ *   • มีโค้ด → ได้โปรอัตโนมัติเฉพาะตัวที่ใช้ร่วมได้
+ *   • ไม่มีโค้ด → โปรอัตโนมัติที่ใช้ร่วมได้ทั้งหมด; ถ้าไม่มีเลย ได้ตัวที่ใช้ร่วมไม่ได้ตัวแรก (เก่าสุด)
+ *
+ * `autos` ต้องเรียงตามลำดับความสำคัญมาแล้ว (เก่า → ใหม่)
+ */
+export function selectStackedPromotions<T extends StackCandidate>(
+  code: StackCandidate | null,
+  autos: T[],
+): { selected: T[]; blocked: Array<{ promotion: T; reason: StackBlockReason }> } {
+  const others = autos.filter((a) => a.id !== code?.id);
+  if (code && !code.stackable) {
+    return { selected: [], blocked: others.map((promotion) => ({ promotion, reason: 'CODE_NOT_STACKABLE' })) };
+  }
+  const stackable = others.filter((a) => a.stackable);
+  const selected = code || stackable.length ? stackable : others.slice(0, 1);
+  const chosen = new Set(selected.map((s) => s.id));
+  return {
+    selected,
+    blocked: others
+      .filter((a) => !chosen.has(a.id))
+      .map((promotion) => ({ promotion, reason: 'NOT_STACKABLE' as const })),
+  };
+}

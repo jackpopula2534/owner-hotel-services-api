@@ -2418,12 +2418,14 @@ model DpaAcceptance {
 }
 
 model LoyaltyPoint {
-  id        String   @id @default(uuid())
-  tenantId  String
-  guestId   String?
-  points    Int      @default(0)
-  tier      String   @default("standard")
-  updatedAt DateTime @default(now()) @updatedAt @db.DateTime(6)
+  id             String   @id @default(uuid())
+  tenantId       String
+  guestId        String?
+  points         Int      @default(0)
+  /// แต้มที่ได้รับสะสมตลอดชีพ (หักเฉพาะแต้มที่ถูกดึงคืน) — tier คิดจากค่านี้ แลกแต้มแล้ว tier ไม่ตก
+  lifetimePoints Int      @default(0)
+  tier           String   @default("standard")
+  updatedAt      DateTime @default(now()) @updatedAt @db.DateTime(6)
 
   @@unique([tenantId, guestId])
   @@index([tenantId])
@@ -3398,6 +3400,8 @@ model RetailSale {
   promoDiscount   Decimal             @default(0.00) @db.Decimal(12, 2)
   /// ต้นทุนของแถม = ค่าใช้จ่ายส่งเสริมการขาย ไม่รวมใน costTotal (ต้นทุนขาย)
   promoGiftCost   Decimal             @default(0.00) @db.Decimal(12, 2)
+  /// แต้มสมาชิกที่ได้จากบิลนี้ (1 แต้ม/100฿ ของยอดหลังหักส่วนลด) — ดึงคืนเมื่อ void
+  pointsEarned    Int                 @default(0)
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
   items           RetailSaleItem[]
@@ -3500,6 +3504,12 @@ model RetailPromotion {
   usedCount        Int                         @default(0)
   /// โควตาต่อสมาชิก (null = ไม่จำกัด)
   perMemberLimit   Int?
+  /// แจกอัตโนมัติเมื่อบิลเข้าเงื่อนไข ไม่ต้องใช้โค้ด (เฉพาะโปรของแถมล้วน)
+  autoApply        Boolean                     @default(false)
+  /// ใช้ร่วมกับโปรอื่นในบิลเดียวกันได้ (โค้ด 1 ตัว + โปรอัตโนมัติ)
+  stackable        Boolean                     @default(true)
+  /// สมาชิกแลกแต้มเป็นโค้ด UNIQUE ของโปรนี้ได้ (null = แลกไม่ได้)
+  pointsCost       Int?
   /// ระบบหยุดโปรเองเมื่อไร (ของแถมหมดและโปรไม่มีส่วนลด) — ล้างเมื่อผู้จัดการเปิดใช้ใหม่
   autoPausedAt     DateTime?
   pausedReason     String?                     @db.VarChar(255)
@@ -3511,6 +3521,7 @@ model RetailPromotion {
   redemptions      RetailPromotionRedemption[]
 
   @@index([tenantId, status])
+  @@index([tenantId, autoApply, status])
   @@map("retail_promotions")
 }
 
@@ -3532,6 +3543,8 @@ model RetailPromoCode {
   campaignId         String?             @db.VarChar(36)
   /// 1 delivery = 1 โค้ด — retry ของคิวได้โค้ดเดิม ไม่ออกซ้ำ
   campaignDeliveryId String?             @unique @db.VarChar(36)
+  /// แต้มที่สมาชิกจ่ายแลกโค้ดนี้ (null = ไม่ได้มาจากการแลกแต้ม)
+  pointsSpent        Int?
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
   promotion          RetailPromotion     @relation(fields: [promotionId], references: [id], onDelete: Cascade)
@@ -3581,10 +3594,12 @@ model RetailPromotionRedemption {
   id             String                          @id @default(uuid())
   tenantId       String
   promotionId    String
-  promoCodeId    String
-  code           String                          @db.VarChar(40)
-  saleId         String                          @unique
-  guestId        String
+  /// null = โปรอัตโนมัติ (ไม่ใช้โค้ด)
+  promoCodeId    String?
+  code           String?                         @db.VarChar(40)
+  saleId         String
+  /// null = โปรอัตโนมัติที่ไม่จำกัดสิทธิ์ ขายให้ลูกค้าทั่วไป
+  guestId        String?
   contactId      String?
   discountAmount Decimal                         @default(0.00) @db.Decimal(12, 2)
   giftCost       Decimal                         @default(0.00) @db.Decimal(12, 2)
@@ -3596,6 +3611,9 @@ model RetailPromotionRedemption {
   reversedAt     DateTime?
   promotion      RetailPromotion                 @relation(fields: [promotionId], references: [id], onDelete: Cascade)
 
+  /// บิลหนึ่งใช้ได้หลายโปร (โค้ด 1 + อัตโนมัติ) แต่โปรเดียวกันซ้ำในบิลไม่ได้
+  @@unique([saleId, promotionId])
+  @@index([saleId])
   @@index([tenantId, createdAt])
   @@index([promotionId])
   @@index([guestId])
@@ -7322,12 +7340,15 @@ model LoyaltyTransaction {
   metadata     String?     @db.Text // JSON
   balanceAfter Int?
   tierAfter    String?     @db.VarChar(20)
+  /// บิลร้านค้าที่ให้แต้ม/ดึงแต้มคืน (คู่กับ bookingId ของฝั่งห้องพัก)
+  retailSaleId String?     @db.VarChar(36)
   createdAt    DateTime    @default(now())
   contact      CrmContact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, guestId, createdAt])
   @@index([tenantId, type])
   @@index([bookingId])
+  @@index([retailSaleId])
   @@map("loyalty_transactions")
 }
 

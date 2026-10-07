@@ -8,19 +8,18 @@ import {
   Prisma,
   RetailPromoCodeKind,
   RetailPromoDiscountType,
-  RetailPromotionRedemptionStatus,
   RetailPromotionStatus,
   WarehouseType,
 } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
 import {
+  audienceError,
   computePromoDiscount,
   jsonStringList,
   normalizeCode,
   promoError,
   randomPromoCode,
   PromoCartLine,
-  round2,
 } from './promotion-engine';
 import {
   CreatePromoCodeDto,
@@ -71,6 +70,7 @@ export interface EvaluatedPromotion {
     usageLimit: number | null;
     perMemberLimit: number | null;
     giftWarehouseId: string | null;
+    stackable: boolean;
   };
   code: { id: string; code: string; maxUses: number | null };
   member: PromoMember;
@@ -174,6 +174,8 @@ export class RetailPromotionsService {
       eligibleItemIds: dto.eligibleItemIds ?? [],
       startsAt: dto.startsAt ?? null,
       endsAt: dto.endsAt ?? null,
+      autoApply: dto.autoApply ?? false,
+      pointsCost: dto.pointsCost ?? null,
     });
 
     const created = await this.prisma.retailPromotion.create({
@@ -211,7 +213,15 @@ export class RetailPromotionsService {
       eligibleItemIds: dto.eligibleItemIds ?? jsonStringList(current.eligibleItemIds),
       startsAt: dto.startsAt !== undefined ? dto.startsAt : current.startsAt?.toISOString() ?? null,
       endsAt: dto.endsAt !== undefined ? dto.endsAt : current.endsAt?.toISOString() ?? null,
+      autoApply: dto.autoApply ?? current.autoApply,
+      pointsCost: dto.pointsCost !== undefined ? dto.pointsCost : current.pointsCost,
     });
+    if ((dto.autoApply ?? current.autoApply) && !current.autoApply) {
+      const codes = await this.prisma.retailPromoCode.count({ where: { tenantId, promotionId: id, isActive: true } });
+      if (codes > 0) {
+        throw promoError('PROMO_AUTO_HAS_CODES', `ปิดโค้ดที่ยังใช้งานได้ ${codes} โค้ดก่อนเปลี่ยนเป็นโปรอัตโนมัติ`);
+      }
+    }
 
     await this.prisma.$transaction(async (tx) => {
       await tx.retailPromotion.update({ where: { id }, data: this.promotionData(dto) });
@@ -236,7 +246,7 @@ export class RetailPromotionsService {
   // ───────────────────────────────── Codes ──────────────────────────────────
 
   async addCode(promotionId: string, dto: CreatePromoCodeDto, tenantId: string) {
-    await this.requirePromotion(promotionId, tenantId);
+    await this.requireCodePromotion(promotionId, tenantId);
     if (dto.issuedToGuestId) await this.requireGuest(this.prisma, tenantId, dto.issuedToGuestId);
     try {
       const code = await this.prisma.retailPromoCode.create({
@@ -263,7 +273,7 @@ export class RetailPromotionsService {
   }
 
   async generateCodes(promotionId: string, dto: GeneratePromoCodesDto, tenantId: string) {
-    await this.requirePromotion(promotionId, tenantId);
+    await this.requireCodePromotion(promotionId, tenantId);
     const prefix = dto.prefix ? `${dto.prefix.toUpperCase()}-` : '';
     const created: string[] = [];
     // ชนกับโค้ดเดิมได้ (น้อยมาก) — createMany skipDuplicates แล้วสุ่มเติมจนครบ
@@ -427,6 +437,9 @@ export class RetailPromotionsService {
     if (promo.status !== RetailPromotionStatus.ACTIVE) {
       throw promoError('PROMO_NOT_ACTIVE', `โปรโมชั่น "${promo.name}" ยังไม่เปิดใช้งาน`);
     }
+    if (promo.autoApply) {
+      throw promoError('PROMO_AUTO_NO_CODE', `โปรโมชั่น "${promo.name}" แจกอัตโนมัติเมื่อบิลเข้าเงื่อนไข ไม่ต้องใช้โค้ด`);
+    }
     if (promo.startsAt && promo.startsAt > now) {
       throw promoError('PROMO_NOT_STARTED', `โปรโมชั่น "${promo.name}" ยังไม่เริ่ม`);
     }
@@ -441,24 +454,17 @@ export class RetailPromotionsService {
     if (code.issuedToGuestId && code.issuedToGuestId !== member.guestId) {
       throw promoError('PROMO_CODE_NOT_YOURS', 'โค้ดนี้ออกให้สมาชิกท่านอื่น');
     }
-    const tiers = jsonStringList(promo.eligibleTiers);
-    if (tiers.length && !tiers.includes(member.tier)) {
-      throw promoError('PROMO_TIER_NOT_ELIGIBLE', `โปรนี้สำหรับสมาชิกระดับ ${tiers.join(', ')} เท่านั้น`, {
-        tier: member.tier,
-      });
-    }
-    const segments = jsonStringList(promo.eligibleSegments);
-    if (segments.length && (!member.segment || !segments.includes(member.segment))) {
-      throw promoError('PROMO_SEGMENT_NOT_ELIGIBLE', 'สมาชิกท่านนี้ไม่อยู่ในกลุ่มเป้าหมายของโปรนี้');
-    }
-    if (promo.perMemberLimit != null) {
-      const usage = await db.retailPromotionMemberUsage.findFirst({
-        where: { tenantId, promotionId: promo.id, guestId: member.guestId },
-      });
-      if ((usage?.usedCount ?? 0) >= promo.perMemberLimit) {
-        throw promoError('PROMO_MEMBER_LIMIT', `สมาชิกท่านนี้ใช้โปรนี้ครบ ${promo.perMemberLimit} ครั้งแล้ว`);
-      }
-    }
+    const memberUsed = promo.perMemberLimit != null ? await this.memberUsedCount(db, tenantId, promo.id, member.guestId) : 0;
+    const notEligible = audienceError(
+      {
+        eligibleTiers: jsonStringList(promo.eligibleTiers),
+        eligibleSegments: jsonStringList(promo.eligibleSegments),
+        perMemberLimit: promo.perMemberLimit,
+      },
+      member,
+      memberUsed,
+    );
+    if (notEligible) throw notEligible;
 
     const priced = computePromoDiscount(
       {
@@ -471,12 +477,48 @@ export class RetailPromotionsService {
       input.lines,
     );
 
+    const gifts = await this.evaluateGifts(db, tenantId, promo);
+
+    return {
+      promotion: {
+        id: promo.id,
+        name: promo.name,
+        discountType: promo.discountType,
+        discountValue: Number(promo.discountValue),
+        maxDiscount: promo.maxDiscount != null ? Number(promo.maxDiscount) : null,
+        minSpend: Number(promo.minSpend),
+        usageLimit: promo.usageLimit,
+        perMemberLimit: promo.perMemberLimit,
+        giftWarehouseId: promo.giftWarehouseId,
+        stackable: promo.stackable,
+      },
+      code: { id: code.id, code: code.code, maxUses: code.maxUses },
+      member,
+      netSubtotal: priced.netSubtotal,
+      discount: priced.discount,
+      gifts,
+    };
+  }
+
+  /**
+   * ของแถมของโปร + จำนวนที่แจกได้ตอนนี้ = min(สต็อกคลังของแถม, งบที่เหลือ)
+   * ใช้ร่วมกับโปรอัตโนมัติ (RetailPromotionCheckoutService)
+   */
+  async evaluateGifts(
+    db: Db,
+    tenantId: string,
+    promo: {
+      giftWarehouseId: string | null;
+      gifts: Array<{ id: string; itemId: string; quantity: number; budgetQty: number | null; issuedQty: number }>;
+    },
+  ): Promise<EvaluatedGift[]> {
+    if (!promo.gifts.length) return [];
     const giftIds = promo.gifts.map((g) => g.itemId);
     const [items, stock] = await Promise.all([
       this.itemNames(tenantId, giftIds, db),
       promo.giftWarehouseId ? this.giftStock(db, promo.giftWarehouseId, giftIds) : Promise.resolve(new Map<string, number>()),
     ]);
-    const gifts: EvaluatedGift[] = promo.gifts.map((g) => {
+    return promo.gifts.map((g) => {
       const item = items.get(g.itemId);
       const budgetLeft = g.budgetQty != null ? Math.max(g.budgetQty - g.issuedQty, 0) : Infinity;
       return {
@@ -490,197 +532,15 @@ export class RetailPromotionsService {
         availableQty: Math.floor(Math.min(stock.get(g.itemId) ?? 0, budgetLeft)),
       };
     });
-
-    return {
-      promotion: {
-        id: promo.id,
-        name: promo.name,
-        discountType: promo.discountType,
-        discountValue: Number(promo.discountValue),
-        maxDiscount: promo.maxDiscount != null ? Number(promo.maxDiscount) : null,
-        minSpend: Number(promo.minSpend),
-        usageLimit: promo.usageLimit,
-        perMemberLimit: promo.perMemberLimit,
-        giftWarehouseId: promo.giftWarehouseId,
-      },
-      code: { id: code.id, code: code.code, maxUses: code.maxUses },
-      member,
-      netSubtotal: priced.netSubtotal,
-      discount: priced.discount,
-      gifts,
-    };
   }
 
-  /**
-   * Consume every quota the redemption touches and write the redemption row.
-   * Each counter is a conditional increment (`usedCount < limit`), so two tills
-   * racing for the last use cannot both win — the loser's whole sale rolls back.
-   */
-  async recordRedemptionWithin(
-    tx: Db,
-    params: {
-      tenantId: string;
-      userId: string;
-      saleId: string;
-      evaluated: EvaluatedPromotion;
-      grantedGifts: EvaluatedGift[];
-      giftSkipped: boolean;
-      giftCost: number;
-      contactId: string | null;
-    },
-  ): Promise<void> {
-    const { tenantId, evaluated, grantedGifts } = params;
-    const { promotion, code, member } = evaluated;
-
-    await this.incrementWithin(
-      () =>
-        tx.retailPromotion.updateMany({
-          where: {
-            id: promotion.id,
-            tenantId,
-            ...(promotion.usageLimit != null ? { usedCount: { lt: promotion.usageLimit } } : {}),
-          },
-          data: { usedCount: { increment: 1 } },
-        }),
-      'PROMO_SOLD_OUT',
-      'โปรโมชั่นนี้ถูกใช้ครบโควตาแล้ว',
-    );
-    await this.incrementWithin(
-      () =>
-        tx.retailPromoCode.updateMany({
-          where: {
-            id: code.id,
-            tenantId,
-            isActive: true,
-            ...(code.maxUses != null ? { usedCount: { lt: code.maxUses } } : {}),
-          },
-          data: { usedCount: { increment: 1 } },
-        }),
-      'PROMO_CODE_USED_UP',
-      'โค้ดนี้ถูกใช้ครบจำนวนแล้ว',
-    );
-
-    await tx.retailPromotionMemberUsage.upsert({
-      where: { promotionId_guestId: { promotionId: promotion.id, guestId: member.guestId } },
-      create: { tenantId, promotionId: promotion.id, guestId: member.guestId, usedCount: 0 },
-      update: {},
-    });
-    await this.incrementWithin(
-      () =>
-        tx.retailPromotionMemberUsage.updateMany({
-          where: {
-            tenantId,
-            promotionId: promotion.id,
-            guestId: member.guestId,
-            ...(promotion.perMemberLimit != null ? { usedCount: { lt: promotion.perMemberLimit } } : {}),
-          },
-          data: { usedCount: { increment: 1 } },
-        }),
-      'PROMO_MEMBER_LIMIT',
-      'สมาชิกท่านนี้ใช้โปรนี้ครบจำนวนแล้ว',
-    );
-
-    for (const gift of grantedGifts) {
-      await this.incrementWithin(
-        () =>
-          tx.retailPromotionGift.updateMany({
-            where: {
-              id: gift.giftId,
-              tenantId,
-              ...(gift.budgetQty != null ? { issuedQty: { lte: gift.budgetQty - gift.quantity } } : {}),
-            },
-            data: { issuedQty: { increment: gift.quantity } },
-          }),
-        'PROMO_GIFT_SHORTAGE',
-        `งบของแถม "${gift.name}" หมดแล้ว`,
-      );
-    }
-
-    await tx.retailPromotionRedemption.create({
-      data: {
-        tenantId,
-        promotionId: promotion.id,
-        promoCodeId: code.id,
-        code: code.code,
-        saleId: params.saleId,
-        guestId: member.guestId,
-        contactId: params.contactId,
-        discountAmount: round2(evaluated.discount),
-        giftCost: round2(params.giftCost),
-        giftSkipped: params.giftSkipped,
-        redeemedBy: params.userId,
-      },
-    });
+  /** สมาชิกใช้โปรนี้ไปแล้วกี่ครั้ง (ตัวนับ race-safe ของ perMemberLimit) */
+  async memberUsedCount(db: Db, tenantId: string, promotionId: string, guestId: string): Promise<number> {
+    const usage = await db.retailPromotionMemberUsage.findFirst({ where: { tenantId, promotionId, guestId } });
+    return usage?.usedCount ?? 0;
   }
 
   // ──────────────────────────────── Helpers ─────────────────────────────────
-
-  /**
-   * บิลถูก void — คืนสิทธิ์ทุกตัวนับที่ {@link recordRedemptionWithin} กินไป
-   * (โควตาโปร โค้ด ต่อสมาชิก งบของแถม) แล้วตี redemption เป็น REVERSED
-   *
-   * จำนวนของแถมที่คืนงบอ่านจากบรรทัดของแถมของใบเสร็จจริง ไม่ใช่จากตั้งค่าโปรปัจจุบัน
-   * — แอดมินแก้จำนวนแจกหลังขายไปแล้วได้ ถ้าคืนตามค่าใหม่ issuedQty จะเพี้ยน
-   * ตัวนับลดแบบมีเงื่อนไข `> 0` ไม่มีทางติดลบ แม้ข้อมูลเก่าจะไม่ตรง
-   *
-   * ไม่มี redemption ที่ยัง APPLIED = คืน null (บิลไม่ได้ใช้โค้ด / ถูกคืนไปแล้ว)
-   */
-  async reverseRedemptionWithin(
-    tx: Db,
-    params: {
-      tenantId: string;
-      saleId: string;
-      giftLines: Array<{ itemId: string; quantity: number }>;
-    },
-  ): Promise<{ redemptionId: string; promotionId: string } | null> {
-    const { tenantId, saleId, giftLines } = params;
-    const redemption = await tx.retailPromotionRedemption.findFirst({
-      where: { tenantId, saleId, status: RetailPromotionRedemptionStatus.APPLIED },
-    });
-    if (!redemption) return null;
-
-    const flipped = await tx.retailPromotionRedemption.updateMany({
-      where: { id: redemption.id, status: RetailPromotionRedemptionStatus.APPLIED },
-      data: { status: RetailPromotionRedemptionStatus.REVERSED, reversedAt: new Date() },
-    });
-    if (flipped.count === 0) return null;
-
-    const { promotionId, promoCodeId, guestId } = redemption;
-    await tx.retailPromotion.updateMany({
-      where: { id: promotionId, tenantId, usedCount: { gt: 0 } },
-      data: { usedCount: { decrement: 1 } },
-    });
-    await tx.retailPromoCode.updateMany({
-      where: { id: promoCodeId, tenantId, usedCount: { gt: 0 } },
-      data: { usedCount: { decrement: 1 } },
-    });
-    await tx.retailPromotionMemberUsage.updateMany({
-      where: { tenantId, promotionId, guestId, usedCount: { gt: 0 } },
-      data: { usedCount: { decrement: 1 } },
-    });
-
-    const returnedByItem = new Map<string, number>();
-    for (const line of giftLines) {
-      returnedByItem.set(line.itemId, (returnedByItem.get(line.itemId) ?? 0) + line.quantity);
-    }
-    for (const [itemId, quantity] of returnedByItem) {
-      await tx.retailPromotionGift.updateMany({
-        where: { tenantId, promotionId, itemId, issuedQty: { gte: quantity } },
-        data: { issuedQty: { decrement: quantity } },
-      });
-    }
-
-    return { redemptionId: redemption.id, promotionId };
-  }
-
-  private async incrementWithin(
-    run: () => Promise<{ count: number }>,
-    code: string,
-    message: string,
-  ): Promise<void> {
-    const { count } = await run();
-    if (count === 0) throw promoError(code, message);
-  }
 
   private async validatePromotion(
     tenantId: string,
@@ -692,8 +552,19 @@ export class RetailPromotionsService {
       eligibleItemIds: string[];
       startsAt: string | null;
       endsAt: string | null;
+      autoApply: boolean;
+      pointsCost: number | null;
     },
   ): Promise<void> {
+    if (p.autoApply) {
+      // แผนเฟส 4: โปรอัตโนมัติ = ซื้อครบรับของแถม (GWP) — ส่วนลดเงินต้องผ่านโค้ดเท่านั้น
+      if (p.discountType !== RetailPromoDiscountType.NONE || p.giftItemIds.length === 0) {
+        throw promoError('PROMO_AUTO_GIFT_ONLY', 'โปรอัตโนมัติต้องเป็นโปรของแถมล้วน (ไม่มีส่วนลด) และมีของแถมอย่างน้อย 1 รายการ');
+      }
+      if (p.pointsCost != null) {
+        throw promoError('PROMO_AUTO_NO_POINTS', 'โปรอัตโนมัติแลกแต้มไม่ได้ — ลูกค้าได้ของแถมเองเมื่อบิลเข้าเงื่อนไข');
+      }
+    }
     if (p.discountType === RetailPromoDiscountType.PERCENT && p.discountValue > 100) {
       throw promoError('PROMO_INVALID', 'ส่วนลดเปอร์เซ็นต์ต้องไม่เกิน 100');
     }
@@ -756,12 +627,22 @@ export class RetailPromotionsService {
     if (dto.endsAt !== undefined) data.endsAt = dto.endsAt ? new Date(dto.endsAt) : null;
     if (dto.usageLimit !== undefined) data.usageLimit = dto.usageLimit;
     if (dto.perMemberLimit !== undefined) data.perMemberLimit = dto.perMemberLimit;
+    if (dto.autoApply !== undefined) data.autoApply = dto.autoApply;
+    if (dto.stackable !== undefined) data.stackable = dto.stackable;
+    if (dto.pointsCost !== undefined) data.pointsCost = dto.pointsCost;
     return data;
   }
 
-  private async requirePromotion(id: string, tenantId: string): Promise<void> {
-    const found = await this.prisma.retailPromotion.findFirst({ where: { id, tenantId }, select: { id: true } });
+  /** โปรต้องมีอยู่ และไม่ใช่โปรอัตโนมัติ (โปรอัตโนมัติไม่มีโค้ด) */
+  private async requireCodePromotion(id: string, tenantId: string): Promise<void> {
+    const found = await this.prisma.retailPromotion.findFirst({
+      where: { id, tenantId },
+      select: { id: true, autoApply: true },
+    });
     if (!found) throw new NotFoundException({ code: 'PROMOTION_NOT_FOUND', message: 'ไม่พบโปรโมชั่นนี้' });
+    if (found.autoApply) {
+      throw promoError('PROMO_AUTO_NO_CODE', 'โปรอัตโนมัติไม่ใช้โค้ด — ลูกค้าได้ของแถมเองเมื่อบิลเข้าเงื่อนไข');
+    }
   }
 
   private async requireGuest(db: Db, tenantId: string, guestId: string) {
@@ -835,6 +716,9 @@ export class RetailPromotionsService {
     usageLimit: number | null;
     usedCount: number;
     perMemberLimit: number | null;
+    autoApply: boolean;
+    stackable: boolean;
+    pointsCost: number | null;
     autoPausedAt?: Date | null;
     pausedReason?: string | null;
     createdAt: Date;
@@ -858,6 +742,9 @@ export class RetailPromotionsService {
       usageLimit: p.usageLimit,
       usedCount: p.usedCount,
       perMemberLimit: p.perMemberLimit,
+      autoApply: p.autoApply,
+      stackable: p.stackable,
+      pointsCost: p.pointsCost,
       autoPausedAt: p.autoPausedAt ?? null,
       pausedReason: p.pausedReason ?? null,
       createdAt: p.createdAt,

@@ -30,14 +30,12 @@ import { buildRetailSaleRevenueInput } from '@/modules/revenue/sources/retail-sa
 import { CreateRetailSaleDto } from './dto/create-retail-sale.dto';
 import { QueryRetailSaleDto } from './dto/query-retail-sale.dto';
 import { DashboardRetailSaleDto, RetailDashboardPeriod } from './dto/dashboard-retail-sale.dto';
-import {
-  EvaluatedGift,
-  EvaluatedPromotion,
-  PromoMember,
-  RetailPromotionsService,
-} from '../retail-promotions/retail-promotions.service';
+import { RetailPromotionsService } from '../retail-promotions/retail-promotions.service';
 import { RetailPromotionHealthService } from '../retail-promotions/retail-promotion-health.service';
-import { promoError, resolveGiftGrant } from '../retail-promotions/promotion-engine';
+import { RetailPromotionCheckoutService } from '../retail-promotions/retail-promotion-checkout.service';
+import { promoError } from '../retail-promotions/promotion-engine';
+import { LoyaltyService } from '@/loyalty/loyalty.service';
+import { issueGiftLine, issueStockForLine } from './retail-stock-issue';
 import { emitRetailSaleCompleted } from './retail-sale-events';
 
 const MONTHS_TH_SHORT = [
@@ -83,6 +81,8 @@ export class RetailSalesService {
     private readonly revenue: RevenueQueryService,
     private readonly promotions: RetailPromotionsService,
     private readonly promotionHealth: RetailPromotionHealthService,
+    private readonly promoCheckout: RetailPromotionCheckoutService,
+    private readonly loyalty: LoyaltyService,
     private readonly events: EventEmitter2,
   ) {}
 
@@ -94,10 +94,12 @@ export class RetailSalesService {
    *   2. for each line — deduct WarehouseStock and (for lot-tracked items) the
    *      FEFO InventoryLot remainingQty, writing a GOODS_ISSUE StockMovement
    *      (referenceType RETAIL_SALE) that the stock-balance report reads
-   *   3. promo code (optional) — re-priced on this transaction's snapshot, gifts
-   *      issued from the promotion's gift warehouse (referenceType PROMO_GIFT),
-   *      quotas consumed race-safely, redemption recorded against the member
+   *   3. promotions — one code (optional) + automatic gift promotions under the
+   *      stacking rules, re-priced on this transaction's snapshot; gifts issued
+   *      from each promotion's gift warehouse (referenceType PROMO_GIFT), quotas
+   *      consumed race-safely, one redemption row per promotion
    *   4. create the RetailSale header + snapshotted line items
+   *   5. member earns loyalty points on the grand total (after every discount)
    *
    * Money totals are recomputed server-side; the client's numbers are never trusted.
    */
@@ -173,7 +175,7 @@ export class RetailSalesService {
 
         // Deduct stock + write GOODS_ISSUE movement(s). Lot-tracked items deduct
         // FEFO across one or more lots; plain items deduct a single movement.
-        await this.issueStockForLine(tx, {
+        await issueStockForLine(tx, this.logger, {
           tenantId,
           userId,
           saleId,
@@ -219,43 +221,40 @@ export class RetailSalesService {
       }
 
       // ── สมาชิก + โปรโมชั่น ── คิดใหม่บน snapshot ของ transaction นี้ ไม่เชื่อตัวเลข preview
-      let member: PromoMember | null = null;
-      let evaluated: EvaluatedPromotion | null = null;
-      let grantedGifts: EvaluatedGift[] = [];
-      let giftSkipped = false;
-      let promoGiftCost = 0;
-      if (dto.memberGuestId) {
-        member = await this.promotions.resolveMember(tx, tenantId, dto.memberGuestId);
-      }
-      if (dto.promoCode?.trim()) {
-        evaluated = await this.promotions.evaluate(tx, tenantId, {
-          code: dto.promoCode,
-          guestId: dto.memberGuestId,
-          lines: dto.lines,
-        });
-        const grant = resolveGiftGrant(evaluated.gifts, evaluated.discount, dto.acceptWithoutGift ?? false);
-        grantedGifts = grant.granted;
-        giftSkipped = grant.skipped.length > 0;
-        for (const gift of grantedGifts) {
-          const row = await this.issueGiftLine(tx, {
+      const priced = await this.promoCheckout.priceBill(tx, tenantId, {
+        code: dto.promoCode,
+        guestId: dto.memberGuestId,
+        lines: dto.lines,
+        mode: 'sale',
+        acceptWithoutGift: dto.acceptWithoutGift ?? false,
+      });
+      const member = priced.member;
+      const giftCostByPromo = new Map<string, number>();
+      for (const applied of priced.applied) {
+        let giftCost = 0;
+        for (const gift of applied.grantedGifts) {
+          const row = await issueGiftLine(tx, this.logger, {
             tenantId,
             userId,
             saleId,
-            promotionId: evaluated.promotion.id,
-            warehouseId: evaluated.promotion.giftWarehouseId!,
+            promotionId: applied.promotion.id,
+            warehouseId: applied.promotion.giftWarehouseId!,
             gift,
           });
-          promoGiftCost += Number(row.lineCost);
+          giftCost += Number(row.lineCost);
           lineRows.push(row);
         }
-        promoGiftCost = round2(promoGiftCost);
+        giftCostByPromo.set(applied.promotion.id, round2(giftCost));
       }
+      const promoGiftCost = round2([...giftCostByPromo.values()].reduce((sum, c) => sum + c, 0));
+      const codePromo = priced.applied.find((a) => a.code) ?? null;
       const contactId = member ? await this.promotions.ensureContact(tx, tenantId, member.guestId) : null;
 
       subtotal = round2(subtotal);
       // ส่วนลดโปรใช้ได้เท่าที่ยังเหลือยอดหลังส่วนลดรายบรรทัด + ส่วนลดท้ายบิล
-      const promoDiscount = evaluated
-        ? round2(Math.min(evaluated.discount, Math.max(subtotal - itemDiscountTotal - billDiscount, 0)))
+      // (โปรอัตโนมัติเป็นของแถมล้วน ส่วนลดเงินมีแค่จากโค้ด)
+      const promoDiscount = codePromo
+        ? round2(Math.min(codePromo.discount, Math.max(subtotal - itemDiscountTotal - billDiscount, 0)))
         : 0;
       const discountTotal = round2(Math.min(subtotal, itemDiscountTotal + billDiscount + promoDiscount));
       const taxable = Math.max(subtotal - discountTotal, 0);
@@ -285,6 +284,17 @@ export class RetailSalesService {
           })
         : null;
 
+      // แต้มสะสม 1 แต้ม/100฿ ของยอดสุทธิหลังหักทุกส่วนลด — เฉพาะบิลที่ผูกสมาชิก (void แล้วหักคืน)
+      const pointsEarned = member
+        ? await this.loyalty.earnForRetailSaleWithin(tx, {
+            tenantId,
+            guestId: member.guestId,
+            saleId,
+            amount: grandTotal,
+            contactId,
+          })
+        : 0;
+
       const created = await tx.retailSale.create({
         data: {
           id: saleId,
@@ -310,29 +320,35 @@ export class RetailSalesService {
           soldBy: userId,
           memberGuestId: member?.guestId ?? null,
           memberContactId: contactId,
-          promotionId: evaluated?.promotion.id ?? null,
-          promoCode: evaluated?.code.code ?? null,
+          // โปรหลักของบิล = โปรของโค้ด ไม่มีโค้ดใช้โปรอัตโนมัติตัวแรก (ครบทุกตัวอยู่ใน redemptions)
+          promotionId: (codePromo ?? priced.applied[0])?.promotion.id ?? null,
+          promoCode: codePromo?.code?.code ?? null,
           promoDiscount,
           promoGiftCost,
+          pointsEarned,
           items: { createMany: { data: lineRows } },
         },
         include: { items: true },
       });
 
-      if (evaluated) {
-        await this.promotions.recordRedemptionWithin(tx, {
+      if (priced.applied.length) {
+        await this.promoCheckout.recordRedemptionsWithin(tx, {
           tenantId,
           userId,
           saleId,
-          evaluated: { ...evaluated, discount: promoDiscount },
-          grantedGifts,
-          giftSkipped,
-          giftCost: promoGiftCost,
+          member,
           contactId,
+          applied: priced.applied.map((a) => ({
+            ...a,
+            discount: a.code ? promoDiscount : a.discount,
+            giftCost: giftCostByPromo.get(a.promotion.id) ?? 0,
+          })),
         });
         // บิลนี้แจกของแถมชิ้นสุดท้าย และโปรไม่มีส่วนลด → หยุดโปร (ทรานแซกชันเดียวกับการตัดสต็อก)
-        if (grantedGifts.length) {
-          await this.promotionHealth.autoPauseIfExhaustedWithin(tx, tenantId, evaluated.promotion.id);
+        for (const applied of priced.applied) {
+          if (applied.grantedGifts.length) {
+            await this.promotionHealth.autoPauseIfExhaustedWithin(tx, tenantId, applied.promotion.id);
+          }
         }
       }
 
@@ -348,12 +364,25 @@ export class RetailSalesService {
         await this.revenuePosting.postWithin(tx, revenue);
       }
 
-      return created;
+      const appliedPromotions = priced.applied.map((a) => ({
+        promotionId: a.promotion.id,
+        name: a.promotion.name,
+        code: a.code?.code ?? null,
+        autoApplied: a.autoApplied,
+        discount: a.code ? promoDiscount : a.discount,
+        giftCost: giftCostByPromo.get(a.promotion.id) ?? 0,
+        giftSkipped: a.giftSkipped,
+      }));
+      return { ...created, appliedPromotions, skippedAutoPromotions: priced.skipped };
     });
 
     this.logger.log(`Retail sale ${sale.receiptNo} created (tenant ${tenantId}, total ${sale.grandTotal})`);
     emitRetailSaleCompleted(this.events, sale);
-    return this.toDetail(sale);
+    return {
+      ...this.toDetail(sale),
+      appliedPromotions: sale.appliedPromotions,
+      skippedAutoPromotions: sale.skippedAutoPromotions,
+    };
   }
 
   /** Sales history (ประวัติการขาย) — paginated + filterable, newest first, with range totals. */
@@ -643,157 +672,6 @@ export class RetailSalesService {
     return `RCP-${yearMonth}-${String(seq.lastNumber).padStart(4, '0')}`;
   }
 
-  /**
-   * Issue stock for one cart line as GOODS_ISSUE movement(s) tied to the sale.
-   * Lot-tracked / perishable items consume FEFO lots (earliest expiry first) and
-   * write one movement per consumed lot; plain items write a single movement.
-   * WarehouseStock balance itself is decremented by the caller.
-   */
-  private async issueStockForLine(
-    tx: Prisma.TransactionClient,
-    params: {
-      tenantId: string;
-      userId: string;
-      saleId: string;
-      warehouseId: string;
-      itemId: string;
-      quantity: number;
-      avgCost: number;
-      needsLot: boolean;
-      /** RETAIL_SALE (ขาย) หรือ PROMO_GIFT (ของแถมจากคลังของแถม) */
-      referenceType?: 'RETAIL_SALE' | 'PROMO_GIFT';
-    },
-  ): Promise<void> {
-    const { tenantId, userId, saleId, warehouseId, itemId, quantity, avgCost, needsLot } = params;
-    const referenceType = params.referenceType ?? 'RETAIL_SALE';
-
-    if (needsLot) {
-      const lots = await tx.inventoryLot.findMany({
-        where: { tenantId, itemId, warehouseId, status: 'ACTIVE', remainingQty: { gt: 0 } },
-        orderBy: [{ expiryDate: 'asc' }, { receivedDate: 'asc' }],
-      });
-      const available = lots.reduce((sum, l) => sum + l.remainingQty, 0);
-      if (available >= quantity) {
-        // Consume FEFO across lots.
-        let remaining = quantity;
-        for (const lot of lots) {
-          if (remaining <= 0) break;
-          const take = Math.min(remaining, lot.remainingQty);
-          const newRemaining = lot.remainingQty - take;
-          await tx.inventoryLot.update({
-            where: { id: lot.id },
-            data: {
-              remainingQty: newRemaining,
-              status: newRemaining === 0 ? 'EXHAUSTED' : lot.status,
-              updatedAt: new Date(),
-            },
-          });
-          const unitCost = Number(lot.unitCost) || avgCost;
-          await tx.stockMovement.create({
-            data: {
-              id: randomUUID(),
-              tenantId,
-              warehouseId,
-              itemId,
-              type: 'GOODS_ISSUE',
-              quantity: take,
-              unitCost,
-              totalCost: round2(take * unitCost),
-              referenceType,
-              referenceId: saleId,
-              createdBy: userId,
-              lotId: lot.id,
-            },
-          });
-          remaining -= take;
-        }
-        return;
-      }
-      // Lot coverage is short (data drift): fall through to a single non-lot movement
-      // so the sale still reconciles against the authoritative WarehouseStock balance.
-      this.logger.warn(
-        `Item ${itemId} lot coverage ${available} < ${quantity}; issuing against warehouse balance only`,
-      );
-    }
-
-    await tx.stockMovement.create({
-      data: {
-        id: randomUUID(),
-        tenantId,
-        warehouseId,
-        itemId,
-        type: 'GOODS_ISSUE',
-        quantity,
-        unitCost: avgCost,
-        totalCost: round2(quantity * avgCost),
-        referenceType,
-        referenceId: saleId,
-        createdBy: userId,
-      },
-    });
-  }
-
-  /**
-   * Issue one promotion gift from the gift warehouse (type PROMOTION) and return
-   * its ฿0 receipt line. The real cost stays on the line so promo spend is
-   * reportable, but it is kept out of costTotal (goods sold).
-   */
-  private async issueGiftLine(
-    tx: Prisma.TransactionClient,
-    params: {
-      tenantId: string;
-      userId: string;
-      saleId: string;
-      promotionId: string;
-      warehouseId: string;
-      gift: EvaluatedGift;
-    },
-  ): Promise<Prisma.RetailSaleItemCreateManySaleInput> {
-    const { tenantId, userId, saleId, promotionId, warehouseId, gift } = params;
-    const item = await tx.inventoryItem.findFirst({ where: { id: gift.itemId, tenantId, deletedAt: null } });
-    const stock = await tx.warehouseStock.findFirst({ where: { warehouseId, itemId: gift.itemId } });
-    const currentQty = Number(stock?.quantity ?? 0);
-    if (!item || !stock || currentQty < gift.quantity) {
-      throw promoError('PROMO_GIFT_SHORTAGE', `ของแถม "${gift.name}" ในคลังของแถมไม่พอ`, {
-        skippedItemIds: [gift.itemId],
-        canAcceptWithoutGift: true,
-      });
-    }
-    const avgCost = Number(stock.avgCost) || 0;
-    await this.issueStockForLine(tx, {
-      tenantId,
-      userId,
-      saleId,
-      warehouseId,
-      itemId: gift.itemId,
-      quantity: gift.quantity,
-      avgCost,
-      needsLot: item.isPerishable || item.requiresLotTracking,
-      referenceType: 'PROMO_GIFT',
-    });
-    const newQty = currentQty - gift.quantity;
-    await tx.warehouseStock.update({
-      where: { id: stock.id },
-      data: { quantity: newQty, totalValue: round2(newQty * avgCost), updatedAt: new Date() },
-    });
-    return {
-      id: randomUUID(),
-      itemId: item.id,
-      sku: item.sku,
-      name: item.name,
-      unit: item.unit,
-      quantity: gift.quantity,
-      unitPrice: 0,
-      lineDiscount: 0,
-      lineTotal: 0,
-      unitCost: round2(avgCost),
-      lineCost: round2(gift.quantity * avgCost),
-      isGift: true,
-      promotionId,
-      sourceWarehouseId: warehouseId,
-    };
-  }
-
   /** Map a Prisma RetailSale (+items) to a number-normalized API shape. */
   private toDetail(sale: {
     id: string;
@@ -821,6 +699,7 @@ export class RetailSalesService {
     promoCode?: string | null;
     promoDiscount?: Prisma.Decimal;
     promoGiftCost?: Prisma.Decimal;
+    pointsEarned?: number;
     voidedBy?: string | null;
     voidedAt?: Date | null;
     voidReason?: string | null;
@@ -871,6 +750,7 @@ export class RetailSalesService {
       promoCode: sale.promoCode ?? null,
       promoDiscount: Number(sale.promoDiscount ?? 0),
       promoGiftCost: Number(sale.promoGiftCost ?? 0),
+      pointsEarned: sale.pointsEarned ?? 0,
       voidedBy: sale.voidedBy ?? null,
       voidedAt: sale.voidedAt ?? null,
       voidReason: sale.voidReason ?? null,

@@ -21,11 +21,15 @@ import { RequireAddon } from '@/common/decorators/require-addon.decorator';
 import { RetailPromotionsService } from './retail-promotions.service';
 import { RetailPromotionHealthService } from './retail-promotion-health.service';
 import { RetailPromotionReportService } from './retail-promotion-report.service';
+import { RetailPromotionCheckoutService } from './retail-promotion-checkout.service';
+import { RetailPromotionRewardsService } from './retail-promotion-rewards.service';
 import {
   CreatePromoCodeDto,
   CreateRetailPromotionDto,
   GeneratePromoCodesDto,
+  PreviewCheckoutDto,
   PreviewPromotionDto,
+  RedeemPointsForCodeDto,
   RegisterMemberDto,
   UpdatePromoCodeDto,
   UpdateRetailPromotionDto,
@@ -46,6 +50,8 @@ export class RetailPromotionsController {
     private readonly service: RetailPromotionsService,
     private readonly health: RetailPromotionHealthService,
     private readonly reports: RetailPromotionReportService,
+    private readonly checkout: RetailPromotionCheckoutService,
+    private readonly rewards: RetailPromotionRewardsService,
   ) {}
 
   @Get()
@@ -93,6 +99,17 @@ export class RetailPromotionsController {
   @ApiResponse({ status: 200, description: 'Promotion priced' })
   async preview(@Body() dto: PreviewPromotionDto, @Req() req: AuthedReq): Promise<{ success: boolean; data: unknown }> {
     return { success: true, data: await this.service.preview(dto, req.user.tenantId) };
+  }
+
+  @Post('checkout-preview')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Price a cart: one code + automatic gift promotions under stacking rules (no side effects)' })
+  @ApiResponse({ status: 200, description: 'Bill priced' })
+  async checkoutPreview(
+    @Body() dto: PreviewCheckoutDto,
+    @Req() req: AuthedReq,
+  ): Promise<{ success: boolean; data: unknown }> {
+    return { success: true, data: await this.checkout.preview(dto, req.user.tenantId) };
   }
 
   @Patch('codes/:codeId')
@@ -151,6 +168,21 @@ export class RetailPromotionsController {
     return { success: true, data: await this.service.addCode(id, dto, req.user.tenantId) };
   }
 
+  @Post(':id/redeem-points')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Spend a member\'s loyalty points for a single-use code of this promotion' })
+  @ApiResponse({ status: 201, description: 'Points redeemed, code issued' })
+  async redeemPoints(
+    @Param('id') id: string,
+    @Body() dto: RedeemPointsForCodeDto,
+    @Req() req: AuthedReq,
+  ): Promise<{ success: boolean; data: unknown }> {
+    return {
+      success: true,
+      data: await this.rewards.redeemPoints(req.user.tenantId, req.user.id, id, dto.memberGuestId),
+    };
+  }
+
   @Post(':id/codes/generate')
   @Roles(...PROMO_MANAGERS)
   @HttpCode(HttpStatus.CREATED)
@@ -172,7 +204,20 @@ export class RetailPromotionsController {
 @RequireAddon('INVENTORY_MODULE')
 @Controller({ path: 'inventory/retail/members', version: '1' })
 export class RetailMembersController {
-  constructor(private readonly service: RetailPromotionsService) {}
+  constructor(
+    private readonly service: RetailPromotionsService,
+    private readonly rewards: RetailPromotionRewardsService,
+  ) {}
+
+  @Get(':guestId/rewards')
+  @ApiOperation({ summary: 'Member loyalty points, rewards redeemable for points, and unused point codes' })
+  @ApiResponse({ status: 200, description: 'Rewards retrieved' })
+  async listRewards(
+    @Param('guestId') guestId: string,
+    @Req() req: AuthedReq,
+  ): Promise<{ success: boolean; data: unknown }> {
+    return { success: true, data: await this.rewards.listRewards(req.user.tenantId, guestId) };
+  }
 
   @Get()
   @ApiOperation({ summary: 'Search members (guests) by phone / name / email' })

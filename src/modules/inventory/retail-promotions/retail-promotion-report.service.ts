@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { Prisma, RetailSaleStatus } from '@prisma/client';
+import { RetailSaleStatus } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
 import { round2 } from './promotion-engine';
 
@@ -46,9 +46,13 @@ const emptyTotals = (): PromoReportTotals => ({
   voidedBills: 0,
 });
 
+/** แถวโค้ดของโปรอัตโนมัติ (ไม่มีโค้ด) */
+export const AUTO_CODE_LABEL = '(อัตโนมัติ)';
+
 /**
- * รายงานโปรโมชั่น ต่อโปร/ต่อโค้ด — อ่านจากใบเสร็จ (retail_sales) ซึ่งเก็บโปร/โค้ด/ส่วนลด/ต้นทุนของแถม
- * ของบิลนั้นไว้แล้ว ตัวเลขจึงตรงกับใบเสร็จทุกใบ และบิลที่ถูกยกเลิกหลุดออกจากยอดทันที
+ * รายงานโปรโมชั่น ต่อโปร/ต่อโค้ด — อ่านจาก redemption (1 แถว/โปร/บิล ซึ่งเก็บส่วนลด+ต้นทุนของแถมของโปรนั้น)
+ * คู่กับสถานะใบเสร็จ บิลที่ถูกยกเลิกหลุดออกจากยอดทันที
+ * ยอดขาย (salesTotal) ของแต่ละโปร = ยอดบิลที่โปรนั้นร่วมอยู่ — บิลมีสองโปรนับในทั้งสองแถว ยอดรวมทั้งรายงานนับครั้งเดียว
  */
 @Injectable()
 export class RetailPromotionReportService {
@@ -56,75 +60,95 @@ export class RetailPromotionReportService {
 
   async report(tenantId: string, query: { from?: string; to?: string; promotionId?: string }): Promise<PromoReport> {
     const { from, to } = this.range(query.from, query.to);
-    const base: Prisma.RetailSaleWhereInput = {
-      tenantId,
-      promotionId: query.promotionId ? query.promotionId : { not: null },
-      soldAt: { gte: from, lte: to },
+    // 1 แถว = 1 โปรใน 1 บิล (บิลเดียวมีได้หลายโปร: โค้ด 1 + โปรอัตโนมัติ) — สร้างพร้อมใบเสร็จในทรานแซกชันเดียว
+    const redemptions = await this.prisma.retailPromotionRedemption.findMany({
+      where: {
+        tenantId,
+        ...(query.promotionId ? { promotionId: query.promotionId } : {}),
+        createdAt: { gte: from, lte: to },
+      },
+      select: {
+        saleId: true,
+        promotionId: true,
+        code: true,
+        guestId: true,
+        status: true,
+        discountAmount: true,
+        giftCost: true,
+      },
+    });
+    const saleIds = [...new Set(redemptions.map((r) => r.saleId))];
+    const [sales, gifts] = saleIds.length
+      ? await Promise.all([
+          this.prisma.retailSale.findMany({
+            where: { tenantId, id: { in: saleIds } },
+            select: { id: true, grandTotal: true, status: true },
+          }),
+          this.prisma.retailSaleItem.findMany({
+            where: { isGift: true, saleId: { in: saleIds }, sale: { tenantId, status: RetailSaleStatus.COMPLETED } },
+            select: { saleId: true, promotionId: true, quantity: true },
+          }),
+        ])
+      : [[], []];
+    const saleById = new Map(sales.map((s) => [s.id, s]));
+    const isLive = (saleId: string) => saleById.get(saleId)?.status === RetailSaleStatus.COMPLETED;
+
+    const codeKey = (promotionId: string, code: string | null) => `${promotionId}:${code ?? AUTO_CODE_LABEL}`;
+    const codes = new Map<string, PromoReportTotals & { promotionId: string; code: string }>();
+    const codeRow = (promotionId: string, code: string | null) => {
+      const key = codeKey(promotionId, code);
+      const existing = codes.get(key);
+      if (existing) return existing;
+      const created = { ...emptyTotals(), promotionId, code: code ?? AUTO_CODE_LABEL };
+      codes.set(key, created);
+      return created;
     };
-    const completed = { ...base, status: RetailSaleStatus.COMPLETED };
 
-    const [byCode, voided, gifts, members] = await Promise.all([
-      this.prisma.retailSale.groupBy({
-        by: ['promotionId', 'promoCode'],
-        where: completed,
-        _count: { _all: true },
-        _sum: { grandTotal: true, promoDiscount: true, promoGiftCost: true },
-      }),
-      this.prisma.retailSale.groupBy({
-        by: ['promotionId', 'promoCode'],
-        where: { ...base, status: RetailSaleStatus.VOIDED },
-        _count: { _all: true },
-      }),
-      this.prisma.retailSaleItem.findMany({
-        where: { isGift: true, sale: completed },
-        select: { quantity: true, sale: { select: { promotionId: true, promoCode: true } } },
-      }),
-      this.prisma.retailSale.groupBy({
-        by: ['promotionId', 'memberGuestId'],
-        where: { ...completed, memberGuestId: { not: null } },
-      }),
-    ]);
+    const codeOfSalePromo = new Map<string, string | null>();
+    const memberSets = new Map<string, Set<string>>();
+    const grand = emptyTotals();
+    const liveSales = new Set<string>();
+    const voidedSales = new Set<string>();
+    for (const r of redemptions) {
+      codeOfSalePromo.set(`${r.saleId}:${r.promotionId}`, r.code);
+      const row = codeRow(r.promotionId, r.code);
+      if (!isLive(r.saleId)) {
+        row.voidedBills += 1;
+        voidedSales.add(r.saleId);
+        continue;
+      }
+      row.bills += 1;
+      row.salesTotal += Number(saleById.get(r.saleId)?.grandTotal ?? 0);
+      row.discountTotal += Number(r.discountAmount);
+      row.giftCostTotal += Number(r.giftCost);
+      grand.discountTotal += Number(r.discountAmount);
+      grand.giftCostTotal += Number(r.giftCost);
+      liveSales.add(r.saleId);
+      if (r.guestId) {
+        const set = memberSets.get(r.promotionId) ?? new Set<string>();
+        set.add(r.guestId);
+        memberSets.set(r.promotionId, set);
+      }
+    }
+    for (const g of gifts) {
+      // บรรทัดของแถมรุ่นก่อนเฟส 4 ไม่มี promotionId — บิลแบบนั้นมีโปรเดียว
+      const promotionId = g.promotionId ?? redemptions.find((r) => r.saleId === g.saleId)?.promotionId;
+      if (!promotionId || !codeOfSalePromo.has(`${g.saleId}:${promotionId}`)) continue;
+      codeRow(promotionId, codeOfSalePromo.get(`${g.saleId}:${promotionId}`) ?? null).giftQty += g.quantity;
+      grand.giftQty += g.quantity;
+    }
+    // ยอดรวมทั้งรายงานนับบิลละครั้ง — บิลที่มีสองโปรโผล่ในสองแถวของโปร แต่ยอดขายต้องไม่ถูกบวกซ้ำ
+    grand.bills = liveSales.size;
+    grand.salesTotal = [...liveSales].reduce((sum, id) => sum + Number(saleById.get(id)?.grandTotal ?? 0), 0);
+    grand.voidedBills = voidedSales.size;
 
-    const promotionIds = [
-      ...new Set([...byCode, ...voided].map((r) => r.promotionId).filter((id): id is string => !!id)),
-    ];
+    const promotionIds = [...new Set(redemptions.map((r) => r.promotionId))];
     const promos = promotionIds.length
       ? await this.prisma.retailPromotion.findMany({
           where: { tenantId, id: { in: promotionIds } },
           select: { id: true, name: true, status: true },
         })
       : [];
-
-    const codeKey = (promotionId: string | null, code: string | null) => `${promotionId}:${code ?? '—'}`;
-    const codes = new Map<string, PromoReportTotals & { promotionId: string; code: string }>();
-    const codeRow = (promotionId: string, code: string | null) => {
-      const key = codeKey(promotionId, code);
-      const existing = codes.get(key);
-      if (existing) return existing;
-      const created = { ...emptyTotals(), promotionId, code: code ?? '—' };
-      codes.set(key, created);
-      return created;
-    };
-
-    for (const r of byCode) {
-      if (!r.promotionId) continue;
-      const row = codeRow(r.promotionId, r.promoCode);
-      row.bills += r._count._all;
-      row.salesTotal += Number(r._sum.grandTotal ?? 0);
-      row.discountTotal += Number(r._sum.promoDiscount ?? 0);
-      row.giftCostTotal += Number(r._sum.promoGiftCost ?? 0);
-    }
-    for (const r of voided) {
-      if (r.promotionId) codeRow(r.promotionId, r.promoCode).voidedBills += r._count._all;
-    }
-    for (const g of gifts) {
-      if (g.sale.promotionId) codeRow(g.sale.promotionId, g.sale.promoCode).giftQty += g.quantity;
-    }
-
-    const memberCount = new Map<string, number>();
-    for (const m of members) {
-      if (m.promotionId) memberCount.set(m.promotionId, (memberCount.get(m.promotionId) ?? 0) + 1);
-    }
 
     const promoMap = new Map(promos.map((p) => [p.id, p]));
     const rows: PromoReportRow[] = promotionIds.map((id) => {
@@ -136,14 +160,14 @@ export class RetailPromotionReportService {
         promotionId: id,
         name: promoMap.get(id)?.name ?? '(โปรที่ถูกลบ)',
         status: promoMap.get(id)?.status ?? 'ARCHIVED',
-        members: memberCount.get(id) ?? 0,
+        members: memberSets.get(id)?.size ?? 0,
         ...this.rounded(this.sum(codeRows)),
         codes: codeRows,
       };
     });
     rows.sort((a, b) => b.salesTotal - a.salesTotal || b.bills - a.bills);
 
-    return { from, to, totals: this.rounded(this.sum(rows)), promotions: rows };
+    return { from, to, totals: this.rounded(grand), promotions: rows };
   }
 
   private range(fromRaw?: string, toRaw?: string): { from: Date; to: Date } {

@@ -129,6 +129,23 @@ export class CreateRetailPromotionDto {
   @Min(1)
   perMemberLimit?: number | null;
 
+  @ApiPropertyOptional({ description: 'แจกอัตโนมัติเมื่อบิลเข้าเงื่อนไข ไม่ต้องใช้โค้ด (เฉพาะโปรของแถมล้วน)', default: false })
+  @IsOptional()
+  @IsBoolean()
+  autoApply?: boolean;
+
+  @ApiPropertyOptional({ description: 'ใช้ร่วมกับโปรอื่นในบิลเดียวกันได้', default: true })
+  @IsOptional()
+  @IsBoolean()
+  stackable?: boolean;
+
+  @ApiPropertyOptional({ description: 'แต้มที่สมาชิกใช้แลกเป็นโค้ดของโปรนี้ (ไม่ใส่ = แลกไม่ได้)', minimum: 1 })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(1_000_000)
+  pointsCost?: number | null;
+
   @ApiPropertyOptional({ type: [PromotionGiftInputDto], description: 'ของแถม — ส่งมาแทนที่รายการเดิมทั้งชุด' })
   @IsOptional()
   @IsArray()
@@ -210,6 +227,33 @@ export class PreviewPromotionDto {
   @ValidateNested({ each: true })
   @Type(() => CreateRetailSaleLineDto)
   lines: CreateRetailSaleLineDto[];
+}
+
+/** ตรวจโปรทั้งบิลที่ POS: โค้ด (ถ้ามี) + โปรอัตโนมัติ ตามกติกาใช้ร่วม */
+export class PreviewCheckoutDto {
+  @ApiPropertyOptional({ example: 'SUMMER10' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  code?: string;
+
+  @ApiPropertyOptional({ description: 'สมาชิก (Guest id) — บังคับเมื่อใส่โค้ด / โปรอัตโนมัติที่จำกัดสิทธิ์' })
+  @IsOptional()
+  @IsString()
+  memberGuestId?: string;
+
+  @ApiProperty({ type: [CreateRetailSaleLineDto] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => CreateRetailSaleLineDto)
+  lines: CreateRetailSaleLineDto[];
+}
+
+export class RedeemPointsForCodeDto {
+  @ApiProperty({ description: 'สมาชิก (Guest id) ที่แลกแต้ม' })
+  @IsString()
+  memberGuestId: string;
 }
 
 export class RegisterMemberDto {

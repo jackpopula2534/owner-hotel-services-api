@@ -12,10 +12,37 @@ describe('LoyaltyService', () => {
       findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
     },
     loyaltyTransaction: {
+      findMany: jest.fn(),
       create: jest.fn(),
     },
+  };
+
+  /**
+   * บัญชีแต้มในหน่วยความจำ — updateMany เคารพเงื่อนไข `points >= n` เหมือน DB จริง
+   * (null = ยังไม่มีบัญชี ให้ create)
+   */
+  const useAccount = (initial: { points: number; lifetimePoints: number; tier?: string } | null) => {
+    let row = initial ? { id: 'a1', tenantId: 't1', guestId: 'g1', tier: 'standard', ...initial } : null;
+    mockTx.loyaltyPoint.findFirst.mockImplementation(async () => (row ? { ...row } : null));
+    mockTx.loyaltyPoint.create.mockImplementation(async ({ data }) => {
+      row = { id: 'a1', ...data };
+      return { ...row };
+    });
+    mockTx.loyaltyPoint.updateMany.mockImplementation(async ({ where, data }) => {
+      if (!row || (where.points?.gte != null && row.points < where.points.gte)) return { count: 0 };
+      row.points += data.points.increment;
+      row.lifetimePoints += data.lifetimePoints.increment;
+      return { count: 1 };
+    });
+    mockTx.loyaltyPoint.update.mockImplementation(async ({ data }) => {
+      Object.assign(row!, data);
+      return { ...row };
+    });
+    mockTx.loyaltyTransaction.create.mockResolvedValue({ id: 'tx1' });
+    return () => row;
   };
 
   const mockPrismaService = {
@@ -111,27 +138,14 @@ describe('LoyaltyService', () => {
     });
 
     it('awards 25 points for 2500 THB booking and updates tier', async () => {
-      mockTx.loyaltyPoint.findFirst.mockResolvedValue(null);
-      mockTx.loyaltyPoint.create.mockResolvedValue({
-        id: 'a1',
-        tenantId: 't1',
-        guestId: 'g1',
-        points: 0,
-        tier: 'standard',
-      });
-      mockTx.loyaltyPoint.update.mockResolvedValue({
-        id: 'a1',
-        tenantId: 't1',
-        guestId: 'g1',
-        points: 25,
-        tier: 'standard',
-      });
-      mockTx.loyaltyTransaction.create.mockResolvedValue({ id: 'tx1' });
+      const account = useAccount(null);
 
       const r = await service.addPointsForStay('g1', 't1', 2500, { bookingId: 'b1' });
       expect(r?.pointsDelta).toBe(25);
       expect(r?.balance).toBe(25);
+      expect(r?.lifetimePoints).toBe(25);
       expect(r?.tier).toBe('standard');
+      expect(account()).toMatchObject({ points: 25, lifetimePoints: 25 });
       expect(mockTx.loyaltyTransaction.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
@@ -145,21 +159,8 @@ describe('LoyaltyService', () => {
       );
     });
 
-    it('upgrades to silver tier after crossing 1000 points', async () => {
-      mockTx.loyaltyPoint.findFirst.mockResolvedValue({
-        id: 'a1',
-        tenantId: 't1',
-        guestId: 'g1',
-        points: 950,
-        tier: 'standard',
-      });
-      mockTx.loyaltyPoint.update.mockResolvedValue({
-        id: 'a1',
-        points: 1000,
-        tier: 'silver',
-      });
-      mockTx.loyaltyTransaction.create.mockResolvedValue({ id: 'tx2' });
-
+    it('upgrades to silver tier after lifetime points cross 1000', async () => {
+      useAccount({ points: 950, lifetimePoints: 950 });
       const r = await service.addPointsForStay('g1', 't1', 5000);
       expect(r?.tier).toBe('silver');
       expect(r?.balance).toBe(1000);
@@ -174,29 +175,81 @@ describe('LoyaltyService', () => {
       );
     });
 
-    it('deducts points when sufficient balance', async () => {
-      mockPrismaService.loyaltyPoint.findFirst.mockResolvedValue({
-        id: 'a1',
-        points: 800,
-        tier: 'standard',
-      });
-      mockTx.loyaltyPoint.findFirst.mockResolvedValue({
-        id: 'a1',
-        tenantId: 't1',
-        guestId: 'g1',
-        points: 800,
-        tier: 'standard',
-      });
-      mockTx.loyaltyPoint.update.mockResolvedValue({
-        id: 'a1',
-        points: 300,
-        tier: 'standard',
-      });
-      mockTx.loyaltyTransaction.create.mockResolvedValue({ id: 'tx3' });
+    it('deducts points but keeps the tier (tier = lifetime points)', async () => {
+      mockPrismaService.loyaltyPoint.findFirst.mockResolvedValue({ id: 'a1', points: 1200 });
+      const account = useAccount({ points: 1200, lifetimePoints: 1200, tier: 'silver' });
 
       const r = await service.redeem('t1', { guestId: 'g1', points: 500 });
       expect(r.pointsDelta).toBe(-500);
-      expect(r.balance).toBe(300);
+      expect(r.balance).toBe(700);
+      expect(r.tier).toBe('silver');
+      expect(account()).toMatchObject({ points: 700, lifetimePoints: 1200, tier: 'silver' });
+    });
+
+    it('loses a race for the last points → INSUFFICIENT_POINTS, balance untouched', async () => {
+      mockPrismaService.loyaltyPoint.findFirst.mockResolvedValue({ id: 'a1', points: 600 });
+      // อีกเครื่องแลกไปก่อนระหว่างเช็คกับหัก
+      const account = useAccount({ points: 100, lifetimePoints: 600 });
+      await expect(service.redeem('t1', { guestId: 'g1', points: 500 })).rejects.toMatchObject({
+        response: { code: 'INSUFFICIENT_POINTS' },
+      });
+      expect(account()).toMatchObject({ points: 100, lifetimePoints: 600 });
+      expect(mockTx.loyaltyTransaction.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('reverseStayAward', () => {
+    it('claws back what is left but drops lifetime points by the full award', async () => {
+      mockPrismaService.loyaltyTransaction.findMany.mockResolvedValue([{ type: 'earn', points: 300, reason: 'x' }]);
+      mockPrismaService.loyaltyPoint.findFirst.mockResolvedValue({ points: 100 });
+      const account = useAccount({ points: 100, lifetimePoints: 1100, tier: 'silver' });
+
+      const r = await service.reverseStayAward('t1', 'g1', 'b1');
+      expect(r?.pointsDelta).toBe(-100);
+      expect(account()).toMatchObject({ points: 0, lifetimePoints: 800, tier: 'standard' });
+    });
+  });
+
+  describe('retail sales', () => {
+    it('earns 1 point per 100 THB of the net bill, tagged with the sale', async () => {
+      const account = useAccount({ points: 0, lifetimePoints: 0 });
+      const points = await service.earnForRetailSaleWithin(mockTx as never, {
+        tenantId: 't1',
+        guestId: 'g1',
+        saleId: 's1',
+        amount: 481.5,
+      });
+      expect(points).toBe(4);
+      expect(account()).toMatchObject({ points: 4, lifetimePoints: 4 });
+      expect(mockTx.loyaltyTransaction.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ type: 'earn', retailSaleId: 's1', reason: 'retail_sale' }),
+      });
+    });
+
+    it('bill under 100 THB earns nothing', async () => {
+      useAccount({ points: 0, lifetimePoints: 0 });
+      const points = await service.earnForRetailSaleWithin(mockTx as never, {
+        tenantId: 't1',
+        guestId: 'g1',
+        saleId: 's1',
+        amount: 99.99,
+      });
+      expect(points).toBe(0);
+      expect(mockTx.loyaltyPoint.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('void claws the sale points back once', async () => {
+      const account = useAccount({ points: 10, lifetimePoints: 10 });
+      mockTx.loyaltyTransaction.findMany.mockResolvedValueOnce([{ type: 'earn', points: 4, reason: 'retail_sale' }]);
+      expect(await service.reverseRetailSaleWithin(mockTx as never, { tenantId: 't1', guestId: 'g1', saleId: 's1' })).toBe(4);
+      expect(account()).toMatchObject({ points: 6, lifetimePoints: 6 });
+
+      mockTx.loyaltyTransaction.findMany.mockResolvedValueOnce([
+        { type: 'earn', points: 4, reason: 'retail_sale' },
+        { type: 'adjust', points: -4, reason: 'retail_sale_void' },
+      ]);
+      expect(await service.reverseRetailSaleWithin(mockTx as never, { tenantId: 't1', guestId: 'g1', saleId: 's1' })).toBe(0);
+      expect(account()).toMatchObject({ points: 6 });
     });
   });
 

@@ -10,7 +10,9 @@ export interface ContactPromoRedemption {
   id: string;
   promotionId: string;
   promotionName: string;
-  code: string;
+  /** null = โปรอัตโนมัติ (ไม่ใช้โค้ด) */
+  code: string | null;
+  autoApplied: boolean;
   status: RetailPromotionRedemptionStatus;
   discountAmount: number;
   giftCost: number;
@@ -136,7 +138,8 @@ export class CrmContactPromotionsService {
         id: r.id,
         promotionId: r.promotionId,
         promotionName: r.promotion?.name ?? '—',
-        code: r.code,
+        code: r.code ?? null,
+        autoApplied: !r.promoCodeId,
         status: r.status,
         discountAmount: Number(r.discountAmount),
         giftCost: Number(r.giftCost),
@@ -161,14 +164,19 @@ export class CrmContactPromotionsService {
     }));
 
     const applied = redemptions.filter((r) => r.status === RetailPromotionRedemptionStatus.APPLIED);
+    // บิลเดียวมีได้หลายโปร (โค้ด + โปรอัตโนมัติ) → นับบิล/ยอดบิลไม่ซ้ำ
+    const appliedSales = new Map(applied.map((r) => [r.sale?.id ?? r.id, r.sale?.grandTotal ?? 0]));
+    const reversedSales = new Set(
+      redemptions.filter((r) => r.status !== RetailPromotionRedemptionStatus.APPLIED).map((r) => r.sale?.id ?? r.id),
+    );
     return {
       ...empty,
       summary: {
-        redeemed: applied.length,
-        reversed: redemptions.length - applied.length,
+        redeemed: appliedSales.size,
+        reversed: reversedSales.size,
         discountTotal: round2(applied.reduce((s, r) => s + r.discountAmount, 0)),
         giftCostTotal: round2(applied.reduce((s, r) => s + r.giftCost, 0)),
-        salesTotal: round2(applied.reduce((s, r) => s + (r.sale?.grandTotal ?? 0), 0)),
+        salesTotal: round2([...appliedSales.values()].reduce((s, v) => s + v, 0)),
         codesIssued: issuedCodes.length,
         codesAvailable: issuedCodes.filter((c) => c.state === 'available').length,
       },
