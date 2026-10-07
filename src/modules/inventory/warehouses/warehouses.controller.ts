@@ -10,11 +10,13 @@ import {
   Query,
   HttpCode,
   HttpStatus,
+  BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
 import { WarehousesService } from './warehouses.service';
 import { CreateWarehouseDto, WarehouseType } from './dto/create-warehouse.dto';
 import { UpdateWarehouseDto } from './dto/update-warehouse.dto';
+import { WAREHOUSE_CHANNELS, WarehouseChannel } from './warehouse-channel';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AddonGuard } from '@/common/guards/addon.guard';
 import { RequireAddon } from '@/common/decorators/require-addon.decorator';
@@ -48,6 +50,12 @@ export class WarehousesController {
     enum: WarehouseType,
     description: 'Filter by warehouse type',
   })
+  @ApiQuery({
+    name: 'channel',
+    required: false,
+    enum: WAREHOUSE_CHANNELS,
+    description: 'เฉพาะคลังที่ระบบนี้มองเห็นตามกลุ่มคลัง (เช่น POS)',
+  })
   @ApiResponse({
     status: 200,
     description: 'List of warehouses',
@@ -78,10 +86,15 @@ export class WarehousesController {
     @CurrentUser() user: JwtPayload,
     @Query('propertyId') propertyId?: string,
     @Query('type') type?: WarehouseType,
+    @Query('channel') channel?: string,
   ) {
+    if (channel && !(WAREHOUSE_CHANNELS as readonly string[]).includes(channel)) {
+      throw new BadRequestException(`channel ต้องเป็น ${WAREHOUSE_CHANNELS.join(', ')}`);
+    }
     const data = await this.warehousesService.findAll(user.tenantId, {
       propertyId,
       type,
+      channel: channel as WarehouseChannel | undefined,
     });
     return { success: true, data };
   }

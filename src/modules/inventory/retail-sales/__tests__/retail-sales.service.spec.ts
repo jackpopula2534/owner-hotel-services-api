@@ -393,6 +393,25 @@ describe('RetailSalesService', () => {
       ).rejects.toMatchObject({ response: expect.objectContaining({ code: 'GIFT_WAREHOUSE_NOT_SELLABLE' }) });
       expect(prisma.retailSale.create).not.toHaveBeenCalled();
     });
+
+    it('refuses a warehouse whose group hides it from POS', async () => {
+      const prisma = buildPrisma();
+      prisma.warehouse.findFirst.mockResolvedValue({
+        id: WH,
+        tenantId: TENANT,
+        type: 'MAINTENANCE',
+        group: { channels: [], isActive: true },
+      });
+      const service = await makeService(prisma);
+      await expect(
+        service.create(
+          { warehouseId: WH, paymentMethod: 'CASH' as any, lines: [{ itemId: 'i1', quantity: 1, unitPrice: 100 }] },
+          USER,
+          TENANT,
+        ),
+      ).rejects.toThrow('ไม่ได้เปิดให้ขายผ่าน POS');
+      expect(prisma.retailSale.create).not.toHaveBeenCalled();
+    });
   });
 
   /**

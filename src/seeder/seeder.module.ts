@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { SeederService } from './seeder.service';
 import { ReadyMadeGoodsSeeder } from './ready-made-goods.seeder';
 import { RetailPromotionsSeeder } from './retail-promotions.seeder';
+import { WarehouseGroupsSeeder } from './warehouse-groups.seeder';
 import { SeederController } from './seeder.controller';
 import { PlansModule } from '../plans/plans.module';
 import { FeaturesModule } from '../features/features.module';
@@ -28,7 +29,7 @@ import { AddonModule } from '../modules/addons/addon.module';
     AddonModule,
   ],
   controllers: [SeederController],
-  providers: [SeederService, ReadyMadeGoodsSeeder, RetailPromotionsSeeder],
+  providers: [SeederService, ReadyMadeGoodsSeeder, RetailPromotionsSeeder, WarehouseGroupsSeeder],
   exports: [SeederService],
 })
 export class SeederModule {}

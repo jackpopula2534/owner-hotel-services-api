@@ -11,6 +11,7 @@ import {
   WarehouseType,
 } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
+import { isVisibleOnChannel } from '../warehouses/warehouse-channel';
 import { daysOfMonth, shiftDate, toBangkokDate } from '@/common/utils/bangkok-day.util';
 import {
   RevenueDocument,
@@ -112,6 +113,7 @@ export class RetailSalesService {
     // Validate the store/warehouse belongs to this tenant.
     const warehouse = await this.prisma.warehouse.findFirst({
       where: { id: dto.warehouseId, tenantId },
+      include: { group: { select: { channels: true, isActive: true } } },
     });
     if (!warehouse) {
       throw new BadRequestException('ไม่พบคลัง/ร้านค้านี้ หรือไม่ได้อยู่ในองค์กรของคุณ');
@@ -119,6 +121,10 @@ export class RetailSalesService {
     // คลังของแถมกันไว้แจกในโปรโมชั่นเท่านั้น — ขายตรงจากคลังนี้ = ของแถมหมดโดยไม่ผ่านโควตาโปร
     if (warehouse.type === WarehouseType.PROMOTION) {
       throw promoError('GIFT_WAREHOUSE_NOT_SELLABLE', 'คลังของแถมใช้ขายไม่ได้ — เลือกคลังร้านค้า');
+    }
+    // กลุ่มคลังปิดไม่ให้ POS เห็น (เช่น คลังช่างซ่อม/ครัว) — กันยิง API ขายตรงจากคลังนั้น
+    if (!isVisibleOnChannel(warehouse.group, 'POS')) {
+      throw new BadRequestException('คลังนี้ไม่ได้เปิดให้ขายผ่าน POS — ตั้งค่าได้ที่กลุ่มคลัง');
     }
 
     const isRoomCharge = dto.paymentMethod === RetailPaymentMethod.ROOM_CHARGE;

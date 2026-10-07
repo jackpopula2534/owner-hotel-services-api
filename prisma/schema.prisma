@@ -3157,12 +3157,36 @@ model Warehouse {
   warehouseStocks WarehouseStock[]
   restaurants     Restaurant[]
   property        Property         @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  groupId         String?
+  group           WarehouseGroup?  @relation(fields: [groupId], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, propertyId, code])
   @@index([tenantId])
   @@index([propertyId])
   @@index([deletedAt])
+  @@index([groupId])
   @@map("warehouses")
+}
+
+/// กลุ่มคลัง — กำหนดว่าคลังในกลุ่มไปแสดงที่ระบบไหน (เช่น POS หน้าร้าน)
+/// คลังที่ไม่อยู่ในกลุ่มใดถือว่าแสดงทุกระบบ (พฤติกรรมเดิม)
+model WarehouseGroup {
+  id          String      @id @default(uuid())
+  tenantId    String
+  name        String
+  code        String      @db.VarChar(40)
+  description String?     @db.VarChar(255)
+  /// ระบบที่มองเห็นคลังในกลุ่มนี้ เช่น ["POS"]
+  channels    Json
+  sortOrder   Int         @default(0)
+  isActive    Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  warehouses  Warehouse[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("warehouse_groups")
 }
 
 model ItemCategory {

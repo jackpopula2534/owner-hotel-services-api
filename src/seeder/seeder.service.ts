@@ -18,6 +18,7 @@ import { PaymentMethod, PaymentStatus } from '../payments/entities/payment.entit
 import { PrismaService } from '../prisma/prisma.service';
 import { ReadyMadeGoodsSeeder } from './ready-made-goods.seeder';
 import { RetailPromotionsSeeder } from './retail-promotions.seeder';
+import { WarehouseGroupsSeeder } from './warehouse-groups.seeder';
 import {
   CostCenterType,
   CostCategory,
@@ -56,6 +57,7 @@ export class SeederService {
     private prisma: PrismaService,
     private readyMadeGoods: ReadyMadeGoodsSeeder,
     private retailPromotions: RetailPromotionsSeeder,
+    private warehouseGroups: WarehouseGroupsSeeder,
   ) {}
 
   /**
@@ -90,6 +92,8 @@ export class SeederService {
       await this.readyMadeGoods.seed();
       // คลังของแถม + โปรตัวอย่าง — ต้องมีคลังร้านขายของ (WH-RETAIL) ก่อน
       await this.retailPromotions.seed();
+      // กลุ่มคลัง — ต้องอยู่หลังคลังทุกตัวถูกสร้าง (คลังร้าน/มินิบาร์มาจาก readyMadeGoods)
+      await this.warehouseGroups.seed();
       await this.seedRestaurantRecipes();
       await this.seedProcurementUsersAndFlows();
       await this.seedPurchaseRequisitionData();
