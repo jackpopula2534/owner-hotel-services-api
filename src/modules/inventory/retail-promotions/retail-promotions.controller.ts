@@ -37,8 +37,19 @@ import {
 
 type AuthedReq = { user: { id: string; tenantId: string } };
 
-/** ตั้งค่าโปร/โค้ดได้เฉพาะผู้จัดการขึ้นไป — แคชเชียร์อ่าน/preview ได้อย่างเดียว */
-const PROMO_MANAGERS: UserRole[] = ['tenant_admin', 'admin', 'manager', 'warehouse_manager', 'platform_admin'];
+/**
+ * ตั้งค่าโปร/โค้ดได้เฉพาะผู้จัดการขึ้นไป — แคชเชียร์อ่าน/preview ได้อย่างเดียว
+ * หน้าตั้งโปรอยู่ใน CRM terminal → crm_manager ต้องอยู่ในลิสต์ (role นี้ไม่มี level ใน
+ * RolesGuard จึงเข้าได้เฉพาะ endpoint ที่เอ่ยชื่อตรง ๆ)
+ */
+const PROMO_MANAGERS: UserRole[] = [
+  'tenant_admin',
+  'admin',
+  'manager',
+  'warehouse_manager',
+  'crm_manager',
+  'platform_admin',
+];
 
 @ApiTags('Inventory - Retail Promotions')
 @ApiBearerAuth()

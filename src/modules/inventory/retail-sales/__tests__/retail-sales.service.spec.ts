@@ -782,7 +782,7 @@ describe('RetailSalesService', () => {
         },
       ]);
       prisma.retailSale.count.mockResolvedValue(1);
-      prisma.retailSale.aggregate.mockResolvedValue({ _count: { _all: 1 }, _sum: { grandTotal: 267.5, profitTotal: 100, costTotal: 150 } });
+      prisma.retailSale.aggregate.mockResolvedValue({ _count: { _all: 1 }, _sum: { grandTotal: 267.5, profitTotal: 100, costTotal: 150, promoGiftCost: 45 } });
 
       const service = await makeService(prisma);
       const res = await service.findAll(TENANT, { page: 1, limit: 20 });
@@ -790,6 +790,7 @@ describe('RetailSalesService', () => {
       expect(res.data).toHaveLength(1);
       expect(res.summary.totalSales).toBe(267.5);
       expect(res.summary.totalProfit).toBe(100);
+      expect(res.summary.totalGiftCost).toBe(45);
     });
 
     it('ใบที่ถูกยกเลิกยังอยู่ในตาราง แต่ยอดสรุปนับเฉพาะใบ COMPLETED', async () => {

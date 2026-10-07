@@ -79,7 +79,7 @@ Guest (guests)              ← ตัวตนสมาชิก: ชื่อ 
 - [x] Backend: ห้ามขายตรงจากคลังของแถม (`GIFT_WAREHOUSE_NOT_SELLABLE`)
 - [x] curl API จริงทุก endpoint (mock Prisma ไม่ผ่าน tenant middleware)
 - [x] Frontend: api client + types (`lib/types/retail-promotion.ts`)
-- [x] Frontend: หน้า `/dashboard/inventory/promotions` จัดการโปร/โค้ด/ของแถม + เมนู sidebar
+- [x] Frontend: หน้า `/dashboard/inventory/promotions` จัดการโปร/โค้ด/ของแถม + เมนู sidebar (ย้ายไป `/crm-terminal/promotions` แล้ว — ดูบันทึก 2026-10-07 ย้ายไป CRM)
 - [x] Frontend: POS — เลือกสมาชิก (`MemberPicker`), กรอกโค้ด (`PromoCodeField`), แสดงส่วนลด/ของแถม, "รับเฉพาะส่วนลด"
 - [x] Frontend: Modal สรุปการสั่งซื้อแสดงสมาชิก/โค้ด/ของแถม ฿0
 - [x] Frontend: ซ่อนคลังของแถมจากตัวเลือกคลังขาย + หน้าคลังสินค้ารู้จัก type `PROMOTION` (เดิมจะพัง)
@@ -160,3 +160,11 @@ Guest (guests)              ← ตัวตนสมาชิก: ชื่อ 
   - ของรางวัลแลกแต้ม "แลก 50 แต้ม ลด ฿50" และ "แลก 200 แต้ม ลด 20% (ไม่ร่วมโปรอื่น)" (stackable=false)
   - สมาชิก วิภา 0890000101 (250 แต้ม, สะสม 6000, gold) / ธนา 0890000102 (30 แต้ม, standard) + CRM contact + ประวัติแต้มยอดยกมา
 - `db:refresh` แล้ว curl: walk-in ฿600 ได้ถุงผ้า + Gold = MEMBER_REQUIRED · ฿380 = shortBy 120 · วิภา ฿600 ได้ถุงผ้า + แก้ว · วิภาแลกได้ทั้ง 2 รางวัล · ธนาแลกไม่ได้ (affordable=false)
+
+### 2026-10-07 — ย้ายหน้าตั้งโปรไป CRM (ยังไม่ commit)
+- เหตุผล: โปร/โค้ด/แลกแต้มเป็นงานการตลาด ไม่ใช่งานคลัง → หน้าตั้งโปรอยู่ที่ CRM → การตลาด → โปรโมชั่นหน้าร้าน (`/crm-terminal/promotions`, รองรับ `?open=<id>`)
+- ฝั่งคลังเหลือหน้า "คลังของแถม" `/dashboard/inventory/gift-stock` (ยอดของแถม + โอนเข้าคลังของแถม + แจ้งเตือนของใกล้หมด → ปุ่มเปิดดูโปรพาไป CRM)
+- `/dashboard/inventory/promotions` เดิม redirect ไปหน้า CRM (bookmark เก่ายังใช้ได้)
+- หน้าแรก CRM มี tile โปรโมชั่นหน้าร้าน แสดงจำนวนโปรที่เปิดใช้อยู่
+- Backend: `PROMO_MANAGERS` เพิ่ม `crm_manager` (API ยังอยู่ที่ `/inventory/retail/promotions` + `@RequireAddon('INVENTORY_MODULE')` เพราะตัดสต็อกของแถมผ่านคลัง)
+- เทสต์: backend retail-promotions 65 ผ่าน, frontend CrmTerminal + retail-promotions-move 11 ผ่าน, tsc ทั้งสอง repo 0 error; Sidebar 4 suites (24 tests) ล้มเหมือนเดิมก่อนแก้ (ตรวจด้วยไฟล์ HEAD แล้ว)

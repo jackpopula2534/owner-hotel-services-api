@@ -422,7 +422,7 @@ export class RetailSalesService {
       this.prisma.retailSale.aggregate({
         where: query.status ? where : { ...where, status: RetailSaleStatus.COMPLETED },
         _count: { _all: true },
-        _sum: { grandTotal: true, profitTotal: true, costTotal: true },
+        _sum: { grandTotal: true, profitTotal: true, costTotal: true, promoGiftCost: true },
       }),
     ]);
 
@@ -436,6 +436,8 @@ export class RetailSalesService {
         totalSales: Number(agg._sum.grandTotal ?? 0),
         totalCost: Number(agg._sum.costTotal ?? 0),
         totalProfit: Number(agg._sum.profitTotal ?? 0),
+        // costTotal = ต้นทุนสินค้าที่ขาย, ของแถมตัดจากคลังของแถมแยกไว้ — กำไร = ยอด − ทั้งสองก้อน
+        totalGiftCost: Number(agg._sum.promoGiftCost ?? 0),
       },
     };
   }
