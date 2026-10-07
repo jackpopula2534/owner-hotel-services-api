@@ -682,28 +682,28 @@ model Order {
 }
 
 model OrderItem {
-  id            String          @id @default(uuid())
-  tenantId      String?
-  orderId       String
-  menuItemId    String
-  quantity      Int
-  unitPrice     Decimal         @db.Decimal(10, 2)
-  totalPrice    Decimal         @db.Decimal(10, 2)
-  status        OrderItemStatus @default(PENDING)
-  notes         String?
-  modifiers     Json?
-  sentToKitchen Boolean         @default(false)
-  sentAt        DateTime?
+  id              String          @id @default(uuid())
+  tenantId        String?
+  orderId         String
+  menuItemId      String
+  quantity        Int
+  unitPrice       Decimal         @db.Decimal(10, 2)
+  totalPrice      Decimal         @db.Decimal(10, 2)
+  status          OrderItemStatus @default(PENDING)
+  notes           String?
+  modifiers       Json?
+  sentToKitchen   Boolean         @default(false)
+  sentAt          DateTime?
   /// ของสำเร็จรูปถูกหักออกจากสต๊อกไปแล้วเมื่อไหร่ — ว่างแปลว่ายังกันไว้เฉย ๆ ยังไม่ได้หัก
   /// ตัวนี้เป็นตัวชี้ขาดว่าบรรทัดนี้ "ถูกนับไปแล้ว" กันตัดซ้ำตอนปิดบิล และกันนับซ้อน
   /// ตอนคำนวณของที่ค้างอยู่ในบิลที่ยังไม่ปิด
   stockDeductedAt DateTime?
-  preparedAt    DateTime?
-  servedAt      DateTime?
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
-  menuItem      MenuItem        @relation(fields: [menuItemId], references: [id])
-  order         Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  preparedAt      DateTime?
+  servedAt        DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  menuItem        MenuItem        @relation(fields: [menuItemId], references: [id])
+  order           Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([orderId])
   @@index([menuItemId])
@@ -3515,25 +3515,31 @@ model RetailPromotion {
 }
 
 model RetailPromoCode {
-  id              String              @id @default(uuid())
-  tenantId        String
-  promotionId     String
+  id                 String              @id @default(uuid())
+  tenantId           String
+  promotionId        String
   /// เก็บเป็นตัวพิมพ์ใหญ่เสมอ
-  code            String              @db.VarChar(40)
-  kind            RetailPromoCodeKind @default(SHARED)
+  code               String              @db.VarChar(40)
+  kind               RetailPromoCodeKind @default(SHARED)
   /// null = ไม่จำกัด (UNIQUE ตั้งเป็น 1)
-  maxUses         Int?
-  usedCount       Int                 @default(0)
-  isActive        Boolean             @default(true)
+  maxUses            Int?
+  usedCount          Int                 @default(0)
+  isActive           Boolean             @default(true)
   /// โค้ดที่ออกให้สมาชิกคนเดียว — คนอื่นใช้ไม่ได้
-  issuedToGuestId String?
-  expiresAt       DateTime?
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
-  promotion       RetailPromotion     @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  issuedToGuestId    String?
+  expiresAt          DateTime?
+  /// ออกผ่านแคมเปญ CRM ไหน (ติดตาม sent → redeemed)
+  campaignId         String?             @db.VarChar(36)
+  /// 1 delivery = 1 โค้ด — retry ของคิวได้โค้ดเดิม ไม่ออกซ้ำ
+  campaignDeliveryId String?             @unique @db.VarChar(36)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  promotion          RetailPromotion     @relation(fields: [promotionId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, code])
   @@index([promotionId])
+  @@index([campaignId])
+  @@index([issuedToGuestId])
   @@map("retail_promo_codes")
 }
 
@@ -7333,31 +7339,36 @@ model LoyaltyTransaction {
 /// One-off or recurring campaign. Audience is resolved at dispatch time
 /// from `audienceQuery` (JSON with segmentation rules).
 model CrmCampaign {
-  id              String                @id @default(uuid()) @db.VarChar(36)
-  tenantId        String                @db.VarChar(36)
-  name            String                @db.VarChar(200)
-  description     String?               @db.Text
-  channel         String                @db.VarChar(20) // email, line, sms, push
-  templateKey     String?               @db.VarChar(100) // handlebars template name
-  subject         String?               @db.VarChar(255) // for email/sms
-  bodyOverride    String?               @db.Text // raw content if no template
-  audienceQuery   String?               @db.Text // JSON: { segment, contactType, tags, minLtv, ... }
-  status          String                @default("draft") @db.VarChar(20) // draft, scheduled, running, completed, cancelled
-  scheduledAt     DateTime?
-  startedAt       DateTime?
-  completedAt     DateTime?
-  totalRecipients Int                   @default(0)
-  totalSent       Int                   @default(0)
-  totalOpened     Int                   @default(0)
-  totalClicked    Int                   @default(0)
-  totalFailed     Int                   @default(0)
-  createdById     String?               @db.VarChar(36)
-  createdAt       DateTime              @default(now())
-  updatedAt       DateTime              @updatedAt
-  deliveries      CrmCampaignDelivery[]
+  id                 String                @id @default(uuid()) @db.VarChar(36)
+  tenantId           String                @db.VarChar(36)
+  name               String                @db.VarChar(200)
+  description        String?               @db.Text
+  channel            String                @db.VarChar(20) // email, line, sms, push
+  templateKey        String?               @db.VarChar(100) // handlebars template name
+  subject            String?               @db.VarChar(255) // for email/sms
+  bodyOverride       String?               @db.Text // raw content if no template
+  audienceQuery      String?               @db.Text // JSON: { segment, contactType, tags, minLtv, ... }
+  status             String                @default("draft") @db.VarChar(20) // draft, scheduled, running, completed, cancelled
+  scheduledAt        DateTime?
+  startedAt          DateTime?
+  completedAt        DateTime?
+  totalRecipients    Int                   @default(0)
+  totalSent          Int                   @default(0)
+  totalOpened        Int                   @default(0)
+  totalClicked       Int                   @default(0)
+  totalFailed        Int                   @default(0)
+  createdById        String?               @db.VarChar(36)
+  /// แคมเปญแจกโค้ด: ออกโค้ด UNIQUE ของโปรนี้ให้ผู้รับทีละคน (RetailPromoCode.campaignId)
+  promotionId        String?               @db.VarChar(36)
+  /// โค้ดที่ออกให้หมดอายุกี่วันหลังส่ง — null = ตามวันจบของโปร
+  promoCodeValidDays Int?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  deliveries         CrmCampaignDelivery[]
 
   @@index([tenantId, status])
   @@index([tenantId, scheduledAt])
+  @@index([promotionId])
   @@map("crm_campaigns")
 }
 

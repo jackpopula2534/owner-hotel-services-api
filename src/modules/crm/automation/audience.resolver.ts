@@ -33,6 +33,13 @@ export class AudienceResolver {
     }
   }
 
+  /** ผู้รับคนนี้ส่งทางช่องทางนี้ได้ไหม — adapter ตรวจรอบสุดท้ายอีกที */
+  static isEligibleForChannel(channel: string, member: AudienceMember): boolean {
+    if (channel === 'email') return !!member.email;
+    // line/sms/push require guestId — adapters perform the final eligibility check
+    return !!member.guestId;
+  }
+
   async resolve(tenantId: string, query: AudienceQueryDto): Promise<AudienceMember[]> {
     if (!tenantId) return [];
 

@@ -3,7 +3,8 @@ import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AudienceResolver } from './audience.resolver';
-import { CreateCampaignDto, QueryCampaignsDto, UpdateCampaignDto } from './dto/campaign.dto';
+import { CampaignPromoCodeService } from './campaign-promo-code.service';
+import { CreateCampaignDto, EstimateAudienceDto, QueryCampaignsDto, UpdateCampaignDto } from './dto/campaign.dto';
 import { CRM_CAMPAIGN_QUEUE, CAMPAIGN_JOB, DispatchJobData } from './campaign.constants';
 
 /**
@@ -22,8 +23,11 @@ export class CampaignService {
     'subject',
     'bodyOverride',
     'audienceQuery',
+    'promotionId',
+    'promoCodeValidDays',
   ] as const;
 
+  /** promotionId แก้ไม่ได้หลังสร้าง — โค้ดที่ออกไปแล้วผูกกับโปรเดิม */
   private static readonly WRITABLE_UPDATE = [
     'name',
     'description',
@@ -31,11 +35,13 @@ export class CampaignService {
     'bodyOverride',
     'templateKey',
     'audienceQuery',
+    'promoCodeValidDays',
   ] as const;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly audience: AudienceResolver,
+    private readonly promoCodes: CampaignPromoCodeService,
     @InjectQueue(CRM_CAMPAIGN_QUEUE) private readonly queue: Queue,
   ) {}
 
@@ -50,6 +56,7 @@ export class CampaignService {
     if (query.status) where.status = query.status;
     if (query.channel) where.channel = query.channel;
     if (query.search) where.name = { contains: query.search };
+    if (query.promotionId) where.promotionId = query.promotionId;
 
     try {
       const [data, total] = await Promise.all([
@@ -85,6 +92,7 @@ export class CampaignService {
     if (dto.channel === 'email' && !dto.subject && !dto.templateKey) {
       throw new BadRequestException('Email campaigns require subject or templateKey');
     }
+    if (dto.promotionId) await this.promoCodes.assertLinkable(tenantId, dto.promotionId, dto.channel);
 
     const sanitized: Record<string, unknown> = {};
     for (const key of CampaignService.WRITABLE_CREATE) {
@@ -118,6 +126,26 @@ export class CampaignService {
     if (dto.scheduledAt) sanitized.scheduledAt = new Date(dto.scheduledAt);
 
     return this.prisma.crmCampaign.update({ where: { id }, data: sanitized });
+  }
+
+  /** ขนาดกลุ่มเป้าหมายก่อนสร้างแคมเปญ (หน้าแจกโค้ดโปรใช้) */
+  async estimateAudience(dto: EstimateAudienceDto, tenantId: string) {
+    if (!tenantId) throw new BadRequestException('Tenant ID is required');
+    const { channel, ...query } = dto;
+    // นับแบบเดียวกับตอน dispatch: ยินยอม PDPA + ช่องทางส่งถึงได้ — ไม่ใช่จำนวน contact ดิบ
+    const [estimatedSize, members] = await Promise.all([
+      this.audience.estimateSize(tenantId, query),
+      this.audience.resolve(tenantId, query),
+    ]);
+    const reachable = channel
+      ? members.filter((m) => AudienceResolver.isEligibleForChannel(channel, m)).length
+      : members.length;
+    return { estimatedSize, consented: members.length, reachable, query };
+  }
+
+  async listForPromotion(promotionId: string, tenantId: string) {
+    if (!tenantId) throw new BadRequestException('Tenant ID is required');
+    return this.promoCodes.listForPromotion(tenantId, promotionId);
   }
 
   /** Returns the resolved audience size for a campaign without sending. */
@@ -181,6 +209,7 @@ export class CampaignService {
       clickRate: campaign.totalSent > 0 ? campaign.totalClicked / campaign.totalSent : 0,
       startedAt: campaign.startedAt,
       completedAt: campaign.completedAt,
+      promo: await this.promoCodes.statsForCampaign(tenantId, campaign),
     };
   }
 

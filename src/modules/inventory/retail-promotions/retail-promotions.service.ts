@@ -1,4 +1,3 @@
-import { randomBytes } from 'crypto';
 import {
   ConflictException,
   Injectable,
@@ -19,6 +18,7 @@ import {
   jsonStringList,
   normalizeCode,
   promoError,
+  randomPromoCode,
   PromoCartLine,
   round2,
 } from './promotion-engine';
@@ -34,9 +34,6 @@ import {
 
 /** Either the root client or an interactive-transaction client. */
 type Db = Prisma.TransactionClient;
-
-/** ไม่มี 0/O/1/I — แคชเชียร์อ่านโค้ดจากจอลูกค้าแล้วพิมพ์ไม่พลาด */
-const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 /** PDPA consent version recorded when a member signs up at the POS. */
 const POS_CONSENT_VERSION = '1.0';
@@ -271,7 +268,7 @@ export class RetailPromotionsService {
     const created: string[] = [];
     // ชนกับโค้ดเดิมได้ (น้อยมาก) — createMany skipDuplicates แล้วสุ่มเติมจนครบ
     for (let attempt = 0; attempt < 5 && created.length < dto.count; attempt++) {
-      const batch = Array.from({ length: dto.count - created.length }, () => prefix + this.randomCode(8));
+      const batch = Array.from({ length: dto.count - created.length }, () => prefix + randomPromoCode(8));
       await this.prisma.retailPromoCode.createMany({
         data: batch.map((code) => ({
           tenantId,
@@ -883,13 +880,6 @@ export class RetailPromotionsService {
       budgetQty: g.budgetQty,
       issuedQty: g.issuedQty,
     };
-  }
-
-  private randomCode(length: number): string {
-    const bytes = randomBytes(length);
-    let out = '';
-    for (let i = 0; i < length; i++) out += CODE_ALPHABET[bytes[i] % CODE_ALPHABET.length];
-    return out;
   }
 }
 

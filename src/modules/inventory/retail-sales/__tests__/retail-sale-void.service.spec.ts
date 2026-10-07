@@ -1,3 +1,4 @@
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Test } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { RevenueSourceType } from '@prisma/client';
@@ -78,6 +79,9 @@ function buildFolioPosting() {
   return { reverseChargeWithin: jest.fn().mockResolvedValue(null) };
 }
 
+/** CRM events — ส่งหลัง commit */
+const events = { emit: jest.fn() };
+
 async function makeService(
   prisma: any,
   folio = buildFolioPosting(),
@@ -88,6 +92,7 @@ async function makeService(
       RetailSaleVoidService,
       RetailPromotionsService,
       { provide: PrismaService, useValue: prisma },
+      { provide: EventEmitter2, useValue: events },
       { provide: FolioPostingService, useValue: folio },
       { provide: RevenuePostingService, useValue: revenue },
     ],
@@ -230,6 +235,33 @@ describe('RetailSaleVoidService', () => {
       where: { tenantId: TENANT, promotionId: 'promo-1', itemId: 'item-tote', issuedQty: { gte: 1 } },
       data: { issuedQty: { decrement: 1 } },
     });
+  });
+
+  it('บิลสมาชิก: หลังยกเลิกสำเร็จส่ง event ให้ CRM หักยอดสะสม', async () => {
+    events.emit.mockClear();
+    const prisma = buildPrisma();
+    prisma.retailSale.findFirst.mockResolvedValue({
+      ...SALE,
+      grandTotal: 192.6,
+      memberGuestId: 'guest-1',
+      memberContactId: 'contact-1',
+    });
+    const { service } = await makeService(prisma);
+    await service.void(SALE_ID, TENANT, USER, 'ขายผิด');
+    expect(events.emit).toHaveBeenCalledWith(
+      'retail.member_sale.voided',
+      expect.objectContaining({ tenantId: TENANT, guestId: 'guest-1', saleId: SALE_ID, amount: 192.6 }),
+    );
+  });
+
+  it('ยกเลิกไม่สำเร็จ = ไม่ส่ง event', async () => {
+    events.emit.mockClear();
+    const prisma = buildPrisma();
+    prisma.retailSale.findFirst.mockResolvedValue({ ...SALE, memberGuestId: 'guest-1', grandTotal: 10 });
+    prisma.retailSale.updateMany.mockResolvedValue({ count: 0 });
+    const { service } = await makeService(prisma);
+    await expect(service.void(SALE_ID, TENANT, USER, 'ขายผิด')).rejects.toBeDefined();
+    expect(events.emit).not.toHaveBeenCalled();
   });
 
   it('บิลไม่ได้ใช้โค้ด = ไม่แตะตัวนับโปร', async () => {

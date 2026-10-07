@@ -6,6 +6,8 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
+  Max,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -55,6 +57,14 @@ export class AudienceQueryDto {
   minTotalStays?: number;
 }
 
+/** ประเมินกลุ่มเป้าหมายก่อนสร้างแคมเปญ — ระบุช่องทางเพื่อนับเฉพาะคนที่ส่งถึงได้จริง */
+export class EstimateAudienceDto extends AudienceQueryDto {
+  @ApiProperty({ required: false, enum: CAMPAIGN_CHANNELS })
+  @IsOptional()
+  @IsEnum(CAMPAIGN_CHANNELS)
+  channel?: (typeof CAMPAIGN_CHANNELS)[number];
+}
+
 export class CreateCampaignDto {
   @ApiProperty()
   @IsString()
@@ -94,6 +104,18 @@ export class CreateCampaignDto {
   @IsOptional()
   @IsDateString()
   scheduledAt?: string;
+
+  @ApiProperty({ required: false, description: 'แคมเปญแจกโค้ด: ออกโค้ด UNIQUE ของโปรนี้ให้ผู้รับทีละคน' })
+  @IsOptional()
+  @IsUUID()
+  promotionId?: string;
+
+  @ApiProperty({ required: false, description: 'โค้ดหมดอายุกี่วันหลังส่ง (ไม่เกินวันจบโปร)' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(365)
+  promoCodeValidDays?: number;
 }
 
 export class UpdateCampaignDto {
@@ -131,6 +153,13 @@ export class UpdateCampaignDto {
   @IsOptional()
   @IsDateString()
   scheduledAt?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(365)
+  promoCodeValidDays?: number;
 }
 
 export class QueryCampaignsDto {
@@ -148,6 +177,11 @@ export class QueryCampaignsDto {
   @IsOptional()
   @IsEnum(CAMPAIGN_CHANNELS)
   channel?: (typeof CAMPAIGN_CHANNELS)[number];
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsUUID()
+  promotionId?: string;
 
   @ApiProperty({ required: false })
   @IsOptional()

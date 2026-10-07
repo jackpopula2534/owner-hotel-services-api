@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -11,7 +12,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CampaignService } from './campaign.service';
-import { CreateCampaignDto, QueryCampaignsDto, UpdateCampaignDto } from './dto/campaign.dto';
+import { CreateCampaignDto, EstimateAudienceDto, QueryCampaignsDto, UpdateCampaignDto } from './dto/campaign.dto';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../../common/guards/roles.guard';
 import { Roles } from '../../../common/decorators/roles.decorator';
@@ -29,6 +30,23 @@ export class CampaignController {
   @Roles('admin', 'manager', 'tenant_admin', 'platform_admin', 'crm_manager', 'crm_agent')
   async findAll(@Query() query: QueryCampaignsDto, @CurrentUser() user: { tenantId?: string }) {
     return this.campaigns.findAll(query, user?.tenantId);
+  }
+
+  @Get('by-promotion/:promotionId')
+  @ApiOperation({ summary: 'Promo-code campaigns of a retail promotion with sent → redeemed stats' })
+  @Roles('admin', 'manager', 'tenant_admin', 'platform_admin', 'crm_manager', 'crm_agent')
+  async byPromotion(
+    @Param('promotionId', new ParseUUIDPipe()) promotionId: string,
+    @CurrentUser() user: { tenantId: string },
+  ) {
+    return this.campaigns.listForPromotion(promotionId, user.tenantId);
+  }
+
+  @Post('audience-estimate')
+  @ApiOperation({ summary: 'Estimate audience size for a segment query before creating a campaign' })
+  @Roles('admin', 'manager', 'tenant_admin', 'platform_admin', 'crm_manager')
+  async estimateAudience(@Body() query: EstimateAudienceDto, @CurrentUser() user: { tenantId: string }) {
+    return this.campaigns.estimateAudience(query, user.tenantId);
   }
 
   @Get(':id')

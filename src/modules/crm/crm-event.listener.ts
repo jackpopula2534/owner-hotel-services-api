@@ -8,8 +8,13 @@ import {
   BookingEventPayload,
   CRM_EVENTS,
   MessageEventPayload,
+  PromoRedeemedEventPayload,
+  RetailMemberSaleEventPayload,
   ReviewEventPayload,
 } from './crm.events';
+
+/** tag ที่ติดให้สมาชิกที่เคยใช้โค้ดโปรร้านค้า — ใช้ทำ segment แคมเปญต่อได้ */
+export const PROMO_REDEEMER_TAG = 'promo-redeemer';
 
 /**
  * Subscribes CRM module to domain events emitted from bookings, reviews,
@@ -104,5 +109,27 @@ export class CrmEventListener {
       priority: 'high',
       metadata: { conversationId: payload.conversationId },
     });
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // Retail POS (ร้านค้า) → lifetimeValue + tag ผู้ใช้โค้ดโปร
+  // ส่งหลังทรานแซกชันขาย/ยกเลิก commit — CRM ล้มต้องไม่กระทบบิล
+  // ──────────────────────────────────────────────────────────
+  @OnEvent(CRM_EVENTS.RETAIL_MEMBER_SALE, { async: true })
+  async onRetailMemberSale(payload: RetailMemberSaleEventPayload): Promise<void> {
+    if (!payload?.tenantId || !payload?.guestId) return;
+    await this.contacts.recordRetailSale(payload.tenantId, payload.guestId, payload.amount);
+  }
+
+  @OnEvent(CRM_EVENTS.RETAIL_MEMBER_SALE_VOIDED, { async: true })
+  async onRetailMemberSaleVoided(payload: RetailMemberSaleEventPayload): Promise<void> {
+    if (!payload?.tenantId || !payload?.guestId) return;
+    await this.contacts.recordRetailSale(payload.tenantId, payload.guestId, -payload.amount);
+  }
+
+  @OnEvent(CRM_EVENTS.PROMO_REDEEMED, { async: true })
+  async onPromoRedeemed(payload: PromoRedeemedEventPayload): Promise<void> {
+    if (!payload?.tenantId || !payload?.guestId) return;
+    await this.contacts.addTags(payload.tenantId, payload.guestId, [PROMO_REDEEMER_TAG]);
   }
 }

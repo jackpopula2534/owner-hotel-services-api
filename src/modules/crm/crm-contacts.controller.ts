@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CrmContactsService } from './crm-contacts.service';
+import { CrmContactPromotionsService } from './crm-contact-promotions.service';
 import { CreateContactDto, QueryContactsDto, UpdateContactDto } from './dto/create-contact.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -26,7 +27,10 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 @UseGuards(JwtAuthGuard, RolesGuard, AddonGuard)
 @RequireAddon('CRM_MODULE')
 export class CrmContactsController {
-  constructor(private readonly contacts: CrmContactsService) {}
+  constructor(
+    private readonly contacts: CrmContactsService,
+    private readonly contactPromotions: CrmContactPromotionsService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'List CRM contacts with filtering' })
@@ -48,6 +52,13 @@ export class CrmContactsController {
   async stayHistory(@Param('id') id: string, @CurrentUser() user: { tenantId: string }) {
     const bookings = await this.contacts.getStayHistory(id, user.tenantId);
     return { bookings };
+  }
+
+  @Get(':id/promotions')
+  @ApiOperation({ summary: 'Retail promo history of a contact: redemptions + codes issued to them' })
+  @Roles('admin', 'manager', 'tenant_admin', 'platform_admin', 'crm_agent', 'crm_manager')
+  async promotions(@Param('id') id: string, @CurrentUser() user: { tenantId: string }) {
+    return this.contactPromotions.history(id, user.tenantId);
   }
 
   @Post()

@@ -97,9 +97,16 @@ Guest (guests)              ← ตัวตนสมาชิก: ชื่อ 
 - ข้อจำกัดที่รู้: transfer เดิมย้ายแค่ยอด **ไม่ย้ายล็อต**; 403 ของ role ที่ไม่ใช่ผู้จัดการยังไม่ได้ทดสอบสด (บัญชี staff ล็อกอินแดชบอร์ดหลักไม่ได้) — อาศัย RolesGuard; ยังไม่ได้ทดสอบผ่านเบราว์เซอร์ (Chrome เปิด localhost ไม่ได้ในรอบนี้)
 
 ### Phase 3 — CRM
-- [ ] ออกโค้ด UNIQUE ให้สมาชิกตาม segment ผ่าน `CrmCampaign` (LINE/อีเมล) + ติดตาม sent → redeemed
-- [ ] event `PROMO_REDEEMED` → crm-event.listener (tag, automation, lifetimeValue retail)
-- [ ] หน้า Contact 360 แสดงประวัติการใช้โปร
+- [x] ออกโค้ด UNIQUE ให้สมาชิกตาม segment ผ่าน `CrmCampaign` (LINE/อีเมล) + ติดตาม sent → redeemed
+  - `CrmCampaign.promotionId` + `promoCodeValidDays` (ล็อก promotionId หลังสร้าง), `RetailPromoCode.campaignId` + `campaignDeliveryId @unique` (ออกซ้ำไม่ได้ต่อ delivery)
+  - processor ออกโค้ด (maxUses 1, ผูก issuedToGuestId) **ก่อน**ส่ง → ส่งพัง = ปิดโค้ดทิ้ง; ข้อความแทน `{{promoCode}}` / `{{promoExpiresAt}}` (ไม่ใส่ = ต่อท้ายให้)
+  - วันหมดอายุ = min(ส่ง + N วัน, วันจบโปร); ช่องทางรับได้เฉพาะ line/email
+  - `GET /crm/campaigns/by-promotion/:id`, `POST /crm/campaigns/audience-estimate`, stats `promo` ใน `GET /crm/campaigns/:id/stats`
+  - FE: ส่วน "ส่งโค้ดให้สมาชิก (CRM)" ใน drawer โปร + `SendPromoCodesModal` (นับผู้รับสด)
+- [x] event `PROMO_REDEEMED` → crm-event.listener (tag, automation, lifetimeValue retail)
+  - emit หลัง commit: `RETAIL_MEMBER_SALE` (LTV +), `RETAIL_MEMBER_SALE_VOIDED` (LTV −), `PROMO_REDEEMED` (tag `promo-redeemer` + journey trigger `retail.promo_redeemed`)
+- [x] หน้า Contact 360 แสดงประวัติการใช้โปร — `GET /crm/contacts/:id/promotions` + ปุ่ม 🏷 ในการ์ดผู้ติดต่อ (`ContactPromoHistoryModal`)
+- ข้อจำกัดที่รู้: journey dedupe ต่อ (journey, guest, booking=null) → journey โปรลงทะเบียนสมาชิกได้ครั้งเดียว; tag `promo-redeemer` ไม่ถูกถอดตอน void (ถือเป็นประวัติ)
 
 ### Phase 4 — ทางเลือก
 - [ ] Loyalty: แลกแต้มเป็นโค้ด / ให้แต้มจากยอดหลังส่วนลด
@@ -122,3 +129,8 @@ Guest (guests)              ← ตัวตนสมาชิก: ชื่อ 
 - ทดสอบสด: void RCP-202610-0003 คืนสต็อก/ตัวนับครบ, void ซ้ำ = `SALE_ALREADY_VOIDED`; auto-pause โปรของแถมอย่างเดียวงบ 1 หยุดเองหลังขาย 1 บิล; รายงาน TOTE300 = 1 บิล + 1 ยกเลิก; โอน WH-RETAIL ↔ WH-GIFT ได้ทั้งสองทาง
 - เทสต์: backend retail-sales/promotions/minibar 111 ผ่าน, frontend ที่เกี่ยวข้อง 37 ผ่าน, tsc ทั้งสอง repo 0 error
 
+### 2026-10-07 — Phase 3 เสร็จ (ยังไม่ commit)
+- Backend: migration `20261007150000_retail_promotion_crm_campaign`, `CampaignPromoCodeService`, processor ออก/ถอนโค้ดต่อ delivery, `retail-sale-events.ts` + listener (LTV/tag/journey), `CrmContactPromotionsService`
+- ทดสอบสด: แคมเปญ VIP อีเมล 2 คน → โค้ด UNIQUE 2 ใบ (14 วัน) · สมาชิกอื่นใช้โค้ด = `PROMO_CODE_NOT_YOURS` · เจ้าของใช้ได้ (RCP-202610-0001 ลด 50) · ใช้ซ้ำ = `PROMO_CODE_USED_UP` · LTV 481.50 + tag · stats issued 2 / redeemed 1 · void → LTV 0, redeemed 0, โค้ดกลับเป็น available
+- แก้ระหว่างทาง: หน้าสร้างแคมเปญ CRM เดิมส่ง `bodyText` (ฟิลด์ไม่มีใน DTO → 400 ทุกครั้ง) และ audienceQuery ผิดรูป — แก้เป็น `bodyOverride` + JSON string แล้ว
+- เทสต์: backend crm + retail 22 suites / 258 ผ่าน, frontend Phase 3 12 ผ่าน (+ Phase 1–2 29, CRM terminal 8), tsc ทั้งสอง repo 0 error

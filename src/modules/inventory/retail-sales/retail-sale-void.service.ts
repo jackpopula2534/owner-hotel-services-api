@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma, RetailSaleStatus, RevenueSourceType } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
 import {
@@ -8,6 +9,7 @@ import {
 } from '@/modules/accounts-receivable/folio-posting/folio-posting.service';
 import { RevenuePostingService } from '@/modules/revenue/revenue-posting.service';
 import { RetailPromotionsService } from '../retail-promotions/retail-promotions.service';
+import { emitRetailSaleVoided } from './retail-sale-events';
 
 /** referenceType ของการตัดสต็อกตอนขาย → referenceType ของการคืนสต็อกตอน void */
 const VOID_REFERENCE: Record<string, string> = {
@@ -54,6 +56,7 @@ export class RetailSaleVoidService {
     private readonly folioPosting: FolioPostingService,
     private readonly revenuePosting: RevenuePostingService,
     private readonly promotions: RetailPromotionsService,
+    private readonly events: EventEmitter2,
   ) {}
 
   async void(
@@ -116,6 +119,7 @@ export class RetailSaleVoidService {
     this.logger.log(
       `Retail sale ${sale.receiptNo} voided by ${userId} (tenant ${tenantId}, restocked ${result.restockedQty})`,
     );
+    emitRetailSaleVoided(this.events, sale);
     return {
       id: sale.id,
       receiptNo: sale.receiptNo,

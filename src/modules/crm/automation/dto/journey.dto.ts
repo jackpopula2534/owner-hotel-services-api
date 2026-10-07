@@ -17,6 +17,7 @@ export const JOURNEY_TRIGGERS = [
   'booking.checked_in',
   'booking.checked_out',
   'guest.birthday',
+  'retail.promo_redeemed',
   'manual',
 ] as const;
 

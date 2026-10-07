@@ -201,4 +201,65 @@ export class CrmContactsService {
       this.logger.error(`Failed to record stay for guest ${guestId}: ${(error as Error).message}`);
     }
   }
+  /**
+   * บิลร้านค้าที่ผูกสมาชิก — เพิ่ม lifetimeValue (คืนเมื่อบิลถูกยกเลิก: amount ติดลบ)
+   * ไม่ปล่อยให้ติดลบ แม้ข้อมูลเก่าจะไม่ตรง · fail แบบเงียบเหมือน recordStayCompletion
+   */
+  async recordRetailSale(tenantId: string, guestId: string, amount: number): Promise<void> {
+    if (!amount) return;
+    try {
+      const contact = await this.upsertFromGuest(tenantId, guestId);
+      if (amount > 0) {
+        await this.prisma.crmContact.update({
+          where: { id: contact.id },
+          data: { lifetimeValue: { increment: amount } },
+        });
+        return;
+      }
+      const refund = -amount;
+      const dec = await this.prisma.crmContact.updateMany({
+        where: { id: contact.id, tenantId, lifetimeValue: { gte: refund } },
+        data: { lifetimeValue: { decrement: refund } },
+      });
+      if (dec.count === 0) {
+        await this.prisma.crmContact.updateMany({
+          where: { id: contact.id, tenantId },
+          data: { lifetimeValue: 0 },
+        });
+      }
+    } catch (error) {
+      this.logger.error(`Failed to record retail sale for guest ${guestId}: ${(error as Error).message}`);
+    }
+  }
+
+  /** เพิ่ม tag (ไม่ซ้ำ) ให้ contact ของ guest — tags เก็บเป็น JSON array */
+  async addTags(tenantId: string, guestId: string, tags: string[]): Promise<void> {
+    try {
+      const contact = await this.upsertFromGuest(tenantId, guestId);
+      const current = parseTags(contact.tags);
+      const next = [...current, ...tags.filter((t) => !current.includes(t))];
+      if (next.length === current.length) return;
+      await this.prisma.crmContact.update({
+        where: { id: contact.id },
+        data: { tags: JSON.stringify(next) },
+      });
+    } catch (error) {
+      this.logger.error(`Failed to tag guest ${guestId}: ${(error as Error).message}`);
+    }
+  }
+}
+
+/** tags เก่าอาจเป็น JSON เสีย/คั่นด้วย comma — อ่านแบบยอมรับทุกแบบ ไม่ทิ้ง tag เดิม */
+export function parseTags(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed.filter((t): t is string => typeof t === 'string' && t !== '');
+  } catch {
+    // fall through
+  }
+  return raw
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean);
 }

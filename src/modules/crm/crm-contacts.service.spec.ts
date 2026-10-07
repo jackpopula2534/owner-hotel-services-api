@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { CrmContactsService } from './crm-contacts.service';
+import { CrmContactsService, parseTags } from './crm-contacts.service';
 import { PrismaService } from '../../prisma/prisma.service';
 
 describe('CrmContactsService', () => {
@@ -14,6 +14,7 @@ describe('CrmContactsService', () => {
       create: jest.fn(),
       update: jest.fn(),
       delete: jest.fn(),
+      updateMany: jest.fn(),
     },
     guest: {
       findMany: jest.fn(),
@@ -162,6 +163,67 @@ describe('CrmContactsService', () => {
     it('does not throw when upsert fails (logs only)', async () => {
       mockPrisma.crmContact.findFirst.mockRejectedValue(new Error('db down'));
       await expect(service.recordStayCompletion('t1', 'g1', 1000)).resolves.toBeUndefined();
+    });
+  });
+
+  describe('recordRetailSale', () => {
+    beforeEach(() => mockPrisma.crmContact.findFirst.mockResolvedValue({ id: 'ct1', tags: null }));
+
+    it('increments lifetime value for a sale', async () => {
+      await service.recordRetailSale('t1', 'g1', 450);
+      expect(mockPrisma.crmContact.update).toHaveBeenCalledWith({
+        where: { id: 'ct1' },
+        data: { lifetimeValue: { increment: 450 } },
+      });
+    });
+
+    it('decrements on void, guarded against going negative', async () => {
+      mockPrisma.crmContact.updateMany.mockResolvedValueOnce({ count: 1 });
+      await service.recordRetailSale('t1', 'g1', -450);
+      expect(mockPrisma.crmContact.updateMany).toHaveBeenCalledWith({
+        where: { id: 'ct1', tenantId: 't1', lifetimeValue: { gte: 450 } },
+        data: { lifetimeValue: { decrement: 450 } },
+      });
+      expect(mockPrisma.crmContact.updateMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('floors at zero when the refund exceeds the recorded value', async () => {
+      mockPrisma.crmContact.updateMany.mockResolvedValueOnce({ count: 0 }).mockResolvedValueOnce({ count: 1 });
+      await service.recordRetailSale('t1', 'g1', -450);
+      expect(mockPrisma.crmContact.updateMany).toHaveBeenLastCalledWith({
+        where: { id: 'ct1', tenantId: 't1' },
+        data: { lifetimeValue: 0 },
+      });
+    });
+
+    it('never throws', async () => {
+      mockPrisma.crmContact.findFirst.mockRejectedValue(new Error('db down'));
+      await expect(service.recordRetailSale('t1', 'g1', 10)).resolves.toBeUndefined();
+    });
+  });
+
+  describe('addTags', () => {
+    it('merges without duplicates', async () => {
+      mockPrisma.crmContact.findFirst.mockResolvedValue({ id: 'ct1', tags: '["vip"]' });
+      await service.addTags('t1', 'g1', ['vip', 'promo-redeemer']);
+      expect(mockPrisma.crmContact.update).toHaveBeenCalledWith({
+        where: { id: 'ct1' },
+        data: { tags: JSON.stringify(['vip', 'promo-redeemer']) },
+      });
+    });
+
+    it('skips the write when every tag is already present', async () => {
+      mockPrisma.crmContact.findFirst.mockResolvedValue({ id: 'ct1', tags: '["promo-redeemer"]' });
+      await service.addTags('t1', 'g1', ['promo-redeemer']);
+      expect(mockPrisma.crmContact.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('parseTags', () => {
+    it('reads JSON arrays and legacy comma text', () => {
+      expect(parseTags('["a","b",""]')).toEqual(['a', 'b']);
+      expect(parseTags('a, b ,c')).toEqual(['a', 'b', 'c']);
+      expect(parseTags(null)).toEqual([]);
     });
   });
 });

@@ -2,8 +2,15 @@ import { Process, Processor } from '@nestjs/bull';
 import { Injectable, Logger } from '@nestjs/common';
 import { Job } from 'bull';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { AudienceMember, AudienceResolver } from './audience.resolver';
+import { AudienceResolver } from './audience.resolver';
 import { ChannelRegistry } from './channels/channel.registry';
+import { OutboundMessage } from './channels/channel.types';
+import {
+  CampaignPromoCodeService,
+  IssuedPromoCode,
+  PROMO_CODE_PLACEHOLDER,
+  renderPromoMessage,
+} from './campaign-promo-code.service';
 import {
   CAMPAIGN_JOB,
   CRM_CAMPAIGN_QUEUE,
@@ -27,6 +34,7 @@ export class CampaignProcessor {
     private readonly prisma: PrismaService,
     private readonly audience: AudienceResolver,
     private readonly channels: ChannelRegistry,
+    private readonly promoCodes: CampaignPromoCodeService,
   ) {}
 
   // ──────────────────────────────────────────────────────────
@@ -66,7 +74,7 @@ export class CampaignProcessor {
     );
 
     // Filter by adapter eligibility
-    const eligible = audience.filter((m) => this.isEligibleForChannel(campaign.channel, m));
+    const eligible = audience.filter((m) => AudienceResolver.isEligibleForChannel(campaign.channel, m));
     this.logger.log(
       `dispatch ${campaignId}: ${audience.length} resolved · ${eligible.length} eligible (${campaign.channel})`,
     );
@@ -137,29 +145,64 @@ export class CampaignProcessor {
       return;
     }
 
-    const result = await adapter.send({
+    const message: OutboundMessage = {
       tenantId,
       recipient: delivery.recipient,
       guestId: delivery.guestId,
       subject: campaign.subject,
       templateKey: campaign.templateKey,
       bodyOverride: campaign.bodyOverride,
-    });
+    };
+
+    // แคมเปญแจกโค้ด: ออกโค้ด UNIQUE ของผู้รับคนนี้ก่อนส่ง — ออกไม่ได้ = ไม่ส่งข้อความเปล่า
+    let promoCode: IssuedPromoCode | null = null;
+    if (campaign.promotionId) {
+      const issued = await this.promoCodes.issueForDelivery({
+        tenantId,
+        campaignId,
+        promotionId: campaign.promotionId,
+        deliveryId,
+        guestId: delivery.guestId,
+        validDays: campaign.promoCodeValidDays,
+      });
+      if ('reason' in issued) {
+        this.logger.warn(`deliver-one ${deliveryId}: promo code not issued — ${issued.reason}`);
+        await this.prisma.crmCampaignDelivery.update({
+          where: { id: deliveryId },
+          data: { status: 'failed', errorMessage: issued.reason },
+        });
+        await this.bumpCampaignCounter(campaignId, 'totalFailed');
+        await this.completeIfDrained(campaignId);
+        return;
+      }
+      promoCode = issued.code;
+      message.bodyOverride = renderPromoMessage(campaign.bodyOverride, promoCode.code, promoCode.expiresAt);
+      message.subject = campaign.subject?.split(PROMO_CODE_PLACEHOLDER).join(promoCode.code) ?? campaign.subject;
+      message.context = {
+        promoCode: promoCode.code,
+        promoExpiresAt: promoCode.expiresAt?.toISOString() ?? null,
+      };
+    }
+
+    const result = await adapter.send(message);
 
     if (result.success) {
+      const metadata = {
+        ...(result.providerMessageId ? { providerMessageId: result.providerMessageId } : {}),
+        ...(promoCode ? { promoCodeId: promoCode.id, promoCode: promoCode.code } : {}),
+      };
       await this.prisma.crmCampaignDelivery.update({
         where: { id: deliveryId },
         data: {
           status: 'sent',
           sentAt: new Date(),
-          metadata: result.providerMessageId
-            ? JSON.stringify({ providerMessageId: result.providerMessageId })
-            : null,
+          metadata: Object.keys(metadata).length ? JSON.stringify(metadata) : null,
         },
       });
       await this.bumpCampaignCounter(campaignId, 'totalSent');
     } else {
       this.logger.warn(`deliver-one ${deliveryId} failed: ${result.errorMessage}`);
+      if (promoCode) await this.promoCodes.revokeForDelivery(tenantId, deliveryId);
       await this.prisma.crmCampaignDelivery.update({
         where: { id: deliveryId },
         data: { status: 'failed', errorMessage: result.errorMessage ?? 'unknown' },
@@ -167,6 +210,13 @@ export class CampaignProcessor {
       await this.bumpCampaignCounter(campaignId, 'totalFailed');
     }
 
+    await this.completeIfDrained(campaignId);
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // Helpers
+  // ──────────────────────────────────────────────────────────
+  private async completeIfDrained(campaignId: string) {
     const pendingCount = await this.prisma.crmCampaignDelivery.count({
       where: { campaignId, status: 'pending' },
     });
@@ -176,15 +226,6 @@ export class CampaignProcessor {
         data: { status: 'completed', completedAt: new Date() },
       });
     }
-  }
-
-  // ──────────────────────────────────────────────────────────
-  // Helpers
-  // ──────────────────────────────────────────────────────────
-  private isEligibleForChannel(channel: string, member: AudienceMember): boolean {
-    if (channel === 'email') return !!member.email;
-    // line/sms/push require guestId — adapters perform the final eligibility check
-    return !!member.guestId;
   }
 
   private async bumpCampaignCounter(

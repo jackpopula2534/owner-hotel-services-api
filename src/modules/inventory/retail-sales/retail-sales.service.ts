@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   FolioChargeType,
   Prisma,
@@ -37,6 +38,7 @@ import {
 } from '../retail-promotions/retail-promotions.service';
 import { RetailPromotionHealthService } from '../retail-promotions/retail-promotion-health.service';
 import { promoError, resolveGiftGrant } from '../retail-promotions/promotion-engine';
+import { emitRetailSaleCompleted } from './retail-sale-events';
 
 const MONTHS_TH_SHORT = [
   'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
@@ -81,6 +83,7 @@ export class RetailSalesService {
     private readonly revenue: RevenueQueryService,
     private readonly promotions: RetailPromotionsService,
     private readonly promotionHealth: RetailPromotionHealthService,
+    private readonly events: EventEmitter2,
   ) {}
 
   /**
@@ -349,6 +352,7 @@ export class RetailSalesService {
     });
 
     this.logger.log(`Retail sale ${sale.receiptNo} created (tenant ${tenantId}, total ${sale.grandTotal})`);
+    emitRetailSaleCompleted(this.events, sale);
     return this.toDetail(sale);
   }
 

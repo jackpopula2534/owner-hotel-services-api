@@ -1,3 +1,4 @@
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import {
@@ -96,6 +97,9 @@ function buildPromotionHealth() {
   return { autoPauseIfExhaustedWithin: jest.fn().mockResolvedValue(false) };
 }
 
+/** CRM events — ส่งหลัง commit */
+const events = { emit: jest.fn() };
+
 async function makeService(
   prisma: any,
   folioPosting: any = buildFolioPosting(),
@@ -107,6 +111,7 @@ async function makeService(
     providers: [
       RetailSalesService,
       { provide: PrismaService, useValue: prisma },
+      { provide: EventEmitter2, useValue: events },
       { provide: FolioPostingService, useValue: folioPosting },
       { provide: RevenuePostingService, useValue: revenuePosting },
       { provide: RevenueQueryService, useValue: revenueQuery },
@@ -580,6 +585,7 @@ describe('RetailSalesService', () => {
     });
 
     it('ลดราคา + ตัดของแถมจากคลังของแถมเป็นบรรทัด ฿0 แยกต้นทุนออกจาก costTotal', async () => {
+      events.emit.mockClear();
       const { prisma, service, promotions } = await setup();
       const result = await service.create(dto(), USER, TENANT);
 
@@ -606,6 +612,15 @@ describe('RetailSalesService', () => {
       expect(promotions.recordRedemptionWithin).toHaveBeenCalledWith(
         prisma,
         expect.objectContaining({ giftSkipped: false, giftCost: 40, contactId: 'c1' }),
+      );
+      // หลัง commit → CRM: ยอดสมาชิก (LTV) + ใช้โค้ด (tag/journey)
+      expect(events.emit).toHaveBeenCalledWith(
+        'retail.member_sale.completed',
+        expect.objectContaining({ tenantId: TENANT, guestId: 'g1', contactId: 'c1', amount: 192.6 }),
+      );
+      expect(events.emit).toHaveBeenCalledWith(
+        'retail.promo.redeemed',
+        expect.objectContaining({ guestId: 'g1', code: 'SUMMER10', discountAmount: 20 }),
       );
     });
 
@@ -668,6 +683,14 @@ describe('RetailSalesService', () => {
       expect(promotions.evaluate).not.toHaveBeenCalled();
       expect(promotions.ensureContact).toHaveBeenCalledWith(expect.anything(), TENANT, 'g1');
       expect(promotions.recordRedemptionWithin).not.toHaveBeenCalled();
+    });
+
+    it('บิลสมาชิกไม่มีโค้ด → ส่งเฉพาะ event ยอดสมาชิก ไม่ส่ง promo redeemed', async () => {
+      events.emit.mockClear();
+      const { service } = await setup();
+      await service.create(dto({ promoCode: undefined }), USER, TENANT);
+      const names = events.emit.mock.calls.map((c) => c[0]);
+      expect(names).toEqual(['retail.member_sale.completed']);
     });
   });
 

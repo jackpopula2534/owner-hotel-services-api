@@ -1,3 +1,4 @@
+import { randomBytes } from 'crypto';
 import { BadRequestException } from '@nestjs/common';
 import { RetailPromoDiscountType } from '@prisma/client';
 
@@ -139,4 +140,14 @@ export function jsonStringList(value: unknown): string[] {
 /** Codes are case-insensitive at the counter; stored upper-case. */
 export function normalizeCode(code: string): string {
   return code.trim().toUpperCase();
+}
+
+/** ไม่มี 0/O/1/I — แคชเชียร์อ่านโค้ดจากจอลูกค้าแล้วพิมพ์ไม่พลาด */
+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+export function randomPromoCode(length: number): string {
+  const bytes = randomBytes(length);
+  let out = '';
+  for (let i = 0; i < length; i++) out += CODE_ALPHABET[bytes[i] % CODE_ALPHABET.length];
+  return out;
 }

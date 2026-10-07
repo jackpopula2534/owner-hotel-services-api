@@ -5,6 +5,7 @@ import { CampaignService } from './campaign.service';
 import { AudienceResolver } from './audience.resolver';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CRM_CAMPAIGN_QUEUE } from './campaign.constants';
+import { CampaignPromoCodeService } from './campaign-promo-code.service';
 
 describe('CampaignService', () => {
   let service: CampaignService;
@@ -22,6 +23,13 @@ describe('CampaignService', () => {
 
   const mockResolver = {
     estimateSize: jest.fn(),
+    resolve: jest.fn(),
+  };
+
+  const mockPromoCodes = {
+    assertLinkable: jest.fn(),
+    listForPromotion: jest.fn(),
+    statsForCampaign: jest.fn(),
   };
 
   const mockQueue = {
@@ -36,6 +44,7 @@ describe('CampaignService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: AudienceResolver, useValue: mockResolver },
         { provide: getQueueToken(CRM_CAMPAIGN_QUEUE), useValue: mockQueue },
+        { provide: CampaignPromoCodeService, useValue: mockPromoCodes },
       ],
     }).compile();
     service = module.get(CampaignService);
@@ -55,6 +64,60 @@ describe('CampaignService', () => {
       const r = await service.create({ name: 'x', channel: 'email', templateKey: 'welcome' }, 't1');
       expect(r.channel).toBe('email');
       expect(r.status).toBe('draft');
+    });
+  });
+
+  describe('create — promo campaign', () => {
+    it('checks the promotion is linkable before creating', async () => {
+      mockPrisma.crmCampaign.create.mockImplementation(async ({ data }) => ({ id: 'c1', ...data }));
+      const r = await service.create(
+        { name: 'x', channel: 'line', promotionId: 'p1', promoCodeValidDays: 14 } as never,
+        't1',
+      );
+      expect(mockPromoCodes.assertLinkable).toHaveBeenCalledWith('t1', 'p1', 'line');
+      expect(r).toEqual(expect.objectContaining({ promotionId: 'p1', promoCodeValidDays: 14 }));
+    });
+
+    it('does not create when the promotion is not linkable', async () => {
+      mockPromoCodes.assertLinkable.mockRejectedValueOnce(new BadRequestException('archived'));
+      await expect(
+        service.create({ name: 'x', channel: 'line', promotionId: 'p1' } as never, 't1'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(mockPrisma.crmCampaign.create).not.toHaveBeenCalled();
+    });
+
+    it('skips the promo check for a plain campaign', async () => {
+      mockPrisma.crmCampaign.create.mockImplementation(async ({ data }) => ({ id: 'c1', ...data }));
+      await service.create({ name: 'x', channel: 'line' } as never, 't1');
+      expect(mockPromoCodes.assertLinkable).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('update — promo campaign', () => {
+    it('never changes promotionId after create', async () => {
+      mockPrisma.crmCampaign.findFirst.mockResolvedValue({ id: 'c1', tenantId: 't1', status: 'draft' });
+      mockPrisma.crmCampaign.update.mockResolvedValue({ id: 'c1' });
+      await service.update('c1', { promotionId: 'p2', promoCodeValidDays: 7 } as never, 't1');
+      const data = mockPrisma.crmCampaign.update.mock.calls[0][0].data;
+      expect(data.promotionId).toBeUndefined();
+      expect(data.promoCodeValidDays).toBe(7);
+    });
+  });
+
+  describe('estimateAudience', () => {
+    it('counts only members reachable on the chosen channel', async () => {
+      mockResolver.estimateSize.mockResolvedValue(5);
+      mockResolver.resolve.mockResolvedValue([
+        { email: 'a@x.com', guestId: 'g1' },
+        { email: 'b@x.com', guestId: null },
+        { email: null, guestId: 'g3' },
+      ]);
+      const r = await service.estimateAudience({ segments: ['vip'], channel: 'email' } as never, 't1');
+      expect(r).toEqual(expect.objectContaining({ estimatedSize: 5, consented: 3, reachable: 2 }));
+    });
+
+    it('requires a tenant', async () => {
+      await expect(service.estimateAudience({} as never, '')).rejects.toBeInstanceOf(BadRequestException);
     });
   });
 

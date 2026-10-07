@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { JourneyService } from './journey.service';
-import { BookingEventPayload, CRM_EVENTS } from '../crm.events';
+import { BookingEventPayload, CRM_EVENTS, PromoRedeemedEventPayload } from '../crm.events';
 import { IntegrationsService } from '../../integrations/integrations.service';
 
 /**
@@ -47,5 +47,18 @@ export class JourneyEventListener {
       bookingId: payload.bookingId,
       metadata: { totalAmount: payload.totalAmount },
     });
+  }
+
+  /** สมาชิกใช้โค้ดโปรร้านค้า → เข้า journey ที่ตั้ง trigger 'retail.promo_redeemed' (เช่น ขอบคุณ/ชวนกลับมาซื้อ) */
+  @OnEvent(CRM_EVENTS.PROMO_REDEEMED, { async: true })
+  async onPromoRedeemed(payload: PromoRedeemedEventPayload): Promise<void> {
+    if (!payload?.tenantId || !payload?.guestId) return;
+    try {
+      await this.journeys.enrollByTrigger('retail.promo_redeemed', payload.tenantId, payload.guestId, {
+        metadata: { saleId: payload.saleId, promotionId: payload.promotionId, code: payload.code },
+      });
+    } catch (error) {
+      this.logger.warn(`retail.promo.redeemed journey enroll failed: ${(error as Error).message}`);
+    }
   }
 }

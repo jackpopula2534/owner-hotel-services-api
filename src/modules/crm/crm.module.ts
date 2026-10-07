@@ -1,3 +1,4 @@
+import { CrmContactPromotionsService } from './crm-contact-promotions.service';
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { LoyaltyModule } from '../../loyalty/loyalty.module';
@@ -28,7 +29,7 @@ import { CrmAiModule } from './ai/ai.module';
 @Module({
   imports: [PrismaModule, LoyaltyModule, AddonModule, IntegrationsModule, CrmAutomationModule, CrmSalesModule, CrmAiModule],
   controllers: [CrmContactsController, CrmTicketsController],
-  providers: [CrmContactsService, CrmTicketsService, CrmEventListener],
+  providers: [CrmContactsService, CrmContactPromotionsService, CrmTicketsService, CrmEventListener],
   exports: [CrmContactsService, CrmTicketsService],
 })
 export class CrmModule {}
