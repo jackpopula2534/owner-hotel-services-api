@@ -10,6 +10,7 @@ import {
 } from '@prisma/client';
 import { RetailPromotionsService } from '../../retail-promotions/retail-promotions.service';
 import { RetailSalesService } from '../retail-sales.service';
+import { RetailPromotionHealthService } from '../../retail-promotions/retail-promotion-health.service';
 import { PrismaService } from '@/prisma/prisma.service';
 import { FolioPostingService } from '@/modules/accounts-receivable/folio-posting/folio-posting.service';
 import { RevenuePostingService } from '@/modules/revenue/revenue-posting.service';
@@ -88,11 +89,19 @@ function buildFolioPosting() {
   };
 }
 
+/** stub ที่ผูกกับเมธอดจริง — เปลี่ยนชื่อเมธอดแล้วเทสต์ต้องพัง ไม่ใช่ผ่านเงียบ ๆ */
+function buildPromotionHealth() {
+  const real = RetailPromotionHealthService.prototype as unknown as Record<string, unknown>;
+  expect(typeof real.autoPauseIfExhaustedWithin).toBe('function');
+  return { autoPauseIfExhaustedWithin: jest.fn().mockResolvedValue(false) };
+}
+
 async function makeService(
   prisma: any,
   folioPosting: any = buildFolioPosting(),
   revenuePosting: RevenuePostingStub = buildRevenuePostingStub(),
   revenueQuery: RevenueQueryStub = buildRevenueQueryStub(),
+  promotionHealth: ReturnType<typeof buildPromotionHealth> = buildPromotionHealth(),
 ): Promise<RetailSalesService> {
   const moduleRef: TestingModule = await Test.createTestingModule({
     providers: [
@@ -102,6 +111,7 @@ async function makeService(
       { provide: RevenuePostingService, useValue: revenuePosting },
       { provide: RevenueQueryService, useValue: revenueQuery },
       RetailPromotionsService,
+      { provide: RetailPromotionHealthService, useValue: promotionHealth },
     ],
   }).compile();
   return moduleRef.get(RetailSalesService);
@@ -556,7 +566,8 @@ describe('RetailSalesService', () => {
         recordRedemptionWithin: jest.fn().mockResolvedValue(undefined),
       };
       (service as any).promotions = promotions;
-      return { prisma, service, promotions };
+      const promotionHealth = (service as any).promotionHealth as { autoPauseIfExhaustedWithin: jest.Mock };
+      return { prisma, service, promotions, promotionHealth };
     }
 
     const dto = (over: Record<string, unknown> = {}) => ({
@@ -596,6 +607,21 @@ describe('RetailSalesService', () => {
         prisma,
         expect.objectContaining({ giftSkipped: false, giftCost: 40, contactId: 'c1' }),
       );
+    });
+
+    it('แจกของแถมแล้ว → เช็คหยุดโปรอัตโนมัติในทรานแซกชันเดียวกัน หลังบันทึกการใช้โปร', async () => {
+      const { prisma, service, promotions, promotionHealth } = await setup();
+      await service.create(dto(), USER, TENANT);
+      expect(promotionHealth.autoPauseIfExhaustedWithin).toHaveBeenCalledWith(prisma, TENANT, expect.any(String));
+      expect(promotionHealth.autoPauseIfExhaustedWithin.mock.invocationCallOrder[0]).toBeGreaterThan(
+        promotions.recordRedemptionWithin.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('ไม่ได้แจกของแถม (รับเฉพาะส่วนลด) → ไม่ต้องเช็คหยุดโปร', async () => {
+      const { service, promotionHealth } = await setup(evaluated({ availableQty: 0 }));
+      await service.create(dto({ acceptWithoutGift: true }), USER, TENANT);
+      expect(promotionHealth.autoPauseIfExhaustedWithin).not.toHaveBeenCalled();
     });
 
     it('ของแถมไม่พอและลูกค้ายังไม่ยอมรับ → PROMO_GIFT_SHORTAGE ไม่ออกใบเสร็จ', async () => {
@@ -657,7 +683,7 @@ describe('RetailSalesService', () => {
         },
       ]);
       prisma.retailSale.count.mockResolvedValue(1);
-      prisma.retailSale.aggregate.mockResolvedValue({ _sum: { grandTotal: 267.5, profitTotal: 100, costTotal: 150 } });
+      prisma.retailSale.aggregate.mockResolvedValue({ _count: { _all: 1 }, _sum: { grandTotal: 267.5, profitTotal: 100, costTotal: 150 } });
 
       const service = await makeService(prisma);
       const res = await service.findAll(TENANT, { page: 1, limit: 20 });
@@ -665,6 +691,33 @@ describe('RetailSalesService', () => {
       expect(res.data).toHaveLength(1);
       expect(res.summary.totalSales).toBe(267.5);
       expect(res.summary.totalProfit).toBe(100);
+    });
+
+    it('ใบที่ถูกยกเลิกยังอยู่ในตาราง แต่ยอดสรุปนับเฉพาะใบ COMPLETED', async () => {
+      const prisma = buildPrisma();
+      prisma.retailSale.findMany.mockResolvedValue([]);
+      prisma.retailSale.count.mockResolvedValue(3);
+      prisma.retailSale.aggregate.mockResolvedValue({ _count: { _all: 2 }, _sum: { grandTotal: 200 } });
+
+      const service = await makeService(prisma);
+      const res = await service.findAll(TENANT, {});
+
+      expect(prisma.retailSale.count.mock.calls[0][0].where.status).toBeUndefined();
+      expect(prisma.retailSale.aggregate.mock.calls[0][0].where.status).toBe('COMPLETED');
+      expect(res.meta.total).toBe(3);
+      expect(res.summary.count).toBe(2);
+    });
+
+    it('กรองดูใบที่ยกเลิก → สรุปตามตัวกรองนั้น', async () => {
+      const prisma = buildPrisma();
+      prisma.retailSale.findMany.mockResolvedValue([]);
+      prisma.retailSale.count.mockResolvedValue(1);
+      prisma.retailSale.aggregate.mockResolvedValue({ _count: { _all: 1 }, _sum: {} });
+
+      const service = await makeService(prisma);
+      await service.findAll(TENANT, { status: 'VOIDED' } as never);
+
+      expect(prisma.retailSale.aggregate.mock.calls[0][0].where.status).toBe('VOIDED');
     });
   });
 
@@ -677,7 +730,7 @@ describe('RetailSalesService', () => {
       const prisma = buildPrisma();
       prisma.retailSale.findMany.mockResolvedValue([]);
       prisma.retailSale.count.mockResolvedValue(0);
-      prisma.retailSale.aggregate.mockResolvedValue({ _sum: {} });
+      prisma.retailSale.aggregate.mockResolvedValue({ _count: { _all: 0 }, _sum: {} });
 
       const service = await makeService(prisma);
       await service.findAll(TENANT, {});
@@ -689,7 +742,7 @@ describe('RetailSalesService', () => {
       const prisma = buildPrisma();
       prisma.retailSale.findMany.mockResolvedValue([]);
       prisma.retailSale.count.mockResolvedValue(0);
-      prisma.retailSale.aggregate.mockResolvedValue({ _sum: {} });
+      prisma.retailSale.aggregate.mockResolvedValue({ _count: { _all: 0 }, _sum: {} });
 
       const service = await makeService(prisma);
       await service.findAll(TENANT, {

@@ -233,6 +233,50 @@ export class FolioPostingService {
   }
 
   /**
+   * เหมือน {@link reverseCharge} แต่ร่วม transaction ของผู้เรียก และ**ยอมกลับรายการ
+   * เฉพาะโฟลิโอที่ยังเปิดอยู่** — แขกเช็คเอาต์/ชำระไปแล้ว ยอดถูกเก็บเงินจริงไปแล้ว
+   * ลดยอดเงียบ ๆ จะทำให้โฟลิโอที่ปิดแล้วมียอดติดลบ ต้องไปออกใบลดหนี้แทน
+   *
+   * ไม่มีรายการให้กลับ = คืน `null` (เรียกดื้อ ๆ ได้)
+   */
+  async reverseChargeWithin(
+    tx: Prisma.TransactionClient,
+    params: { tenantId: string; sourceType: FolioSourceType; sourceId: string; reversedBy: string },
+  ): Promise<{ chargeId: string; folioId: string; amount: number } | null> {
+    const { tenantId, sourceType, sourceId, reversedBy } = params;
+    const charge = await tx.folioCharge.findFirst({
+      where: { tenantId, sourceType, sourceId, status: 'POSTED' },
+    });
+    if (!charge) return null;
+
+    const folio = await tx.guestFolio.findFirst({
+      where: { id: charge.folioId, tenantId },
+      select: { id: true, folioNo: true, status: true },
+    });
+    if (!folio || folio.status !== 'OPEN') {
+      throw new BadRequestException({
+        code: 'FOLIO_NOT_OPEN',
+        message: `โฟลิโอ ${folio?.folioNo ?? ''} ปิดแล้ว (${folio?.status ?? 'ไม่พบ'}) — กลับรายการเข้าห้องไม่ได้ ต้องออกใบลดหนี้แทน`,
+      });
+    }
+
+    // เงื่อนไข status ซ้ำใน where กันสองคำขอกลับรายการเดียวกันพร้อมกัน
+    const { count } = await tx.folioCharge.updateMany({
+      where: { id: charge.id, status: 'POSTED' },
+      data: { status: 'REVERSED', isReversed: true, reversedBy, reversedAt: new Date() },
+    });
+    if (count === 0) return null;
+
+    const amount = Number(charge.totalAmount);
+    await tx.guestFolio.update({
+      where: { id: folio.id },
+      data: { totalCharges: { decrement: amount }, balance: { decrement: amount } },
+    });
+    this.logger.log(`Reversed folio charge ${charge.id} (${sourceType}:${sourceId}) within caller tx`);
+    return { chargeId: charge.id, folioId: folio.id, amount };
+  }
+
+  /**
    * ห้องที่ `postCharge` จะยอมรับ ถ้าเลือกจากรายการนี้
    *
    * ทุกหน้าจอที่มีปุ่ม "ชาร์จเข้าห้อง" ต้องดึงตัวเลือกจากที่นี่ที่เดียว ไม่งั้นจอกับ

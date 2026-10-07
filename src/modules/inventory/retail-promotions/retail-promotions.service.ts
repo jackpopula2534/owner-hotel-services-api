@@ -9,6 +9,7 @@ import {
   Prisma,
   RetailPromoCodeKind,
   RetailPromoDiscountType,
+  RetailPromotionRedemptionStatus,
   RetailPromotionStatus,
   WarehouseType,
 } from '@prisma/client';
@@ -617,6 +618,64 @@ export class RetailPromotionsService {
 
   // ──────────────────────────────── Helpers ─────────────────────────────────
 
+  /**
+   * บิลถูก void — คืนสิทธิ์ทุกตัวนับที่ {@link recordRedemptionWithin} กินไป
+   * (โควตาโปร โค้ด ต่อสมาชิก งบของแถม) แล้วตี redemption เป็น REVERSED
+   *
+   * จำนวนของแถมที่คืนงบอ่านจากบรรทัดของแถมของใบเสร็จจริง ไม่ใช่จากตั้งค่าโปรปัจจุบัน
+   * — แอดมินแก้จำนวนแจกหลังขายไปแล้วได้ ถ้าคืนตามค่าใหม่ issuedQty จะเพี้ยน
+   * ตัวนับลดแบบมีเงื่อนไข `> 0` ไม่มีทางติดลบ แม้ข้อมูลเก่าจะไม่ตรง
+   *
+   * ไม่มี redemption ที่ยัง APPLIED = คืน null (บิลไม่ได้ใช้โค้ด / ถูกคืนไปแล้ว)
+   */
+  async reverseRedemptionWithin(
+    tx: Db,
+    params: {
+      tenantId: string;
+      saleId: string;
+      giftLines: Array<{ itemId: string; quantity: number }>;
+    },
+  ): Promise<{ redemptionId: string; promotionId: string } | null> {
+    const { tenantId, saleId, giftLines } = params;
+    const redemption = await tx.retailPromotionRedemption.findFirst({
+      where: { tenantId, saleId, status: RetailPromotionRedemptionStatus.APPLIED },
+    });
+    if (!redemption) return null;
+
+    const flipped = await tx.retailPromotionRedemption.updateMany({
+      where: { id: redemption.id, status: RetailPromotionRedemptionStatus.APPLIED },
+      data: { status: RetailPromotionRedemptionStatus.REVERSED, reversedAt: new Date() },
+    });
+    if (flipped.count === 0) return null;
+
+    const { promotionId, promoCodeId, guestId } = redemption;
+    await tx.retailPromotion.updateMany({
+      where: { id: promotionId, tenantId, usedCount: { gt: 0 } },
+      data: { usedCount: { decrement: 1 } },
+    });
+    await tx.retailPromoCode.updateMany({
+      where: { id: promoCodeId, tenantId, usedCount: { gt: 0 } },
+      data: { usedCount: { decrement: 1 } },
+    });
+    await tx.retailPromotionMemberUsage.updateMany({
+      where: { tenantId, promotionId, guestId, usedCount: { gt: 0 } },
+      data: { usedCount: { decrement: 1 } },
+    });
+
+    const returnedByItem = new Map<string, number>();
+    for (const line of giftLines) {
+      returnedByItem.set(line.itemId, (returnedByItem.get(line.itemId) ?? 0) + line.quantity);
+    }
+    for (const [itemId, quantity] of returnedByItem) {
+      await tx.retailPromotionGift.updateMany({
+        where: { tenantId, promotionId, itemId, issuedQty: { gte: quantity } },
+        data: { issuedQty: { decrement: quantity } },
+      });
+    }
+
+    return { redemptionId: redemption.id, promotionId };
+  }
+
   private async incrementWithin(
     run: () => Promise<{ count: number }>,
     code: string,
@@ -681,7 +740,12 @@ export class RetailPromotionsService {
     const data: Prisma.RetailPromotionUncheckedUpdateInput & Prisma.RetailPromotionUncheckedCreateInput = {} as never;
     if (dto.name !== undefined) data.name = dto.name.trim();
     if (dto.description !== undefined) data.description = dto.description?.trim() || null;
-    if (dto.status !== undefined) data.status = dto.status;
+    if (dto.status !== undefined) {
+      data.status = dto.status;
+      // ผู้จัดการตั้งสถานะเอง = ยกเลิกป้าย "ระบบหยุดอัตโนมัติ" (เปิดใหม่ หรือหยุดต่อด้วยเหตุผลของตัวเอง)
+      data.autoPausedAt = null;
+      data.pausedReason = null;
+    }
     if (dto.discountType !== undefined) data.discountType = dto.discountType;
     if (dto.discountType === RetailPromoDiscountType.NONE) data.discountValue = 0;
     else if (dto.discountValue !== undefined) data.discountValue = dto.discountValue;
@@ -774,6 +838,8 @@ export class RetailPromotionsService {
     usageLimit: number | null;
     usedCount: number;
     perMemberLimit: number | null;
+    autoPausedAt?: Date | null;
+    pausedReason?: string | null;
     createdAt: Date;
     updatedAt: Date;
   }) {
@@ -795,6 +861,8 @@ export class RetailPromotionsService {
       usageLimit: p.usageLimit,
       usedCount: p.usedCount,
       perMemberLimit: p.perMemberLimit,
+      autoPausedAt: p.autoPausedAt ?? null,
+      pausedReason: p.pausedReason ?? null,
       createdAt: p.createdAt,
       updatedAt: p.updatedAt,
     };

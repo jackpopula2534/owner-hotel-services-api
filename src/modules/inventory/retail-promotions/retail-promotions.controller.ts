@@ -19,6 +19,8 @@ import { AddonGuard } from '@/common/guards/addon.guard';
 import { Roles, UserRole } from '@/common/decorators/roles.decorator';
 import { RequireAddon } from '@/common/decorators/require-addon.decorator';
 import { RetailPromotionsService } from './retail-promotions.service';
+import { RetailPromotionHealthService } from './retail-promotion-health.service';
+import { RetailPromotionReportService } from './retail-promotion-report.service';
 import {
   CreatePromoCodeDto,
   CreateRetailPromotionDto,
@@ -40,7 +42,11 @@ const PROMO_MANAGERS: UserRole[] = ['tenant_admin', 'admin', 'manager', 'warehou
 @RequireAddon('INVENTORY_MODULE')
 @Controller({ path: 'inventory/retail/promotions', version: '1' })
 export class RetailPromotionsController {
-  constructor(private readonly service: RetailPromotionsService) {}
+  constructor(
+    private readonly service: RetailPromotionsService,
+    private readonly health: RetailPromotionHealthService,
+    private readonly reports: RetailPromotionReportService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'List retail promotions' })
@@ -54,6 +60,33 @@ export class RetailPromotionsController {
   }
 
   // static routes ต้องมาก่อน :id
+  @Get('alerts')
+  @ApiOperation({ summary: 'Gifts running low / budget or quota nearly used / auto-paused promotions' })
+  @ApiResponse({ status: 200, description: 'Alerts retrieved' })
+  async alerts(@Req() req: AuthedReq): Promise<{ success: boolean; data: unknown }> {
+    return { success: true, data: await this.health.alerts(req.user.tenantId) };
+  }
+
+  @Get('gift-stock')
+  @ApiOperation({ summary: 'Stock in PROMOTION (gift) warehouses with linked promotions and remaining runs' })
+  @ApiResponse({ status: 200, description: 'Gift stock retrieved' })
+  async giftStock(@Req() req: AuthedReq): Promise<{ success: boolean; data: unknown }> {
+    return { success: true, data: await this.health.giftStock(req.user.tenantId) };
+  }
+
+  @Get('report')
+  @Roles(...PROMO_MANAGERS)
+  @ApiOperation({ summary: 'Promotion report per promotion / per code: bills, sales, discount, gift cost' })
+  @ApiResponse({ status: 200, description: 'Report retrieved' })
+  async report(
+    @Query('from') from: string | undefined,
+    @Query('to') to: string | undefined,
+    @Query('promotionId') promotionId: string | undefined,
+    @Req() req: AuthedReq,
+  ): Promise<{ success: boolean; data: unknown }> {
+    return { success: true, data: await this.reports.report(req.user.tenantId, { from, to, promotionId }) };
+  }
+
   @Post('preview')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Check a promo code against a cart + member (no side effects)' })

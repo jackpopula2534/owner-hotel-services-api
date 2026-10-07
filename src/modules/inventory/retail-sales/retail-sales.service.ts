@@ -5,6 +5,7 @@ import {
   Prisma,
   RetailPaymentMethod,
   RetailSaleChannel,
+  RetailSaleStatus,
   RevenueSourceModule,
   WarehouseType,
 } from '@prisma/client';
@@ -34,6 +35,7 @@ import {
   PromoMember,
   RetailPromotionsService,
 } from '../retail-promotions/retail-promotions.service';
+import { RetailPromotionHealthService } from '../retail-promotions/retail-promotion-health.service';
 import { promoError, resolveGiftGrant } from '../retail-promotions/promotion-engine';
 
 const MONTHS_TH_SHORT = [
@@ -78,6 +80,7 @@ export class RetailSalesService {
     private readonly revenuePosting: RevenuePostingService,
     private readonly revenue: RevenueQueryService,
     private readonly promotions: RetailPromotionsService,
+    private readonly promotionHealth: RetailPromotionHealthService,
   ) {}
 
   /**
@@ -324,6 +327,10 @@ export class RetailSalesService {
           giftCost: promoGiftCost,
           contactId,
         });
+        // บิลนี้แจกของแถมชิ้นสุดท้าย และโปรไม่มีส่วนลด → หยุดโปร (ทรานแซกชันเดียวกับการตัดสต็อก)
+        if (grantedGifts.length) {
+          await this.promotionHealth.autoPauseIfExhaustedWithin(tx, tenantId, evaluated.promotion.id);
+        }
       }
 
       // ลงสมุดรายได้กลางในทรานแซกชันเดียวกับการตัดสต็อกและออกใบเสร็จ — ใบเสร็จที่
@@ -378,8 +385,10 @@ export class RetailSalesService {
         take: limit,
       }),
       this.prisma.retailSale.count({ where }),
+      // ใบที่ถูกยกเลิกยังแสดงในตาราง (ติดป้าย) แต่ไม่นับเข้ายอดสรุป — เว้นแต่ผู้ใช้กรองสถานะเอง
       this.prisma.retailSale.aggregate({
-        where,
+        where: query.status ? where : { ...where, status: RetailSaleStatus.COMPLETED },
+        _count: { _all: true },
         _sum: { grandTotal: true, profitTotal: true, costTotal: true },
       }),
     ]);
@@ -390,7 +399,7 @@ export class RetailSalesService {
       // ผลรวมของ "ใบที่ตรงตัวกรองนี้" ไม่ใช่ยอดขายทางบัญชี — ตัวกรองของหน้าประวัติ
       // เลือกได้ถึงใบที่ถูกยกเลิก ตัวเลขรายได้จริงอยู่ที่ getDashboard ซึ่งอ่านจากสมุด
       summary: {
-        count: total,
+        count: agg._count._all,
         totalSales: Number(agg._sum.grandTotal ?? 0),
         totalCost: Number(agg._sum.costTotal ?? 0),
         totalProfit: Number(agg._sum.profitTotal ?? 0),
@@ -808,6 +817,9 @@ export class RetailSalesService {
     promoCode?: string | null;
     promoDiscount?: Prisma.Decimal;
     promoGiftCost?: Prisma.Decimal;
+    voidedBy?: string | null;
+    voidedAt?: Date | null;
+    voidReason?: string | null;
     notes: string | null;
     soldBy: string;
     soldAt: Date;
@@ -855,6 +867,9 @@ export class RetailSalesService {
       promoCode: sale.promoCode ?? null,
       promoDiscount: Number(sale.promoDiscount ?? 0),
       promoGiftCost: Number(sale.promoGiftCost ?? 0),
+      voidedBy: sale.voidedBy ?? null,
+      voidedAt: sale.voidedAt ?? null,
+      voidReason: sale.voidReason ?? null,
       notes: sale.notes,
       soldBy: sale.soldBy,
       soldAt: sale.soldAt,

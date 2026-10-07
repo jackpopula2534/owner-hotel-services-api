@@ -84,11 +84,17 @@ Guest (guests)              ← ตัวตนสมาชิก: ชื่อ 
 - [x] Seed: คลังของแถม + โปรตัวอย่าง (WELCOME10 / TOTE300 / GOLD50) + `npm run db:refresh`
 - [ ] ทดสอบผ่านเบราว์เซอร์จริงทั้ง flow (ยังไม่ได้ทำ — เทสต์อัตโนมัติ + curl ผ่านแล้ว)
 
-### Phase 2 — Void & รายงาน
-- [ ] Void/คืนบิล: คืนสต็อกสินค้า + ของแถม (ADJUSTMENT_IN), ลดตัวนับทุกตัว, redemption → REVERSED
-- [ ] แจ้งเตือนของแถมใกล้หมด / budget ใกล้เต็ม, auto-pause เมื่อของหมดและโปรไม่มีส่วนลด
-- [ ] รายงานโปรโมชั่น: ใช้กี่ครั้ง ยอดขาย ส่วนลด ต้นทุนของแถม ต่อโปร/ต่อโค้ด
-- [ ] โอนสต็อกเข้าคลังของแถม (ใช้ transfer เดิม) + หน้าสต็อกคลังของแถม
+### Phase 2 — Void & รายงาน ✅ (2026-10-07)
+- [x] Void/คืนบิล: `POST /inventory/retail/sales/:id/void` (ผู้จัดการเท่านั้น, ต้องมีเหตุผล ≥ 3 ตัวอักษร) — ทรานแซกชันเดียว: COMPLETED→VOIDED แบบมีเงื่อนไข, คืนสต็อกสินค้า + ของแถมตาม GOODS_ISSUE จริง (ADJUSTMENT_IN `RETAIL_SALE_VOID` / `PROMO_GIFT_VOID` + คืนล็อต + avgCost ถ่วงน้ำหนัก), ลดตัวนับโปร/โค้ด/สมาชิก/ของแถม, redemption → REVERSED, กลับรายการชาร์จเข้าห้อง (โฟลิโอต้อง OPEN ไม่งั้น `FOLIO_NOT_OPEN` → ออกใบลดหนี้แทน), revenue entry → VOIDED
+  - FE: ปุ่ม "ยกเลิกบิล" ในประวัติการขาย (เฉพาะ role ผู้จัดการ) + modal เหตุผล (zod); บิลที่ยกเลิกโชว์วันที่/เหตุผล; ยอดสรุปประวัติไม่นับบิลที่ยกเลิก
+- [x] แจ้งเตือน: `GET /inventory/retail/promotions/alerts` — GIFT_OUT / GIFT_LOW (≤ 10 บิล หรืองบเหลือ ≤ 20%) / USAGE_FULL / USAGE_LOW (≤ 10% ขั้นต่ำ 5) สูตรเดียวอยู่ใน `promotion-health.ts`
+- [x] Auto-pause: หลังตัดของแถมในทรานแซกชันขาย ถ้าโปร discountType = NONE และของแถมตัวใดแจกต่อไม่ได้ → PAUSED + `autoPausedAt`/`pausedReason` (migration `20261007120000_retail_promotion_auto_pause`); ผู้จัดการเปลี่ยนสถานะเอง = ล้าง flag
+  - FE: แบนเนอร์แจ้งเตือน + รายการโปรที่หยุดอัตโนมัติบนหน้าโปรโมชั่น, แถวโปรโชว์ "หยุดอัตโนมัติ" + เหตุผล
+- [x] รายงาน: `GET /inventory/retail/promotions/report?from&to&promotionId` (ผู้จัดการ, ดีฟอลต์ 30 วัน สูงสุด 366) — ต่อโปร/ต่อโค้ด: บิล, สมาชิกไม่ซ้ำ, ยอดขาย, ส่วนลด, ชิ้น/ต้นทุนของแถม, บิลที่ถูกยกเลิก (นับแยก)
+  - FE: แท็บ "รายงาน" เลือกช่วงวัน (zod) กางดูต่อโค้ด + การ์ดสรุปต้นทุนโปรเทียบยอดก่อนลด
+- [x] คลังของแถม: `GET /inventory/retail/promotions/gift-stock` — สต็อกทุกคลัง PROMOTION + โปรที่ผูก + แจกได้อีกกี่บิล (รวมของที่โปรผูกแต่ยังไม่เคยเข้าคลัง = 0)
+  - FE: แท็บ "คลังของแถม" + modal โอนเข้า/คืนออก ใช้ `POST /inventory/stock-movements/transfer` เดิม
+- ข้อจำกัดที่รู้: transfer เดิมย้ายแค่ยอด **ไม่ย้ายล็อต**; 403 ของ role ที่ไม่ใช่ผู้จัดการยังไม่ได้ทดสอบสด (บัญชี staff ล็อกอินแดชบอร์ดหลักไม่ได้) — อาศัย RolesGuard; ยังไม่ได้ทดสอบผ่านเบราว์เซอร์ (Chrome เปิด localhost ไม่ได้ในรอบนี้)
 
 ### Phase 3 — CRM
 - [ ] ออกโค้ด UNIQUE ให้สมาชิกตาม segment ผ่าน `CrmCampaign` (LINE/อีเมล) + ติดตาม sent → redeemed
@@ -110,3 +116,9 @@ Guest (guests)              ← ตัวตนสมาชิก: ชื่อ 
 - 2026-10-07 — Frontend Phase 1 เสร็จ: หน้าจัดการโปร, POS สมาชิก+โค้ด, modal สรุปบิล · Jest 37 ผ่าน, `tsc --noEmit` 0 error
   - เจอระหว่างทาง: หน้าคลังสินค้าจะพังเมื่อมีคลัง type PROMOTION (แก้แล้ว), POS เลือกคลังของแถมเป็นคลังขายได้ (ซ่อน + กันที่ backend แล้ว)
   - ตั้งข้อสังเกต: Sidebar Jest 24 เคสพังอยู่ก่อนแล้ว (พังเท่าเดิมบน HEAD) — ไม่เกี่ยวกับงานนี้
+
+### 2026-10-07 — Phase 2 เสร็จ (ยังไม่ commit)
+- Backend: `RetailSaleVoidService`, `reverseChargeWithin` (folio), `reverseRedemptionWithin`, `promotion-health.ts` + `RetailPromotionHealthService` (alerts / auto-pause / gift-stock), `RetailPromotionReportService`, migration auto-pause; findAll ประวัติขายไม่นับบิลที่ยกเลิกในยอดสรุป
+- ทดสอบสด: void RCP-202610-0003 คืนสต็อก/ตัวนับครบ, void ซ้ำ = `SALE_ALREADY_VOIDED`; auto-pause โปรของแถมอย่างเดียวงบ 1 หยุดเองหลังขาย 1 บิล; รายงาน TOTE300 = 1 บิล + 1 ยกเลิก; โอน WH-RETAIL ↔ WH-GIFT ได้ทั้งสองทาง
+- เทสต์: backend retail-sales/promotions/minibar 111 ผ่าน, frontend ที่เกี่ยวข้อง 37 ผ่าน, tsc ทั้งสอง repo 0 error
+

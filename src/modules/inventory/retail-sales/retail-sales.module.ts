@@ -6,11 +6,12 @@ import { RevenueModule } from '@/modules/revenue/revenue.module';
 import { RetailPromotionsModule } from '../retail-promotions/retail-promotions.module';
 import { RetailSalesController } from './retail-sales.controller';
 import { RetailSalesService } from './retail-sales.service';
+import { RetailSaleVoidService } from './retail-sale-void.service';
 
 @Module({
   imports: [AddonModule, PrismaModule, FolioPostingModule, RevenueModule, RetailPromotionsModule],
   controllers: [RetailSalesController],
-  providers: [RetailSalesService],
+  providers: [RetailSalesService, RetailSaleVoidService],
   exports: [RetailSalesService],
 })
 export class RetailSalesModule {}

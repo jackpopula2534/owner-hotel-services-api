@@ -14,12 +14,19 @@ import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagg
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AddonGuard } from '@/common/guards/addon.guard';
 import { RequireAddon } from '@/common/decorators/require-addon.decorator';
+import { RolesGuard } from '@/common/guards/roles.guard';
+import { Roles, UserRole } from '@/common/decorators/roles.decorator';
 import { RetailSalesService } from './retail-sales.service';
+import { RetailSaleVoidService } from './retail-sale-void.service';
+import { VoidRetailSaleDto } from './dto/void-retail-sale.dto';
 import { CreateRetailSaleDto } from './dto/create-retail-sale.dto';
 import { QueryRetailSaleDto } from './dto/query-retail-sale.dto';
 import { DashboardRetailSaleDto } from './dto/dashboard-retail-sale.dto';
 
 type AuthedReq = { user: { id: string; tenantId: string } };
+
+/** ยกเลิกใบเสร็จ = คืนของ คืนเงิน กลับรายได้ — ผู้จัดการขึ้นไปเท่านั้น แคชเชียร์ยกเลิกเองไม่ได้ */
+const VOID_APPROVERS: UserRole[] = ['tenant_admin', 'admin', 'manager', 'warehouse_manager', 'platform_admin'];
 
 @ApiTags('Inventory - Retail Sales')
 @ApiBearerAuth()
@@ -27,7 +34,10 @@ type AuthedReq = { user: { id: string; tenantId: string } };
 @RequireAddon('INVENTORY_MODULE')
 @Controller({ path: 'inventory/retail/sales', version: '1' })
 export class RetailSalesController {
-  constructor(private readonly retailSalesService: RetailSalesService) {}
+  constructor(
+    private readonly retailSalesService: RetailSalesService,
+    private readonly voidService: RetailSaleVoidService,
+  ) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
@@ -77,6 +87,21 @@ export class RetailSalesController {
     @Req() req: AuthedReq,
   ): Promise<{ success: boolean; data: unknown }> {
     const data = await this.retailSalesService.listChargeableRooms(req.user.tenantId, search);
+    return { success: true, data };
+  }
+
+  @Post(':id/void')
+  @UseGuards(RolesGuard)
+  @Roles(...VOID_APPROVERS)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Void a retail sale (restock goods + gifts, reverse promo, folio and revenue)' })
+  @ApiResponse({ status: 200, description: 'Sale voided' })
+  async void(
+    @Param('id') id: string,
+    @Body() dto: VoidRetailSaleDto,
+    @Req() req: AuthedReq,
+  ): Promise<{ success: boolean; data: unknown }> {
+    const data = await this.voidService.void(id, req.user.tenantId, req.user.id, dto.reason);
     return { success: true, data };
   }
 

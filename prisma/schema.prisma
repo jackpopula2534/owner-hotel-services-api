@@ -3500,6 +3500,9 @@ model RetailPromotion {
   usedCount        Int                         @default(0)
   /// โควตาต่อสมาชิก (null = ไม่จำกัด)
   perMemberLimit   Int?
+  /// ระบบหยุดโปรเองเมื่อไร (ของแถมหมดและโปรไม่มีส่วนลด) — ล้างเมื่อผู้จัดการเปิดใช้ใหม่
+  autoPausedAt     DateTime?
+  pausedReason     String?                     @db.VarChar(255)
   createdBy        String?
   createdAt        DateTime                    @default(now())
   updatedAt        DateTime                    @updatedAt
