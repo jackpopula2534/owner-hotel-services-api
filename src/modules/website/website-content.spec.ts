@@ -196,6 +196,32 @@ describe('theme / seo / defaults', () => {
     expect(without.sections.find((s) => s.type === 'dining')?.enabled).toBe(false);
     expect(withR.contact).toMatchObject({ phone: '021234567', email: 'a@b.co' });
   });
+
+  it('camp sites start with camping photos in hero + gallery; hotels start empty', () => {
+    const camp = buildDefaultContent({
+      hotelName: 'Pine',
+      phone: null,
+      email: null,
+      hasRestaurants: false,
+      kind: 'camp',
+    });
+    const hotel = buildDefaultContent({
+      hotelName: 'H',
+      phone: null,
+      email: null,
+      hasRestaurants: false,
+    });
+    const props = (c: typeof camp, type: string) =>
+      c.sections.find((s) => s.type === type)?.props as { images: string[] };
+    expect(props(camp, 'hero').images.length).toBeGreaterThan(0);
+    expect(props(camp, 'gallery').images.length).toBeGreaterThan(0);
+    expect(camp.sections.find((s) => s.type === 'gallery')?.enabled).toBe(true);
+    for (const url of [...props(camp, 'hero').images, ...props(camp, 'gallery').images]) {
+      expect(cleanUrl(url)).toBe(url);
+    }
+    expect(props(hotel, 'hero').images).toEqual([]);
+    expect(props(hotel, 'gallery').images).toEqual([]);
+  });
 });
 
 describe('toGuestDisplayName', () => {

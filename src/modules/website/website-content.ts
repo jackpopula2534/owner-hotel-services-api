@@ -196,6 +196,23 @@ export function isTemplateKey(v: unknown): v is TemplateKey {
  *   dining → สิ่งอำนวยความสะดวก + อุปกรณ์ให้เช่า
  *   reviews → ไม่มีข้อมูลรีวิวของลาน (ปิดไว้และหน้าเว็บไม่แสดง)
  */
+// ภาพตั้งต้นของเว็บลาน (Unsplash) — เว็บใหม่ดูเป็นลานกางเต็นท์ทันที เจ้าของเปลี่ยนเป็นรูปจริงได้ภายหลัง
+const campPhoto = (id: string): string =>
+  `https://images.unsplash.com/photo-${id}?auto=format&fit=crop&w=1600&q=75`;
+export const CAMP_DEFAULT_HERO_IMAGES = [
+  '1487730116645-74489c95b41b',
+  '1510312305653-8ed496efae75',
+  '1504280390367-361c6d9f38f4',
+].map(campPhoto);
+export const CAMP_DEFAULT_GALLERY_IMAGES = [
+  '1478131143081-80f7f84ca84d',
+  '1525811902-f2342640856e',
+  '1508873696983-2dfd5898f08b',
+  '1532339142463-fd0a8979791a',
+  '1445308394109-4ec2920981b1',
+  '1517824806704-9040b037703b',
+].map(campPhoto);
+
 const CAMP_TITLES: Partial<Record<SectionType, LocalizedText>> = {
   rooms: { th: 'โซนลานกางเต็นท์', en: 'Camping Zones' },
   dining: { th: 'สิ่งอำนวยความสะดวก & อุปกรณ์ให้เช่า', en: 'Facilities & Gear Rental' },
@@ -437,7 +454,18 @@ export function buildDefaultContent(input: DefaultContentInput): SiteContent {
     ...base,
     sections: base.sections.map((s) => {
       if (s.type === 'dining') return { ...s, enabled: input.hasRestaurants } as SiteSection;
-      if (s.type === 'reviews' && kind === 'camp') return { ...s, enabled: false } as SiteSection;
+      if (kind !== 'camp') return s;
+      if (s.type === 'reviews') return { ...s, enabled: false } as SiteSection;
+      if (s.type === 'hero') {
+        return { ...s, props: { ...s.props, images: [...CAMP_DEFAULT_HERO_IMAGES] } } as SiteSection;
+      }
+      if (s.type === 'gallery') {
+        return {
+          ...s,
+          enabled: true,
+          props: { ...s.props, images: [...CAMP_DEFAULT_GALLERY_IMAGES] },
+        } as SiteSection;
+      }
       return s;
     }),
   };
