@@ -24,6 +24,12 @@ import {
   WebsiteBookingResult,
   WebsiteBookingService,
 } from './website-booking.service';
+import { CampAvailabilityQueryDto, CreateCampBookingDto } from './dto/website-camp-booking.dto';
+import {
+  CampAvailability,
+  CampBookingResult,
+  WebsiteCampBookingService,
+} from './website-camp-booking.service';
 import {
   SLIP_MAX_BYTES,
   WebsitePaymentService,
@@ -49,6 +55,7 @@ export class WebsitePublicController {
     private readonly publicService: WebsitePublicService,
     private readonly bookingService: WebsiteBookingService,
     private readonly paymentService: WebsitePaymentService,
+    private readonly campBookingService: WebsiteCampBookingService,
   ) {}
 
   @Get(':slug')
@@ -101,6 +108,32 @@ export class WebsitePublicController {
     @Req() req: Request,
   ): Promise<WebsiteBookingResult> {
     return this.bookingService.createBooking(slug, dto, req.ip ?? null);
+  }
+
+  @Get(':slug/camp-availability')
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Campground website: free pitches per zone + price quote' })
+  @ApiResponse({ status: 200, description: 'CampAvailability' })
+  @ApiResponse({ status: 400, description: 'Invalid dates' })
+  getCampAvailability(
+    @Param('slug') slug: string,
+    @Query() query: CampAvailabilityQueryDto,
+  ): Promise<CampAvailability> {
+    return this.campBookingService.getAvailability(slug, query);
+  }
+
+  @Post(':slug/camp-bookings')
+  @HttpCode(201)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Guest self-booking of a camping pitch (status pending)' })
+  @ApiResponse({ status: 201, description: 'CampBookingResult' })
+  @ApiResponse({ status: 409, description: 'Zone sold out for these dates' })
+  @ApiResponse({ status: 429, description: 'Too many requests' })
+  createCampBooking(
+    @Param('slug') slug: string,
+    @Body() dto: CreateCampBookingDto,
+  ): Promise<CampBookingResult> {
+    return this.campBookingService.createBooking(slug, dto);
   }
 
   /** แขกไม่มี session — สิทธิ์ = token (HMAC ของ ref) ที่ได้ตอนจอง */

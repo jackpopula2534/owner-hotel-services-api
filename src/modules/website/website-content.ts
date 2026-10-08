@@ -11,7 +11,13 @@
  * ข้อมูลรูปทรงผิดจะถูกแทนด้วยค่าเริ่มต้นแทนการ throw — editor ส่งทั้งก้อนทุกครั้ง
  * จึงไม่มีทางที่ field ที่ผิดจะทำให้บันทึกส่วนอื่นไม่ได้
  */
-import { SECTION_TYPES, SectionType, TEMPLATE_KEYS, TemplateKey } from './website.constants';
+import {
+  SECTION_TYPES,
+  SectionType,
+  SiteKind,
+  TEMPLATE_KEYS,
+  TemplateKey,
+} from './website.constants';
 
 export interface LocalizedText {
   th: string;
@@ -184,10 +190,29 @@ export function isTemplateKey(v: unknown): v is TemplateKey {
   return typeof v === 'string' && (TEMPLATE_KEYS as readonly string[]).includes(v);
 }
 
+/**
+ * เว็บลานกางเต็นท์ใช้ section ชุดเดียวกับโรงแรม แต่ความหมายต่างกัน:
+ *   rooms  → โซนลานกางเต็นท์ (ราคา/ความจุจาก CampZone)
+ *   dining → สิ่งอำนวยความสะดวก + อุปกรณ์ให้เช่า
+ *   reviews → ไม่มีข้อมูลรีวิวของลาน (ปิดไว้และหน้าเว็บไม่แสดง)
+ */
+const CAMP_TITLES: Partial<Record<SectionType, LocalizedText>> = {
+  rooms: { th: 'โซนลานกางเต็นท์', en: 'Camping Zones' },
+  dining: { th: 'สิ่งอำนวยความสะดวก & อุปกรณ์ให้เช่า', en: 'Facilities & Gear Rental' },
+  reviews: { th: 'รีวิวจากนักแคมป์', en: 'Camper Reviews' },
+};
+
 function defaultSectionProps<K extends SectionType>(
   type: K,
   hotelName: string,
+  kind: SiteKind = 'hotel',
 ): SectionPropsMap[K] {
+  const props = baseSectionProps(type, hotelName);
+  const campTitle = kind === 'camp' ? CAMP_TITLES[type] : undefined;
+  return campTitle ? ({ ...props, title: { ...campTitle } } as SectionPropsMap[K]) : props;
+}
+
+function baseSectionProps<K extends SectionType>(type: K, hotelName: string): SectionPropsMap[K] {
   const defaults: SectionPropsMap = {
     hero: {
       headline: lt(hotelName, hotelName),
@@ -245,9 +270,10 @@ function cleanSectionProps<K extends SectionType>(
   type: K,
   raw: unknown,
   hotelName: string,
+  kind: SiteKind,
 ): SectionPropsMap[K] {
   const o = asObject(raw);
-  const d = defaultSectionProps(type, hotelName) as SectionPropsMap[SectionType];
+  const d = defaultSectionProps(type, hotelName, kind) as SectionPropsMap[SectionType];
   const title = (): LocalizedText =>
     cleanLocalized(o.title, SHORT, (d as { title?: LocalizedText }).title);
 
@@ -296,7 +322,11 @@ function cleanSectionProps<K extends SectionType>(
   return props as SectionPropsMap[K];
 }
 
-export function sanitizeSections(raw: unknown, hotelName: string): SiteSection[] {
+export function sanitizeSections(
+  raw: unknown,
+  hotelName: string,
+  kind: SiteKind = 'hotel',
+): SiteSection[] {
   const list = Array.isArray(raw) ? raw.map(asObject) : [];
   const byType = new Map<SectionType, Raw>();
   for (const s of list) {
@@ -313,7 +343,7 @@ export function sanitizeSections(raw: unknown, hotelName: string): SiteSection[]
       type,
       enabled: s && typeof s.enabled === 'boolean' ? s.enabled : DEFAULT_ENABLED[type],
       order,
-      props: cleanSectionProps(type, s?.props, hotelName),
+      props: cleanSectionProps(type, s?.props, hotelName, kind),
     } as SiteSection;
   });
 
@@ -353,10 +383,14 @@ function sanitizeContact(raw: unknown): SiteContact {
 }
 
 // ─── public API ────────────────────────────────────────────────────────
-export function sanitizeSiteContent(raw: unknown, hotelName: string): SiteContent {
+export function sanitizeSiteContent(
+  raw: unknown,
+  hotelName: string,
+  kind: SiteKind = 'hotel',
+): SiteContent {
   const o = asObject(raw);
   return {
-    sections: sanitizeSections(o.sections, hotelName),
+    sections: sanitizeSections(o.sections, hotelName, kind),
     roomTypes: sanitizeRoomTypes(o.roomTypes),
     contact: sanitizeContact(o.contact),
   };
@@ -386,19 +420,25 @@ export interface DefaultContentInput {
   hotelName: string;
   phone: string | null;
   email: string | null;
+  /** โรงแรม: มีห้องอาหาร / ลาน: มีสิ่งอำนวยความสะดวกหรืออุปกรณ์ให้เช่า → เปิด section dining */
   hasRestaurants: boolean;
+  kind?: SiteKind;
 }
 
 /** เนื้อหาเริ่มต้นตอนสร้างเว็บ — เปิดเฉพาะ section ที่มีข้อมูลพร้อมแสดงแล้ว */
 export function buildDefaultContent(input: DefaultContentInput): SiteContent {
+  const kind = input.kind ?? 'hotel';
   const base = sanitizeSiteContent(
     { contact: { phone: input.phone, email: input.email } },
     input.hotelName,
+    kind,
   );
   return {
     ...base,
-    sections: base.sections.map((s) =>
-      s.type === 'dining' ? ({ ...s, enabled: input.hasRestaurants } as SiteSection) : s,
-    ),
+    sections: base.sections.map((s) => {
+      if (s.type === 'dining') return { ...s, enabled: input.hasRestaurants } as SiteSection;
+      if (s.type === 'reviews' && kind === 'camp') return { ...s, enabled: false } as SiteSection;
+      return s;
+    }),
   };
 }

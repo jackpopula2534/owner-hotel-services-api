@@ -89,12 +89,17 @@ function setup(live = true) {
   };
   const entitlement = { isLive: jest.fn().mockResolvedValue(live) };
   const notifications = { create: jest.fn().mockResolvedValue({}) };
+  const campPublic = {
+    buildPayload: jest.fn().mockResolvedValue({ available: true, kind: 'camp' }),
+    buildFallback: jest.fn().mockResolvedValue({ available: false }),
+  };
   const svc = new WebsitePublicService(
     prisma as never,
     entitlement as never,
     notifications as never,
+    campPublic as never,
   );
-  return { svc, prisma, entitlement, notifications };
+  return { svc, prisma, entitlement, notifications, campPublic };
 }
 
 const contact = (over: Partial<CreateWebsiteInquiryDto> = {}): CreateWebsiteInquiryDto =>

@@ -26,6 +26,7 @@ describe('WebsitePaymentService', () => {
     promptPayTransaction: { findFirst: jest.Mock };
     booking: { findFirst: jest.Mock; findMany: jest.Mock };
     payments: { findFirst: jest.Mock; update: jest.Mock };
+    campReservation: { findFirst: jest.Mock; updateMany: jest.Mock };
   };
   let promptPay: { generateQRCode: jest.Mock };
   let storage: { save: jest.Mock };
@@ -52,6 +53,17 @@ describe('WebsitePaymentService', () => {
       payments: {
         findFirst: jest.fn().mockResolvedValue({ id: 'pay-1', slip_url: null }),
         update: jest.fn().mockResolvedValue({}),
+      },
+      campReservation: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'res-1',
+          reservationNo: 'CR-1',
+          status: 'pending',
+          slipUrl: null,
+          guestFirstName: 'C',
+          guestLastName: 'D',
+        }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
     };
     promptPay = {
@@ -272,6 +284,64 @@ describe('WebsitePaymentService', () => {
         expect.objectContaining({
           message: expect.stringContaining('2 ห้อง: #BK-1 ฿600, #BK-2 ฿400'),
         }),
+      );
+    });
+  });
+
+  describe('campground sites', () => {
+    const campSite = { ...site, campgroundId: 'cg-1' };
+
+    it('camp charge has no booking/invoice and stores the ref on the reservation', async () => {
+      const info = await service.createCampPromptPayCharge({
+        tenantId: 'tenant-1',
+        reservationId: 'res-1',
+        amount: 1000,
+        grandTotal: 3531,
+        account: { promptpayId: '0812345678', accountName: 'Camp' } as never,
+      });
+      const dto = promptPay.generateQRCode.mock.calls[0][0];
+      expect(dto).toMatchObject({ tenantId: 'tenant-1', promptpayId: '0812345678' });
+      expect(dto.bookingId).toBeUndefined();
+      expect(prisma.campReservation.updateMany).toHaveBeenCalledWith({
+        where: { id: 'res-1', tenantId: 'tenant-1' },
+        data: { paymentRef: 'PPREF' },
+      });
+      expect(info.token).toHaveLength(32);
+    });
+
+    it('status + slip go to the camp reservation (tenant-scoped by paymentRef)', async () => {
+      publicSites.findPublishedSite.mockResolvedValue(campSite);
+      prisma.promptPayTransaction.findFirst.mockResolvedValue({
+        ...tx,
+        bookingId: null,
+        invoiceId: null,
+      });
+      storage.save.mockResolvedValue({ path: '/p', url: 'https://cdn/slip.png' });
+      const { token } = await charge();
+
+      const status = await service.getStatus('pine', 'PPREF', token);
+      expect(status).toMatchObject({ slipUploaded: false, bookingStatus: 'pending' });
+
+      await service.uploadSlip('pine', 'PPREF', token, png);
+      expect(prisma.campReservation.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { paymentRef: 'PPREF', tenantId: 'tenant-1' } }),
+      );
+      expect(prisma.campReservation.updateMany).toHaveBeenCalledWith({
+        where: { id: 'res-1', tenantId: 'tenant-1' },
+        data: { slipUrl: 'https://cdn/slip.png' },
+      });
+      expect(prisma.payments.update).not.toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ slip_url: expect.anything() }) }),
+      );
+      expect(publicSites.notifyStaff).toHaveBeenCalled();
+    });
+
+    it('slip without a matching camp reservation is rejected', async () => {
+      publicSites.findPublishedSite.mockResolvedValue(campSite);
+      prisma.campReservation.findFirst.mockResolvedValue(null);
+      const { token } = await charge();
+      await expect(service.uploadSlip('pine', 'PPREF', token, png)).rejects.toBeInstanceOf(
+        BadRequestException,
       );
     });
   });

@@ -7730,6 +7730,7 @@ model Campground {
   reservations       CampReservation[]
   campAddons         CampAddon[]
   requisitions       CampRequisition[]
+  websiteSite        WebsiteSite?
 
   @@index([tenantId])
   @@index([status])
@@ -7868,6 +7869,12 @@ model CampReservation {
   amountPaid        Decimal?               @db.Decimal(10, 2)
   /// ประวัติการรับชำระเงินแบบรายการ [{at, amount, method, reference?, note?, slipUrl?}]
   payments          Json?
+  /// ที่มาของการจอง: STAFF (พนักงานลงเอง) | WEBSITE (ลูกค้าจองผ่านเว็บของลาน)
+  source            String                 @default("STAFF") @db.VarChar(20)
+  /// transactionRef ของ QR PromptPay ที่ออกให้ลูกค้าตอนจองผ่านเว็บ
+  paymentRef        String?                @db.VarChar(64)
+  /// สลิปที่ลูกค้าแนบจากหน้าเว็บ — รอพนักงานตรวจยอดแล้วกดรับชำระ
+  slipUrl           String?                @db.VarChar(500)
   notes             String?                @db.Text
   createdAt         DateTime               @default(now())
   updatedAt         DateTime               @updatedAt
@@ -7880,6 +7887,7 @@ model CampReservation {
   @@index([pitchId])
   @@index([status])
   @@index([checkIn, checkOut])
+  @@index([paymentRef])
   @@map("camp_reservations")
 }
 
@@ -8144,6 +8152,8 @@ model WebsiteSite {
   id               String           @id @default(uuid())
   tenantId         String
   propertyId       String           @unique
+  /// เว็บของลานกางเต็นท์ (CampSync) — null = เว็บโรงแรม; propertyId ยังชี้ property หลักของ tenant (บัญชีรับเงิน/นโยบายมัดจำ)
+  campgroundId     String?          @unique @db.VarChar(36)
   slug             String           @unique @db.VarChar(40)
   /// DRAFT | PUBLISHED | UNPUBLISHED
   status           String           @default("DRAFT") @db.VarChar(20)
@@ -8164,6 +8174,7 @@ model WebsiteSite {
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
   property         Property         @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  campground       Campground?      @relation(fields: [campgroundId], references: [id], onDelete: Cascade)
   inquiries        WebsiteInquiry[]
 
   @@index([tenantId])

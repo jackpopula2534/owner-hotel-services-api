@@ -51,6 +51,16 @@ function setup(eligibility: { ok: boolean; reason?: string } = { ok: true }) {
       }),
     },
     restaurant: { count: jest.fn().mockResolvedValue(1) },
+    campground: {
+      findFirst: jest.fn().mockResolvedValue({
+        id: 'cg1',
+        name: 'Pine Camp',
+        phone: '081',
+        description: 'Forest',
+      }),
+    },
+    campFacility: { count: jest.fn().mockResolvedValue(2) },
+    campAddon: { count: jest.fn().mockResolvedValue(0) },
     booking: { findFirst: jest.fn() },
     review: { findMany: jest.fn().mockResolvedValue([]) },
   };
@@ -62,6 +72,7 @@ function setup(eligibility: { ok: boolean; reason?: string } = { ok: true }) {
   const storage = { saveMany: jest.fn().mockResolvedValue([{ url: 'https://cdn/a.jpg' }]) };
   const config = { get: jest.fn().mockReturnValue('staysync.io') };
   const entitlement = { checkPublishable: jest.fn().mockResolvedValue(eligibility) };
+  const addons = { getTenantSystem: jest.fn().mockResolvedValue('HOTEL') };
   const publicService = { buildPayload: jest.fn().mockResolvedValue({ available: true }) };
   const svc = new WebsiteService(
     prisma as never,
@@ -70,8 +81,9 @@ function setup(eligibility: { ok: boolean; reason?: string } = { ok: true }) {
     config as never,
     entitlement as never,
     publicService as never,
+    addons as never,
   );
-  return { svc, prisma, tenantContext, storage, entitlement, publicService };
+  return { svc, addons, prisma, tenantContext, storage, entitlement, publicService };
 }
 
 describe('WebsiteService sites', () => {
@@ -165,6 +177,56 @@ describe('WebsiteService sites', () => {
       expect.objectContaining({ where: { slug: 'grand-new', id: { not: 's1' } } }),
     );
     expect(prisma.websiteSite.update.mock.calls[0][0].data.slug).toBe('grand-new');
+  });
+});
+
+describe('WebsiteService camp sites', () => {
+  it('createSite: CAMP tenant → links its campground and camp defaults', async () => {
+    const { svc, prisma, addons } = setup();
+    addons.getTenantSystem.mockResolvedValue('CAMP');
+    await svc.createSite('t1', { slug: 'pine-camp' });
+    expect(prisma.campground.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { tenantId: 't1', status: 'active' } }),
+    );
+    const data = prisma.websiteSite.create.mock.calls[0][0].data;
+    expect(data).toMatchObject({ campgroundId: 'cg1', propertyId: 'p1' });
+    const types = data.draftContent.sections.map((s: { type: string; enabled: boolean }) => [
+      s.type,
+      s.enabled,
+    ]);
+    expect(types).toEqual(
+      expect.arrayContaining([
+        ['reviews', false],
+        ['dining', true],
+      ]),
+    );
+    expect(data.seo.title.th).toContain('Pine Camp');
+  });
+
+  it('createSite: campgroundId of another tenant is rejected', async () => {
+    const { svc, prisma } = setup();
+    prisma.campground.findFirst.mockResolvedValueOnce(null);
+    await expect(
+      svc.createSite('t1', {
+        slug: 'pine-x',
+        campgroundId: '00000000-0000-0000-0000-000000000000',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.campground.findFirst.mock.calls[0][0].where).toMatchObject({ tenantId: 't1' });
+  });
+
+  it('createSite: HOTEL tenant stays a hotel site', async () => {
+    const { svc, prisma } = setup();
+    await svc.createSite('t1', { slug: 'grand-2' });
+    expect(prisma.campground.findFirst).not.toHaveBeenCalled();
+    expect(prisma.websiteSite.create.mock.calls[0][0].data.campgroundId).toBeNull();
+  });
+
+  it('reviewOptions is empty for camp sites', async () => {
+    const { svc, prisma } = setup();
+    prisma.websiteSite.findFirst.mockResolvedValueOnce({ ...baseSite, campgroundId: 'cg1' });
+    await expect(svc.reviewOptions('s1', 't1')).resolves.toEqual([]);
+    expect(prisma.review.findMany).not.toHaveBeenCalled();
   });
 });
 

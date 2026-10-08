@@ -78,3 +78,62 @@ export function calcLodgingTotal(
 export function calcAddonTotal(items: { qty: number; priceSnapshot: number }[]): number {
   return items.reduce((sum, it) => sum + it.qty * it.priceSnapshot, 0);
 }
+
+/** แปลงค่า seasonalRates (Json จาก DB) เป็น SeasonalRate[] อย่างปลอดภัย */
+export function parseSeasonalRates(raw: unknown): SeasonalRate[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter(
+      (s): s is SeasonalRate =>
+        !!s &&
+        typeof s === 'object' &&
+        typeof (s as SeasonalRate).start === 'string' &&
+        typeof (s as SeasonalRate).end === 'string' &&
+        typeof (s as SeasonalRate).price === 'number',
+    )
+    .map((s) => ({ name: s.name, start: s.start, end: s.end, price: s.price }));
+}
+
+/** โซนในรูปที่ใช้คิดราคา — ค่า Decimal ของ Prisma ส่งมาได้ตรง ๆ */
+export interface CampZonePricing {
+  basePrice: { toString(): string } | number;
+  weekendPrice: { toString(): string } | number | null;
+  pricingMode: string | null;
+  hasElectricity: boolean | null;
+  electricityFee: { toString(): string } | number | null;
+  seasonalRates?: unknown;
+}
+
+export interface CampStayQuote {
+  nights: number;
+  /** ค่าที่พักรวม (คูณจำนวนคนแล้วถ้าโซนคิด per_person) */
+  lodging: number;
+  /** ค่าไฟรวมทุกคืน (0 = โซนไม่มีไฟ/ไม่คิดค่าไฟ) */
+  electricity: number;
+}
+
+const round2 = (n: number): number => Math.round(n * 100) / 100;
+
+/**
+ * ราคาที่พัก + ค่าไฟของการจองหนึ่งจุด — สูตรเดียวที่ทั้งพนักงาน (ReservationsService)
+ * และหน้าเว็บของลานใช้ ห้ามคิดแยกที่อื่น ไม่งั้นราคาบนเว็บกับใบจองจะไม่ตรงกัน
+ */
+export function quoteCampStay(
+  zone: CampZonePricing,
+  checkIn: Date,
+  checkOut: Date,
+  numGuests: number,
+): CampStayQuote {
+  const perUnit = calcLodgingTotal(
+    Number(zone.basePrice),
+    zone.weekendPrice ? Number(zone.weekendPrice) : null,
+    checkIn,
+    checkOut,
+    parseSeasonalRates(zone.seasonalRates),
+  );
+  const nights = countNights(checkIn, checkOut);
+  const lodging = zone.pricingMode === 'per_person' ? perUnit * numGuests : perUnit;
+  const electricity =
+    zone.hasElectricity && zone.electricityFee ? Number(zone.electricityFee) * nights : 0;
+  return { nights, lodging: round2(lodging), electricity: round2(electricity) };
+}

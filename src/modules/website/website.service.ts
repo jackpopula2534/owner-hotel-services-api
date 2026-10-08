@@ -29,7 +29,8 @@ import {
   sanitizeTheme,
   isTemplateKey,
 } from './website-content';
-import { TemplateKey, normalizeSlug, validateSlug } from './website.constants';
+import { SiteKind, TemplateKey, normalizeSlug, validateSlug } from './website.constants';
+import { AddonService } from '../addons/addon.service';
 import { CreateWebsiteSiteDto } from './dto/create-website-site.dto';
 import { UpdateWebsiteSiteDto } from './dto/update-website-site.dto';
 import { UpdateWebsiteInquiryDto, WebsiteInquiryQueryDto } from './dto/website-inquiry-query.dto';
@@ -40,14 +41,16 @@ const MAX_REVIEW_OPTIONS = 50;
 
 const PUBLISH_BLOCK_MESSAGES: Record<PublishBlockReason, string> = {
   TRIAL: 'ช่วงทดลองใช้แก้ไขและดูตัวอย่างเว็บได้ แต่เปิดเว็บสาธารณะได้หลังชำระเงินแล้วเท่านั้น',
-  WRONG_PRODUCT_LINE: 'แผนปัจจุบันของคุณใช้ฟีเจอร์เว็บไซต์โรงแรมไม่ได้',
-  ADDON_REQUIRED: 'ต้องมี add-on "เว็บไซต์โรงแรม" ที่ยังใช้งานอยู่จึงจะเปิดเว็บได้',
+  WRONG_PRODUCT_LINE: 'แผนปัจจุบันของคุณใช้ฟีเจอร์เว็บไซต์ไม่ได้',
+  ADDON_REQUIRED: 'ต้องมี add-on "เว็บไซต์ + จองออนไลน์" ที่ยังใช้งานอยู่จึงจะเปิดเว็บได้',
 };
 
 export type SiteWithEligibility = WebsiteSite & {
   publicHost: string | null;
   eligibility: PublishEligibility;
 };
+
+const siteKind = (site: WebsiteSite): SiteKind => (site.campgroundId ? 'camp' : 'hotel');
 
 const asJson = (v: unknown): Prisma.InputJsonValue => v as Prisma.InputJsonValue;
 
@@ -66,6 +69,7 @@ export class WebsiteService {
     private readonly config: ConfigService,
     private readonly entitlement: WebsiteEntitlementService,
     private readonly publicService: WebsitePublicService,
+    private readonly addons: AddonService,
   ) {}
 
   // ─── sites ───────────────────────────────────────────────────────────
@@ -92,18 +96,31 @@ export class WebsiteService {
     }
 
     const property = await this.resolveProperty(tenantId, dto.propertyId);
+    const campground = await this.resolveCampground(tenantId, dto.campgroundId);
     const slug = await this.assertSlugAvailable(dto.slug);
     const templateKey: TemplateKey = dto.templateKey ?? 'classic';
-    const hasRestaurants =
-      (await this.prisma.restaurant.count({
-        where: { tenantId, propertyId: property.id, isActive: true },
-      })) > 0;
+
+    // เว็บลาน: ชื่อ/เบอร์/คำอธิบายมาจากลาน, section dining = สิ่งอำนวยความสะดวก + อุปกรณ์ให้เช่า
+    const name = campground?.name ?? property.name;
+    const description = campground ? campground.description : property.description;
+    const hasRestaurants = campground
+      ? (await this.prisma.campFacility.count({
+          where: { tenantId, campgroundId: campground.id },
+        })) +
+          (await this.prisma.campAddon.count({
+            where: { tenantId, campgroundId: campground.id, active: true },
+          })) >
+        0
+      : (await this.prisma.restaurant.count({
+          where: { tenantId, propertyId: property.id, isActive: true },
+        })) > 0;
 
     const content = buildDefaultContent({
-      hotelName: property.name,
-      phone: property.phone,
+      hotelName: name,
+      phone: campground ? (campground.phone ?? property.phone) : property.phone,
       email: property.email,
       hasRestaurants,
+      kind: campground ? 'camp' : 'hotel',
     });
 
     try {
@@ -111,13 +128,12 @@ export class WebsiteService {
         data: {
           tenantId,
           propertyId: property.id,
+          campgroundId: campground?.id ?? null,
           slug,
           templateKey,
           theme: asJson(sanitizeTheme({}, templateKey)),
           draftContent: asJson(content),
-          seo: asJson(
-            sanitizeSeo({ description: { th: property.description ?? '' } }, property.name),
-          ),
+          seo: asJson(sanitizeSeo({ description: { th: description ?? '' } }, name)),
         },
       });
       this.logger.log(`Website ${site.id} (${slug}) created for tenant ${tenantId}`);
@@ -152,7 +168,7 @@ export class WebsiteService {
       data.theme = asJson(sanitizeTheme(themeInput, templateKey));
     }
     if (dto.content !== undefined)
-      data.draftContent = asJson(sanitizeSiteContent(dto.content, hotelName));
+      data.draftContent = asJson(sanitizeSiteContent(dto.content, hotelName, siteKind(site)));
     if (dto.seo !== undefined) data.seo = asJson(sanitizeSeo(dto.seo, hotelName));
 
     try {
@@ -175,7 +191,7 @@ export class WebsiteService {
     }
 
     const hotelName = await this.getHotelName(site);
-    const content = sanitizeSiteContent(site.draftContent, hotelName);
+    const content = sanitizeSiteContent(site.draftContent, hotelName, siteKind(site));
     const templateKey = isTemplateKey(site.templateKey) ? site.templateKey : 'classic';
     await this.prisma.websiteSite.update({
       where: { id: site.id },
@@ -229,6 +245,8 @@ export class WebsiteService {
   /** รายการรีวิวของ property ให้ editor เลือกไปโชว์ในหน้าเว็บ */
   async reviewOptions(id: string, tenantId: string): Promise<PublicReview[]> {
     const site = await this.findSite(id, tenantId);
+    // ลานกางเต็นท์ยังไม่มีระบบรีวิว
+    if (site.campgroundId) return [];
     const reviews = await this.prisma.review.findMany({
       where: { tenantId, booking: { propertyId: site.propertyId } },
       select: {
@@ -320,6 +338,13 @@ export class WebsiteService {
   }
 
   private async getHotelName(site: WebsiteSite): Promise<string> {
+    if (site.campgroundId) {
+      const campground = await this.prisma.campground.findFirst({
+        where: { id: site.campgroundId, tenantId: site.tenantId },
+        select: { name: true },
+      });
+      return campground?.name ?? site.slug;
+    }
     const property = await this.prisma.property.findFirst({
       where: { id: site.propertyId, tenantId: site.tenantId },
       select: { name: true },
@@ -350,6 +375,38 @@ export class WebsiteService {
         });
     if (!property) throw new BadRequestException('ไม่พบที่พักสำหรับสร้างเว็บไซต์');
     return property;
+  }
+
+  /**
+   * เว็บลานกางเต็นท์ = ระบุ campgroundId มา หรือ tenant อยู่สาย CAMP (ใช้ลานแรกที่เปิดอยู่)
+   * คืน null = เว็บโรงแรม
+   */
+  private async resolveCampground(
+    tenantId: string,
+    campgroundId?: string,
+  ): Promise<{
+    id: string;
+    name: string;
+    phone: string | null;
+    description: string | null;
+  } | null> {
+    const select = { id: true, name: true, phone: true, description: true };
+    if (campgroundId) {
+      const campground = await this.prisma.campground.findFirst({
+        where: { id: campgroundId, tenantId },
+        select,
+      });
+      if (!campground) throw new BadRequestException('ไม่พบลานกางเต็นท์นี้');
+      return campground;
+    }
+    if ((await this.addons.getTenantSystem(tenantId)) !== 'CAMP') return null;
+    const campground = await this.prisma.campground.findFirst({
+      where: { tenantId, status: 'active' },
+      orderBy: { createdAt: 'asc' },
+      select,
+    });
+    if (!campground) throw new BadRequestException('กรุณาสร้างลานกางเต็นท์ก่อนสร้างเว็บไซต์');
+    return campground;
   }
 
   private async assertSlugAvailable(rawSlug: string, excludeSiteId?: string): Promise<string> {

@@ -1,5 +1,6 @@
 import {
   calcAddonTotal,
+  quoteCampStay,
   calcLodgingTotal,
   countNights,
   countWeekendNights,
@@ -101,5 +102,31 @@ describe('camp-pricing', () => {
     it('ไม่มี item → 0', () => {
       expect(calcAddonTotal([])).toBe(0);
     });
+  });
+});
+
+describe('quoteCampStay', () => {
+  const zone = {
+    basePrice: 400,
+    weekendPrice: 600,
+    pricingMode: 'per_night',
+    hasElectricity: true,
+    electricityFee: 50,
+  };
+
+  it('per_night: weekday + weekend rates, electricity per night', () => {
+    // Thu 2026-10-08 → Sat 2026-10-10: Thu (400) + Fri (600)
+    const q = quoteCampStay(zone, new Date('2026-10-08'), new Date('2026-10-10'), 3);
+    expect(q).toEqual({ nights: 2, lodging: 1000, electricity: 100 });
+  });
+
+  it('per_person multiplies lodging by guests; no electricity when zone has none', () => {
+    const q = quoteCampStay(
+      { ...zone, pricingMode: 'per_person', hasElectricity: false },
+      new Date('2026-10-12'),
+      new Date('2026-10-13'),
+      3,
+    );
+    expect(q).toEqual({ nights: 1, lodging: 1200, electricity: 0 });
   });
 });

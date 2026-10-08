@@ -13,16 +13,10 @@ import {
   UpdateReservationAddonsDto,
   UpdateReservationDto,
 } from './dto/reservation.dto';
-import { calcAddonTotal, calcLodgingTotal, countNights, type SeasonalRate } from './camp-pricing';
+import { calcAddonTotal, quoteCampStay } from './camp-pricing';
 import { CampAccountingService } from './camp-accounting.service';
-import {
-  RevenuePostingService,
-  hasPostableRevenue,
-} from '../revenue/revenue-posting.service';
-import {
-  buildCampRevenueInput,
-  CAMP_REVENUE_SELECT,
-} from '../revenue/sources/camp-revenue.source';
+import { RevenuePostingService, hasPostableRevenue } from '../revenue/revenue-posting.service';
+import { buildCampRevenueInput, CAMP_REVENUE_SELECT } from '../revenue/sources/camp-revenue.source';
 
 const BLOCKING_STATUSES = ['pending', 'confirmed', 'checked_in'];
 
@@ -65,7 +59,12 @@ export class ReservationsService {
     return { success: true, data: reservation };
   }
 
-  async create(dto: CreateReservationDto, tenantId?: string) {
+  /** opts.source: ที่มาของการจอง — หน้าเว็บของลานส่ง 'WEBSITE' ที่เหลือเป็นพนักงานลงเอง */
+  async create(
+    dto: CreateReservationDto,
+    tenantId?: string,
+    opts: { source?: 'STAFF' | 'WEBSITE' } = {},
+  ) {
     const checkIn = new Date(dto.checkIn);
     const checkOut = new Date(dto.checkOut);
     if (checkOut <= checkIn) {
@@ -118,7 +117,9 @@ export class ReservationsService {
           throw new NotFoundException(`Addon ${req.addonId} not found`);
         }
         if (stockManaged && addon.stockQty < req.qty) {
-          throw new ConflictException(`อุปกรณ์ "${addon.name}" คงเหลือไม่พอ (เหลือ ${addon.stockQty})`);
+          throw new ConflictException(
+            `อุปกรณ์ "${addon.name}" คงเหลือไม่พอ (เหลือ ${addon.stockQty})`,
+          );
         }
         lineItems.push({
           addonId: addon.id,
@@ -128,24 +129,13 @@ export class ReservationsService {
         });
       }
 
-      const perUnitLodging = calcLodgingTotal(
-        Number(pitch.zone.basePrice),
-        pitch.zone.weekendPrice ? Number(pitch.zone.weekendPrice) : null,
+      const totalPrice = this.computeTotal(
+        pitch.zone,
         checkIn,
         checkOut,
-        this.parseSeasons((pitch.zone as any).seasonalRates),
+        dto.numGuests ?? 1,
+        lineItems,
       );
-      // per_person: ราคาที่กำหนดเป็นราคา "ต่อคน" → คูณจำนวนผู้เข้าพัก
-      const numGuests = dto.numGuests ?? 1;
-      const lodging =
-        pitch.zone.pricingMode === 'per_person' ? perUnitLodging * numGuests : perUnitLodging;
-      // ค่าไฟ (ถ้าโซนมีไฟฟ้า + ตั้งค่าธรรมเนียม) คิดต่อคืน
-      const nights = countNights(checkIn, checkOut);
-      const electricity =
-        pitch.zone.hasElectricity && pitch.zone.electricityFee
-          ? Number(pitch.zone.electricityFee) * nights
-          : 0;
-      const totalPrice = lodging + electricity + calcAddonTotal(lineItems);
 
       const created = await tx.campReservation.create({
         data: {
@@ -168,6 +158,7 @@ export class ReservationsService {
           hasPet: dto.hasPet ?? false,
           status: 'pending',
           totalPrice,
+          source: opts.source ?? 'STAFF',
           notes: dto.notes ?? null,
         },
       });
@@ -405,21 +396,10 @@ export class ReservationsService {
     numGuests: number,
     addonItems: { qty: number; priceSnapshot: Prisma.Decimal | number }[],
   ): number {
-    const perUnitLodging = calcLodgingTotal(
-      Number(zone.basePrice),
-      zone.weekendPrice ? Number(zone.weekendPrice) : null,
-      checkIn,
-      checkOut,
-      this.parseSeasons(zone.seasonalRates),
-    );
-    const lodging = zone.pricingMode === 'per_person' ? perUnitLodging * numGuests : perUnitLodging;
-    const electricity =
-      zone.hasElectricity && zone.electricityFee
-        ? Number(zone.electricityFee) * countNights(checkIn, checkOut)
-        : 0;
+    const stay = quoteCampStay(zone, checkIn, checkOut, numGuests);
     return (
-      lodging +
-      electricity +
+      stay.lodging +
+      stay.electricity +
       calcAddonTotal(
         addonItems.map((item) => ({ qty: item.qty, priceSnapshot: Number(item.priceSnapshot) })),
       )
@@ -568,6 +548,7 @@ export class ReservationsService {
         amountPaid: true,
         payments: true,
         reservationNo: true,
+        paymentRef: true,
       },
     });
     if (!reservation) {
@@ -616,6 +597,19 @@ export class ReservationsService {
       `Payment recorded: ${id} +${dto.amount} (${dto.method}) → ${paymentStatus} ${newPaid}/${total}`,
     );
 
+    // ลูกค้าจองผ่านเว็บแล้วโอน QR → พนักงานรับชำระแล้ว = QR นั้นได้รับเงินแล้ว
+    // หน้าเว็บของลูกค้าจะเปลี่ยนจาก "รอตรวจสลิป" เป็น "ชำระแล้ว"
+    if (reservation.paymentRef && (dto.method === 'qr' || dto.method === 'transfer')) {
+      await this.prisma.promptPayTransaction.updateMany({
+        where: {
+          transactionRef: reservation.paymentRef,
+          ...(tenantId ? { tenantId } : {}),
+          status: { in: ['pending', 'expired'] },
+        },
+        data: { status: 'verified', verifiedAt: new Date(), paidAt: new Date() },
+      });
+    }
+
     // ลงบัญชีหลังบันทึกสำเร็จแล้ว — ไม่บล็อกการรับเงิน ถ้าผังบัญชียังไม่ได้ seed ก็แค่ข้าม
     if (tenantId) {
       this.campAccounting
@@ -654,21 +648,6 @@ export class ReservationsService {
   private parsePayments(raw: unknown): Record<string, unknown>[] {
     if (!Array.isArray(raw)) return [];
     return raw.filter((p): p is Record<string, unknown> => !!p && typeof p === 'object');
-  }
-
-  /** แปลงค่า seasonalRates (Json จาก DB) เป็น SeasonalRate[] อย่างปลอดภัย */
-  private parseSeasons(raw: unknown): SeasonalRate[] {
-    if (!Array.isArray(raw)) return [];
-    return raw
-      .filter(
-        (s): s is SeasonalRate =>
-          !!s &&
-          typeof s === 'object' &&
-          typeof (s as SeasonalRate).start === 'string' &&
-          typeof (s as SeasonalRate).end === 'string' &&
-          typeof (s as SeasonalRate).price === 'number',
-      )
-      .map((s) => ({ name: s.name, start: s.start, end: s.end, price: s.price }));
   }
 
   private generateReservationNo(): string {

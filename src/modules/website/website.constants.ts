@@ -4,6 +4,9 @@
 
 export const WEBSITE_ADDON_CODE = 'WEBSITE_BUILDER' as const;
 
+/** hotel = เว็บโรงแรม (จองห้อง) · camp = เว็บลานกางเต็นท์ (จองจุดกางเต็นท์) */
+export type SiteKind = 'hotel' | 'camp';
+
 export const SITE_STATUSES = ['DRAFT', 'PUBLISHED', 'UNPUBLISHED'] as const;
 export type SiteStatus = (typeof SITE_STATUSES)[number];
 
@@ -38,10 +41,11 @@ export const SITE_EDITOR_ROLES = [
   'platform_admin',
   'manager',
   'hotel_manager',
+  'camp_manager',
 ] as const;
 
 /** คนที่ดู/ตอบกล่องคำขอได้ (เพิ่มพนักงานต้อนรับ) */
-export const INQUIRY_ROLES = [...SITE_EDITOR_ROLES, 'receptionist'] as const;
+export const INQUIRY_ROLES = [...SITE_EDITOR_ROLES, 'receptionist', 'camp_staff'] as const;
 
 /** ผู้รับแจ้งเตือนเมื่อมีคำขอใหม่เข้ามา */
 export const INQUIRY_NOTIFY_ROLES = [
@@ -49,7 +53,9 @@ export const INQUIRY_NOTIFY_ROLES = [
   'tenant_admin',
   'manager',
   'hotel_manager',
+  'camp_manager',
   'receptionist',
+  'camp_staff',
 ];
 
 export const SLUG_MIN = 3;

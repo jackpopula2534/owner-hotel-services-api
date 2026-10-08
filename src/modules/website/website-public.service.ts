@@ -13,8 +13,9 @@ import {
   sanitizeTheme,
   isTemplateKey,
 } from './website-content';
-import { INQUIRY_NOTIFY_ROLES } from './website.constants';
+import { INQUIRY_NOTIFY_ROLES, SiteKind } from './website.constants';
 import { CreateWebsiteInquiryDto } from './dto/create-website-inquiry.dto';
+import { CampSiteExtras, WebsiteCampPublicService } from './website-camp-public.service';
 
 export interface PublicRoomType {
   key: string;
@@ -29,8 +30,8 @@ export interface PublicRoomType {
   images: string[];
   hidden: boolean;
   order: number;
-  /** เฉพาะ preview ของ editor */
-  defaults?: { description: string; images: string[] };
+  /** เฉพาะ preview ของ editor (name = ชื่อโซนลาน; ห้องโรงแรมใช้ key เป็นชื่อ) */
+  defaults?: { description: string; images: string[]; name?: string };
 }
 
 export interface PublicReview {
@@ -43,6 +44,8 @@ export interface PublicReview {
 
 export interface SitePayload {
   available: true;
+  /** hotel = เว็บโรงแรม, camp = เว็บลานกางเต็นท์ (roomTypes = โซน, ข้อมูลเพิ่มอยู่ที่ camp) */
+  kind: SiteKind;
   site: {
     slug: string;
     status: string;
@@ -79,6 +82,7 @@ export interface SitePayload {
     closeTime: string | null;
   }>;
   reviews: { average: number | null; count: number; featured: PublicReview[] };
+  camp?: CampSiteExtras;
 }
 
 export interface SiteFallbackPayload {
@@ -145,6 +149,7 @@ export class WebsitePublicService {
     private readonly prisma: PrismaService,
     private readonly entitlement: WebsiteEntitlementService,
     private readonly notifications: NotificationsService,
+    private readonly campPublic: WebsiteCampPublicService,
   ) {}
 
   async getPublishedSite(slug: string): Promise<SitePayload | SiteFallbackPayload> {
@@ -157,6 +162,7 @@ export class WebsitePublicService {
 
   /** ใช้ทั้งหน้า public (published) และ preview ใน editor (draft) */
   async buildPayload(site: WebsiteSite, source: 'published' | 'draft'): Promise<SitePayload> {
+    if (site.campgroundId) return this.campPublic.buildPayload(site, source);
     const { tenantId, propertyId } = site;
     const [property, tenant] = await Promise.all([
       this.prisma.property.findFirst({
@@ -204,6 +210,7 @@ export class WebsitePublicService {
 
     return {
       available: true,
+      kind: 'hotel',
       site: {
         slug: site.slug,
         status: site.status,
@@ -393,7 +400,7 @@ export class WebsitePublicService {
     await this.notifyStaff(site.tenantId, {
       refId: inquiry.id,
       title: isRequest ? 'คำขอจองใหม่จากเว็บไซต์' : 'ข้อความใหม่จากเว็บไซต์',
-      message: `${inquiry.name} ส่งคำขอเข้ามาทางเว็บไซต์โรงแรม`,
+      message: `${inquiry.name} ส่งคำขอเข้ามาทางเว็บไซต์${site.campgroundId ? 'ลานกางเต็นท์' : 'โรงแรม'}`,
     });
     return { received: true };
   }
@@ -409,6 +416,7 @@ export class WebsitePublicService {
   }
 
   private async buildFallback(site: WebsiteSite): Promise<SiteFallbackPayload> {
+    if (site.campgroundId) return this.campPublic.buildFallback(site);
     const [property, tenant] = await Promise.all([
       this.prisma.property.findFirst({
         where: { id: site.propertyId, tenantId: site.tenantId },

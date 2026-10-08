@@ -18,4 +18,10 @@ export class CreateWebsiteSiteDto {
   @IsOptional()
   @IsUUID()
   propertyId?: string;
+
+  /** เว็บลานกางเต็นท์ — ไม่ระบุแต่ tenant อยู่สาย CAMP = ใช้ลานแรกที่เปิดอยู่ */
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsUUID()
+  campgroundId?: string;
 }

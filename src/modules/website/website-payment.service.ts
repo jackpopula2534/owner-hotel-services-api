@@ -7,7 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PaymentAccount, PromptPayTransactionStatus } from '@prisma/client';
+import { PaymentAccount, PromptPayTransaction, PromptPayTransactionStatus } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
 import { PromptPayService } from '../../promptpay/promptpay.service';
 import { StorageService, UploadableFile } from '../../common/storage/storage.service';
@@ -140,8 +140,45 @@ export class WebsitePaymentService {
     };
   }
 
+  /**
+   * QR ของการจองลานกางเต็นท์ — ลานไม่มี invoice/booking ของโรงแรม จึงผูกกันด้วย
+   * campReservation.paymentRef = transactionRef (สลิปเก็บที่ campReservation.slipUrl)
+   */
+  async createCampPromptPayCharge(params: {
+    tenantId: string;
+    reservationId: string;
+    amount: number;
+    grandTotal: number;
+    account: PaymentAccount;
+  }): Promise<WebsitePromptPayInfo> {
+    const qr = await this.promptPay.generateQRCode({
+      tenantId: params.tenantId,
+      amount: params.amount,
+      promptpayId: params.account.promptpayId ?? undefined,
+      expiryMinutes: WEBSITE_QR_EXPIRY_MINUTES,
+    });
+    await this.prisma.campReservation.updateMany({
+      where: { id: params.reservationId, tenantId: params.tenantId },
+      data: { paymentRef: qr.transactionRef },
+    });
+    return {
+      method: 'PROMPTPAY',
+      transactionRef: qr.transactionRef,
+      token: this.sign(qr.transactionRef),
+      qrCodeImage: qr.qrCodeImage,
+      amount: qr.amount,
+      grandTotal: params.grandTotal,
+      balanceDue: Math.max(0, Math.round((params.grandTotal - qr.amount) * 100) / 100),
+      isDeposit: qr.amount < params.grandTotal,
+      expiresAt: new Date(qr.expiresAt).toISOString(),
+      accountName: params.account.accountName,
+      promptpayId: qr.promptpayId,
+    };
+  }
+
   async getStatus(slug: string, ref: string, token: string): Promise<WebsitePaymentStatus> {
-    const { tx } = await this.load(slug, ref, token);
+    const { tx, site } = await this.load(slug, ref, token);
+    if (site.campgroundId) return this.campStatus(tx, site.tenantId);
     const [booking, slip] = await Promise.all([
       tx.bookingId
         ? this.prisma.booking.findFirst({
@@ -189,6 +226,10 @@ export class WebsitePaymentService {
     }
     if (tx.status !== 'pending' && tx.status !== 'expired') {
       throw new BadRequestException('รายการชำระเงินนี้ถูกยกเลิกแล้ว กรุณาติดต่อโรงแรม');
+    }
+    if (site.campgroundId) {
+      await this.attachCampSlip(tx, site.tenantId, file);
+      return this.getStatus(slug, ref, token);
     }
     // จองหลายห้อง: QR ใบเดียวครอบทุกห้องในชุด → สลิปเดียวผูกกับแถวที่รอตรวจของทุก invoice
     const group = await this.groupOf(tx);
@@ -238,6 +279,56 @@ export class WebsitePaymentService {
   }
 
   // ─── internals ───────────────────────────────────────────────────────
+
+  private async campStatus(
+    tx: PromptPayTransaction,
+    tenantId: string,
+  ): Promise<WebsitePaymentStatus> {
+    const reservation = await this.prisma.campReservation.findFirst({
+      where: { paymentRef: tx.transactionRef, tenantId },
+      select: { status: true, slipUrl: true },
+    });
+    const expired = tx.status === 'pending' && tx.expiresAt < new Date();
+    return {
+      transactionRef: tx.transactionRef,
+      status: expired ? 'expired' : tx.status,
+      amount: Number(tx.amount),
+      expiresAt: tx.expiresAt.toISOString(),
+      slipUploaded: Boolean(reservation?.slipUrl),
+      bookingStatus: reservation?.status ?? null,
+    };
+  }
+
+  /** แนบซ้ำได้ (ทับไฟล์เดิม) จนกว่าลานจะบันทึกรับชำระ */
+  private async attachCampSlip(
+    tx: PromptPayTransaction,
+    tenantId: string,
+    file: UploadableFile,
+  ): Promise<void> {
+    const reservation = await this.prisma.campReservation.findFirst({
+      where: { paymentRef: tx.transactionRef, tenantId },
+      select: { id: true, reservationNo: true, guestFirstName: true, guestLastName: true },
+    });
+    if (!reservation) {
+      throw new BadRequestException('ไม่พบการจองของรายการชำระเงินนี้ กรุณาติดต่อลาน');
+    }
+    const saved = await this.storage.save({
+      folder: 'payment-slips',
+      file,
+      prefix: `web-${tx.transactionRef}`,
+    });
+    await this.prisma.campReservation.updateMany({
+      where: { id: reservation.id, tenantId },
+      data: { slipUrl: saved.url },
+    });
+    const name = [reservation.guestFirstName, reservation.guestLastName].filter(Boolean).join(' ');
+    await this.publicSites.notifyStaff(tenantId, {
+      refId: reservation.id,
+      title: 'แขกแนบสลิป PromptPay — รอตรวจยอด',
+      message: `${name} แนบสลิปการจองลาน #${reservation.reservationNo ?? reservation.id.slice(0, 8)} ยอด ฿${Number(tx.amount).toLocaleString('en-US')} กรุณาตรวจยอดเข้าบัญชีแล้วบันทึกรับชำระในหน้าการจอง`,
+    });
+    this.logger.log(`camp slip uploaded for ${tx.transactionRef} (reservation ${reservation.id})`);
+  }
 
   private async load(slug: string, ref: string, token: string) {
     if (!this.verify(ref, token)) throw new ForbiddenException('ลิงก์ชำระเงินไม่ถูกต้อง');
