@@ -13,10 +13,28 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { AllowSystems } from '@/common/decorators/allow-systems.decorator';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
+import { Roles, type UserRole } from '@/common/decorators/roles.decorator';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
+import { RolesGuard } from '@/common/guards/roles.guard';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PaymentSettingsService } from './payment-settings.service';
 import { SavePaymentSettingsDto } from './dto/save-payment-settings.dto';
+
+/**
+ * ใครแก้ช่องทางรับเงินได้ — บัญชี PromptPay ปลายทางคือที่ที่ลูกค้าโอนเงินเข้า
+ * ให้พนักงานหน้าร้าน/แม่บ้านเปลี่ยนได้ = เปลี่ยนเงินเข้าบัญชีตัวเองได้
+ * ระดับ manager ขึ้นไปสืบทอดเข้าได้ (RolesGuard); role ที่เหลือเป็น exact match
+ */
+const PAYMENT_SETTINGS_WRITE_ROLES: UserRole[] = [
+  'platform_admin',
+  'tenant_admin',
+  'admin',
+  'manager',
+  'owner',
+  'hotel_manager',
+  'accounting_manager',
+  'camp_manager',
+];
 
 interface JwtUser {
   id: string;
@@ -26,7 +44,7 @@ interface JwtUser {
 
 @ApiTags('Payment Settings')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('payment-settings')
 export class PaymentSettingsController {
   constructor(
@@ -51,10 +69,12 @@ export class PaymentSettingsController {
   }
 
   @Post()
+  @Roles(...PAYMENT_SETTINGS_WRITE_ROLES)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Save (upsert) payment settings for current property' })
   @ApiQuery({ name: 'propertyId', required: false })
   @ApiResponse({ status: 200, description: 'Payment settings saved' })
+  @ApiResponse({ status: 403, description: 'Role cannot change payment channels' })
   async save(
     @CurrentUser() user: JwtUser,
     @Body() dto: SavePaymentSettingsDto,

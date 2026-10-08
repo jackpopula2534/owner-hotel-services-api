@@ -28,6 +28,11 @@ describe('PaymentsService', () => {
       update: jest.fn(),
       updateMany: jest.fn(),
       findFirstOrThrow: jest.fn(),
+      findMany: jest.fn(),
+      count: jest.fn(),
+    },
+    promptPayTransaction: {
+      updateMany: jest.fn(),
     },
     invoices: {
       update: jest.fn(),
@@ -41,6 +46,7 @@ describe('PaymentsService', () => {
       findUnique: jest.fn(),
       update: jest.fn(),
       findFirst: jest.fn(),
+      findMany: jest.fn(),
     },
   });
 
@@ -183,6 +189,100 @@ describe('PaymentsService', () => {
       });
     });
 
+    it('keeps a booking invoice open when only a deposit has been approved', async () => {
+      arrangePending({ id: 'payment-1', status: 'approved', invoices: { id: 'inv-1' } });
+      prismaMock.invoices.findFirst.mockResolvedValue({
+        id: 'inv-1',
+        booking_id: 'booking-1',
+        amount: '3177.90',
+        adjusted_amount: null,
+      });
+      prismaMock.payments.findMany.mockResolvedValue([{ amount: '953.37' }]);
+
+      await service.approvePayment('payment-1', 'admin-1', 'tenant-1');
+
+      expect(prismaMock.invoices.update).not.toHaveBeenCalled();
+    });
+
+    it('syncs the booking to partial with the approved deposit amount', async () => {
+      arrangePending({ id: 'payment-1', status: 'approved', invoices: { id: 'inv-1' } });
+      prismaMock.invoices.findFirst.mockResolvedValue({
+        id: 'inv-1',
+        tenant_id: 'tenant-1',
+        booking_id: 'booking-1',
+        amount: '3177.90',
+        adjusted_amount: null,
+      });
+      prismaMock.booking.findFirst.mockResolvedValue({ id: 'booking-1', status: 'pending' });
+      prismaMock.payments.findMany.mockResolvedValue([{ amount: '953.37' }]);
+
+      await service.approvePayment('payment-1', 'admin-1', 'tenant-1');
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(prismaMock.booking.update).toHaveBeenCalledWith({
+        where: { id: 'booking-1' },
+        data: { status: 'confirmed', paymentStatus: 'partial', amountPaid: 953.37 },
+      });
+    });
+
+    it('never confirms an unrelated booking when the invoice has no booking (subscription)', async () => {
+      arrangePending({ id: 'payment-1', status: 'approved', invoices: { id: 'inv-1' } });
+      prismaMock.invoices.findFirst.mockResolvedValue({
+        id: 'inv-1',
+        tenant_id: 'tenant-1',
+        booking_id: null,
+        amount: '990.00',
+        adjusted_amount: null,
+      });
+      prismaMock.booking.findFirst.mockResolvedValue({ id: 'someone-elses-booking', status: 'pending' });
+      prismaMock.payments.findMany.mockResolvedValue([{ amount: '990.00' }]);
+
+      await service.approvePayment('payment-1', 'admin-1', 'tenant-1');
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(prismaMock.booking.findFirst).not.toHaveBeenCalled();
+      expect(prismaMock.booking.update).not.toHaveBeenCalled();
+    });
+
+    it('keeps a checked-in booking checked in while syncing the paid amount', async () => {
+      arrangePending({ id: 'payment-1', status: 'approved', invoices: { id: 'inv-1' } });
+      prismaMock.invoices.findFirst.mockResolvedValue({
+        id: 'inv-1',
+        tenant_id: 'tenant-1',
+        booking_id: 'booking-1',
+        amount: '3177.90',
+        adjusted_amount: null,
+      });
+      prismaMock.booking.findFirst.mockResolvedValue({ id: 'booking-1', status: 'checked_in' });
+      prismaMock.payments.findMany.mockResolvedValue([{ amount: '953.37' }, { amount: '2224.53' }]);
+
+      await service.approvePayment('payment-1', 'admin-1', 'tenant-1');
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(prismaMock.booking.update).toHaveBeenCalledWith({
+        where: { id: 'booking-1' },
+        data: { paymentStatus: 'paid', amountPaid: 3177.9 },
+      });
+    });
+
+    it('closes a booking invoice once approved payments cover the total', async () => {
+      arrangePending({ id: 'payment-1', status: 'approved', invoices: { id: 'inv-1' } });
+      prismaMock.invoices.findFirst.mockResolvedValue({
+        id: 'inv-1',
+        booking_id: 'booking-1',
+        amount: '3177.90',
+        adjusted_amount: null,
+      });
+      prismaMock.payments.findMany.mockResolvedValue([{ amount: '953.37' }, { amount: '2224.53' }]);
+
+      await service.approvePayment('payment-1', 'admin-1', 'tenant-1');
+
+      expect(prismaMock.invoices.update).toHaveBeenCalledWith({
+        where: { id: 'inv-1' },
+        data: { status: 'paid' },
+      });
+    });
+
     it('activates the subscription INSIDE the approval transaction (H2)', async () => {
       arrangePending({ id: 'payment-1', status: 'approved', invoices: { id: 'inv-1' } });
       // activation lookups
@@ -203,6 +303,70 @@ describe('PaymentsService', () => {
           data: expect.objectContaining({ status: 'active' }),
         }),
       );
+    });
+  });
+
+  describe('approvePayment — PromptPay จากหน้าเว็บ', () => {
+    const arrangeQr = (bookingGroupId: string | null, stillPending: number) => {
+      prismaMock.payments.findFirst.mockResolvedValue({
+        id: 'payment-1',
+        invoice_id: 'inv-1',
+        tenant_id: 'tenant-1',
+        method: 'qr',
+        status: 'pending',
+      });
+      prismaMock.payments.updateMany.mockResolvedValue({ count: 1 });
+      prismaMock.payments.findFirstOrThrow.mockResolvedValue({ id: 'payment-1', status: 'approved' });
+      prismaMock.payments.findMany.mockResolvedValue([{ amount: '3531' }]);
+      prismaMock.invoices.findFirst.mockResolvedValue({
+        id: 'inv-1',
+        tenant_id: 'tenant-1',
+        booking_id: 'booking-1',
+        amount: '3531',
+        adjusted_amount: null,
+      });
+      prismaMock.booking.findFirst.mockResolvedValue({ id: 'booking-1', bookingGroupId });
+      prismaMock.booking.findMany.mockResolvedValue([{ id: 'booking-1' }, { id: 'booking-2' }]);
+      prismaMock.payments.count.mockResolvedValue(stillPending);
+      prismaMock.promptPayTransaction.updateMany.mockResolvedValue({ count: 1 });
+    };
+
+    it('verifies the PromptPay transaction of a single-room booking', async () => {
+      arrangeQr(null, 0);
+      await service.approvePayment('payment-1', 'admin-1', 'tenant-1');
+      expect(prismaMock.promptPayTransaction.updateMany).toHaveBeenCalledWith({
+        where: { bookingId: { in: ['booking-1'] }, tenantId: 'tenant-1', status: { in: ['pending', 'expired'] } },
+        data: { status: 'verified', verifiedAt: expect.any(Date) },
+      });
+    });
+
+    it('keeps a multi-room QR pending while another room is still unapproved', async () => {
+      arrangeQr('group-1', 1);
+      await service.approvePayment('payment-1', 'admin-1', 'tenant-1');
+      expect(prismaMock.promptPayTransaction.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('verifies the multi-room QR once every room is approved', async () => {
+      arrangeQr('group-1', 0);
+      await service.approvePayment('payment-1', 'admin-1', 'tenant-1');
+      expect(prismaMock.promptPayTransaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ bookingId: { in: ['booking-1', 'booking-2'] } }),
+        }),
+      );
+    });
+
+    it('leaves PromptPay transactions alone for non-QR payments', async () => {
+      arrangeQr(null, 0);
+      prismaMock.payments.findFirst.mockResolvedValue({
+        id: 'payment-1',
+        invoice_id: 'inv-1',
+        tenant_id: 'tenant-1',
+        method: 'cash',
+        status: 'pending',
+      });
+      await service.approvePayment('payment-1', 'admin-1', 'tenant-1');
+      expect(prismaMock.promptPayTransaction.updateMany).not.toHaveBeenCalled();
     });
   });
 

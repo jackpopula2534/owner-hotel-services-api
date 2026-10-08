@@ -28,6 +28,7 @@ import {
   SupplierQuoteStatus,
   InventoryLotStatus,
   RevenueType,
+  Prisma,
 } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { DEFAULT_HR_PERMISSIONS as HR_DEFAULT_PERMISSIONS } from '../modules/hr-terminal-users/dto/create-hr-terminal-user.dto';
@@ -38,6 +39,19 @@ import {
   DEFAULT_CHECK_IN_TIME,
   DEFAULT_CHECK_OUT_TIME,
 } from '../common/availability/availability.util';
+import {
+  sanitizeSeo,
+  sanitizeSiteContent,
+  sanitizeTheme,
+} from '../modules/website/website-content';
+import {
+  MOUNTAIN_VIEW_PROPERTY,
+  MOUNTAIN_VIEW_REVIEWS,
+  MOUNTAIN_VIEW_SEO,
+  MOUNTAIN_VIEW_THEME,
+  ROOM_TYPE_SEED,
+  buildMountainViewContent,
+} from './website-demo.seed-data';
 
 @Injectable()
 export class SeederService {
@@ -78,6 +92,8 @@ export class SeederService {
       await this.seedAdminPanelTestData();
       await this.seedDemoGuests();
       await this.seedDemoBookings();
+      // ต้องมาก่อน seedDemoReviews — รีวิวสุ่มจะข้าม tenant ที่มีรีวิวอยู่แล้ว ทำให้คะแนนเว็บเดโมนิ่ง
+      await this.seedMountainViewWebsite();
       await this.seedDemoReviews();
       await this.seedHrMasterData();
       await this.seedEmployeesForAllTenants();
@@ -477,6 +493,23 @@ export class SeederService {
         priceMonthly: 390,
         isActive: true,
       },
+
+      // ─── STANDALONE MODULE GRANT ──────────────────────────
+      // ข้อยกเว้นของกติกา "toggle/limit only": add-on ที่ขายแยก (ไม่ bundle ในแพลนไหน)
+      // ให้สิทธิ์ได้ทางเดียวคือ subscription_features → features(type=module, code = add_ons.code)
+      // (ดู AddonService.getActiveAddons ขั้นที่ 3) ไม่มีแถวนี้ = ซื้อแล้วก็ไม่ได้สิทธิ์
+      // module_code ปล่อย null → ไม่โผล่ซ้ำใน /addons/public (catalog ดึงจาก add_ons)
+      {
+        code: 'WEBSITE_BUILDER',
+        name: 'เว็บไซต์โรงแรม (Website Builder)',
+        description: 'สิทธิ์ใช้ add-on WEBSITE_BUILDER เมื่อซื้อแยกผ่าน subscription',
+        type: FeatureType.MODULE,
+        category: 'MARKETING',
+        icon: 'Globe',
+        displayOrder: 10,
+        priceMonthly: 590,
+        isActive: true,
+      },
     ];
 
     for (const featureData of features) {
@@ -487,7 +520,7 @@ export class SeederService {
     }
 
     this.logger.log(
-      `  ✅ Seeded ${features.length} features across 4 categories (toggle/limit only)`,
+      `  ✅ Seeded ${features.length} features (toggle/limit + standalone module grants)`,
     );
   }
 
@@ -718,6 +751,24 @@ export class SeederService {
         category: 'CRM',
         icon: 'Users',
         displayOrder: 610,
+        minQuantity: 1,
+        maxQuantity: 1,
+        isActive: true,
+      },
+
+      // ─── WEBSITE BUILDER (เว็บไซต์โรงแรม) ─────────────────
+      // ราคาชั่วคราว (MVP เว็บ + รับคำขอจอง ~490–590) — รอสรุป pricing source of truth
+      {
+        code: 'WEBSITE_BUILDER',
+        name: 'เว็บไซต์โรงแรม (Website Builder)',
+        system: 'HOTEL',
+        description:
+          'สร้างเว็บไซต์ของโรงแรมเองที่ <ชื่อ>.staysync.io: เลือกเทมเพลต ห้องพัก/ราคาดึงจากระบบอัตโนมัติ แกลเลอรี โปรโมชัน รีวิวจริง แผนที่ และฟอร์มขอจอง/ติดต่อที่เด้งเข้ากล่องคำขอ (ช่วงทดลองใช้แก้และดูตัวอย่างได้ เปิดเว็บสาธารณะหลังชำระเงิน)',
+        price: 590,
+        billingCycle: AddonBillingCycle.MONTHLY,
+        category: 'MARKETING',
+        icon: 'Globe',
+        displayOrder: 620,
         minQuantity: 1,
         maxQuantity: 1,
         isActive: true,
@@ -1177,6 +1228,7 @@ export class SeederService {
     const advancedReport = await this.featuresService.findByCode('advanced_report');
     const auditLog = await this.featuresService.findByCode('audit_log');
     const dailyManagerReport = await this.featuresService.findByCode('daily_manager_report');
+    const websiteBuilder = await this.featuresService.findByCode('WEBSITE_BUILDER');
 
     // Dynamic dates based on current date — subscriptions always valid when seeding
     const now = new Date();
@@ -1272,6 +1324,8 @@ export class SeederService {
           { feature: advancedReport, price: 500 },
           { feature: auditLog, price: 290 },
           { feature: dailyManagerReport, price: 290 },
+          // ซื้อแยก (ไม่อยู่ในแพลน L) — ให้ demo สร้าง/เผยแพร่เว็บโรงแรมได้ครบวงจร
+          { feature: websiteBuilder, price: 590 },
         ],
         invoices: [{ amount: 23200, status: InvoiceStatus.PAID, daysAgo: 0 }],
       },
@@ -1761,6 +1815,7 @@ export class SeederService {
           for (let i = 1; i <= 4; i++) {
             const roomType = roomTypes[i - 1];
             const basePrice = 1000 + i * 500;
+            const detail = ROOM_TYPE_SEED[roomType];
 
             const r = await this.prisma.room.create({
               data: {
@@ -1772,7 +1827,12 @@ export class SeederService {
                 floor: 1,
                 price: basePrice,
                 status: 'available',
-                description: `${roomType} room created by seeder`,
+                description: detail?.description ?? `${roomType} room`,
+                size: detail?.size ?? null,
+                bedType: detail?.bedType ?? null,
+                maxOccupancy: detail?.maxOccupancy ?? 2,
+                amenities: detail?.amenities ?? [],
+                images: detail?.images ?? [],
               },
             });
             newRooms.push(r);
@@ -1906,6 +1966,7 @@ export class SeederService {
         FROM bookings b
         LEFT JOIN reviews r ON r.bookingId = b.id
         WHERE b.status = 'completed' AND r.id IS NULL
+          AND NOT EXISTS (SELECT 1 FROM reviews r2 WHERE r2.tenantId = b.tenantId)
         LIMIT 50
       `;
 
@@ -1956,6 +2017,194 @@ export class SeederService {
       this.logger.log(`  ✓ Created ${reviewCount} demo reviews`);
     } catch (error) {
       this.logger.warn(`  ⚠️ Error seeding demo reviews: ${error.message}`);
+    }
+  }
+
+  /**
+   * 🌐 เว็บไซต์โรงแรมเดโมของ Mountain View Resort (SUB-002, add-on WEBSITE_BUILDER)
+   * - เติมข้อมูลที่พัก/ที่อยู่ให้ครบ (หน้าเว็บโชว์ตรง ๆ)
+   * - การเข้าพักย้อนหลัง 14 ครั้ง + รีวิว (เฉลี่ย ~4.6) ผูกกับ property นี้
+   * - website_sites สถานะ PUBLISHED — เนื้อหา/ธีม/SEO ผ่าน sanitize* ก่อนเขียนเสมอ
+   * ไม่สร้างเว็บให้ SUB-003 (seaside) — ต้องว่างไว้ทดสอบ wizard สร้างเว็บ
+   */
+  private async seedMountainViewWebsite(): Promise<void> {
+    this.logger.log('🌐 Seeding Mountain View hotel website...');
+
+    try {
+      const tenant = await this.prisma.tenants.findFirst({
+        where: { name: 'Mountain View Resort (Premium Test)' },
+        select: { id: true },
+      });
+      if (!tenant) {
+        this.logger.warn('  ⚠️ Mountain View tenant not found, skipping website');
+        return;
+      }
+      const property = await this.prisma.property.findFirst({
+        where: { tenantId: tenant.id, isDefault: true, deletedAt: null },
+      });
+      if (!property) {
+        this.logger.warn('  ⚠️ Mountain View property not found, skipping website');
+        return;
+      }
+      if (await this.prisma.websiteSite.findFirst({ where: { propertyId: property.id } })) {
+        this.logger.log('  ⊙ Website already exists for Mountain View');
+        return;
+      }
+
+      // ── ข้อมูลที่พัก/ที่อยู่ (หน้าเว็บอ่านจาก property + tenants) ──
+      const updatedProperty = await this.prisma.property.update({
+        where: { id: property.id },
+        data: {
+          name: MOUNTAIN_VIEW_PROPERTY.name,
+          location: MOUNTAIN_VIEW_PROPERTY.location,
+          description: MOUNTAIN_VIEW_PROPERTY.description,
+        },
+      });
+      await this.prisma.tenants.update({
+        where: { id: tenant.id },
+        data: {
+          address: MOUNTAIN_VIEW_PROPERTY.tenantAddress,
+          district: MOUNTAIN_VIEW_PROPERTY.district,
+          province: MOUNTAIN_VIEW_PROPERTY.province,
+          postal_code: MOUNTAIN_VIEW_PROPERTY.postalCode,
+          description: MOUNTAIN_VIEW_PROPERTY.description,
+        },
+      });
+
+      // ── การเข้าพักย้อนหลัง + รีวิว ──
+      const rooms = await this.prisma.room.findMany({
+        where: { tenantId: tenant.id, propertyId: property.id },
+        select: { id: true, type: true, price: true },
+      });
+      if (rooms.length === 0) {
+        this.logger.warn('  ⚠️ Mountain View has no rooms, skipping website');
+        return;
+      }
+
+      const today = new Date();
+      const featuredReviewIds: string[] = [];
+      let reviewCount = 0;
+
+      for (const seed of MOUNTAIN_VIEW_REVIEWS) {
+        const room = rooms.find((r) => r.type === seed.roomType) ?? rooms[0];
+
+        // วันที่แบบ date-only (UTC midnight) + เวลาเช็คอิน/เอาท์มาตรฐานไทย — เหมือน seedDemoBookings
+        const checkInBase = new Date(today);
+        checkInBase.setUTCDate(checkInBase.getUTCDate() - seed.daysAgo);
+        const checkInStr = checkInBase.toISOString().split('T')[0];
+        const checkOutBase = new Date(checkInBase);
+        checkOutBase.setUTCDate(checkOutBase.getUTCDate() + seed.nights);
+        const checkOutStr = checkOutBase.toISOString().split('T')[0];
+        const scheduledCheckIn = buildBangkokDateTime(checkInStr, DEFAULT_CHECK_IN_TIME);
+        const scheduledCheckOut = buildBangkokDateTime(checkOutStr, DEFAULT_CHECK_OUT_TIME);
+        const totalPrice = Number(room.price) * seed.nights;
+
+        const guest = await this.prisma.guest.create({
+          data: {
+            tenantId: tenant.id,
+            firstName: seed.firstName,
+            lastName: seed.lastName,
+            email: seed.email,
+            nationality: seed.nationality,
+          },
+        });
+
+        const booking = await this.prisma.booking.create({
+          data: {
+            tenantId: tenant.id,
+            property: { connect: { id: property.id } },
+            room: { connect: { id: room.id } },
+            guest: { connect: { id: guest.id } },
+            guestFirstName: seed.firstName,
+            guestLastName: seed.lastName,
+            guestEmail: seed.email,
+            checkIn: new Date(`${checkInStr}T00:00:00.000Z`),
+            checkOut: new Date(`${checkOutStr}T00:00:00.000Z`),
+            scheduledCheckIn,
+            scheduledCheckOut,
+            actualCheckIn: scheduledCheckIn,
+            actualCheckOut: scheduledCheckOut,
+            status: 'completed',
+            totalPrice,
+            grandTotal: totalPrice,
+            amountPaid: totalPrice,
+            paymentStatus: 'paid',
+            paymentMethod: 'credit_card',
+            adults: 2,
+            numberOfGuests: 2,
+            source: 'website',
+            notes: 'Demo stay created by seeder (website reviews)',
+          },
+        });
+
+        // รีวิวเขียนหลังเช็คเอาท์ 1 วัน
+        const reviewAt = new Date(scheduledCheckOut.getTime() + 24 * 60 * 60 * 1000);
+        const review = await this.prisma.review.create({
+          data: {
+            tenantId: tenant.id,
+            bookingId: booking.id,
+            rating: seed.rating,
+            comment: seed.comment,
+            createdAt: reviewAt,
+            updatedAt: reviewAt,
+          },
+        });
+        reviewCount++;
+        if (seed.featured && seed.rating === 5) featuredReviewIds.push(review.id);
+      }
+
+      // ── เว็บไซต์ (เนื้อหาผ่าน sanitizer ให้ตรงกับที่ editor/API เขียนจริง) ──
+      const hotelName = updatedProperty.name;
+      const content = sanitizeSiteContent(
+        buildMountainViewContent({
+          featuredReviewIds,
+          phone: updatedProperty.phone,
+          email: updatedProperty.email,
+        }),
+        hotelName,
+      );
+      const theme = sanitizeTheme(MOUNTAIN_VIEW_THEME, 'classic');
+      const seo = sanitizeSeo(MOUNTAIN_VIEW_SEO, hotelName);
+      const asJson = <T>(v: T): Prisma.InputJsonValue => v as unknown as Prisma.InputJsonValue;
+
+      const site = await this.prisma.websiteSite.create({
+        data: {
+          tenantId: tenant.id,
+          propertyId: property.id,
+          slug: 'mountain-view',
+          status: 'PUBLISHED',
+          templateKey: 'classic',
+          defaultLang: 'th',
+          theme: asJson(theme),
+          seo: asJson(seo),
+          draftContent: asJson(content),
+          publishedContent: asJson(content),
+          publishedTheme: asJson(theme),
+          publishedSeo: asJson(seo),
+          publishedAt: new Date(),
+        },
+      });
+
+      // บัญชีรับเงินของโรงแรมเอง — เว็บใช้ PromptPay default ของ property สร้าง QR ให้แขก
+      // (เบอร์ทดสอบ ไม่ใช่บัญชีจริง; PROMPTPAY_ID ใน env เป็นของแพลตฟอร์ม ห้ามใช้รับเงินแขก)
+      if (!(await this.prisma.paymentAccount.findFirst({ where: { propertyId: property.id, kind: 'promptpay' } }))) {
+        await this.prisma.paymentAccount.create({
+          data: {
+            propertyId: property.id,
+            kind: 'promptpay',
+            label: 'PromptPay หน้าเว็บ',
+            promptpayId: '0812345678',
+            accountName: MOUNTAIN_VIEW_PROPERTY.name,
+            isDefault: true,
+          },
+        });
+      }
+
+      this.logger.log(
+        `  ✓ Website ${site.slug} (${site.id}) + ${reviewCount} reviews, ${featuredReviewIds.length} featured`,
+      );
+    } catch (error) {
+      this.logger.warn(`  ⚠️ Error seeding Mountain View website: ${(error as Error).message}`);
     }
   }
 

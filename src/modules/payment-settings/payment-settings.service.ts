@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SavePaymentSettingsDto } from './dto/save-payment-settings.dto';
 
@@ -22,7 +22,8 @@ export class PaymentSettingsService {
    * บันทึก / อัปเดต payment settings (upsert)
    * Return ข้อมูลล่าสุดพร้อม flag isNew
    */
-  async upsert(propertyId: string, dto: SavePaymentSettingsDto) {
+  async upsert(propertyId: string, rawDto: SavePaymentSettingsDto) {
+    const dto = normalizeDeposit(rawDto);
     const existing = await this.prisma.paymentSettings.findUnique({
       where: { propertyId },
     });
@@ -60,4 +61,21 @@ export class PaymentSettingsService {
     // ถือว่า setup แล้ว ถ้าเปิดช่องทางชำระเงินอย่างน้อย 1 ช่องทาง
     return settings.promptpayEnabled || settings.bankTransferEnabled || settings.cashEnabled;
   }
+}
+
+/**
+ * มัดจำ: full → ล้างค่า, percentage ต้อง < 100 (100% = โอนเต็ม ใช้ full),
+ * ไม่ส่ง websiteDepositType มา = ไม่แตะค่าเดิม (client รุ่นเก่า)
+ */
+function normalizeDeposit(dto: SavePaymentSettingsDto): SavePaymentSettingsDto {
+  const { websiteDepositType: type, websiteDepositValue: value, ...rest } = dto;
+  if (type === undefined) return rest;
+  if (type === 'full') return { ...rest, websiteDepositType: 'full', websiteDepositValue: null };
+  if (value == null) {
+    throw new BadRequestException('กรุณาระบุจำนวนมัดจำ');
+  }
+  if (type === 'percentage' && value >= 100) {
+    throw new BadRequestException('มัดจำแบบเปอร์เซ็นต์ต้องน้อยกว่า 100% (ถ้าต้องการให้โอนเต็มจำนวน เลือก "โอนเต็มจำนวน")');
+  }
+  return { ...rest, websiteDepositType: type, websiteDepositValue: value };
 }

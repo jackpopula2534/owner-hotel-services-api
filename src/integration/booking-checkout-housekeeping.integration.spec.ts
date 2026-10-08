@@ -35,6 +35,10 @@ describe('Booking -> Checkout -> Housekeeping integration flow', () => {
     guest: {
       findFirst: jest.fn(),
     },
+    // ราคาห้องดูวันหยุดของที่พัก — flow นี้ไม่มีวันหยุดพิเศษ
+    propertyHoliday: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     invoices: {
       findFirst: jest.fn(),
     },

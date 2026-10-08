@@ -68,12 +68,20 @@ async function bootstrap() {
 
   logger.log('CORS allowed origins: ' + allowedOrigins.join(', '));
 
+  // เว็บโรงแรม <slug>.<WEBSITE_ROOT_DOMAIN> เรียก /public/sites/* (ฟอร์มคำขอจอง) — dev ใช้ <slug>.localhost
+  const escapeRe = (v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const siteRoot = process.env.WEBSITE_ROOT_DOMAIN?.trim();
+  const siteOriginPatterns: RegExp[] = [
+    ...(siteRoot ? [new RegExp(`^https://[a-z0-9-]{3,40}\\.${escapeRe(siteRoot)}$`)] : []),
+    ...(process.env.NODE_ENV !== 'production' ? [/^http:\/\/[a-z0-9-]{3,40}\.localhost(:\d+)?$/] : []),
+  ];
+
   app.enableCors({
     origin: (origin, callback) => {
       // Allow requests with no origin (like mobile apps, curl, Postman)
       if (!origin) return callback(null, true);
 
-      if (allowedOrigins.includes(origin)) {
+      if (allowedOrigins.includes(origin) || siteOriginPatterns.some((re) => re.test(origin))) {
         callback(null, true);
       } else {
         logger.warn('CORS blocked origin: ' + origin);

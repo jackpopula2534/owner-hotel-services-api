@@ -182,11 +182,69 @@ model Property {
   rooms                    Room[]
   warehouses               Warehouse[]
   lifecycleAssignmentRules HrLifecycleAssignmentRule[]
+  websiteSite              WebsiteSite?
+  holidays                 PropertyHoliday[]
+  promoCodes               PropertyPromoCode[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
   @@index([deletedAt])
   @@map("properties")
+}
+
+/// วันหยุดของโรงแรม (ใช้คิดราคา "วันหยุด" ของห้อง) — ต่อ property
+/// kind = "custom"      → วันหยุดที่โรงแรมเพิ่มเอง (date..endDate, ทำซ้ำทุกปีได้)
+/// kind = "default_off" → ปิดวันหยุดราชการวันที่ date (ไม่คิดราคาวันหยุดวันนั้น)
+model PropertyHoliday {
+  id           String    @id @default(uuid())
+  tenantId     String
+  propertyId   String
+  kind         String    @default("custom") @db.VarChar(20)
+  date         DateTime  @db.Date
+  endDate      DateTime? @db.Date
+  name         String    @default("") @db.VarChar(120)
+  /// government | religious | royal | custom (ป้ายกำกับในหน้าตั้งค่า)
+  category     String    @default("custom") @db.VarChar(20)
+  repeatYearly Boolean   @default(false)
+  isEnabled    Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  property     Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, propertyId])
+  @@index([propertyId])
+  @@map("property_holidays")
+}
+
+/// โค้ดส่วนลดของโรงแรม (ใช้ตอนแขกจองผ่านหน้าเว็บ) — ส่วนลดหักจากค่าห้องก่อนคิดค่าบริการ/VAT
+model PropertyPromoCode {
+  id            String    @id @default(uuid())
+  tenantId      String
+  propertyId    String
+  /// ตัวพิมพ์ใหญ่เสมอ
+  code          String    @db.VarChar(40)
+  description   String?   @db.VarChar(255)
+  /// percentage | fixed
+  discountType  String    @default("percentage") @db.VarChar(20)
+  discountValue Decimal   @db.Decimal(12, 2)
+  /// เพดานส่วนลดสำหรับแบบ % (null = ไม่จำกัด)
+  maxDiscount   Decimal?  @db.Decimal(12, 2)
+  minNights     Int       @default(1)
+  /// ยอดค่าห้องขั้นต่ำก่อนหักส่วนลด (null = ไม่กำหนด)
+  minAmount     Decimal?  @db.Decimal(12, 2)
+  /// ช่วงวันที่ใช้โค้ดได้ (นับวันที่จอง เวลาไทย)
+  validFrom     DateTime? @db.Date
+  validUntil    DateTime? @db.Date
+  /// จำนวนการจองสูงสุด (ไม่นับการจองที่ยกเลิก) null = ไม่จำกัด
+  usageLimit    Int?
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  property      Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, propertyId, code])
+  @@index([propertyId])
+  @@map("property_promo_codes")
 }
 
 model PaymentSettings {
@@ -204,6 +262,10 @@ model PaymentSettings {
   cashEnabled          Boolean  @default(true)
   /// คำแนะนำการชำระเงินสด
   cashInstructions     String?  @db.VarChar(500)
+  /// มัดจำที่เก็บตอนแขกจอง+โอน PromptPay ผ่านหน้าเว็บโรงแรม: full | percentage | fixed (ส่วนที่เหลือชำระที่โรงแรม)
+  websiteDepositType   String   @default("full") @db.VarChar(20)
+  /// % ของยอดรวม หรือบาทต่อการจอง ตาม websiteDepositType
+  websiteDepositValue  Decimal? @db.Decimal(12, 2)
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
   property             Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
@@ -333,6 +395,11 @@ model Booking {
   extraBedGuests        Int?               @default(0)
   standardBedGuests     Int?               @default(1)
   source                String?
+  /// โค้ดส่วนลดของโรงแรมที่ใช้ตอนจอง (ยอดส่วนลดอยู่ใน discountAmount + pricingBreakdown.promo)
+  promoCodeId           String?
+  discountAmount        Decimal?           @db.Decimal(10, 2)
+  /// จองหลายห้องในครั้งเดียว (หน้าเว็บ) — ทุกห้องในชุดมีค่าเดียวกัน ใช้ QR PromptPay ใบเดียว
+  bookingGroupId        String?            @db.VarChar(36)
   addOns                BookingAddOn[]
   arInvoices            ArInvoice[]
   guestFolios           GuestFolio[]
@@ -341,6 +408,7 @@ model Booking {
   property              Property           @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   room                  Room               @relation(fields: [roomId], references: [id], onDelete: Cascade)
   housekeepingTasks     HousekeepingTask[]
+  websiteInquiries      WebsiteInquiry[]
   review                Review?
 
   @@index([tenantId])
@@ -351,6 +419,8 @@ model Booking {
   @@index([scheduledCheckIn])
   @@index([scheduledCheckOut])
   @@index([status])
+  @@index([promoCodeId])
+  @@index([bookingGroupId])
   @@map("bookings")
 }
 
@@ -8066,4 +8136,67 @@ model RevenueEntry {
   @@index([tenantId, journalEntryId])
   @@index([reversalOfId])
   @@map("revenue_entries")
+}
+
+/// เว็บไซต์สาธารณะของโรงแรม (add-on WEBSITE_BUILDER) — 1 เว็บต่อ 1 property
+/// เปิดที่ <slug>.<root-domain> ; slug ไม่ซ้ำทั้งแพลตฟอร์มเพราะเป็น subdomain
+model WebsiteSite {
+  id               String           @id @default(uuid())
+  tenantId         String
+  propertyId       String           @unique
+  slug             String           @unique @db.VarChar(40)
+  /// DRAFT | PUBLISHED | UNPUBLISHED
+  status           String           @default("DRAFT") @db.VarChar(20)
+  templateKey      String           @default("classic") @db.VarChar(30)
+  defaultLang      String           @default("th") @db.VarChar(5)
+  /// { primary, accent, font, logoUrl }
+  theme            Json
+  /// sections + roomTypes + contact (ผ่าน sanitizeSiteContent ทุกครั้งก่อนเขียน)
+  draftContent     Json
+  /// สำเนาของ draftContent ตอนกด Publish — หน้าเว็บสาธารณะอ่านจากตัวนี้เท่านั้น
+  publishedContent Json?
+  /// { title: {th,en}, description: {th,en}, ogImage }
+  seo              Json
+  /// สำเนา theme / seo ตอนกด Publish — แก้สี/SEO ในร่างแล้วต้องไม่ขึ้นเว็บจริงจนกว่าจะเผยแพร่
+  publishedTheme   Json?
+  publishedSeo     Json?
+  publishedAt      DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  property         Property         @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  inquiries        WebsiteInquiry[]
+
+  @@index([tenantId])
+  @@map("website_sites")
+}
+
+/// คำขอจอง/ข้อความติดต่อที่ส่งมาจากหน้าเว็บโรงแรม — ยังไม่ตัดห้อง เจ้าหน้าที่โทรกลับแล้วค่อยแปลงเป็นการจอง
+model WebsiteInquiry {
+  id        String      @id @default(uuid())
+  tenantId  String
+  siteId    String
+  /// CONTACT | BOOKING_REQUEST
+  type      String      @db.VarChar(20)
+  name      String      @db.VarChar(120)
+  phone     String?     @db.VarChar(30)
+  email     String?     @db.VarChar(160)
+  message   String?     @db.Text
+  /// @db.Date = UTC midnight
+  checkIn   DateTime?   @db.Date
+  checkOut  DateTime?   @db.Date
+  adults    Int?
+  children  Int?
+  roomType  String?     @db.VarChar(120)
+  /// NEW | CONTACTED | CONVERTED | CLOSED
+  status    String      @default("NEW") @db.VarChar(20)
+  bookingId String?
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  site      WebsiteSite @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  booking   Booking?    @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status, createdAt])
+  @@index([siteId])
+  @@index([bookingId])
+  @@map("website_inquiries")
 }

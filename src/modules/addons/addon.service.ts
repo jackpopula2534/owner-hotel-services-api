@@ -31,6 +31,7 @@ export const ADDON_CODES = {
   ACCOUNTING_MODULE: 'ACCOUNTING_MODULE',
   CRM_MODULE: 'CRM_MODULE',
   CAMP_MODULE: 'CAMP_MODULE',
+  WEBSITE_BUILDER: 'WEBSITE_BUILDER',
 } as const;
 
 export type AddonCode = (typeof ADDON_CODES)[keyof typeof ADDON_CODES];

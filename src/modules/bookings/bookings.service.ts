@@ -40,6 +40,9 @@ import {
 } from '../revenue/revenue-posting.service';
 import { buildBookingRevenueInput } from '../revenue/sources/booking-revenue.source';
 import { businessDateOf, toBangkokDate, DAY_MS } from '../../common/utils/bangkok-day.util';
+import { expandHolidayDates } from '../properties/property-holidays.service';
+import { computeTimeFees, timeFeeAmount, type TimeFees } from './time-fees';
+import { applyPromo, type AppliedPromo, type PromoRule } from './promo-discount';
 
 // ─── Activity Types ───────────────────────────────────────────────────────────
 
@@ -99,7 +102,7 @@ function toBookingStatusLabel(status?: string): string {
   }
 }
 
-type NightlyPricingRow = {
+export type NightlyPricingRow = {
   date: string;
   dayName: string;
   baseRate: number;
@@ -109,9 +112,16 @@ type NightlyPricingRow = {
   note?: string;
 };
 
-type BookingPricingSummary = {
+export type BookingPricingSummary = {
   nightlyRates: NightlyPricingRow[];
+  /** ยอดก่อนค่าบริการ/VAT = ค่าห้องทุกคืน + ค่าเตียงเสริม (ถ้ามี) */
   roomSubtotal: number;
+  /** เตียงเสริมคิดต่อคน ต่อคืน จาก room.extraBedPrice — รวมอยู่ใน roomSubtotal แล้ว */
+  extraBeds?: { guests: number; ratePerNight: number; nights: number; amount: number };
+  /** ค่าเช็คอินก่อน/เช็คเอาท์หลังเวลา ตามการตั้งค่าที่พัก — รวมอยู่ใน roomSubtotal แล้ว */
+  timeFees?: TimeFees;
+  /** ส่วนลดจากโค้ดโปรโมชัน — หักออกจาก roomSubtotal แล้ว (roomSubtotal = promo.grossSubtotal - promo.amount) */
+  promo?: AppliedPromo;
   serviceChargePercent: number;
   serviceChargeAmount: number;
   vatPercent: number;
@@ -136,6 +146,12 @@ export class BookingsService {
     private paymentsService: PaymentsService,
     private revenuePosting: RevenuePostingService,
   ) {}
+
+  /** วันหยุดที่ใช้คิดราคาของที่พัก (วันหยุดราชการที่ไม่ได้ปิด + วันหยุดที่โรงแรมเพิ่มเอง) */
+  private async loadHolidayDates(propertyId: string, tenantId: string): Promise<string[]> {
+    const rows = await this.prisma.propertyHoliday.findMany({ where: { propertyId, tenantId } });
+    return expandHolidayDates(rows ?? [], new Date().getUTCFullYear() + 1);
+  }
 
   private parseBookingDate(value: string, fieldName: 'checkIn' | 'checkOut'): Date {
     const parsed = new Date(value);
@@ -446,12 +462,51 @@ export class BookingsService {
     };
   }
 
+  /**
+   * ราคาเข้าพักตามกติกาเดียวกับ create() — ให้หน้าเว็บโรงแรมโชว์ราคาก่อนจอง
+   * คำนวณฝั่ง server ล้วน ไม่รับ pricingBreakdown จาก client
+   */
+  quoteStay(
+    room: any,
+    property: any,
+    checkIn: string,
+    checkOut: string,
+    holidayDates: string[],
+    guests: { adults: number; children: number } = { adults: 1, children: 0 },
+    promo?: PromoRule,
+  ): BookingPricingSummary {
+    const { extraBedGuests } = this.resolveOccupancy(guests as CreateBookingDto, room);
+    return this.resolveBookingPricing(
+      { holidayDates } as unknown as CreateBookingDto,
+      room,
+      property,
+      this.parseBookingDate(checkIn, 'checkIn'),
+      this.parseBookingDate(checkOut, 'checkOut'),
+      extraBedGuests,
+      undefined,
+      promo,
+    );
+  }
+
+  /** ห้องนี้รับแขกจำนวนนี้ได้ไหม (รวมเตียงเสริม) — กติกาเดียวกับ create() */
+  fitsOccupancy(room: any, adults: number, children: number): boolean {
+    try {
+      this.resolveOccupancy({ adults, children } as CreateBookingDto, room);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   private resolveBookingPricing(
     createBookingDto: CreateBookingDto,
     room: any,
     property: any,
     checkInDate: Date,
     checkOutDate: Date,
+    extraBedGuests = 0,
+    times?: { checkInTime?: string; checkOutTime?: string },
+    promoRule?: PromoRule,
   ): BookingPricingSummary {
     const holidayDates = new Set(
       Array.isArray((createBookingDto as any).holidayDates)
@@ -497,9 +552,34 @@ export class BookingsService {
       this.calculateNightlyRate(room, date, holidayDates),
     );
 
-    const roomSubtotal = this.roundCurrency(
-      nightlyRates.reduce((sum, nightlyRate) => sum + nightlyRate.appliedRate, 0),
+    const extraBedRate = Math.max(0, Number(room.extraBedPrice ?? 0));
+    const extraBeds =
+      extraBedGuests > 0 && extraBedRate > 0
+        ? {
+            guests: extraBedGuests,
+            ratePerNight: this.roundCurrency(extraBedRate),
+            nights: nightlyRates.length,
+            amount: this.roundCurrency(extraBedGuests * extraBedRate * nightlyRates.length),
+          }
+        : undefined;
+
+    const fees = times
+      ? computeTimeFees(property, times, {
+          firstNightRate: nightlyRates[0]?.appliedRate ?? 0,
+          lastNightRate: nightlyRates[nightlyRates.length - 1]?.appliedRate ?? 0,
+        })
+      : undefined;
+    const timeFees = fees && fees.total > 0 ? fees : undefined;
+
+    // ค่าธรรมเนียมเวลาเป็นค่าห้อง → คิดค่าบริการ/VAT รวมด้วย และลงรายได้ห้องพักตอนเช็คเอาท์
+    const grossSubtotal = this.roundCurrency(
+      nightlyRates.reduce((sum, nightlyRate) => sum + nightlyRate.appliedRate, 0) +
+        (extraBeds?.amount ?? 0) +
+        (timeFees?.total ?? 0),
     );
+    // ส่วนลดหักก่อนคิดค่าบริการ/VAT (ภาษีคิดจากยอดที่แขกจ่ายจริง)
+    const promo = promoRule ? applyPromo(promoRule, grossSubtotal) : undefined;
+    const roomSubtotal = this.roundCurrency(grossSubtotal - (promo?.amount ?? 0));
 
     const serviceChargePercent = property.serviceChargeEnabled
       ? Number(property.serviceChargePercent ?? 10)
@@ -513,6 +593,9 @@ export class BookingsService {
     return {
       nightlyRates,
       roomSubtotal,
+      ...(extraBeds && { extraBeds }),
+      ...(timeFees && { timeFees }),
+      ...(promo && { promo }),
       serviceChargePercent: this.roundCurrency(serviceChargePercent),
       serviceChargeAmount,
       vatPercent: this.roundCurrency(vatPercent),
@@ -752,7 +835,14 @@ export class BookingsService {
     return this.mapBookingResponse(booking);
   }
 
-  async create(createBookingDto: CreateBookingDto, tenantId?: string) {
+  /**
+   * @param options.promo โค้ดส่วนลดที่ผู้เรียก (เช่นหน้าเว็บโรงแรม) ตรวจสิทธิ์แล้ว — ไม่รับจาก DTO ของ client
+   */
+  async create(
+    createBookingDto: CreateBookingDto,
+    tenantId?: string,
+    options?: { promo?: PromoRule },
+  ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID is required');
     }
@@ -884,13 +974,19 @@ export class BookingsService {
     }
 
     const occupancy = this.resolveOccupancy(createBookingDto, room);
+    // วันหยุดมาจากการตั้งค่าของโรงแรมที่ server เสมอ — ไม่เชื่อรายการที่ client ส่งมา
+    const holidayDates = await this.loadHolidayDates(propertyId, tenantId);
     const pricingSummary = this.resolveBookingPricing(
-      createBookingDto,
+      { ...createBookingDto, holidayDates } as CreateBookingDto,
       room,
       property,
       checkInDate,
       checkOutDate,
+      occupancy.extraBedGuests,
+      { checkInTime: effectiveCheckInTime, checkOutTime: effectiveCheckOutTime },
+      options?.promo,
     );
+    const { earlyCheckIn, lateCheckOut } = pricingSummary.timeFees ?? {};
 
     // Extract paymentMethod for booking record + Payment record creation
     const rawPaymentMethod: string | undefined = createBookingDto.paymentMethod;
@@ -935,6 +1031,20 @@ export class BookingsService {
       vatAmount: pricingSummary.vatAmount,
       grandTotal: pricingSummary.grandTotal,
       pricingBreakdown: pricingSummary as unknown as Prisma.InputJsonValue,
+      ...(earlyCheckIn && {
+        requestedEarlyCheckIn: true,
+        approvedEarlyCheckIn: true,
+        earlyCheckInFee: earlyCheckIn.amount,
+      }),
+      ...(lateCheckOut && {
+        requestedLateCheckOut: true,
+        approvedLateCheckOut: true,
+        lateCheckOutFee: lateCheckOut.amount,
+      }),
+      ...(pricingSummary.promo && {
+        promoCodeId: pricingSummary.promo.id,
+        discountAmount: pricingSummary.promo.amount,
+      }),
       source: createBookingDto.source || 'DIRECT',
       tenantId,
     };
@@ -2301,6 +2411,7 @@ export class BookingsService {
         adults: 1,
         children: 0,
         numberOfGuests: 1,
+        holidayDates: await this.loadHolidayDates(finalPropertyId, tenantId),
       } as CreateBookingDto,
       room,
       property,
@@ -2466,22 +2577,16 @@ export class BookingsService {
       throw new BadRequestException('Early check-in is not enabled for this property');
     }
 
-    const feeAmount = property.earlyCheckInFeeAmount ? Number(property.earlyCheckInFeeAmount) : 0;
-
-    const updateData: Record<string, unknown> = {
-      requestedEarlyCheckIn: true,
-    };
-
-    if (approve) {
-      updateData.approvedEarlyCheckIn = true;
-      updateData.earlyCheckInFee = feeAmount;
-    }
-
-    const updated = await this.prisma.booking.update({
-      where: { id },
-      data: updateData,
-      include: { guest: true, room: true, property: true },
-    });
+    const { updated, fee: feeAmount } = approve
+      ? await this.approveTimeFee(id, tenantId, 'early')
+      : {
+          updated: await this.prisma.booking.update({
+            where: { id },
+            data: { requestedEarlyCheckIn: true },
+            include: { guest: true, room: true, property: true },
+          }),
+          fee: 0,
+        };
 
     this.logger.log(
       `Early check-in ${approve ? 'approved' : 'requested'} for booking ${id} | fee: ${feeAmount}`,
@@ -2529,22 +2634,9 @@ export class BookingsService {
     if (booking.approvedEarlyCheckIn) {
       throw new BadRequestException('Early check-in has already been approved');
     }
+    this.assertTimeFeeChargeable(booking.status);
 
-    const property = await this.prisma.property.findFirst({
-      where: { id: booking.propertyId, tenantId, deletedAt: null },
-      select: { earlyCheckInFeeAmount: true },
-    });
-
-    const feeAmount = property?.earlyCheckInFeeAmount ? Number(property.earlyCheckInFeeAmount) : 0;
-
-    const updated = await this.prisma.booking.update({
-      where: { id },
-      data: {
-        approvedEarlyCheckIn: true,
-        earlyCheckInFee: feeAmount,
-      },
-      include: { guest: true, room: true, property: true },
-    });
+    const { updated, fee: feeAmount } = await this.approveTimeFee(id, tenantId, 'early');
 
     this.logger.log(`Early check-in approved for booking ${id} | fee: ${feeAmount}`);
 
@@ -2606,22 +2698,16 @@ export class BookingsService {
       throw new BadRequestException('Late check-out is not enabled for this property');
     }
 
-    const feeAmount = property.lateCheckOutFeeAmount ? Number(property.lateCheckOutFeeAmount) : 0;
-
-    const updateData: Record<string, unknown> = {
-      requestedLateCheckOut: true,
-    };
-
-    if (approve) {
-      updateData.approvedLateCheckOut = true;
-      updateData.lateCheckOutFee = feeAmount;
-    }
-
-    const updated = await this.prisma.booking.update({
-      where: { id },
-      data: updateData,
-      include: { guest: true, room: true, property: true },
-    });
+    const { updated, fee: feeAmount } = approve
+      ? await this.approveTimeFee(id, tenantId, 'late')
+      : {
+          updated: await this.prisma.booking.update({
+            where: { id },
+            data: { requestedLateCheckOut: true },
+            include: { guest: true, room: true, property: true },
+          }),
+          fee: 0,
+        };
 
     this.logger.log(
       `Late check-out ${approve ? 'approved' : 'requested'} for booking ${id} | fee: ${feeAmount}`,
@@ -2669,22 +2755,9 @@ export class BookingsService {
     if (booking.approvedLateCheckOut) {
       throw new BadRequestException('Late check-out has already been approved');
     }
+    this.assertTimeFeeChargeable(booking.status);
 
-    const property = await this.prisma.property.findFirst({
-      where: { id: booking.propertyId, tenantId, deletedAt: null },
-      select: { lateCheckOutFeeAmount: true },
-    });
-
-    const feeAmount = property?.lateCheckOutFeeAmount ? Number(property.lateCheckOutFeeAmount) : 0;
-
-    const updated = await this.prisma.booking.update({
-      where: { id },
-      data: {
-        approvedLateCheckOut: true,
-        lateCheckOutFee: feeAmount,
-      },
-      include: { guest: true, room: true, property: true },
-    });
+    const { updated, fee: feeAmount } = await this.approveTimeFee(id, tenantId, 'late');
 
     this.logger.log(`Late check-out approved for booking ${id} | fee: ${feeAmount}`);
 
@@ -2704,6 +2777,115 @@ export class BookingsService {
       });
 
     return this.mapBookingResponse(updated);
+  }
+
+  /** บิลปิดแล้ว (ยกเลิก/เช็คเอาท์) → เพิ่มค่าธรรมเนียมไม่ได้ */
+  private assertTimeFeeChargeable(status: string): void {
+    if (status === 'cancelled' || status === 'checked_out') {
+      throw new BadRequestException(`Cannot approve for a booking in status '${status}'`);
+    }
+  }
+
+  /**
+   * อนุมัติเช็คอินก่อน/เช็คเอาท์หลังเวลา แล้วคิดค่าธรรมเนียมเข้าบิล
+   *
+   * - สูตรเดียวกับตอนสร้างการจอง (time-fees.ts): fixed หรือ % ของคืนแรก/คืนสุดท้าย
+   * - ค่าธรรมเนียมเป็นค่าห้อง → บวกเข้า roomSubtotal แล้วคิดค่าบริการ/VAT ด้วยอัตราเดิมของการจองนี้
+   * - อัปเดตใบแจ้งหนี้ที่ยังไม่ชำระให้ยอดตรงกับ grandTotal ใหม่ในธุรกรรมเดียวกัน
+   */
+  private async approveTimeFee(
+    id: string,
+    tenantId: string,
+    kind: 'early' | 'late',
+  ): Promise<{ updated: any; fee: number }> {
+    const booking = await this.prisma.booking.findFirst({
+      where: { id, tenantId },
+      include: { room: true },
+    });
+    if (!booking) throw new NotFoundException(`Booking with ID ${id} not found`);
+    const property = await this.prisma.property.findFirst({
+      where: { id: booking.propertyId, tenantId, deletedAt: null },
+      select: {
+        earlyCheckInFeeType: true,
+        earlyCheckInFeeAmount: true,
+        lateCheckOutFeeType: true,
+        lateCheckOutFeeAmount: true,
+      },
+    });
+
+    const early = kind === 'early';
+    const breakdown = (booking.pricingBreakdown ?? null) as Partial<BookingPricingSummary> | null;
+    const nightly = Array.isArray(breakdown?.nightlyRates) ? breakdown!.nightlyRates : [];
+    const night = early ? nightly[0] : nightly[nightly.length - 1];
+    const nightRate = night ? Number(night.appliedRate) : Number(booking.room?.price ?? 0);
+    const fee = timeFeeAmount(
+      early ? property?.earlyCheckInFeeType : property?.lateCheckOutFeeType,
+      early ? property?.earlyCheckInFeeAmount : property?.lateCheckOutFeeAmount,
+      nightRate,
+    );
+
+    const flags = early
+      ? { requestedEarlyCheckIn: true, approvedEarlyCheckIn: true, earlyCheckInFee: fee.amount }
+      : { requestedLateCheckOut: true, approvedLateCheckOut: true, lateCheckOutFee: fee.amount };
+
+    let totals: Record<string, unknown> = {};
+    if (fee.amount > 0) {
+      const sub = Number(booking.roomSubtotal ?? booking.totalPrice ?? 0);
+      const sc = Number(booking.serviceChargeAmount ?? 0);
+      const vat = Number(booking.vatAmount ?? 0);
+      const grand = Number(booking.grandTotal ?? sub + sc + vat);
+      // อัตราที่ใช้ตอนจอง (การจองเก่าไม่มี breakdown → ถอดอัตราจากยอดที่เก็บไว้)
+      const scPct = breakdown?.serviceChargePercent ?? (sub > 0 ? (sc / sub) * 100 : 0);
+      const vatPct = breakdown?.vatPercent ?? (sub + sc > 0 ? (vat / (sub + sc)) * 100 : 0);
+
+      const newSub = this.roundCurrency(sub + fee.amount);
+      const newSc = this.roundCurrency(newSub * (scPct / 100));
+      const newVat = this.roundCurrency((newSub + newSc) * (vatPct / 100));
+      const newGrand = this.roundCurrency(grand + (newSub - sub) + (newSc - sc) + (newVat - vat));
+
+      const key = early ? 'earlyCheckIn' : 'lateCheckOut';
+      const prevFees: TimeFees = breakdown?.timeFees ?? { total: 0 };
+      const timeFees: TimeFees = {
+        ...prevFees,
+        [key]: fee,
+        total: this.roundCurrency((prevFees.total ?? 0) - (prevFees[key]?.amount ?? 0) + fee.amount),
+      };
+
+      totals = {
+        totalPrice: newSub,
+        roomSubtotal: newSub,
+        serviceChargeAmount: newSc,
+        vatAmount: newVat,
+        grandTotal: newGrand,
+        ...(breakdown && {
+          pricingBreakdown: {
+            ...breakdown,
+            timeFees,
+            roomSubtotal: newSub,
+            serviceChargeAmount: newSc,
+            vatAmount: newVat,
+            grandTotal: newGrand,
+          } as unknown as Prisma.InputJsonValue,
+        }),
+      };
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.booking.update({
+        where: { id },
+        data: { ...flags, ...totals },
+        include: { guest: true, room: true, property: true },
+      });
+      if (fee.amount > 0) {
+        await tx.invoices.updateMany({
+          where: { booking_id: id, tenant_id: tenantId, status: { in: ['pending', 'draft'] } },
+          data: { amount: Number(totals.grandTotal) },
+        });
+      }
+      return row;
+    });
+
+    return { updated, fee: fee.amount };
   }
 
   // ─── Booking Activity Timeline ────────────────────────────────────────────

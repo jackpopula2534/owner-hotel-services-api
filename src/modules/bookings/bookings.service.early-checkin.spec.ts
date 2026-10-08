@@ -145,33 +145,74 @@ describe('BookingsService — requestEarlyCheckIn', () => {
     );
   });
 
-  it('writes both requestedEarlyCheckIn and approvedEarlyCheckIn + earlyCheckInFee when approve=true', async () => {
-    prismaMock.booking.findFirst.mockResolvedValue(baseBooking);
+  it('approve=true charges the fee into the booking totals and the unpaid invoice', async () => {
+    const priced = {
+      ...baseBooking,
+      roomSubtotal: 3000,
+      totalPrice: 3000,
+      serviceChargeAmount: 300,
+      vatAmount: 231,
+      grandTotal: 3531,
+      pricingBreakdown: {
+        nightlyRates: [{ appliedRate: 1500 }, { appliedRate: 1500 }],
+        serviceChargePercent: 10,
+        vatPercent: 7,
+      },
+    };
+    prismaMock.booking.findFirst.mockResolvedValue(priced);
     prismaMock.property.findFirst.mockResolvedValue({
       earlyCheckInEnabled: true,
-      earlyCheckInFeeType: 'flat',
+      earlyCheckInFeeType: 'fixed',
       earlyCheckInFeeAmount: 500,
     });
-    prismaMock.booking.update.mockResolvedValue({
-      ...baseBooking,
-      requestedEarlyCheckIn: true,
-      approvedEarlyCheckIn: true,
-      earlyCheckInFee: 500,
-    });
+    prismaMock.booking.update.mockResolvedValue({ ...priced, approvedEarlyCheckIn: true });
+    const invoicesUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
+    (prismaMock as any).invoices = { updateMany: invoicesUpdateMany };
+    (prismaMock as any).$transaction = jest.fn((fn: (tx: unknown) => unknown) => fn(prismaMock));
 
     await service.requestEarlyCheckIn('booking-1', 'tenant-1', true);
 
     expect(prismaMock.booking.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: {
+        data: expect.objectContaining({
           requestedEarlyCheckIn: true,
           approvedEarlyCheckIn: true,
           earlyCheckInFee: 500,
-        },
+          roomSubtotal: 3500,
+          serviceChargeAmount: 350,
+          vatAmount: 269.5,
+          grandTotal: 4119.5,
+        }),
       }),
     );
+    expect(invoicesUpdateMany).toHaveBeenCalledWith({
+      where: { booking_id: 'booking-1', tenant_id: 'tenant-1', status: { in: ['pending', 'draft'] } },
+      data: { amount: 4119.5 },
+    });
     // Audit log fired (fire-and-forget, but jest.fn will still record the call).
     expect((auditLogMock as { log: jest.Mock }).log).toHaveBeenCalled();
+  });
+
+  it('percentage fee is a share of the first night', async () => {
+    prismaMock.booking.findFirst.mockResolvedValue({
+      ...baseBooking,
+      roomSubtotal: 3000,
+      pricingBreakdown: { nightlyRates: [{ appliedRate: 1200 }, { appliedRate: 1800 }] },
+    });
+    prismaMock.property.findFirst.mockResolvedValue({
+      earlyCheckInEnabled: true,
+      earlyCheckInFeeType: 'percentage',
+      earlyCheckInFeeAmount: 50,
+    });
+    prismaMock.booking.update.mockResolvedValue(baseBooking);
+    (prismaMock as any).invoices = { updateMany: jest.fn() };
+    (prismaMock as any).$transaction = jest.fn((fn: (tx: unknown) => unknown) => fn(prismaMock));
+
+    await service.requestEarlyCheckIn('booking-1', 'tenant-1', true);
+
+    expect(prismaMock.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ earlyCheckInFee: 600, roomSubtotal: 3600 }) }),
+    );
   });
 
   it('coerces null earlyCheckInFeeAmount to 0', async () => {

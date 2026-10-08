@@ -1,5 +1,16 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  IsBoolean,
+  IsIn,
+  IsNumber,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+  ValidateIf,
+} from 'class-validator';
+import { DEPOSIT_TYPES, DepositType } from '../../website/website-deposit';
 
 export class SavePaymentSettingsDto {
   @ApiProperty({ description: 'เปิดใช้ PromptPay หรือไม่', example: true })
@@ -37,4 +48,20 @@ export class SavePaymentSettingsDto {
   @IsString()
   @MaxLength(500)
   cashInstructions?: string;
+
+  @ApiPropertyOptional({
+    description: 'มัดจำตอนแขกจอง+โอน PromptPay ผ่านหน้าเว็บ: full = โอนเต็ม, percentage = % ของยอดรวม, fixed = บาทต่อการจอง',
+    enum: DEPOSIT_TYPES,
+    example: 'percentage',
+  })
+  @IsOptional()
+  @IsIn(DEPOSIT_TYPES)
+  websiteDepositType?: DepositType;
+
+  @ApiPropertyOptional({ description: '% (1–99) หรือบาท ตาม websiteDepositType', example: 30, nullable: true })
+  @ValidateIf((_, v) => v !== null && v !== undefined)
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
+  websiteDepositValue?: number | null;
 }

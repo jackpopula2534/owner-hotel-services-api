@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { PropertiesController } from './properties.controller';
 import { PropertiesService } from './properties.service';
 import { PropertyTimeSettingsService } from './property-time-settings.service';
+import { PropertyHolidaysService } from './property-holidays.service';
+import { PropertyPromoCodesService } from './property-promo-codes.service';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { RevenueModule } from '../revenue/revenue.module';
 
@@ -9,7 +11,17 @@ import { RevenueModule } from '../revenue/revenue.module';
   // สถิติของ property อ่านตัวเงินจากสมุดรายได้ ไม่ได้บวกจากตารางการจองเอง
   imports: [PrismaModule, RevenueModule],
   controllers: [PropertiesController],
-  providers: [PropertiesService, PropertyTimeSettingsService],
-  exports: [PropertiesService, PropertyTimeSettingsService],
+  providers: [
+    PropertiesService,
+    PropertyTimeSettingsService,
+    PropertyHolidaysService,
+    PropertyPromoCodesService,
+  ],
+  exports: [
+    PropertiesService,
+    PropertyTimeSettingsService,
+    PropertyHolidaysService,
+    PropertyPromoCodesService,
+  ],
 })
 export class PropertiesModule {}

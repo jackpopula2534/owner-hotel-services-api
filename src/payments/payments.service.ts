@@ -7,6 +7,8 @@ import { PaymentStatus } from './entities/payment.entity';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
 import { Prisma, payments_method, payments_status } from '@prisma/client';
+import { isInvoiceSettled } from '@/common/billing/invoice-settlement';
+import { markWebsiteQrVerified } from '@/modules/website/website-qr-verification';
 
 @Injectable()
 export class PaymentsService {
@@ -137,10 +139,26 @@ export class PaymentsService {
       }
 
       if (payment.invoice_id) {
-        await tx.invoices.update({
-          where: { id: payment.invoice_id },
-          data: { status: 'paid' },
+        // ใบแจ้งหนี้ของการจอง: ปิดเมื่อยอดอนุมัติครบเท่านั้น (มัดจำ ≠ ชำระครบ)
+        const invoice = await tx.invoices.findFirst({
+          where: { id: payment.invoice_id, tenant_id: payment.tenant_id },
+          select: { booking_id: true, amount: true, adjusted_amount: true },
         });
+        const settled =
+          !invoice?.booking_id ||
+          isInvoiceSettled(
+            invoice,
+            await tx.payments.findMany({
+              where: { invoice_id: payment.invoice_id, status: PaymentStatus.APPROVED as payments_status },
+              select: { amount: true },
+            }),
+          );
+        if (settled) {
+          await tx.invoices.update({
+            where: { id: payment.invoice_id },
+            data: { status: 'paid' },
+          });
+        }
 
         // H2: activate + extend the subscription INSIDE the same transaction.
         // If activation fails, the whole approval rolls back (payment stays
@@ -179,6 +197,14 @@ export class PaymentsService {
     if (payment.invoice_id) {
       await this.updateBookingStatusToConfirmed(payment.invoice_id, payment.tenant_id).catch((err) => {
         this.logger.error(`Failed to update booking status: ${err.message}`);
+      });
+    }
+
+    // QR จากหน้าเว็บโรงแรม: ปิดธุรกรรม PromptPay เมื่ออนุมัติครบ (จองหลายห้อง = ครบทุกห้อง)
+    // ไม่งั้นแขกที่รอหน้า QR ไม่เคยเห็นว่าชำระแล้ว ทั้งที่โรงแรมอนุมัติไปแล้ว
+    if (payment.invoice_id && payment.tenant_id && payment.method === 'qr') {
+      await this.verifyWebsiteQr(payment.invoice_id, payment.tenant_id).catch((err) => {
+        this.logger.error(`Failed to verify website PromptPay transaction: ${err.message}`);
       });
     }
 
@@ -291,6 +317,19 @@ export class PaymentsService {
    * First tries to find booking via invoice.booking_id (direct foreign key)
    * Falls back to searching recent pending bookings if not found
    */
+  private async verifyWebsiteQr(invoiceId: string, tenantId: string): Promise<void> {
+    const invoice = await this.prisma.invoices.findFirst({
+      where: { id: invoiceId, tenant_id: tenantId },
+      select: { booking_id: true },
+    });
+    if (!invoice?.booking_id) return;
+    const booking = await this.prisma.booking.findFirst({
+      where: { id: invoice.booking_id, tenantId },
+      select: { id: true, bookingGroupId: true },
+    });
+    if (booking) await markWebsiteQrVerified(this.prisma, booking, tenantId);
+  }
+
   private async updateBookingStatusToConfirmed(
     invoiceId: string,
     tenantId: string | null,
@@ -308,48 +347,37 @@ export class PaymentsService {
         return;
       }
 
-      // Try to find booking via direct booking_id relationship first (preferred method)
-      let booking = null;
+      // ใบแจ้งหนี้ที่ไม่ผูก booking (เช่น ค่า subscription) ไม่เกี่ยวกับการจองใดเลย
+      // ห้ามเดาเอาการจอง pending ล่าสุดของ tenant — เคยทำแบบนั้นแล้วอนุมัติค่าแพ็กเกจ
+      // ไปยืนยันการจองของแขกที่ยังไม่จ่าย
+      if (!invoice.booking_id) return;
 
-      if (invoice.booking_id) {
-        // `Booking` is tenant-scoped → findFirst with the invoice's tenant_id.
-        booking = await this.prisma.booking.findFirst({
-          where: { id: invoice.booking_id, tenantId: invoice.tenant_id },
-        });
-
-        if (booking) {
-          this.logger.log(`Found booking ${booking.id} via invoice.booking_id`);
-        }
-      }
-
-      // Fallback: search by tenant and recent pending booking if direct lookup failed
+      // `Booking` is tenant-scoped → findFirst with the invoice's tenant_id.
+      const booking = await this.prisma.booking.findFirst({
+        where: { id: invoice.booking_id, tenantId: invoice.tenant_id },
+        select: { id: true, status: true },
+      });
       if (!booking) {
-        this.logger.debug(
-          `No booking_id found on invoice ${invoiceId}, searching by tenant and status`,
-        );
-        booking = await this.prisma.booking.findFirst({
-          where: {
-            tenantId: invoice.tenant_id,
-            status: 'pending',
-            createdAt: {
-              gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000), // Within last 7 days
-            },
-          },
-          orderBy: { createdAt: 'desc' },
-        });
-
-        if (!booking) {
-          this.logger.warn(`No pending booking found for invoice ${invoiceId}`);
-          return;
-        }
+        this.logger.warn(`Booking ${invoice.booking_id} of invoice ${invoiceId} not found`);
+        return;
       }
 
+      // sync ยอดที่ชำระแล้วให้ตรงกับ folio (มัดจำ = partial)
+      const approved = await this.prisma.payments.findMany({
+        where: { invoice_id: invoiceId, status: PaymentStatus.APPROVED as payments_status },
+        select: { amount: true },
+      });
+      const amountPaid =
+        Math.round(approved.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) * 100) / 100;
+      const paymentStatus = isInvoiceSettled(invoice, approved) ? 'paid' : amountPaid > 0 ? 'partial' : 'pending';
+
+      // ยืนยันเฉพาะการจองที่ยังรอ — การจองที่เช็กอิน/เช็กเอาต์/ยกเลิกไปแล้วต้องไม่ถูกดึงกลับเป็น confirmed
       await this.prisma.booking.update({
         where: { id: booking.id },
-        data: { status: 'confirmed' },
+        data: { ...(booking.status === 'pending' ? { status: 'confirmed' } : {}), paymentStatus, amountPaid },
       });
 
-      this.logger.log(`Booking ${booking.id} status updated to confirmed from payment approval`);
+      this.logger.log(`Booking ${booking.id} payment synced from payment approval (${paymentStatus})`);
     } catch (error) {
       this.logger.error(`Failed to update booking status: ${error.message}`);
       throw error;

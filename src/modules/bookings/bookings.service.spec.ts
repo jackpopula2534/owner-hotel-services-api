@@ -39,6 +39,9 @@ describe('BookingsService', () => {
     guest: {
       findFirst: jest.fn(),
     },
+    propertyHoliday: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     invoices: {
       findFirst: jest.fn(),
     },
@@ -215,6 +218,120 @@ describe('BookingsService', () => {
       expect(result.checkInDate).toEqual(new Date('2026-04-10T00:00:00.000Z'));
       expect(result.checkOutDate).toEqual(new Date('2026-04-12T00:00:00.000Z'));
       expect(eventEmitterMock.emit).not.toHaveBeenCalled();
+    });
+
+    it('charges the property early/late fees and server-side holiday rates', async () => {
+      prismaMock.property.findFirst.mockResolvedValue({
+        id: 'property-1',
+        tenantId: 'tenant-1',
+        standardCheckInTime: '14:00',
+        standardCheckOutTime: '12:00',
+        earlyCheckInEnabled: true,
+        earlyCheckInFeeType: 'fixed',
+        earlyCheckInFeeAmount: 300,
+        lateCheckOutEnabled: true,
+        lateCheckOutFeeType: 'percentage',
+        lateCheckOutFeeAmount: 50,
+      });
+      prismaMock.room.findFirst.mockResolvedValue({
+        id: 'room-1',
+        tenantId: 'tenant-1',
+        propertyId: 'property-1',
+        price: 2000,
+        holidayPriceEnabled: true,
+        holidayPrice: 3000,
+      });
+      prismaMock.propertyHoliday.findMany.mockResolvedValueOnce([
+        { kind: 'custom', date: new Date('2026-04-11T00:00:00Z'), endDate: null, repeatYearly: false, isEnabled: true },
+      ]);
+      prismaMock.booking.findFirst.mockResolvedValue(null);
+      prismaMock.booking.create.mockImplementation(async ({ data }) => ({
+        id: 'booking-1',
+        ...data,
+        guest: null,
+        room: { id: 'room-1', number: '101' },
+        property: { id: 'property-1' },
+      }));
+
+      await service.create(
+        {
+          propertyId: 'property-1',
+          roomId: 'room-1',
+          guestFirstName: 'John',
+          guestLastName: 'Doe',
+          checkIn: '2026-04-10',
+          checkOut: '2026-04-12',
+          checkInTime: '10:00',
+          checkOutTime: '15:00',
+          holidayDates: [],
+        } as any,
+        'tenant-1',
+      );
+
+      // คืนแรก 2000 + คืนวันหยุด 3000 + early 300 + late 50% ของคืนสุดท้าย 1500
+      expect(prismaMock.booking.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            roomSubtotal: 6800,
+            earlyCheckInFee: 300,
+            approvedEarlyCheckIn: true,
+            lateCheckOutFee: 1500,
+            approvedLateCheckOut: true,
+          }),
+        }),
+      );
+    });
+
+    it('deducts a verified promo from the room subtotal before service charge and VAT', async () => {
+      prismaMock.property.findFirst.mockResolvedValue({
+        id: 'property-1',
+        tenantId: 'tenant-1',
+        serviceChargeEnabled: true,
+        serviceChargePercent: 10,
+        vatEnabled: true,
+        vatPercent: 7,
+      });
+      prismaMock.room.findFirst.mockResolvedValue({
+        id: 'room-1',
+        tenantId: 'tenant-1',
+        propertyId: 'property-1',
+        price: 1500,
+      });
+      prismaMock.booking.findFirst.mockResolvedValue(null);
+      prismaMock.booking.create.mockImplementation(async ({ data }) => ({
+        id: 'booking-1',
+        ...data,
+        guest: null,
+        room: { id: 'room-1', number: '101' },
+        property: { id: 'property-1' },
+      }));
+
+      await service.create(
+        {
+          propertyId: 'property-1',
+          roomId: 'room-1',
+          guestFirstName: 'John',
+          guestLastName: 'Doe',
+          checkIn: '2026-04-06',
+          checkOut: '2026-04-08',
+        } as any,
+        'tenant-1',
+        { promo: { id: 'pc-1', code: 'SAVE10', discountType: 'percentage', discountValue: 10 } },
+      );
+
+      // 3000 - 10% = 2700 → SC 270 → VAT 7% ของ 2970 = 207.9
+      expect(prismaMock.booking.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            roomSubtotal: 2700,
+            serviceChargeAmount: 270,
+            vatAmount: 207.9,
+            grandTotal: 3177.9,
+            promoCodeId: 'pc-1',
+            discountAmount: 300,
+          }),
+        }),
+      );
     });
 
     it('throws when room already has an overlapping active booking', async () => {

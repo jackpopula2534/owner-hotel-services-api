@@ -103,6 +103,8 @@ export const TENANT_SCOPED_MODELS: Readonly<Record<string, TenantScopeField>> = 
   Warehouse: 'tenantId',
   WarehouseGroup: 'tenantId',
   WasteRecord: 'tenantId',
+  WebsiteInquiry: 'tenantId',
+  WebsiteSite: 'tenantId',
   addon_trial_requests: 'tenant_id',
   announcement_reads: 'tenant_id',
   api_keys: 'tenant_id',

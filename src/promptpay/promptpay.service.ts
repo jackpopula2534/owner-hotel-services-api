@@ -18,6 +18,7 @@ import {
   WebhookPaymentDto,
   RefundRequestDto,
 } from './dto/promptpay.dto';
+import { isInvoiceSettled } from '../common/billing/invoice-settlement';
 
 @Injectable()
 export class PromptPayService {
@@ -676,13 +677,25 @@ export class PromptPayService {
         },
       });
 
-      // Update invoice status
-      await this.prisma.invoices.update({
-        where: { id: invoiceId },
-        data: { status: 'paid' },
-      });
-
-      this.logger.log(`Invoice ${invoiceId} marked as paid`);
+      // ใบแจ้งหนี้ของการจอง: ปิดเมื่อยอดอนุมัติครบเท่านั้น (QR มัดจำจากหน้าเว็บ ≠ ชำระครบ)
+      const settled =
+        !invoice.booking_id ||
+        isInvoiceSettled(
+          invoice,
+          await this.prisma.payments.findMany({
+            where: { invoice_id: invoiceId, status: 'approved' },
+            select: { amount: true },
+          }),
+        );
+      if (settled) {
+        await this.prisma.invoices.update({
+          where: { id: invoiceId },
+          data: { status: 'paid' },
+        });
+        this.logger.log(`Invoice ${invoiceId} marked as paid`);
+      } else {
+        this.logger.log(`Invoice ${invoiceId} received ${amount} — balance still outstanding`);
+      }
 
       // If invoice is linked to a booking, update booking status to confirmed
       if (invoice.booking_id) {

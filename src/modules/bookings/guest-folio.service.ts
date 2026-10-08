@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AddFolioChargeDto } from './dto/add-folio-charge.dto';
 import { AddFolioPaymentDto } from './dto/add-folio-payment.dto';
+import { markWebsiteQrVerified } from '@/modules/website/website-qr-verification';
 
 export interface FolioCharge {
   id?: string;
@@ -18,6 +19,8 @@ export interface FolioPayment {
   method: 'transfer' | 'qr' | 'cash';
   status: string;
   paymentNo?: string;
+  /** path ของสลิปที่แขกแนบ (payments.slip_url) */
+  slipUrl?: string;
   createdAt: string;
 }
 
@@ -29,6 +32,11 @@ export interface GuestFolio {
   roomNumber: string;
   checkInDate: string;
   checkOutDate: string;
+  /** ค่าห้องก่อนค่าบริการ/VAT */
+  roomSubtotal: number;
+  serviceChargeAmount: number;
+  vatAmount: number;
+  /** ค่าห้องรวมค่าบริการ + VAT (= booking.grandTotal) — ยอดเดียวกับ invoice และตอน checkout */
   roomChargeAmount: number;
   additionalCharges: FolioCharge[];
   additionalChargesTotal: number;
@@ -48,6 +56,9 @@ export interface ReceiptData {
   checkInDate: string;
   checkOutDate: string;
   nights: number;
+  roomSubtotal: number;
+  serviceChargeAmount: number;
+  vatAmount: number;
   roomChargeAmount: number;
   additionalCharges: FolioCharge[];
   additionalChargesTotal: number;
@@ -76,6 +87,8 @@ function isTableMissingError(error: unknown): boolean {
   );
 }
 
+const round2 = (n: number): number => Math.round(n * 100) / 100;
+
 @Injectable()
 export class GuestFolioService {
   private readonly logger = new Logger(GuestFolioService.name);
@@ -96,7 +109,7 @@ export class GuestFolioService {
       throw new NotFoundException(`Booking with ID ${bookingId} not found`);
     }
 
-    const roomChargeAmount = Number(booking.totalPrice ?? 0);
+    const room = this.roomCharge(booking);
     const guestName =
       `${booking.guestFirstName ?? ''} ${booking.guestLastName ?? ''}`.trim() || 'ไม่ระบุชื่อ';
 
@@ -137,6 +150,7 @@ export class GuestFolioService {
           method: p.method,
           status: p.status,
           paymentNo: p.payment_no ?? undefined,
+          slipUrl: p.slip_url ?? undefined,
           createdAt: p.created_at ? new Date(p.created_at).toISOString() : new Date().toISOString(),
         }));
       }
@@ -152,11 +166,11 @@ export class GuestFolioService {
     }
 
     const additionalChargesTotal = additionalCharges.reduce((sum, c) => sum + c.amount, 0);
-    const totalBalance = roomChargeAmount + additionalChargesTotal;
+    const totalBalance = round2(room.total + additionalChargesTotal);
     const totalPaid = payments
       .filter((p) => p.status === 'approved')
       .reduce((sum, p) => sum + p.amount, 0);
-    const balanceDue = Math.max(0, totalBalance - totalPaid);
+    const balanceDue = Math.max(0, round2(totalBalance - totalPaid));
 
     return {
       bookingId: booking.id,
@@ -166,7 +180,10 @@ export class GuestFolioService {
       roomNumber: booking.room?.number ?? 'N/A',
       checkInDate: booking.checkIn.toISOString(),
       checkOutDate: booking.checkOut.toISOString(),
-      roomChargeAmount,
+      roomSubtotal: room.subtotal,
+      serviceChargeAmount: room.serviceCharge,
+      vatAmount: room.vat,
+      roomChargeAmount: room.total,
       additionalCharges,
       additionalChargesTotal,
       totalBalance,
@@ -205,7 +222,7 @@ export class GuestFolioService {
             tenant_id: tenantId,
             invoice_no: invoiceNo,
             booking_id: bookingId,
-            amount: Number(booking.totalPrice ?? 0),
+            amount: this.roomCharge(booking).total,
             status: 'draft',
             due_date: booking.checkOut,
           },
@@ -292,7 +309,7 @@ export class GuestFolioService {
             tenant_id: tenantId,
             invoice_no: invoiceNo,
             booking_id: bookingId,
-            amount: Number(booking.totalPrice ?? 0),
+            amount: this.roomCharge(booking).total,
             status: 'draft',
             due_date: booking.checkOut,
           },
@@ -300,17 +317,39 @@ export class GuestFolioService {
       }
 
       const paymentNo = this.generatePaymentNumber();
-      await this.prisma.payments.create({
-        data: {
-          invoice_id: invoice.id,
-          tenant_id: tenantId,
-          payment_no: paymentNo,
-          amount: dto.amount,
-          method: dto.method as any,
-          status: 'approved', // Auto-approve for front-desk payments
-          approved_at: new Date(),
-        },
+      // รายการที่ค้างจากตอนจอง (เช่น PromptPay จากหน้าเว็บที่แขกแนบสลิปไว้) → ยืนยันแถวเดิม
+      // แทนการสร้างแถวใหม่ ไม่งั้น folio มีบรรทัด "รอดำเนินการ" ค้างซ้ำ และสลิปหลุดจากยอดที่รับจริง
+      const pending = await this.prisma.payments.findFirst({
+        where: { invoice_id: invoice.id, method: dto.method as any, status: 'pending' },
+        orderBy: { created_at: 'desc' },
       });
+      if (pending) {
+        await this.prisma.payments.update({
+          where: { id: pending.id },
+          data: {
+            payment_no: pending.payment_no ?? paymentNo,
+            amount: dto.amount,
+            tenant_id: tenantId,
+            status: 'approved',
+            approved_at: new Date(),
+          },
+        });
+      } else {
+        await this.prisma.payments.create({
+          data: {
+            invoice_id: invoice.id,
+            tenant_id: tenantId,
+            payment_no: paymentNo,
+            amount: dto.amount,
+            method: dto.method as any,
+            status: 'approved', // Auto-approve for front-desk payments
+            approved_at: new Date(),
+          },
+        });
+      }
+      if (dto.method === 'qr') {
+        await markWebsiteQrVerified(this.prisma, booking, tenantId);
+      }
 
       // Recalculate folio after recording payment
       const folio = await this.getFolio(bookingId, tenantId);
@@ -346,7 +385,7 @@ export class GuestFolioService {
           `Billing tables unavailable (${(err as any)?.code}) — recording payment directly on booking ${bookingId}`,
         );
 
-        const totalPrice = Number(booking.totalPrice ?? 0);
+        const totalPrice = this.roomCharge(booking).total;
         const currentPaid = Number(booking.amountPaid ?? 0);
         const newPaid = currentPaid + dto.amount;
         const fallbackStatus =
@@ -399,6 +438,9 @@ export class GuestFolioService {
       checkInDate: folio.checkInDate,
       checkOutDate: folio.checkOutDate,
       nights,
+      roomSubtotal: folio.roomSubtotal,
+      serviceChargeAmount: folio.serviceChargeAmount,
+      vatAmount: folio.vatAmount,
       roomChargeAmount: folio.roomChargeAmount,
       additionalCharges: folio.additionalCharges,
       additionalChargesTotal: folio.additionalChargesTotal,
@@ -437,6 +479,33 @@ export class GuestFolioService {
     }
 
     return this.getFolio(bookingId, tenantId);
+  }
+
+  /**
+   * ค่าห้องตามที่คิดตอนจอง: grandTotal รวมค่าบริการ + VAT แล้ว (BookingsService.quoteStay)
+   * booking เก่าที่ไม่มี grandTotal ถือว่า totalPrice เป็นยอดสุทธิ ไม่มีภาษีแยก
+   */
+  private roomCharge(booking: {
+    totalPrice: unknown;
+    roomSubtotal?: unknown;
+    serviceChargeAmount?: unknown;
+    vatAmount?: unknown;
+    grandTotal?: unknown;
+  }): { subtotal: number; serviceCharge: number; vat: number; total: number } {
+    const num = (v: unknown): number => {
+      const n = Number(v ?? 0);
+      return Number.isFinite(n) ? n : 0;
+    };
+    const totalPrice = num(booking.totalPrice);
+    if (booking.grandTotal === null || booking.grandTotal === undefined) {
+      return { subtotal: totalPrice, serviceCharge: 0, vat: 0, total: totalPrice };
+    }
+    return {
+      subtotal: booking.roomSubtotal == null ? totalPrice : num(booking.roomSubtotal),
+      serviceCharge: num(booking.serviceChargeAmount),
+      vat: num(booking.vatAmount),
+      total: num(booking.grandTotal),
+    };
   }
 
   /** Generate invoice number: INV-YYYYMMDD-XXXX */
