@@ -41,7 +41,7 @@ const zoneRow = (id: string, over: Record<string, unknown> = {}) => ({
       code: `${id.toUpperCase()}1`,
       posX: 0.2,
       posY: 1.4,
-      images: null,
+      images: id === 'a' ? ['https://cdn.example.com/a1.jpg', 'javascript:x'] : null,
       sizeSqm: 40,
     },
   ],
@@ -109,8 +109,8 @@ describe('WebsiteCampPublicService.buildPayload — map', () => {
       height: 1024,
     });
     expect(camp.map!.pitches).toEqual([
-      { id: 'a-1', code: 'A1', zoneKey: 'a', posX: 0.2, posY: 1 },
-      { id: 'b-1', code: 'B1', zoneKey: 'b', posX: 0.2, posY: 1 },
+      { id: 'a-1', code: 'A1', zoneKey: 'a', posX: 0.2, posY: 1, images: ['https://cdn.example.com/a1.jpg'] },
+      { id: 'b-1', code: 'B1', zoneKey: 'b', posX: 0.2, posY: 1, images: [] },
     ]);
     expect(camp.zones.a).toMatchObject({ code: 'A', color: '#16a34a' });
     expect(camp.facilities[0]).toMatchObject({ posX: 0.5, posY: 0 });

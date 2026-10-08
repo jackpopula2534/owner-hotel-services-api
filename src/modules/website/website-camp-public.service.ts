@@ -59,6 +59,8 @@ export interface PublicCampPitch {
   zoneKey: string;
   posX: number;
   posY: number;
+  /** รูปของจุดนี้ที่อัปโหลดในหลังบ้าน (แขกกดหมุดแล้วเห็นรูปจุดจริง) */
+  images: string[];
 }
 
 /** รูปแผนผังที่เจ้าของลานอัปโหลดในหลังบ้าน + จุดกางที่เปิดขาย */
@@ -85,6 +87,9 @@ export const UNSELLABLE_PITCH_STATUSES = ['maintenance', 'closed'];
 
 const MAX_ZONE_IMAGES = 8;
 const MAX_EQUIPMENT = 60;
+
+/** ตรงกับเพดานอัปโหลดรูปต่อจุดในหลังบ้าน */
+const MAX_PITCH_IMAGES = 12;
 
 function toImageList(raw: unknown): string[] {
   return Array.isArray(raw)
@@ -378,6 +383,7 @@ export class WebsiteCampPublicService {
           zoneKey: zone.id,
           posX: clamp01(p.posX),
           posY: clamp01(p.posY),
+          images: toImageList(p.images).slice(0, MAX_PITCH_IMAGES),
         });
       }
     }
