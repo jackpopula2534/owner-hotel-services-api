@@ -86,13 +86,19 @@ export class CampEquipmentRequestDto {
 
 /**
  * POST /public/sites/:slug/camp-bookings — แขกจองลานเองจากหน้าเว็บ
- * ไม่มีช่องราคา/จุดกาง/สถานะ: server เลือกจุดว่างในโซนและคิดราคาเองทั้งหมด
+ * ไม่มีช่องราคา/สถานะ: server คิดราคาเอง — จุดกางเลือกจากแผนที่ได้ (pitchId) ไม่งั้น server เลือกจุดว่างให้
  */
 export class CreateCampBookingDto extends CampAvailabilityQueryDto {
   /** CampZone.id (key ของ roomTypes บนหน้าเว็บ) */
   @ApiProperty()
   @IsUUID()
   zoneKey: string;
+
+  /** จุดกางที่แขกเลือกจากแผนที่ (ต้องอยู่ในโซนนี้และว่าง) — ไม่ส่ง = server เลือกจุดว่างให้ */
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsUUID()
+  pitchId?: string;
 
   @ApiProperty({ required: false, type: [CampEquipmentRequestDto] })
   @IsOptional()

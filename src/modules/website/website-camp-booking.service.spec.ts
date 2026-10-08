@@ -25,7 +25,10 @@ const zone = (over: Record<string, unknown> = {}) => ({
   maxTents: 2,
   allowVehicle: false,
   allowPet: false,
-  pitches: [{ id: 'pitch-a' }, { id: 'pitch-b' }],
+  pitches: [
+    { id: 'pitch-a', code: 'A1' },
+    { id: 'pitch-b', code: 'A2' },
+  ],
   ...over,
 });
 
@@ -111,6 +114,7 @@ describe('WebsiteCampBookingService.getAvailability', () => {
     });
     expect(res.nights).toBe(2);
     expect(res.zones[0]).toMatchObject({ key: 'z1', available: 1, reason: null });
+    expect(res.zones[0].freePitchIds).toEqual(['pitch-b']);
     expect(res.zones[0].quote).toMatchObject({ lodging: 1000, electricity: 200, grandTotal: 1200 });
     expect(res.payment.promptpay).toBe(false);
   });
@@ -206,6 +210,32 @@ describe('WebsiteCampBookingService.createBooking', () => {
     expect(res.equipment).toEqual([{ name: 'เต็นท์ 2 คน', qty: 2, unitPrice: 250, amount: 500 }]);
     expect(prisma.websiteInquiry.create).toHaveBeenCalled();
     expect(publicSites.notifyStaff).toHaveBeenCalledWith('t1', expect.any(Object));
+  });
+
+  it('books the pitch the guest picked on the map and echoes its code', async () => {
+    const { svc, reservations, publicSites } = setup();
+    const res = await svc.createBooking('pine', booking({ pitchId: 'pitch-b' }));
+    expect(reservations.create.mock.calls[0][0]).toMatchObject({ pitchId: 'pitch-b' });
+    expect(reservations.create.mock.calls[0][0].notes).toContain('A2');
+    expect(res.pitchCode).toBe('A2');
+    expect(publicSites.notifyStaff.mock.calls[0][1].message).toContain('จุด A2');
+
+    const auto = await setup().svc.createBooking('pine', booking());
+    expect(auto.pitchCode).toBeNull();
+  });
+
+  it('picked pitch: 409 when taken, 404 when not in the zone — never falls back', async () => {
+    const taken = setup({ blocked: ['pitch-b'] });
+    await expect(
+      taken.svc.createBooking('pine', booking({ pitchId: 'pitch-b' })),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(taken.reservations.create).not.toHaveBeenCalled();
+
+    const other = setup();
+    await expect(
+      other.svc.createBooking('pine', booking({ pitchId: 'pitch-zz' })),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(other.reservations.create).not.toHaveBeenCalled();
   });
 
   it('409 when every pitch in the zone is taken', async () => {

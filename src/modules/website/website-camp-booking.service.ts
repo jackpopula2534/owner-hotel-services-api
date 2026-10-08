@@ -45,6 +45,8 @@ export interface CampZoneAvailability {
   reason: 'FULL' | 'CAPACITY' | 'RULES' | null;
   message: string | null;
   quote: CampQuote | null;
+  /** จุดกางที่ว่างในช่วงนั้น (id ตรงกับ camp.map.pitches) — ใช้ระบายสีจุดบนแผนที่ */
+  freePitchIds: string[];
 }
 
 export interface CampAvailability {
@@ -63,6 +65,8 @@ export interface CampBookingResult {
   reference: string;
   status: string;
   zone: { key: string; name: LocalizedText };
+  /** รหัสจุดที่แขกเลือกเองจากแผนที่ — null = ลานจัดจุดให้ */
+  pitchCode: string | null;
   checkIn: string;
   checkOut: string;
   checkInTime: string;
@@ -135,12 +139,14 @@ export class WebsiteCampBookingService {
     const result = zones
       .filter((z) => z.pitches.length && !content.roomTypes[z.id]?.hidden)
       .map((zone): CampZoneAvailability => {
-        const free = zone.pitches.filter((p) => !blocked.has(p.id)).length;
+        const freePitchIds = zone.pitches.filter((p) => !blocked.has(p.id)).map((p) => p.id);
+        const free = freePitchIds.length;
         const rule = this.ruleViolation(zone, ctx.party);
         const quote = this.quote(zone, ctx, 0, deposit);
-        if (!free) return { key: zone.id, available: 0, reason: 'FULL', message: null, quote };
-        if (rule) return { key: zone.id, available: free, ...rule, quote };
-        return { key: zone.id, available: free, reason: null, message: null, quote };
+        const base = { key: zone.id, available: free, quote, freePitchIds };
+        if (!free) return { ...base, reason: 'FULL', message: null };
+        if (rule) return { ...base, ...rule };
+        return { ...base, reason: null, message: null };
       });
 
     return {
@@ -186,12 +192,20 @@ export class WebsiteCampBookingService {
       const rule = this.ruleViolation(zone, ctx.party);
       if (rule) throw new BadRequestException(rule.message);
 
-      // จุดว่างจุดแรกตามรหัสจุด — ตรวจซ้ำใน lock เพราะการจองจากเว็บของลานนี้เรียงคิวกันอยู่
+      // จุดที่แขกเลือกจากแผนที่ หรือจุดว่างจุดแรกตามรหัสจุด — ตรวจซ้ำใน lock เพราะการจองจากเว็บของลานนี้เรียงคิวกันอยู่
       const blocked = await this.blockedPitchIds(
         ctx,
         zone.pitches.map((p) => p.id),
       );
-      const pitch = zone.pitches.find((p) => !blocked.has(p.id));
+      let pitch = zone.pitches.find((p) => !blocked.has(p.id));
+      if (dto.pitchId) {
+        const wanted = zone.pitches.find((p) => p.id === dto.pitchId);
+        if (!wanted) throw new NotFoundException('ไม่พบจุดกางนี้ในโซนที่เลือก');
+        if (blocked.has(wanted.id)) {
+          throw new ConflictException('จุดนี้ถูกจองแล้วในวันที่เลือก กรุณาเลือกจุดอื่น');
+        }
+        pitch = wanted;
+      }
       if (!pitch)
         throw new ConflictException('โซนนี้เต็มแล้วในวันที่เลือก กรุณาเลือกโซนหรือวันอื่น');
 
@@ -211,15 +225,17 @@ export class WebsiteCampBookingService {
           numVehicles: ctx.party.vehicles,
           hasPet: ctx.party.pet,
           addons: equipment.map((e) => ({ addonId: e.addonId, qty: e.qty })),
-          notes: ['จองผ่านเว็บไซต์', note].filter(Boolean).join(' — '),
+          notes: ['จองผ่านเว็บไซต์', dto.pitchId ? `แขกเลือกจุด ${pitch.code} จากแผนที่` : '', note]
+            .filter(Boolean)
+            .join(' — '),
         },
         ctx.site.tenantId,
         { source: 'WEBSITE' },
       );
-      return { reservation: res.data, zone };
+      return { reservation: res.data, zone, pitch };
     });
 
-    const { reservation, zone } = created;
+    const { reservation, zone, pitch } = created;
     const equipmentTotal = round2(equipment.reduce((sum, e) => sum + e.amount, 0));
     // ยอดที่บันทึกจริงในใบจอง (คิดใหม่ใน ReservationsService) — ตรงกับที่พนักงานเห็น
     const grandTotal = round2(Number(reservation.totalPrice));
@@ -257,7 +273,7 @@ export class WebsiteCampBookingService {
     await this.publicSites.notifyStaff(ctx.site.tenantId, {
       refId: reservation.id,
       title: 'การจองลานใหม่จากเว็บไซต์',
-      message: `${guestName} จองโซน ${zone.name} ${ctx.checkIn} – ${ctx.checkOut} (#${reference}) ${
+      message: `${guestName} จองโซน ${zone.name}${dto.pitchId ? ` จุด ${pitch.code}` : ''} ${ctx.checkIn} – ${ctx.checkOut} (#${reference}) ${
         !payOnline
           ? 'ชำระที่ลาน — รอยืนยัน'
           : deposit != null
@@ -270,6 +286,7 @@ export class WebsiteCampBookingService {
       reference,
       status: reservation.status,
       zone: { key: zone.id, name: zoneName },
+      pitchCode: dto.pitchId ? pitch.code : null,
       checkIn: ctx.checkIn,
       checkOut: ctx.checkOut,
       checkInTime: ctx.campground.checkInTime ?? '14:00',
@@ -353,7 +370,7 @@ export class WebsiteCampBookingService {
         allowPet: true,
         pitches: {
           where: { status: { notIn: UNSELLABLE_PITCH_STATUSES } },
-          select: { id: true },
+          select: { id: true, code: true },
           orderBy: { code: 'asc' },
         },
       },

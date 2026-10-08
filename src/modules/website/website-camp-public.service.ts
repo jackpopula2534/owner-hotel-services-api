@@ -24,6 +24,9 @@ export interface PublicCampZone {
   restrictions: string[];
   /** จำนวนจุดกางที่เปิดขายของโซน (ไม่นับจุดปิด/ซ่อม) */
   pitchCount: number;
+  /** รหัสนำหน้าจุด (เช่น "A") + สีหมุดบนแผนที่ — ตรงกับแผนผังหลังบ้าน */
+  code: string | null;
+  color: string | null;
 }
 
 export interface PublicCampEquipment {
@@ -43,6 +46,27 @@ export interface PublicCampFacility {
   open24h: boolean;
   openingTime: string | null;
   closingTime: string | null;
+  /** พิกัด normalized บนแผนที่ (0..1) */
+  posX: number;
+  posY: number;
+}
+
+/** จุดกางบนแผนที่ — ไม่มีสถานะ/การจอง (จุดว่างรายวันมาจาก camp-availability) */
+export interface PublicCampPitch {
+  id: string;
+  code: string;
+  /** CampZone.id = roomTypes[].key */
+  zoneKey: string;
+  posX: number;
+  posY: number;
+}
+
+/** รูปแผนผังที่เจ้าของลานอัปโหลดในหลังบ้าน + จุดกางที่เปิดขาย */
+export interface PublicCampMap {
+  imageUrl: string;
+  width: number | null;
+  height: number | null;
+  pitches: PublicCampPitch[];
 }
 
 /** ข้อมูลเฉพาะเว็บลาน — key ของ zones ตรงกับ roomTypes[].key (= CampZone.id) */
@@ -50,6 +74,8 @@ export interface CampSiteExtras {
   zones: Record<string, PublicCampZone>;
   equipment: PublicCampEquipment[];
   facilities: PublicCampFacility[];
+  /** null = ลานยังไม่อัปโหลดรูปแผนผัง */
+  map: PublicCampMap | null;
   latitude: number | null;
   longitude: number | null;
 }
@@ -76,6 +102,16 @@ function toStringList(raw: unknown, max: number): string[] {
     : [];
 }
 
+/** รูปแผนผังมาจาก storage (http/https หรือ path ของเว็บเอง เช่น /uploads/..., /assets/...) */
+export function toMapImageUrl(raw: string | null | undefined): string | null {
+  const url = raw?.trim();
+  if (!url || url.length > 500) return null;
+  if (/^https?:\/\//i.test(url)) return url;
+  return /^\/(?!\/)[\w\-./%]+$/.test(url) ? url : null;
+}
+
+const clamp01 = (n: number): number => (Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0.5);
+
 const num = (v: { toString(): string } | number | null | undefined): number | null =>
   v === null || v === undefined ? null : Number(v);
 
@@ -87,7 +123,7 @@ const num = (v: { toString(): string } | number | null | undefined): number | nu
  *   roomTypes → โซน (key = zone.id) ราคาเริ่มต้นจาก basePrice
  *   camp      → ข้อมูลเฉพาะลาน (กติกาโซน อุปกรณ์ให้เช่า สิ่งอำนวยความสะดวก)
  * หน้า public ไม่มี tenant context → ทุก query กรอง tenantId + campgroundId เอง
- * ห้ามส่งรหัสจุด สถานะจุด หรือข้อมูลการจองออกไป
+ * รหัส/ตำแหน่งจุดกางส่งได้ (พิมพ์อยู่บนแผนผังอยู่แล้ว) แต่ห้ามส่งสถานะจุดหรือข้อมูลการจองออกไป
  */
 @Injectable()
 export class WebsiteCampPublicService {
@@ -109,6 +145,9 @@ export class WebsiteCampPublicService {
         checkInTime: true,
         checkOutTime: true,
         warehouseId: true,
+        mapImageUrl: true,
+        mapWidth: true,
+        mapHeight: true,
       },
     });
     if (!campground) throw new NotFoundException('Website not found');
@@ -131,13 +170,23 @@ export class WebsiteCampPublicService {
       this.listEquipment(site.tenantId, campground.id),
       this.prisma.campFacility.findMany({
         where: { tenantId: site.tenantId, campgroundId: campground.id, status: { not: 'closed' } },
-        select: { name: true, type: true, open24h: true, openingTime: true, closingTime: true },
+        select: {
+          name: true,
+          type: true,
+          open24h: true,
+          openingTime: true,
+          closingTime: true,
+          posX: true,
+          posY: true,
+        },
         orderBy: [{ type: 'asc' }, { name: 'asc' }],
       }),
     ]);
 
     const roomTypes =
       source === 'published' ? zones.roomTypes.filter((r) => !r.hidden) : zones.roomTypes;
+    const visibleZones = new Set(roomTypes.map((r) => r.key));
+    const mapImageUrl = toMapImageUrl(campground.mapImageUrl);
 
     return {
       available: true,
@@ -180,7 +229,15 @@ export class WebsiteCampPublicService {
       camp: {
         zones: zones.extras,
         equipment,
-        facilities,
+        facilities: facilities.map((f) => ({ ...f, posX: clamp01(f.posX), posY: clamp01(f.posY) })),
+        map: mapImageUrl
+          ? {
+              imageUrl: mapImageUrl,
+              width: campground.mapWidth,
+              height: campground.mapHeight,
+              pitches: zones.pitches.filter((p) => visibleZones.has(p.zoneKey)),
+            }
+          : null,
         latitude: campground.latitude,
         longitude: campground.longitude,
       },
@@ -216,7 +273,11 @@ export class WebsiteCampPublicService {
     campground: { id: string; images: unknown },
     content: SiteContent,
     includeDefaults: boolean,
-  ): Promise<{ roomTypes: PublicRoomType[]; extras: Record<string, PublicCampZone> }> {
+  ): Promise<{
+    roomTypes: PublicRoomType[];
+    extras: Record<string, PublicCampZone>;
+    pitches: PublicCampPitch[];
+  }> {
     const zones = await this.prisma.campZone.findMany({
       where: { tenantId, campgroundId: campground.id },
       select: {
@@ -234,9 +295,12 @@ export class WebsiteCampPublicService {
         hasElectricity: true,
         electricityFee: true,
         restrictions: true,
+        code: true,
+        color: true,
         pitches: {
           where: { status: { notIn: UNSELLABLE_PITCH_STATUSES } },
-          select: { images: true, sizeSqm: true },
+          select: { id: true, code: true, posX: true, posY: true, images: true, sizeSqm: true },
+          orderBy: { code: 'asc' },
         },
       },
       orderBy: [{ basePrice: 'asc' }, { name: 'asc' }],
@@ -245,6 +309,7 @@ export class WebsiteCampPublicService {
 
     const roomTypes: PublicRoomType[] = [];
     const extras: Record<string, PublicCampZone> = {};
+    const pitches: PublicCampPitch[] = [];
     for (const zone of zones) {
       // โซนที่ไม่มีจุดเปิดขายเลย จองไม่ได้ → ไม่โชว์บนเว็บ
       if (!zone.pitches.length) continue;
@@ -303,11 +368,22 @@ export class WebsiteCampPublicService {
         electricityFee: zone.hasElectricity ? num(zone.electricityFee) : null,
         restrictions: toStringList(zone.restrictions, 12),
         pitchCount: zone.pitches.length,
+        code: zone.code?.trim() || null,
+        color: zone.color && /^#[0-9a-f]{3,8}$/i.test(zone.color) ? zone.color : null,
       };
+      for (const p of zone.pitches) {
+        pitches.push({
+          id: p.id,
+          code: p.code,
+          zoneKey: zone.id,
+          posX: clamp01(p.posX),
+          posY: clamp01(p.posY),
+        });
+      }
     }
 
     roomTypes.sort((a, b) => a.order - b.order || a.fromPrice - b.fromPrice);
-    return { roomTypes, extras };
+    return { roomTypes, extras, pitches };
   }
 
   async listEquipment(tenantId: string, campgroundId: string): Promise<PublicCampEquipment[]> {
