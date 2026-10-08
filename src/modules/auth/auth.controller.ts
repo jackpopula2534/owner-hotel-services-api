@@ -355,6 +355,26 @@ export class AuthController {
     );
   }
 
+  @Post('accounting-launch/exchange')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 30, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Trade a Accounting deep-link token for a full Accounting session',
+    description:
+      'Same hand-off as the other terminal exchanges: the 5-minute launch token carries no ' +
+      'refresh token, so the terminal trades it once on open for access + refresh tokens tagged ' +
+      'systemContext="accounting" that /auth/refresh can renew all day.',
+  })
+  @ApiResponse({ status: 200, description: 'Accounting session issued' })
+  @ApiResponse({ status: 401, description: 'Launch token invalid, expired, or account not active' })
+  async accountingLaunchExchange(@Body() dto: LaunchExchangeDto, @Req() req: Request) {
+    return this.authService.exchangeAccountingLaunchToken(dto.token, {
+      ipAddress: req.ip ?? req.socket?.remoteAddress,
+      userAgent: req.headers['user-agent'],
+    });
+  }
+
   @Post('hr/login')
   @Public()
   @HttpCode(HttpStatus.OK)
@@ -411,6 +431,26 @@ export class AuthController {
       { userId: caller.userId, email: caller.email, role: caller.role, tenantId: caller.tenantId },
       req.ip ?? req.socket?.remoteAddress,
     );
+  }
+
+  @Post('hr-launch/exchange')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 30, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Trade a HR deep-link token for a full HR session',
+    description:
+      'Same hand-off as the other terminal exchanges: the 5-minute launch token carries no ' +
+      'refresh token, so the terminal trades it once on open for access + refresh tokens tagged ' +
+      'systemContext="hr" that /auth/refresh can renew all day.',
+  })
+  @ApiResponse({ status: 200, description: 'HR session issued' })
+  @ApiResponse({ status: 401, description: 'Launch token invalid, expired, or account not active' })
+  async hrLaunchExchange(@Body() dto: LaunchExchangeDto, @Req() req: Request) {
+    return this.authService.exchangeHrLaunchToken(dto.token, {
+      ipAddress: req.ip ?? req.socket?.remoteAddress,
+      userAgent: req.headers['user-agent'],
+    });
   }
 
   @Post('forgot-password')
@@ -586,6 +626,26 @@ export class AuthController {
       { userId: caller.userId, email: caller.email, role: caller.role, tenantId: caller.tenantId },
       req.ip ?? req.socket?.remoteAddress,
     );
+  }
+
+  @Post('warehouse-launch/exchange')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 30, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Trade a Warehouse deep-link token for a full Warehouse session',
+    description:
+      'Same hand-off as the other terminal exchanges: the 5-minute launch token carries no ' +
+      'refresh token, so the terminal trades it once on open for access + refresh tokens tagged ' +
+      'systemContext="warehouse" that /auth/refresh can renew all day.',
+  })
+  @ApiResponse({ status: 200, description: 'Warehouse session issued' })
+  @ApiResponse({ status: 401, description: 'Launch token invalid, expired, or account not active' })
+  async warehouseLaunchExchange(@Body() dto: LaunchExchangeDto, @Req() req: Request) {
+    return this.authService.exchangeWarehouseLaunchToken(dto.token, {
+      ipAddress: req.ip ?? req.socket?.remoteAddress,
+      userAgent: req.headers['user-agent'],
+    });
   }
 
   // ─── Hotel Management Terminal Deep-link Launch ─────────────────────────────

@@ -94,6 +94,9 @@ interface LaunchTokenClaims {
   posLaunch?: boolean;
   purchasingLaunch?: boolean;
   hotelTerminalLaunch?: boolean;
+  warehouseLaunch?: boolean;
+  accountingLaunch?: boolean;
+  hrLaunch?: boolean;
   restaurantId?: string | null;
   tableId?: string | null;
   propertyId?: string | null;
@@ -1086,7 +1089,13 @@ export class AuthService {
    */
   private async openLaunchToken(
     token: string,
-    claimFlag: 'posLaunch' | 'purchasingLaunch' | 'hotelTerminalLaunch',
+    claimFlag:
+      | 'posLaunch'
+      | 'purchasingLaunch'
+      | 'hotelTerminalLaunch'
+      | 'warehouseLaunch'
+      | 'accountingLaunch'
+      | 'hrLaunch',
     systemLabel: string,
   ): Promise<{ claims: LaunchTokenClaims; user: any }> {
     let claims: LaunchTokenClaims;
@@ -1369,6 +1378,79 @@ export class AuthService {
         propertyName: sessionUser.propertyName ?? claims.propertyName ?? null,
       },
     };
+  }
+
+  /**
+   * Trade a warehouse / accounting / HR deep-link token for a real session.
+   *
+   * Same hand-off as the purchasing exchange (see the note there): the access
+   * token is minted from the account's real role, while the manager role,
+   * permission set and property the link granted ride along on the returned
+   * user — the terminal shells gate their menus on exactly those fields.
+   */
+  private async exchangeManagerLaunchToken(
+    token: string,
+    claimFlag: 'warehouseLaunch' | 'accountingLaunch' | 'hrLaunch',
+    systemContext: 'warehouse' | 'accounting' | 'hr',
+    systemLabel: string,
+    deviceInfo?: { ipAddress?: string; userAgent?: string },
+  ) {
+    const { claims, user } = await this.openLaunchToken(token, claimFlag, systemLabel);
+
+    const session = await this.buildLoginResponse(user, systemContext, deviceInfo);
+    const sessionUser = session.user as {
+      permissions?: string[];
+      propertyId?: string | null;
+      propertyName?: string | null;
+    };
+
+    this.logger.log(`${systemLabel} launch token exchanged for a session by user ${user.id}`);
+
+    return {
+      ...session,
+      user: {
+        ...session.user,
+        role: claims.role ?? session.user.role,
+        permissions: claims.permissions?.length
+          ? claims.permissions
+          : (sessionUser.permissions ?? []),
+        propertyId: sessionUser.propertyId ?? claims.propertyId ?? session.user.defaultPropertyId,
+        propertyName: sessionUser.propertyName ?? claims.propertyName ?? null,
+      },
+    };
+  }
+
+  async exchangeWarehouseLaunchToken(
+    token: string,
+    deviceInfo?: { ipAddress?: string; userAgent?: string },
+  ) {
+    return this.exchangeManagerLaunchToken(
+      token,
+      'warehouseLaunch',
+      'warehouse',
+      'Warehouse',
+      deviceInfo,
+    );
+  }
+
+  async exchangeAccountingLaunchToken(
+    token: string,
+    deviceInfo?: { ipAddress?: string; userAgent?: string },
+  ) {
+    return this.exchangeManagerLaunchToken(
+      token,
+      'accountingLaunch',
+      'accounting',
+      'Accounting',
+      deviceInfo,
+    );
+  }
+
+  async exchangeHrLaunchToken(
+    token: string,
+    deviceInfo?: { ipAddress?: string; userAgent?: string },
+  ) {
+    return this.exchangeManagerLaunchToken(token, 'hrLaunch', 'hr', 'HR', deviceInfo);
   }
 
   /**

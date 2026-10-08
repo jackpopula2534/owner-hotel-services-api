@@ -1,5 +1,5 @@
 /**
- * Purchasing and Hotel Terminal deep-link launch coverage for AuthService.
+ * Purchasing, Hotel Terminal, Warehouse, Accounting and HR deep-link launch coverage for AuthService.
  *
  * Both terminals used to keep the 5-minute launch token *as* their session.
  * A launch token carries no refresh token, so a few minutes in every poll
@@ -63,6 +63,37 @@ describe('AuthService — sub-system launch exchange', () => {
     tenantId: 'tenant-1',
     hotelTerminalLaunch: true,
     permissions: ['frontdesk.manage', 'housekeeping.manage'],
+    propertyId: 'prop-1',
+    propertyName: 'StaySync Bangkok',
+  };
+
+  const warehouseClaims = {
+    sub: 'user-1',
+    email: 'owner@hotel.test',
+    role: 'warehouse_manager',
+    tenantId: 'tenant-1',
+    warehouseLaunch: true,
+    permissions: ['inventory.view', 'stock.adjust'],
+  };
+
+  const accountingClaims = {
+    sub: 'user-1',
+    email: 'owner@hotel.test',
+    role: 'accounting_manager',
+    tenantId: 'tenant-1',
+    accountingLaunch: true,
+    permissions: ['journal.post', 'period.close'],
+    propertyId: 'prop-1',
+    propertyName: 'StaySync Bangkok',
+  };
+
+  const hrClaims = {
+    sub: 'user-1',
+    email: 'owner@hotel.test',
+    role: 'hr_manager',
+    tenantId: 'tenant-1',
+    hrLaunch: true,
+    permissions: ['employee.manage', 'payroll.run'],
     propertyId: 'prop-1',
     propertyName: 'StaySync Bangkok',
   };
@@ -159,7 +190,7 @@ describe('AuthService — sub-system launch exchange', () => {
       );
     });
 
-    it("falls back to the account own procurement permissions when the link carries none", async () => {
+    it('falls back to the account own procurement permissions when the link carries none', async () => {
       mockJwt.verify.mockReturnValue({ ...purchasingClaims, permissions: [] });
       mockPrisma.user.findFirst.mockResolvedValue({
         ...owner,
@@ -267,5 +298,87 @@ describe('AuthService — sub-system launch exchange', () => {
       await expect(service.exchangeHotelTerminalLaunchToken('launch-jwt')).rejects.toThrow();
       expect(mockPrisma.refreshToken.create).not.toHaveBeenCalled();
     });
+  });
+  describe.each([
+    {
+      name: 'warehouse',
+      claims: warehouseClaims,
+      context: 'warehouse',
+      exchange: (t: string) => service.exchangeWarehouseLaunchToken(t),
+    },
+    {
+      name: 'accounting',
+      claims: accountingClaims,
+      context: 'accounting',
+      exchange: (t: string) => service.exchangeAccountingLaunchToken(t),
+    },
+    {
+      name: 'hr',
+      claims: hrClaims,
+      context: 'hr',
+      exchange: (t: string) => service.exchangeHrLaunchToken(t),
+    },
+  ])('$name', ({ claims, context, exchange }) => {
+    it('trades a launch token for a session the terminal can renew', async () => {
+      mockJwt.verify.mockReturnValue(claims);
+      mockPrisma.user.findFirst.mockResolvedValue(owner);
+
+      const result = await exchange('launch-jwt');
+
+      expect(result.accessToken).toBe('new-access-token');
+      expect(result.refreshToken.length).toBeGreaterThan(0);
+      expect(mockJwt.sign).toHaveBeenCalledWith(
+        expect.objectContaining({ sub: 'user-1', role: 'tenant_admin', systemContext: context }),
+        expect.anything(),
+      );
+      expect(mockPrisma.refreshToken.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ userId: 'user-1', systemContext: context }),
+        }),
+      );
+    });
+
+    it('keeps the manager role and permissions the deep link granted', async () => {
+      mockJwt.verify.mockReturnValue(claims);
+      mockPrisma.user.findFirst.mockResolvedValue(owner);
+
+      const result = await exchange('launch-jwt');
+
+      expect(result.user.role).toBe(claims.role);
+      expect(result.user.permissions).toEqual(claims.permissions);
+    });
+
+    it('refuses a launch token minted for another system', async () => {
+      mockJwt.verify.mockReturnValue(purchasingClaims);
+
+      await expect(exchange('purchasing-jwt')).rejects.toThrow(UnauthorizedException);
+      expect(mockPrisma.refreshToken.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses an expired or tampered token', async () => {
+      mockJwt.verify.mockImplementation(() => {
+        throw new Error('jwt expired');
+      });
+
+      await expect(exchange('stale-jwt')).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('refuses an account suspended since the link was made', async () => {
+      mockJwt.verify.mockReturnValue(claims);
+      mockPrisma.user.findFirst.mockResolvedValue({ ...owner, status: 'suspended' });
+
+      await expect(exchange('launch-jwt')).rejects.toThrow();
+      expect(mockPrisma.refreshToken.create).not.toHaveBeenCalled();
+    });
+  });
+
+  it('accounting falls back to the property the link resolved', async () => {
+    mockJwt.verify.mockReturnValue(accountingClaims);
+    mockPrisma.user.findFirst.mockResolvedValue(owner);
+
+    const result = await service.exchangeAccountingLaunchToken('launch-jwt');
+
+    expect(result.user.propertyId).toBe('prop-1');
+    expect(result.user.propertyName).toBe('StaySync Bangkok');
   });
 });
