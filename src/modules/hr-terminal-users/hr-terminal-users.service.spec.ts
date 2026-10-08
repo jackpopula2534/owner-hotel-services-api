@@ -8,6 +8,7 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { HrTerminalUsersService } from './hr-terminal-users.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { DEFAULT_HR_PERMISSIONS } from './dto/create-hr-terminal-user.dto';
 
 function createMockPrisma() {
@@ -31,7 +32,11 @@ describe('HrTerminalUsersService', () => {
   beforeEach(async () => {
     prisma = createMockPrisma();
     const moduleRef: TestingModule = await Test.createTestingModule({
-      providers: [HrTerminalUsersService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        HrTerminalUsersService,
+        TenantContextService,
+        { provide: PrismaService, useValue: prisma },
+      ],
     }).compile();
     service = moduleRef.get(HrTerminalUsersService);
   });
@@ -67,12 +72,24 @@ describe('HrTerminalUsersService', () => {
 
     it('honours explicit permissions override', async () => {
       prisma.user.create.mockResolvedValueOnce({
-        id: 'u2', email: 'p@h.com', firstName: null, lastName: null,
-        role: 'payroll_officer', status: 'active', employeeId: null,
-        warehousePermissions: JSON.stringify(['payroll.view']), lastLoginAt: null, createdAt: new Date(),
+        id: 'u2',
+        email: 'p@h.com',
+        firstName: null,
+        lastName: null,
+        role: 'payroll_officer',
+        status: 'active',
+        employeeId: null,
+        warehousePermissions: JSON.stringify(['payroll.view']),
+        lastLoginAt: null,
+        createdAt: new Date(),
       });
       await service.create(
-        { email: 'p@h.com', password: 'StrongPass123!', role: 'payroll_officer', permissions: ['payroll.view'] },
+        {
+          email: 'p@h.com',
+          password: 'StrongPass123!',
+          role: 'payroll_officer',
+          permissions: ['payroll.view'],
+        },
         TENANT,
       );
       const createArg = prisma.user.create.mock.calls[0][0].data;
@@ -80,9 +97,12 @@ describe('HrTerminalUsersService', () => {
     });
 
     it('rejects duplicate email', async () => {
-      prisma.user.findUnique.mockResolvedValueOnce({ id: 'exists' });
+      prisma.user.findFirst.mockResolvedValueOnce({ id: 'exists' });
       await expect(
-        service.create({ email: 'dup@h.com', password: 'StrongPass123!', role: 'hr_manager' }, TENANT),
+        service.create(
+          { email: 'dup@h.com', password: 'StrongPass123!', role: 'hr_manager' },
+          TENANT,
+        ),
       ).rejects.toBeInstanceOf(ConflictException);
     });
   });
@@ -93,7 +113,13 @@ describe('HrTerminalUsersService', () => {
       const where = prisma.user.findMany.mock.calls[0][0].where;
       expect(where.tenantId).toBe(TENANT);
       expect(where.role.in).toEqual(
-        expect.arrayContaining(['hr_manager', 'hr_officer', 'payroll_officer', 'recruiter', 'hr_viewer']),
+        expect.arrayContaining([
+          'hr_manager',
+          'hr_officer',
+          'payroll_officer',
+          'recruiter',
+          'hr_viewer',
+        ]),
       );
     });
   });
@@ -102,8 +128,16 @@ describe('HrTerminalUsersService', () => {
     it('re-asserts allowedSystems when role changes and hashes new password', async () => {
       prisma.user.findFirst.mockResolvedValueOnce({ id: 'u1', tenantId: TENANT });
       prisma.user.update.mockResolvedValueOnce({
-        id: 'u1', email: 'a@h', firstName: null, lastName: null, role: 'hr_manager',
-        status: 'active', employeeId: null, warehousePermissions: null, lastLoginAt: null, createdAt: new Date(),
+        id: 'u1',
+        email: 'a@h',
+        firstName: null,
+        lastName: null,
+        role: 'hr_manager',
+        status: 'active',
+        employeeId: null,
+        warehousePermissions: null,
+        lastLoginAt: null,
+        createdAt: new Date(),
       });
       await service.update('u1', TENANT, { role: 'hr_manager', password: 'NewPass123!' });
       const data = prisma.user.update.mock.calls[0][0].data;

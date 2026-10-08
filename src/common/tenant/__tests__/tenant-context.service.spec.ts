@@ -69,6 +69,28 @@ describe('TenantContextService', () => {
         expect(svc.getTenantId()).toBeNull();
       });
     });
+
+    it('starts a lazy thenable (PrismaPromise) inside the unscoped frame', async () => {
+      // PrismaPromise only runs its query when .then() is called
+      const seenSkip: boolean[] = [];
+      const lazyQuery = {
+        then<R>(onFulfilled: (v: string) => R) {
+          seenSkip.push(svc.isScopeSkipped());
+          return Promise.resolve('row').then(onFulfilled);
+        },
+      };
+
+      const result = await svc.run({ tenantId: 'tenant-A', skipScope: false }, () =>
+        svc.runUnscoped(() => lazyQuery),
+      );
+
+      expect(result).toBe('row');
+      expect(seenSkip).toEqual([true]);
+    });
+
+    it('returns non-promise values unchanged', () => {
+      expect(svc.runUnscoped(() => 42)).toBe(42);
+    });
   });
 
   describe('frame isolation', () => {

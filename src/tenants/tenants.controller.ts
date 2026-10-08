@@ -289,11 +289,12 @@ export class TenantsController {
     // reaches via user_tenants, not their active scope. Look it up unscoped
     // (findFirst — findUnique is blocked on scoped models); access is still
     // verified by Check 1/2 below before any data is returned.
-    const property = await this.tenantContext.runUnscoped(() =>
-      this.prisma.property.findFirst({
-        where: { id },
-        select: { tenantId: true },
-      }),
+    const property = await this.tenantContext.runUnscoped(
+      async () =>
+        await this.prisma.property.findFirst({
+          where: { id },
+          select: { tenantId: true },
+        }),
     );
     if (property?.tenantId) {
       resolvedTenantId = property.tenantId;
@@ -304,11 +305,18 @@ export class TenantsController {
       return this.hotelDetailService.getHotelDetail(resolvedTenantId);
     }
 
-    // Check 2: Multi-tenant support — user might belong to this tenant via user_tenants table
-    if (user?.userId) {
-      const userTenant = await this.prisma.userTenant.findFirst({
-        where: { userId: user.userId, tenantId: resolvedTenantId },
-      });
+    // Check 2: Multi-tenant support — user might belong to this tenant via user_tenants table.
+    // The membership row lives in another tenant than the active scope → read it unscoped
+    // (scoped, the TenantScope middleware rejects the mismatched tenantId with a 500).
+    const userId = user?.userId;
+    if (userId) {
+      const userTenant = await this.tenantContext.runUnscoped(
+        async () =>
+          await this.prisma.userTenant.findFirst({
+            where: { userId, tenantId: resolvedTenantId },
+            select: { id: true },
+          }),
+      );
       if (userTenant) {
         return this.hotelDetailService.getHotelDetail(resolvedTenantId);
       }

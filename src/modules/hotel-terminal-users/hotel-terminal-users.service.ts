@@ -231,8 +231,8 @@ export class HotelTerminalUsersService {
     dto: CreateHotelTerminalUserDto,
     tenantId: string,
   ): Promise<{ success: true; data: HotelTerminalUserResponse }> {
-    const existing = await this.tenantContext.runUnscoped(() =>
-      this.prisma.user.findFirst({ where: { email: dto.email } }),
+    const existing = await this.tenantContext.runUnscoped(
+      async () => await this.prisma.user.findFirst({ where: { email: dto.email } }),
     );
     if (existing) {
       throw new ConflictException(`A user with email "${dto.email}" already exists`);
@@ -291,8 +291,8 @@ export class HotelTerminalUsersService {
     }
 
     if (
-      await this.tenantContext.runUnscoped(() =>
-        this.prisma.user.findFirst({ where: { email: employee.email } }),
+      await this.tenantContext.runUnscoped(
+        async () => await this.prisma.user.findFirst({ where: { email: employee.email } }),
       )
     ) {
       throw new ConflictException(
@@ -363,8 +363,8 @@ export class HotelTerminalUsersService {
         skipped.push({ employeeId: item.employeeId, reason: 'ไม่พบในระบบ HR' });
         continue;
       }
-      const existing = await this.tenantContext.runUnscoped(() =>
-        this.prisma.user.findFirst({ where: { email: employee.email } }),
+      const existing = await this.tenantContext.runUnscoped(
+        async () => await this.prisma.user.findFirst({ where: { email: employee.email } }),
       );
       if (existing) {
         skipped.push({

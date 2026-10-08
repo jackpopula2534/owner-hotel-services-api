@@ -233,11 +233,12 @@ export class TenantUsersService {
 
     const actorIds = [...new Set(rows.map((r) => r.userId).filter((v): v is string => !!v))];
     const actors = actorIds.length
-      ? await this.tenantContext.runUnscoped(() =>
-          this.prisma.user.findMany({
-            where: { id: { in: actorIds } },
-            select: { id: true, email: true },
-          }),
+      ? await this.tenantContext.runUnscoped(
+          async () =>
+            await this.prisma.user.findMany({
+              where: { id: { in: actorIds } },
+              select: { id: true, email: true },
+            }),
         )
       : [];
     const emailById = new Map(actors.map((a) => [a.id, a.email]));
@@ -302,11 +303,12 @@ export class TenantUsersService {
 
     const emails = visible.map((e) => e.email).filter(Boolean);
     const linked = emails.length
-      ? await this.tenantContext.runUnscoped(() =>
-          this.prisma.user.findMany({
-            where: { email: { in: emails } },
-            select: { email: true },
-          }),
+      ? await this.tenantContext.runUnscoped(
+          async () =>
+            await this.prisma.user.findMany({
+              where: { email: { in: emails } },
+              select: { email: true },
+            }),
         )
       : [];
     const linkedEmails = new Set(linked.map((u) => u.email));
@@ -344,8 +346,8 @@ export class TenantUsersService {
       throw new BadRequestException('ต้องระบุ password หรือส่ง generatePassword=true');
     }
 
-    const existing = await this.tenantContext.runUnscoped(() =>
-      this.prisma.user.findFirst({ where: { email }, select: { id: true } }),
+    const existing = await this.tenantContext.runUnscoped(
+      async () => await this.prisma.user.findFirst({ where: { email }, select: { id: true } }),
     );
     if (existing) throw new ConflictException(`A user with email "${email}" already exists`);
 
@@ -429,8 +431,8 @@ export class TenantUsersService {
         skipped.push({ hrEmployeeId: item.hrEmployeeId, reason: 'พนักงานไม่มีอีเมล' });
         continue;
       }
-      const existing = await this.tenantContext.runUnscoped(() =>
-        this.prisma.user.findFirst({ where: { email }, select: { id: true } }),
+      const existing = await this.tenantContext.runUnscoped(
+        async () => await this.prisma.user.findFirst({ where: { email }, select: { id: true } }),
       );
       if (existing) {
         skipped.push({ hrEmployeeId: item.hrEmployeeId, reason: `อีเมล ${email} ถูกใช้ไปแล้ว` });

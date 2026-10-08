@@ -45,6 +45,14 @@ export interface TenantContextStore {
   skipScope: boolean;
 }
 
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as PromiseLike<unknown>).then === 'function'
+  );
+}
+
 @Injectable()
 export class TenantContextService {
   private readonly logger = new Logger(TenantContextService.name);
@@ -65,10 +73,19 @@ export class TenantContextService {
    * Run `fn` with tenant scoping disabled. Use ONLY for platform-admin paths
    * that intentionally need to read across tenants (e.g. billing rollups).
    *
+   * Prefer `runUnscoped(async () => await this.prisma...)`. A bare
+   * `runUnscoped(() => this.prisma.x.findFirst(...))` returns a *lazy*
+   * PrismaPromise whose query only starts when it is awaited — i.e. outside
+   * this frame, still tenant-scoped. To make that form safe too, a thenable
+   * result is started here (`.then` called inside the frame).
+   *
    * @param fn - the function to run without scoping
    */
   runUnscoped<T>(fn: () => T): T {
-    return this.als.run({ tenantId: null, skipScope: true }, fn);
+    return this.als.run({ tenantId: null, skipScope: true }, () => {
+      const result = fn();
+      return isThenable(result) ? (result.then((value) => value) as T) : result;
+    });
   }
 
   /**

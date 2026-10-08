@@ -274,8 +274,8 @@ export class TenantsService {
       throw new ForbiddenException('คุณไม่มีสิทธิ์แก้ไขข้อมูลกิจการนี้');
     }
 
-    const membership = await this.tenantContext.runUnscoped(() =>
-      this.prisma.userTenant.findFirst({
+    const membership = await this.tenantContext.runUnscoped(async () =>
+      await this.prisma.userTenant.findFirst({
         where: { userId, tenantId },
         select: { role: true },
       }),

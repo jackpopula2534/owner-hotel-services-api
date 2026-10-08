@@ -58,8 +58,8 @@ export class AccountingUsersService {
     dto: CreateAccountingUserDto,
     tenantId: string,
   ): Promise<{ success: true; data: AccountingUserResponse }> {
-    const existing = await this.tenantContext.runUnscoped(() =>
-      this.prisma.user.findFirst({ where: { email: dto.email } }),
+    const existing = await this.tenantContext.runUnscoped(
+      async () => await this.prisma.user.findFirst({ where: { email: dto.email } }),
     );
     if (existing) {
       throw new ConflictException(`A user with email "${dto.email}" already exists`);
