@@ -19,6 +19,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ReadyMadeGoodsSeeder } from './ready-made-goods.seeder';
 import { RetailPromotionsSeeder } from './retail-promotions.seeder';
 import { WarehouseGroupsSeeder } from './warehouse-groups.seeder';
+import { CAMP_PREMIUM_TENANT_NAME, CampPremiumSeeder } from './camp-premium.seeder';
 import {
   CostCenterType,
   CostCategory,
@@ -72,6 +73,7 @@ export class SeederService {
     private readyMadeGoods: ReadyMadeGoodsSeeder,
     private retailPromotions: RetailPromotionsSeeder,
     private warehouseGroups: WarehouseGroupsSeeder,
+    private campPremium: CampPremiumSeeder,
   ) {}
 
   /**
@@ -106,6 +108,8 @@ export class SeederService {
       await this.seedInventoryData();
       // ต้องอยู่หลังคลัง — เมนูของสำเร็จรูปผูกกับสินค้าในคลัง จึงต้องมีสินค้าก่อน
       await this.readyMadeGoods.seed();
+      // ลาน/โซน/จุดกาง/อุปกรณ์เช่า/การจอง/เว็บจองลาน ของ premium.camp — หลังคลัง/HR เพื่อให้ tenant มีครบ
+      await this.campPremium.seed();
       // คลังของแถม + โปรตัวอย่าง — ต้องมีคลังร้านขายของ (WH-RETAIL) ก่อน
       await this.retailPromotions.seed();
       // กลุ่มคลัง — ต้องอยู่หลังคลังทุกตัวถูกสร้าง (คลังร้าน/มินิบาร์มาจาก readyMadeGoods)
@@ -1226,6 +1230,7 @@ export class SeederService {
     const planS = await this.plansService.findByCode('S');
     const planM = await this.plansService.findByCode('M');
     const planL = await this.plansService.findByCode('L');
+    const planCampPlus = await this.plansService.findByCode('CAMP_PLUS');
 
     if (!planS || !planM || !planL) {
       this.logger.warn('  ⚠️ Plans not found, skipping Admin Panel test data');
@@ -1393,6 +1398,42 @@ export class SeederService {
         addons: [],
         invoices: [{ amount: 4990, status: InvoiceStatus.PENDING, daysAgo: 0 }],
       },
+      // SUB-005: Pine Valley Camp — คู่แฝดของ premium.test ฝั่งลานกางเต็นท์
+      // แพ็กใหญ่สุด (CAMP_PLUS: ทุกโมดูล + เว็บไซต์จองลาน) แบบรายปี ไม่มีแบนเนอร์ทดลองใช้
+      // ข้อมูลลาน/โซน/จุดกาง/การจอง/เว็บ มาจาก CampPremiumSeeder
+      ...(planCampPlus
+        ? [
+            {
+              code: 'SUB-005',
+              slug: 'pinevalley',
+              name: CAMP_PREMIUM_TENANT_NAME,
+              nameEn: 'Pine Valley Camp',
+              customerName: 'Pine Valley Outdoor Co., Ltd.',
+              roomCount: 0,
+              propertyType: 'campground',
+              status: TenantStatus.ACTIVE,
+              plan: planCampPlus,
+              previousPlan: null,
+              subscriptionStatus: SubscriptionStatus.ACTIVE,
+              startDate: vipStart.toISOString().split('T')[0],
+              endDate: vipEnd.toISOString().split('T')[0],
+              email: 'info.pinevalley@camp.test',
+              phone: '044-123-456',
+              address: '88 หมู่ 5 ต.หมูสี อ.ปากช่อง จ.นครราชสีมา',
+              owner: {
+                email: 'premium.camp@email.com',
+                firstName: 'Premium',
+                lastName: 'Camper',
+              },
+              addons: [
+                { feature: taxInvoice, price: 500 },
+                { feature: advancedReport, price: 500 },
+                { feature: auditLog, price: 290 },
+              ],
+              invoices: [{ amount: 13158, status: InvoiceStatus.PAID, daysAgo: 0 }],
+            },
+          ]
+        : []),
     ];
 
     let invoiceCounter = 1;
@@ -1419,6 +1460,7 @@ export class SeederService {
         const tenant = await this.tenantsService.create({
           name: hotelData.name,
           nameEn: hotelData.nameEn,
+          propertyType: hotelData.propertyType,
           customerName: hotelData.customerName,
           email: hotelData.email,
           phone: hotelData.phone,
@@ -2386,6 +2428,7 @@ export class SeederService {
     this.logger.log('  somchai@email.com           (Sukjai Hotel)');
     this.logger.log('  seaside@email.com           (Seaside Stay)');
     this.logger.log('  garden@email.com            (Garden Resort)');
+    this.logger.log('  🏕️  premium.camp@email.com   (Pine Valley Camp - Camp Plus)');
     this.logger.log('  📌 Password: ดูที่ SEED_DEFAULT_PASSWORD ใน .env (ไม่แสดง log)');
     this.logger.log('');
     this.logger.log('  👷 Hotel Staff:');
