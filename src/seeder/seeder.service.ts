@@ -270,6 +270,7 @@ export class SeederService {
           'อุปกรณ์ให้เช่า (เต็นท์/ถุงนอน/เก้าอี้)',
           'Retail POS หน้าลาน',
           'รับชำระด้วย PromptPay QR',
+          'ลองสร้างเว็บไซต์จองลาน (ออกแบบ + ดูตัวอย่าง)',
           'ยกเลิกได้ตลอดเวลา',
         ]),
         buttonText: 'เริ่มทดลองฟรี — ไม่มีค่าใช้จ่าย',
@@ -300,6 +301,7 @@ export class SeederService {
           'รับชำระด้วย PromptPay QR',
           'รายงานรายได้รายวัน',
           'ร้านอาหาร & F&B ในลาน',
+          'เว็บไซต์จองลานซื้อเพิ่มได้ (฿590/เดือน)',
         ]),
         buttonText: 'เริ่มใช้งาน Camp',
       },
@@ -307,13 +309,15 @@ export class SeederService {
         code: 'CAMP_PLUS',
         name: 'Camp Plus',
         system: 'CAMP',
-        priceMonthly: 999,
+        // ฿999 → ฿1,290 เมื่อรวมเว็บไซต์จองลาน (add-on ฿590): มูลค่ารวม ฿7,240 ยังลด ~82%
+        // และยังห่างจาก Camp + เว็บ (฿199 + ฿590 = ฿789) พอให้คุ้มที่จะอัปเกรด
+        priceMonthly: 1290,
         yearlyDiscountPercent: 15,
         maxRooms: 300,
         maxUsers: 20,
         maxProperties: 3,
         isActive: true,
-        description: 'ลานกางเต็นท์ที่ต้องการระบบหลังบ้านครบ — บัญชี พนักงาน สต๊อก และ CRM',
+        description: 'ลานกางเต็นท์ที่ต้องการระบบหลังบ้านครบ + เว็บไซต์ให้ลูกค้าจองลานเอง',
         subtitle: 'ครบทุกโมดูลสำหรับลานขนาดใหญ่',
         targetAudience: 'ลานกางเต็นท์หลายสาขา · รีสอร์ทแคมป์ · กลามปิ้งขนาดใหญ่',
         pricePerRoom: null,
@@ -323,6 +327,7 @@ export class SeederService {
         highlightColor: '#0EA5E9',
         features: JSON.stringify([
           'ทุกอย่างในแพ็ก Camp',
+          'เว็บไซต์จองลานออนไลน์ + รับโอน PromptPay',
           'ระบบบัญชี (Accounting)',
           'ระบบพนักงาน / HR',
           'จัดการสต๊อก (Inventory)',
@@ -908,7 +913,7 @@ export class SeederService {
     await this.assignPlanFeatures(planCampFree?.id, [basicReport, advancedReport]);
     // CAMP ฿199 — basic report (แชท FB/LINE ขายแยก ไม่รวมในแพ็ก)
     await this.assignPlanFeatures(planCamp?.id, [basicReport]);
-    // CAMP_PLUS ฿999 — รายงานเชิงลึก + audit log + หลายลาน
+    // CAMP_PLUS ฿1,290 — รายงานเชิงลึก + audit log + หลายลาน
     await this.assignPlanFeatures(planCampPlus?.id, [
       basicReport,
       advancedReport,
@@ -970,6 +975,7 @@ export class SeederService {
     const accountingModule = await findAddon('ACCOUNTING_MODULE');
     const crmModule = await findAddon('CRM_MODULE');
     const campModule = await findAddon('CAMP_MODULE');
+    const websiteBuilder = await findAddon('WEBSITE_BUILDER');
 
     const allHotelModules = [
       restaurantModule,
@@ -1004,16 +1010,23 @@ export class SeederService {
     await this.assignPlanAddons(planL?.id, allHotelModules);
 
     // ── ลานกางเต็นท์ ────────────────────────────────────────
-    // แผนลานแบ่งเป็น 3 ระดับ: ฟรี / Camp ฿199 / Camp Plus ฿999
+    // แผนลานแบ่งเป็น 3 ระดับ: ฟรี / Camp ฿199 / Camp Plus ฿1,290
     // ฟรีกับ ฿199 ได้เฉพาะแกนหลักของลาน (Campground + Restaurant/F&B)
-    // ส่วนโมดูลหลังบ้านที่เหลือขยับไปเป็นจุดขายของ Camp Plus
+    // ส่วนโมดูลหลังบ้านที่เหลือ + เว็บไซต์จองลาน เป็นจุดขายของ Camp Plus
+    // (แผน ฿199 ซื้อเว็บไซต์แยกได้ ฿590/เดือน)
     const campCoreModules = [campModule, restaurantModule];
 
-    await this.syncPlanAddons(planCampFree?.id, campCoreModules);
+    // ทดลองใช้ได้เว็บไซต์ด้วย — ออกแบบ/ดูตัวอย่างได้ แต่เผยแพร่ไม่ได้จนกว่าจะชำระเงิน
+    // (WebsiteEntitlementService บล็อก subscription สถานะ trial กัน spam ใต้โดเมนเรา)
+    await this.syncPlanAddons(planCampFree?.id, [...campCoreModules, websiteBuilder]);
     await this.syncPlanAddons(planCamp?.id, campCoreModules);
 
-    // CAMP_PLUS ฿999 — bundle เดิมของแผน ฿199 คือทุก module ที่ใช้กับลานได้
-    await this.syncPlanAddons(planCampPlus?.id, [campModule, ...campApplicableModules]);
+    // CAMP_PLUS — ทุก module ที่ใช้กับลานได้ + เว็บไซต์จองลาน
+    await this.syncPlanAddons(planCampPlus?.id, [
+      campModule,
+      ...campApplicableModules,
+      websiteBuilder,
+    ]);
 
     await this.pruneCrossSystemPlanAddons();
   }
