@@ -24,10 +24,15 @@ import {
   WebsiteBookingResult,
   WebsiteBookingService,
 } from './website-booking.service';
-import { CampAvailabilityQueryDto, CreateCampBookingDto } from './dto/website-camp-booking.dto';
+import {
+  CampAvailabilityQueryDto,
+  CampMemberLookupDto,
+  CreateCampBookingDto,
+} from './dto/website-camp-booking.dto';
 import {
   CampAvailability,
   CampBookingResult,
+  CampMemberLookupResult,
   WebsiteCampBookingService,
 } from './website-camp-booking.service';
 import {
@@ -120,6 +125,19 @@ export class WebsitePublicController {
     @Query() query: CampAvailabilityQueryDto,
   ): Promise<CampAvailability> {
     return this.campBookingService.getAvailability(slug, query);
+  }
+
+  @Post(':slug/camp-member-lookup')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Campground website: is this guest (name + surname + phone) a member?' })
+  @ApiResponse({ status: 200, description: 'CampMemberLookupResult (no PII)' })
+  @ApiResponse({ status: 429, description: 'Too many requests' })
+  lookupCampMember(
+    @Param('slug') slug: string,
+    @Body() dto: CampMemberLookupDto,
+  ): Promise<CampMemberLookupResult> {
+    return this.campBookingService.lookupMember(slug, dto);
   }
 
   @Post(':slug/camp-bookings')

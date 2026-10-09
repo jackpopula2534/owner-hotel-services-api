@@ -156,3 +156,23 @@ export class CreateCampBookingDto extends CampAvailabilityQueryDto {
   @IsIn(['PAY_AT_CAMP', 'PROMPTPAY'])
   paymentMethod?: CampPaymentMethod;
 }
+
+/** เช็คว่าแขกเป็นสมาชิกเดิมหรือยัง — ต้องส่งครบทั้ง ชื่อ + นามสกุล + เบอร์โทร */
+export class CampMemberLookupDto {
+  @ApiProperty()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(60)
+  firstName: string;
+
+  @ApiProperty()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(60)
+  lastName: string;
+
+  @ApiProperty()
+  @IsString()
+  @Matches(/^[0-9+\-() ]{6,30}$/, { message: 'กรุณาระบุเบอร์โทรที่ถูกต้อง' })
+  phone: string;
+}

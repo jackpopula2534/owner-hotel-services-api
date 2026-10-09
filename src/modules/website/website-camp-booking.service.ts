@@ -10,13 +10,18 @@ import { WebsiteSite } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
 import { ReservationsService } from '../camp/reservations.service';
 import { quoteCampStay } from '../camp/camp-pricing';
+import { findCampMemberGuestId } from '../camp/camp-member';
 import { WebsiteEntitlementService } from './website-entitlement.service';
 import { WebsitePublicService } from './website-public.service';
 import { UNSELLABLE_PITCH_STATUSES, WebsiteCampPublicService } from './website-camp-public.service';
 import { WebsitePaymentService, WebsitePromptPayInfo } from './website-payment.service';
 import { DepositPolicy, depositDue } from './website-deposit';
 import { LocalizedText, sanitizeSiteContent } from './website-content';
-import { CampAvailabilityQueryDto, CreateCampBookingDto } from './dto/website-camp-booking.dto';
+import {
+  CampAvailabilityQueryDto,
+  CampMemberLookupDto,
+  CreateCampBookingDto,
+} from './dto/website-camp-booking.dto';
 
 /** สถานะที่กันจุด — ต้องตรงกับ ReservationsService (BLOCKING_STATUSES) */
 const BLOCKING_STATUSES = ['pending', 'confirmed', 'checked_in'];
@@ -81,6 +86,15 @@ export interface CampBookingResult {
   quote: CampQuote;
   /** null = ชำระที่ลาน */
   payment: WebsitePromptPayInfo | null;
+  /** ผูกกับสมาชิกเดิมได้ → ได้แต้มสะสมเมื่อเช็คเอาต์ */
+  member: boolean;
+}
+
+/** ผลเช็คสมาชิกบนหน้าเว็บ — ไม่คืน id/อีเมล/ข้อมูลส่วนตัวของแขกเด็ดขาด */
+export interface CampMemberLookupResult {
+  member: boolean;
+  tier: string | null;
+  points: number | null;
 }
 
 interface Party {
@@ -186,6 +200,12 @@ export class WebsiteCampBookingService {
     const phone = dto.phone.trim();
     const note = dto.note?.trim() || '';
 
+    const guestId = await findCampMemberGuestId(this.prisma, ctx.site.tenantId, {
+      firstName,
+      lastName,
+      phone,
+    });
+
     const created = await this.withCampgroundLock(ctx.campground.id, async () => {
       const [zone] = await this.loadZones(ctx, dto.zoneKey);
       if (!zone || !zone.pitches.length) throw new NotFoundException('ไม่พบโซนนี้');
@@ -230,7 +250,7 @@ export class WebsiteCampBookingService {
             .join(' — '),
         },
         ctx.site.tenantId,
-        { source: 'WEBSITE' },
+        { source: 'WEBSITE', guestId },
       );
       return { reservation: res.data, zone, pitch };
     });
@@ -302,6 +322,7 @@ export class WebsiteCampBookingService {
       })),
       quote,
       payment: null,
+      member: Boolean(guestId),
     };
     if (!account || grandTotal <= 0) return result;
 
@@ -321,6 +342,24 @@ export class WebsiteCampBookingService {
       );
       return result;
     }
+  }
+
+  /**
+   * เช็คสมาชิกจากหน้าเว็บ: ต้องตรงครบ ชื่อ + นามสกุล + เบอร์ ของ tenant เจ้าของเว็บเท่านั้น
+   * คืนแค่ระดับ/แต้ม (route นี้จำกัดอัตราเรียกไว้ กันไล่เดารายชื่อแขก)
+   */
+  async lookupMember(slug: string, dto: CampMemberLookupDto): Promise<CampMemberLookupResult> {
+    const site = await this.publicSites.findPublishedSite(slug);
+    if (!site.campgroundId || !(await this.entitlement.isLive(site.tenantId))) {
+      throw new NotFoundException('Website not found');
+    }
+    const guestId = await findCampMemberGuestId(this.prisma, site.tenantId, dto);
+    if (!guestId) return { member: false, tier: null, points: null };
+    const balance = await this.prisma.loyaltyPoint.findFirst({
+      where: { tenantId: site.tenantId, guestId },
+      select: { points: true, tier: true },
+    });
+    return { member: true, tier: balance?.tier ?? 'standard', points: balance?.points ?? 0 };
   }
 
   // ─── internals ───────────────────────────────────────────────────────

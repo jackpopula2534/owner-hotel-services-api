@@ -17,6 +17,7 @@ import { calcAddonTotal, quoteCampStay } from './camp-pricing';
 import { CampAccountingService } from './camp-accounting.service';
 import { RevenuePostingService, hasPostableRevenue } from '../revenue/revenue-posting.service';
 import { buildCampRevenueInput, CAMP_REVENUE_SELECT } from '../revenue/sources/camp-revenue.source';
+import { LoyaltyService } from '../../loyalty/loyalty.service';
 
 const BLOCKING_STATUSES = ['pending', 'confirmed', 'checked_in'];
 
@@ -28,6 +29,7 @@ export class ReservationsService {
     private readonly prisma: PrismaService,
     private readonly campAccounting: CampAccountingService,
     private readonly revenuePosting: RevenuePostingService,
+    private readonly loyalty: LoyaltyService,
   ) {}
 
   async findAll(query: { campgroundId?: string; status?: string }, tenantId?: string) {
@@ -59,11 +61,14 @@ export class ReservationsService {
     return { success: true, data: reservation };
   }
 
-  /** opts.source: ที่มาของการจอง — หน้าเว็บของลานส่ง 'WEBSITE' ที่เหลือเป็นพนักงานลงเอง */
+  /**
+   * opts.source: ที่มาของการจอง — หน้าเว็บของลานส่ง 'WEBSITE' ที่เหลือเป็นพนักงานลงเอง
+   * opts.guestId: แขกสมาชิกที่จับคู่ได้ (ผู้เรียกต้องหามาจาก tenant เดียวกันแล้ว) — ใช้สะสมแต้มตอนเช็คเอาต์
+   */
   async create(
     dto: CreateReservationDto,
     tenantId?: string,
-    opts: { source?: 'STAFF' | 'WEBSITE' } = {},
+    opts: { source?: 'STAFF' | 'WEBSITE'; guestId?: string | null } = {},
   ) {
     const checkIn = new Date(dto.checkIn);
     const checkOut = new Date(dto.checkOut);
@@ -159,6 +164,7 @@ export class ReservationsService {
           status: 'pending',
           totalPrice,
           source: opts.source ?? 'STAFF',
+          guestId: opts.guestId ?? null,
           notes: dto.notes ?? null,
         },
       });
@@ -442,6 +448,10 @@ export class ReservationsService {
 
   async checkOut(id: string, tenantId?: string) {
     await this.ensureExists(id, tenantId);
+    const before = await this.prisma.campReservation.findFirst({
+      where: { id, ...(tenantId ? { tenantId } : {}) },
+      select: { status: true },
+    });
     const data = await this.prisma.$transaction(async (tx) => {
       const reservation = await tx.campReservation.update({
         where: { id },
@@ -458,7 +468,28 @@ export class ReservationsService {
 
       return reservation;
     });
+    // แต้มให้หลังทรานแซกชันเท่านั้น และไม่ให้ซ้ำถ้ากดเช็คเอาต์การจองที่ออกไปแล้ว
+    if (before?.status !== 'checked_out') await this.awardStayPoints(data);
     return { success: true, data };
+  }
+
+  /**
+   * สะสมแต้มให้แขกสมาชิก (1 แต้ม/100 บาท) — การจองที่ไม่ได้ผูกสมาชิกข้ามเงียบ ๆ
+   * LoyaltyService กลืน error เอง แต้มจึงไม่มีวันทำให้เช็คเอาต์ล้ม
+   */
+  private async awardStayPoints(reservation: {
+    id: string;
+    tenantId: string | null;
+    guestId: string | null;
+    totalPrice: Prisma.Decimal | number;
+  }): Promise<void> {
+    if (!reservation.guestId || !reservation.tenantId) return;
+    await this.loyalty.addPointsForStay(
+      reservation.guestId,
+      reservation.tenantId,
+      Number(reservation.totalPrice),
+      { bookingId: reservation.id, reason: 'camp_stay' },
+    );
   }
 
   /**

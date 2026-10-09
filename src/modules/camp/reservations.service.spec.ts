@@ -51,21 +51,28 @@ function makeService(tx: ReturnType<typeof makeTx>) {
   // การลงบัญชีเป็น side effect ที่ไม่บล็อกการรับเงิน — mock ทิ้งใน spec ชุดนี้
   const campAccounting = { postPaymentJournal: jest.fn().mockResolvedValue(undefined) };
   const revenuePosting = buildRevenuePostingStub();
+  const loyalty = { addPointsForStay: jest.fn().mockResolvedValue(null) };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return new ReservationsService(prisma as any, campAccounting as any, revenuePosting as any);
+  return new ReservationsService(
+    prisma as any,
+    campAccounting as any,
+    revenuePosting as any,
+    loyalty as any,
+  );
 }
 
 /** เหมือน {@link makeService} แต่คืนตัวโพสต์รายได้มาให้ตรวจว่าถูกเรียกด้วยอะไร */
-function makeServiceWithRevenue(tx: ReturnType<typeof makeTx>) {
+function makeServiceWithRevenue(tx: ReturnType<typeof makeTx>, statusBefore = 'checked_in') {
   const prisma = {
     $transaction: jest.fn().mockImplementation((cb: (t: unknown) => unknown) => cb(tx)),
     campReservation: {
-      findFirst: jest.fn().mockResolvedValue({ id: 'res-1' }),
+      findFirst: jest.fn().mockResolvedValue({ id: 'res-1', status: statusBefore }),
       update: jest.fn().mockResolvedValue({ id: 'res-1' }),
     },
   };
   const campAccounting = { postPaymentJournal: jest.fn().mockResolvedValue(undefined) };
   const revenuePosting = buildRevenuePostingStub();
+  const loyalty = { addPointsForStay: jest.fn().mockResolvedValue(null) };
   const service = new ReservationsService(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prisma as any,
@@ -73,8 +80,10 @@ function makeServiceWithRevenue(tx: ReturnType<typeof makeTx>) {
     campAccounting as any,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     revenuePosting as any,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    loyalty as any,
   );
-  return { service, revenuePosting };
+  return { service, revenuePosting, loyalty };
 }
 
 const baseDto: CreateReservationDto = {
@@ -93,6 +102,18 @@ describe('ReservationsService.create', () => {
     expect(res.success).toBe(true);
     expect(res.data.totalPrice).toBe(2400);
     expect(res.data.status).toBe('pending');
+  });
+
+  it('ผูก guestId ของสมาชิกที่ผู้เรียกส่งมา (ใช้สะสมแต้มตอนเช็คเอาต์)', async () => {
+    const tx = makeTx();
+    const service = makeService(tx);
+    await service.create({ ...baseDto }, 'tenant-1', { source: 'WEBSITE', guestId: 'g-1' });
+    expect(tx.campReservation.create.mock.calls[0][0].data).toMatchObject({
+      guestId: 'g-1',
+      source: 'WEBSITE',
+    });
+    await service.create({ ...baseDto }, 'tenant-1');
+    expect(tx.campReservation.create.mock.calls[1][0].data.guestId).toBeNull();
   });
 
   it('ปฏิเสธเมื่อ checkOut <= checkIn', async () => {
@@ -175,7 +196,9 @@ describe('ReservationsService.update', () => {
       // ครั้งที่ 1 = โหลดการจองเดิม, ครั้งที่ 2 = ตรวจจองซ้อน (null = ว่าง)
       .mockResolvedValueOnce({ ...currentReservation, ...overrides })
       .mockResolvedValueOnce(null);
-    tx.campReservation.update = jest.fn().mockImplementation(({ data }) => ({ id: 'res-1', ...data }));
+    tx.campReservation.update = jest
+      .fn()
+      .mockImplementation(({ data }) => ({ id: 'res-1', ...data }));
     return tx;
   }
 
@@ -350,6 +373,46 @@ describe('ReservationsService.checkOut — สมุดรายได้', () =
   });
 });
 
+describe('ReservationsService.checkOut — แต้มสมาชิก', () => {
+  const memberTx = (guestId: string | null) => {
+    const tx = makeTx();
+    tx.campReservation.update = jest.fn().mockResolvedValue({
+      id: 'res-1',
+      tenantId: 'tenant-1',
+      pitchId: 'pitch-1',
+      campgroundId: 'cg-1',
+      guestId,
+      totalPrice: 2400,
+    });
+    tx.campReservation.findFirst = jest
+      .fn()
+      .mockResolvedValue({ id: 'res-1', tenantId: 'tenant-1', totalPrice: 0, addonItems: [] });
+    tx.campground.findFirst = jest.fn().mockResolvedValue({ name: 'ลานริมธาร' });
+    return tx;
+  };
+
+  it('การจองของสมาชิก → ได้แต้มตามยอด อ้างอิงเลขการจอง', async () => {
+    const { service, loyalty } = makeServiceWithRevenue(memberTx('g-1'));
+    await service.checkOut('res-1', 'tenant-1');
+    expect(loyalty.addPointsForStay).toHaveBeenCalledWith('g-1', 'tenant-1', 2400, {
+      bookingId: 'res-1',
+      reason: 'camp_stay',
+    });
+  });
+
+  it('ไม่ใช่สมาชิก → ไม่แตะแต้ม', async () => {
+    const { service, loyalty } = makeServiceWithRevenue(memberTx(null));
+    await service.checkOut('res-1', 'tenant-1');
+    expect(loyalty.addPointsForStay).not.toHaveBeenCalled();
+  });
+
+  it('กดเช็คเอาต์ซ้ำการจองที่ออกไปแล้ว → ไม่ให้แต้มซ้ำ', async () => {
+    const { service, loyalty } = makeServiceWithRevenue(memberTx('g-1'), 'checked_out');
+    await service.checkOut('res-1', 'tenant-1');
+    expect(loyalty.addPointsForStay).not.toHaveBeenCalled();
+  });
+});
+
 // ── แก้ไขอุปกรณ์เช่า ──────────────────────────────────────────────
 interface AddonRow {
   addonId: string;
@@ -483,37 +546,40 @@ describe('ReservationsService.updateAddons', () => {
       existing: [{ addonId: 'addon-1', qty: 2, priceSnapshot: 300 }],
       amountPaid: 3000,
     });
-    await expect(
-      makeService(tx).updateAddons('res-1', { addons: [] }),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(makeService(tx).updateAddons('res-1', { addons: [] })).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
     expect(tx.campReservationAddon.deleteMany).not.toHaveBeenCalled();
   });
 
   it('ยอดใหม่เท่ากับที่จ่ายมาแล้ว → paymentStatus = paid', async () => {
-    const tx = addonsTx({ existing: [{ addonId: 'addon-1', qty: 2, priceSnapshot: 300 }] , amountPaid: 2400 });
+    const tx = addonsTx({
+      existing: [{ addonId: 'addon-1', qty: 2, priceSnapshot: 300 }],
+      amountPaid: 2400,
+    });
     const res = await makeService(tx).updateAddons('res-1', { addons: [] });
     expect(res.data.paymentStatus).toBe('paid');
   });
 
   it('การจองที่ยกเลิกแล้ว → BadRequestException', async () => {
     const tx = addonsTx({ status: 'cancelled' });
-    await expect(
-      makeService(tx).updateAddons('res-1', { addons: [] }),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(makeService(tx).updateAddons('res-1', { addons: [] })).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
   });
 
   it('เช็คเอาท์แล้ว → แก้อุปกรณ์ไม่ได้', async () => {
     const tx = addonsTx({ status: 'checked_out' });
-    await expect(
-      makeService(tx).updateAddons('res-1', { addons: [] }),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(makeService(tx).updateAddons('res-1', { addons: [] })).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
   });
 
   it('ไม่พบการจอง → NotFoundException', async () => {
     const tx = makeTx();
     tx.campReservation.findFirst = jest.fn().mockResolvedValue(null);
-    await expect(
-      makeService(tx).updateAddons('nope', { addons: [] }),
-    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(makeService(tx).updateAddons('nope', { addons: [] })).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 });

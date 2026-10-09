@@ -22,6 +22,7 @@ import { RequisitionsController } from './requisitions.controller';
 import { RequisitionsService } from './requisitions.service';
 import { CampDashboardController } from './dashboard.controller';
 import { CampDashboardService } from './dashboard.service';
+import { LoyaltyModule } from '../../loyalty/loyalty.module';
 
 /**
  * CampModule — ระบบจัดการลานกางแคมป์ (CampSync sub-system)
@@ -39,6 +40,7 @@ import { CampDashboardService } from './dashboard.service';
     WarehousesModule,
     StockMovementsModule,
     RevenueModule,
+    LoyaltyModule,
   ],
   controllers: [
     CampgroundsController,

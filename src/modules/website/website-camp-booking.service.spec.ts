@@ -32,8 +32,12 @@ const zone = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-function setup(opts: { account?: boolean; blocked?: string[]; zones?: unknown[] } = {}) {
+function setup(
+  opts: { account?: boolean; blocked?: string[]; zones?: unknown[]; guests?: unknown[] } = {},
+) {
   const prisma = {
+    guest: { findMany: jest.fn().mockResolvedValue(opts.guests ?? []) },
+    loyaltyPoint: { findFirst: jest.fn().mockResolvedValue({ points: 320, tier: 'silver' }) },
     campZone: { findMany: jest.fn().mockResolvedValue(opts.zones ?? [zone()]) },
     campReservation: {
       findMany: jest.fn().mockResolvedValue((opts.blocked ?? []).map((pitchId) => ({ pitchId }))),
@@ -204,7 +208,8 @@ describe('WebsiteCampBookingService.createBooking', () => {
       checkIn: '2099-01-10T00:00:00.000Z',
     });
     expect(tenantId).toBe('t1');
-    expect(opts).toEqual({ source: 'WEBSITE' });
+    expect(opts).toEqual({ source: 'WEBSITE', guestId: null });
+    expect(res.member).toBe(false);
     expect(res).toMatchObject({ reference: 'CR-001', status: 'pending', payment: null });
     expect(res.quote.grandTotal).toBe(1450);
     expect(res.equipment).toEqual([{ name: 'เต็นท์ 2 คน', qty: 2, unitPrice: 250, amount: 500 }]);
@@ -283,5 +288,59 @@ describe('WebsiteCampBookingService.createBooking', () => {
     const res = await svc.createBooking('pine', booking({ paymentMethod: 'PROMPTPAY' }));
     expect(res.reference).toBe('CR-001');
     expect(res.payment).toBeNull();
+  });
+});
+
+describe('WebsiteCampBookingService — สมาชิกสะสมแต้ม', () => {
+  const member = { id: 'g-1', phone: '+66 81-234-5678' };
+
+  it('ชื่อ+นามสกุล+เบอร์ตรงแขกเดิม (เบอร์คนละรูปแบบ) → ผูก guestId กับการจอง', async () => {
+    const { svc, prisma, reservations } = setup({ guests: [member] });
+    const res = await svc.createBooking(
+      'pine',
+      booking({ firstName: ' Somchai ', phone: '081 234 5678' }),
+    );
+    expect(prisma.guest.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tenantId: 't1',
+          firstName: 'Somchai',
+          lastName: 'K',
+          anonymizedAt: null,
+        }),
+      }),
+    );
+    expect(reservations.create.mock.calls[0][2]).toEqual({ source: 'WEBSITE', guestId: 'g-1' });
+    expect(res.member).toBe(true);
+  });
+
+  it('ชื่อตรงแต่เบอร์ไม่ตรง → ไม่ผูก (ต้องตรงครบทั้ง 3 อย่าง)', async () => {
+    const { svc, reservations } = setup({ guests: [{ id: 'g-2', phone: '0899999999' }] });
+    await svc.createBooking('pine', booking());
+    expect(reservations.create.mock.calls[0][2].guestId).toBeNull();
+  });
+
+  it('lookupMember คืนแค่ระดับ+แต้ม ไม่คืน id หรือข้อมูลส่วนตัว', async () => {
+    const { svc, prisma } = setup({ guests: [member] });
+    const res = await svc.lookupMember('pine', {
+      firstName: 'Somchai',
+      lastName: 'K',
+      phone: '0812345678',
+    });
+    expect(res).toEqual({ member: true, tier: 'silver', points: 320 });
+    expect(prisma.loyaltyPoint.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { tenantId: 't1', guestId: 'g-1' } }),
+    );
+  });
+
+  it('lookupMember: ไม่พบ → member false; เว็บที่ไม่ใช่ลาน/ไม่ live → 404', async () => {
+    const { svc, entitlement } = setup();
+    await expect(
+      svc.lookupMember('pine', { firstName: 'A', lastName: 'B', phone: '0812345678' }),
+    ).resolves.toEqual({ member: false, tier: null, points: null });
+    entitlement.isLive.mockResolvedValueOnce(false);
+    await expect(
+      svc.lookupMember('pine', { firstName: 'A', lastName: 'B', phone: '0812345678' }),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 });
