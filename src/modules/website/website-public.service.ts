@@ -5,6 +5,7 @@ import { NotificationsService } from '@/notifications/notifications.service';
 import { WebsiteEntitlementService } from './website-entitlement.service';
 import {
   LocalizedText,
+  SectionPropsMap,
   SiteContent,
   SiteSeo,
   SiteTheme,
@@ -16,6 +17,7 @@ import {
 import { INQUIRY_NOTIFY_ROLES, SiteKind } from './website.constants';
 import { CreateWebsiteInquiryDto } from './dto/create-website-inquiry.dto';
 import { CampSiteExtras, WebsiteCampPublicService } from './website-camp-public.service';
+import { PropertyPromoCodesService } from '../properties/property-promo-codes.service';
 
 export interface PublicRoomType {
   key: string;
@@ -150,6 +152,7 @@ export class WebsitePublicService {
     private readonly entitlement: WebsiteEntitlementService,
     private readonly notifications: NotificationsService,
     private readonly campPublic: WebsiteCampPublicService,
+    private readonly promoCodes: PropertyPromoCodesService,
   ) {}
 
   async getPublishedSite(slug: string): Promise<SitePayload | SiteFallbackPayload> {
@@ -184,9 +187,17 @@ export class WebsitePublicService {
     ]);
     if (!property) throw new NotFoundException('Website not found');
 
-    const templateKey = isTemplateKey(site.templateKey) ? site.templateKey : 'classic';
+    // เว็บจริงใช้เลย์เอาต์ตอนเผยแพร่ (เว็บที่เผยแพร่ก่อนมีคอลัมน์นี้ → ใช้ templateKey ปัจจุบัน)
+    const rawTemplate =
+      source === 'published' ? (site.publishedTemplateKey ?? site.templateKey) : site.templateKey;
+    const templateKey = isTemplateKey(rawTemplate) ? rawTemplate : 'classic';
     const rawContent = source === 'published' ? site.publishedContent : site.draftContent;
-    const content = sanitizeSiteContent(rawContent, property.name);
+    const content = await this.withOfferCodes(
+      sanitizeSiteContent(rawContent, property.name),
+      tenantId,
+      propertyId,
+      source,
+    );
 
     const featuredIds =
       content.sections.find((s) => s.type === 'reviews')?.props.featuredReviewIds ?? [];
@@ -247,6 +258,42 @@ export class WebsitePublicService {
       roomTypes: source === 'published' ? roomTypes.filter((r) => !r.hidden) : roomTypes,
       restaurants: restaurants.map((r) => ({ ...r, type: String(r.type) })),
       reviews,
+    };
+  }
+
+  /**
+   * การ์ดข้อเสนอที่ผูกโค้ดส่วนลด: เติมโค้ดจริงให้ปุ่ม "จองพร้อมโค้ด"
+   * เว็บจริงซ่อนการ์ดที่โค้ดหมดอายุ/ปิด/เต็มโควตาแล้ว (โฆษณาโค้ดที่ใช้ไม่ได้ = แขกโกรธ)
+   * preview ของ editor ยังแสดง (promoCode = null) ให้เจ้าของเห็นว่าต้องแก้
+   */
+  private async withOfferCodes(
+    content: SiteContent,
+    tenantId: string,
+    propertyId: string,
+    source: 'published' | 'draft',
+  ): Promise<SiteContent> {
+    const ids = content.sections.flatMap((s) =>
+      s.type === 'offers'
+        ? (s.props as SectionPropsMap['offers']).items.flatMap((i) =>
+            i.promoCodeId ? [i.promoCodeId] : [],
+          )
+        : [],
+    );
+    if (!ids.length) return content;
+    const codes = await this.promoCodes.resolveOfferCodes(propertyId, tenantId, ids);
+    return {
+      ...content,
+      sections: content.sections.map((s) => {
+        if (s.type !== 'offers') return s;
+        const props = s.props as SectionPropsMap['offers'];
+        const items = props.items
+          .map((i) => ({
+            ...i,
+            promoCode: i.promoCodeId ? (codes.get(i.promoCodeId) ?? null) : null,
+          }))
+          .filter((i) => source === 'draft' || !i.promoCodeId || i.promoCode);
+        return { ...s, props: { ...props, items } };
+      }) as SiteContent['sections'],
     };
   }
 

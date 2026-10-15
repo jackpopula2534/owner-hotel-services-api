@@ -26,6 +26,9 @@ const isoDay = (offsetDays: number): string =>
     new Date(Date.now() + offsetDays * 86_400_000),
   );
 
+const LIVE_CODE_ID = '11111111-1111-1111-1111-111111111111';
+const DEAD_CODE_ID = '22222222-2222-2222-2222-222222222222';
+
 function setup(live = true) {
   const prisma = {
     websiteSite: { findFirst: jest.fn().mockResolvedValue(site) },
@@ -93,13 +96,17 @@ function setup(live = true) {
     buildPayload: jest.fn().mockResolvedValue({ available: true, kind: 'camp' }),
     buildFallback: jest.fn().mockResolvedValue({ available: false }),
   };
+  const promoCodes = {
+    resolveOfferCodes: jest.fn().mockResolvedValue(new Map([[LIVE_CODE_ID, 'SUMMER10']])),
+  };
   const svc = new WebsitePublicService(
     prisma as never,
     entitlement as never,
     notifications as never,
     campPublic as never,
+    promoCodes as never,
   );
-  return { svc, prisma, entitlement, notifications, campPublic };
+  return { svc, prisma, entitlement, notifications, campPublic, promoCodes };
 }
 
 const contact = (over: Partial<CreateWebsiteInquiryDto> = {}): CreateWebsiteInquiryDto =>
@@ -159,6 +166,73 @@ describe('WebsitePublicService.getPublishedSite', () => {
       'draft',
     );
     expect(res.roomTypes.map((r) => r.key).sort()).toEqual(['Deluxe', 'Suite']);
+  });
+
+  it('live site renders the published template, draft preview the current one', async () => {
+    const { svc } = setup();
+    const changed = { ...site, templateKey: 'playful', publishedTemplateKey: 'luxe' } as never;
+    expect((await svc.buildPayload(changed, 'published')).site.templateKey).toBe('luxe');
+    expect((await svc.buildPayload(changed, 'draft')).site.templateKey).toBe('playful');
+  });
+
+  describe('offers linked to room promo codes', () => {
+    const offersContent = {
+      sections: [
+        {
+          id: 'o',
+          type: 'offers',
+          enabled: true,
+          props: {
+            items: [
+              { id: 'a', title: { th: 'A' }, promoCodeId: LIVE_CODE_ID },
+              { id: 'b', title: { th: 'B' }, promoCodeId: DEAD_CODE_ID },
+              { id: 'c', title: { th: 'C' } },
+            ],
+          },
+        },
+      ],
+    };
+    const offerItems = (res: Awaited<ReturnType<WebsitePublicService['buildPayload']>>) =>
+      (
+        res.site.content.sections.find((s) => s.type === 'offers')?.props as {
+          items: Array<{ id: string; promoCode?: string | null }>;
+        }
+      ).items;
+
+    it('live site fills the code and hides offers whose code is no longer usable', async () => {
+      const { svc, promoCodes } = setup();
+      const res = await svc.buildPayload(
+        { ...site, publishedContent: offersContent } as never,
+        'published',
+      );
+      expect(promoCodes.resolveOfferCodes).toHaveBeenCalledWith('p1', 't1', [
+        LIVE_CODE_ID,
+        DEAD_CODE_ID,
+      ]);
+      expect(offerItems(res).map((i) => [i.id, i.promoCode])).toEqual([
+        ['a', 'SUMMER10'],
+        ['c', null],
+      ]);
+    });
+
+    it('draft preview keeps dead-code offers so the owner can fix them', async () => {
+      const { svc } = setup();
+      const res = await svc.buildPayload(
+        { ...site, draftContent: offersContent } as never,
+        'draft',
+      );
+      expect(offerItems(res).map((i) => [i.id, i.promoCode])).toEqual([
+        ['a', 'SUMMER10'],
+        ['b', null],
+        ['c', null],
+      ]);
+    });
+
+    it('skips the lookup when no offer links a code', async () => {
+      const { svc, promoCodes } = setup();
+      await svc.buildPayload(site as never, 'published');
+      expect(promoCodes.resolveOfferCodes).not.toHaveBeenCalled();
+    });
   });
 });
 

@@ -218,32 +218,43 @@ model PropertyHoliday {
 
 /// โค้ดส่วนลดของโรงแรม (ใช้ตอนแขกจองผ่านหน้าเว็บ) — ส่วนลดหักจากค่าห้องก่อนคิดค่าบริการ/VAT
 model PropertyPromoCode {
-  id            String    @id @default(uuid())
-  tenantId      String
-  propertyId    String
+  id                 String    @id @default(uuid())
+  tenantId           String
+  propertyId         String
   /// ตัวพิมพ์ใหญ่เสมอ
-  code          String    @db.VarChar(40)
-  description   String?   @db.VarChar(255)
+  code               String    @db.VarChar(40)
+  description        String?   @db.VarChar(255)
   /// percentage | fixed
-  discountType  String    @default("percentage") @db.VarChar(20)
-  discountValue Decimal   @db.Decimal(12, 2)
+  discountType       String    @default("percentage") @db.VarChar(20)
+  discountValue      Decimal   @db.Decimal(12, 2)
   /// เพดานส่วนลดสำหรับแบบ % (null = ไม่จำกัด)
-  maxDiscount   Decimal?  @db.Decimal(12, 2)
-  minNights     Int       @default(1)
+  maxDiscount        Decimal?  @db.Decimal(12, 2)
+  minNights          Int       @default(1)
   /// ยอดค่าห้องขั้นต่ำก่อนหักส่วนลด (null = ไม่กำหนด)
-  minAmount     Decimal?  @db.Decimal(12, 2)
+  minAmount          Decimal?  @db.Decimal(12, 2)
   /// ช่วงวันที่ใช้โค้ดได้ (นับวันที่จอง เวลาไทย)
-  validFrom     DateTime? @db.Date
-  validUntil    DateTime? @db.Date
+  validFrom          DateTime? @db.Date
+  validUntil         DateTime? @db.Date
   /// จำนวนการจองสูงสุด (ไม่นับการจองที่ยกเลิก) null = ไม่จำกัด
-  usageLimit    Int?
-  isActive      Boolean   @default(true)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  property      Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  usageLimit         Int?
+  isActive           Boolean   @default(true)
+  /// โค้ดเฉพาะบุคคลที่แคมเปญ CRM ออกจากโค้ดต้นแบบนี้ (null = โค้ดที่พนักงานสร้างเอง)
+  parentId           String?   @db.VarChar(36)
+  /// ออกให้แขกคนไหน (guests.id)
+  issuedToGuestId    String?   @db.VarChar(36)
+  /// ออกผ่านแคมเปญ CRM ไหน
+  campaignId         String?   @db.VarChar(36)
+  /// 1 delivery = 1 โค้ด — retry ของคิวได้โค้ดเดิม
+  campaignDeliveryId String?   @unique @db.VarChar(36)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  property           Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, propertyId, code])
   @@index([propertyId])
+  @@index([parentId])
+  @@index([campaignId])
+  @@index([issuedToGuestId])
   @@map("property_promo_codes")
 }
 
@@ -7477,6 +7488,8 @@ model CrmCampaign {
   promotionId        String?               @db.VarChar(36)
   /// โค้ดที่ออกให้หมดอายุกี่วันหลังส่ง — null = ตามวันจบของโปร
   promoCodeValidDays Int?
+  /// โค้ดห้องพักต้นแบบ (property_promo_codes) — ออกโค้ดเฉพาะคนให้ผู้รับแต่ละคน
+  roomPromoCodeId    String?               @db.VarChar(36)
   createdAt          DateTime              @default(now())
   updatedAt          DateTime              @updatedAt
   deliveries         CrmCampaignDelivery[]
@@ -7484,6 +7497,7 @@ model CrmCampaign {
   @@index([tenantId, status])
   @@index([tenantId, scheduledAt])
   @@index([promotionId])
+  @@index([roomPromoCodeId])
   @@map("crm_campaigns")
 }
 
@@ -8149,33 +8163,35 @@ model RevenueEntry {
 /// เว็บไซต์สาธารณะของโรงแรม (add-on WEBSITE_BUILDER) — 1 เว็บต่อ 1 property
 /// เปิดที่ <slug>.<root-domain> ; slug ไม่ซ้ำทั้งแพลตฟอร์มเพราะเป็น subdomain
 model WebsiteSite {
-  id               String           @id @default(uuid())
-  tenantId         String
-  propertyId       String           @unique
+  id                   String           @id @default(uuid())
+  tenantId             String
+  propertyId           String           @unique
   /// เว็บของลานกางเต็นท์ (CampSync) — null = เว็บโรงแรม; propertyId ยังชี้ property หลักของ tenant (บัญชีรับเงิน/นโยบายมัดจำ)
-  campgroundId     String?          @unique @db.VarChar(36)
-  slug             String           @unique @db.VarChar(40)
+  campgroundId         String?          @unique @db.VarChar(36)
+  slug                 String           @unique @db.VarChar(40)
   /// DRAFT | PUBLISHED | UNPUBLISHED
-  status           String           @default("DRAFT") @db.VarChar(20)
-  templateKey      String           @default("classic") @db.VarChar(30)
-  defaultLang      String           @default("th") @db.VarChar(5)
+  status               String           @default("DRAFT") @db.VarChar(20)
+  templateKey          String           @default("classic") @db.VarChar(30)
+  /// สำเนา templateKey ตอนกด Publish — เปลี่ยนเทมเพลตในร่างแล้วเลย์เอาต์เว็บจริงต้องไม่เปลี่ยนจนกว่าจะเผยแพร่
+  publishedTemplateKey String?          @db.VarChar(30)
+  defaultLang          String           @default("th") @db.VarChar(5)
   /// { primary, accent, font, logoUrl }
-  theme            Json
+  theme                Json
   /// sections + roomTypes + contact (ผ่าน sanitizeSiteContent ทุกครั้งก่อนเขียน)
-  draftContent     Json
+  draftContent         Json
   /// สำเนาของ draftContent ตอนกด Publish — หน้าเว็บสาธารณะอ่านจากตัวนี้เท่านั้น
-  publishedContent Json?
+  publishedContent     Json?
   /// { title: {th,en}, description: {th,en}, ogImage }
-  seo              Json
+  seo                  Json
   /// สำเนา theme / seo ตอนกด Publish — แก้สี/SEO ในร่างแล้วต้องไม่ขึ้นเว็บจริงจนกว่าจะเผยแพร่
-  publishedTheme   Json?
-  publishedSeo     Json?
-  publishedAt      DateTime?
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
-  property         Property         @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  campground       Campground?      @relation(fields: [campgroundId], references: [id], onDelete: Cascade)
-  inquiries        WebsiteInquiry[]
+  publishedTheme       Json?
+  publishedSeo         Json?
+  publishedAt          DateTime?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+  property             Property         @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  campground           Campground?      @relation(fields: [campgroundId], references: [id], onDelete: Cascade)
+  inquiries            WebsiteInquiry[]
 
   @@index([tenantId])
   @@map("website_sites")

@@ -10,7 +10,11 @@ export type SiteKind = 'hotel' | 'camp';
 export const SITE_STATUSES = ['DRAFT', 'PUBLISHED', 'UNPUBLISHED'] as const;
 export type SiteStatus = (typeof SITE_STATUSES)[number];
 
-export const TEMPLATE_KEYS = ['classic', 'fresh'] as const;
+/**
+ * เทมเพลตเลย์เอาต์ของหน้าเว็บ — classic/fresh เป็นเลย์เอาต์เดิม (ภาพเต็มจอ) ต่างกันแค่สีตั้งต้น
+ * nature (ธรรมชาติ) / luxe (เรียบหรู) / playful (การ์ตูนน่ารัก) = ดีไซน์ใหม่ที่หน้าตาต่างกันทั้งหน้า (render ฝั่ง frontend ตาม key นี้)
+ */
+export const TEMPLATE_KEYS = ['classic', 'fresh', 'nature', 'luxe', 'playful'] as const;
 export type TemplateKey = (typeof TEMPLATE_KEYS)[number];
 
 export const SITE_LANGS = ['th', 'en'] as const;

@@ -51,8 +51,9 @@ export class PropertyPromoCodesService {
 
   async list(propertyId: string, tenantId: string): Promise<PromoCodeView[]> {
     await this.assertProperty(propertyId, tenantId);
+    // โค้ดเฉพาะบุคคลที่แคมเปญ CRM ออกให้ ดูได้ที่หน้าแคมเปญ — ไม่ปนกับโค้ดที่พนักงานสร้าง
     const rows = await this.prisma.propertyPromoCode.findMany({
-      where: { propertyId, tenantId },
+      where: { propertyId, tenantId, parentId: null },
       orderBy: { createdAt: 'desc' },
     });
     const usage = await this.usageCounts(
@@ -133,7 +134,13 @@ export class PropertyPromoCodesService {
    * หาโค้ดที่ใช้ได้ ณ ตอนนี้ (เปิดใช้ / อยู่ในช่วงวันที่ / ยังไม่เต็มโควตา)
    * เรียกจากหน้า public — กรอง tenantId/propertyId เองเสมอ
    */
-  async findRedeemable(propertyId: string, tenantId: string, rawCode: string): Promise<PromoRule> {
+  async findRedeemable(
+    propertyId: string,
+    tenantId: string,
+    rawCode: string,
+    /** แขกที่กำลังจอง (ตอนยืนยันการจอง) — โค้ดเฉพาะบุคคลใช้ได้กับเจ้าของโค้ดเท่านั้น */
+    bookingGuestId?: string | null,
+  ): Promise<PromoRule> {
     const code = rawCode.trim().toUpperCase();
     const invalid = new BadRequestException('โค้ดส่วนลดไม่ถูกต้องหรือหมดอายุแล้ว');
     if (!code) throw invalid;
@@ -141,16 +148,16 @@ export class PropertyPromoCodesService {
       where: { tenantId, propertyId, code, isActive: true },
     });
     if (!row) throw invalid;
-    const today = bangkokToday();
-    if (
-      (row.validFrom && today < toYmd(row.validFrom)!) ||
-      (row.validUntil && today > toYmd(row.validUntil)!)
-    ) {
-      throw invalid;
-    }
-    if (row.usageLimit != null) {
-      const used = (await this.usageCounts(tenantId, [row.id])).get(row.id) ?? 0;
-      if (used >= row.usageLimit) throw new BadRequestException('โค้ดส่วนลดนี้ถูกใช้ครบจำนวนแล้ว');
+    const reason = await this.unusableReason(tenantId, row);
+    if (reason === 'exhausted') throw new BadRequestException('โค้ดส่วนลดนี้ถูกใช้ครบจำนวนแล้ว');
+    if (reason) throw invalid;
+    if (row.issuedToGuestId && bookingGuestId !== undefined) {
+      const owns = await this.isSameGuest(tenantId, row.issuedToGuestId, bookingGuestId);
+      if (!owns) {
+        throw new BadRequestException(
+          'โค้ดนี้เป็นโค้ดเฉพาะบุคคล — ใช้อีเมลหรือเบอร์โทรเดียวกับที่ได้รับโค้ด',
+        );
+      }
     }
     return {
       id: row.id,
@@ -163,7 +170,87 @@ export class PropertyPromoCodesService {
     };
   }
 
+  /**
+   * โค้ดที่ผูกกับการ์ดข้อเสนอบนหน้าเว็บ → คืน id → code เฉพาะโค้ดที่ยังใช้ได้ตอนนี้
+   * (โค้ดเฉพาะบุคคลของแคมเปญห้ามโผล่บนหน้าเว็บ)
+   */
+  async resolveOfferCodes(
+    propertyId: string,
+    tenantId: string,
+    ids: string[],
+  ): Promise<Map<string, string>> {
+    const unique = [...new Set(ids)];
+    if (!unique.length) return new Map();
+    const rows = await this.prisma.propertyPromoCode.findMany({
+      where: { id: { in: unique }, tenantId, propertyId, parentId: null, isActive: true },
+    });
+    const out = new Map<string, string>();
+    for (const row of rows) {
+      if (!(await this.unusableReason(tenantId, row))) out.set(row.id, row.code);
+    }
+    return out;
+  }
+
+  /** ตัวเลือกโค้ดสำหรับ editor ข้อเสนอ / ฟอร์มแคมเปญ (เฉพาะโค้ดต้นแบบ) */
+  async findTemplate(id: string, tenantId: string): Promise<PropertyPromoCode | null> {
+    return this.prisma.propertyPromoCode.findFirst({ where: { id, tenantId, parentId: null } });
+  }
+
   // ─── internals ───────────────────────────────────────────────────────
+
+  /**
+   * แขกที่จองผ่านเว็บถูก upsert ตามอีเมล/เบอร์ อาจได้ guest คนละแถวกับที่ CRM ส่งโค้ดให้
+   * → ถือว่าเป็นคนเดียวกันถ้า id ตรง หรืออีเมล/เบอร์โทรตรงกัน
+   */
+  private async isSameGuest(
+    tenantId: string,
+    ownerId: string,
+    bookingGuestId: string | null,
+  ): Promise<boolean> {
+    if (!bookingGuestId) return false;
+    if (ownerId === bookingGuestId) return true;
+    const guests = await this.prisma.guest.findMany({
+      where: { tenantId, id: { in: [ownerId, bookingGuestId] } },
+      select: { id: true, email: true, phone: true },
+    });
+    const owner = guests.find((g) => g.id === ownerId);
+    const booker = guests.find((g) => g.id === bookingGuestId);
+    if (!owner || !booker) return false;
+    const email = (v: string | null) => v?.trim().toLowerCase() || null;
+    const phone = (v: string | null) => v?.replace(/\D/g, '') || null;
+    return (
+      (!!email(owner.email) && email(owner.email) === email(booker.email)) ||
+      (!!phone(owner.phone) && phone(owner.phone) === phone(booker.phone))
+    );
+  }
+
+  /** null = ใช้ได้ */
+  private async unusableReason(
+    tenantId: string,
+    row: PropertyPromoCode,
+  ): Promise<'inactive' | 'date' | 'exhausted' | null> {
+    if (!row.isActive) return 'inactive';
+    const today = bangkokToday();
+    if (
+      (row.validFrom && today < toYmd(row.validFrom)!) ||
+      (row.validUntil && today > toYmd(row.validUntil)!)
+    ) {
+      return 'date';
+    }
+    if (row.parentId) {
+      // ปิด/ลบโค้ดต้นแบบ = โค้ดที่แคมเปญแจกไปแล้วใช้ไม่ได้ทั้งหมด
+      const parent = await this.prisma.propertyPromoCode.findFirst({
+        where: { id: row.parentId, tenantId },
+        select: { isActive: true },
+      });
+      if (!parent?.isActive) return 'inactive';
+    }
+    if (row.usageLimit != null) {
+      const used = (await this.usageCounts(tenantId, [row.id])).get(row.id) ?? 0;
+      if (used >= row.usageLimit) return 'exhausted';
+    }
+    return null;
+  }
 
   private async usageCounts(tenantId: string, ids: string[]): Promise<Map<string, number>> {
     if (!ids.length) return new Map();

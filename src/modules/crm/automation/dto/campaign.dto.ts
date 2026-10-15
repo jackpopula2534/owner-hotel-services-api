@@ -105,10 +105,22 @@ export class CreateCampaignDto {
   @IsDateString()
   scheduledAt?: string;
 
-  @ApiProperty({ required: false, description: 'แคมเปญแจกโค้ด: ออกโค้ด UNIQUE ของโปรนี้ให้ผู้รับทีละคน' })
+  @ApiProperty({
+    required: false,
+    description: 'แคมเปญแจกโค้ด: ออกโค้ด UNIQUE ของโปรนี้ให้ผู้รับทีละคน',
+  })
   @IsOptional()
   @IsUUID()
   promotionId?: string;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'แคมเปญแจกโค้ดห้องพัก: ออกโค้ดเฉพาะคนจากโค้ดส่วนลดห้องพักต้นแบบนี้ (property_promo_codes.id)',
+  })
+  @IsOptional()
+  @IsUUID()
+  roomPromoCodeId?: string;
 
   @ApiProperty({ required: false, description: 'โค้ดหมดอายุกี่วันหลังส่ง (ไม่เกินวันจบโปร)' })
   @IsOptional()
@@ -182,6 +194,11 @@ export class QueryCampaignsDto {
   @IsOptional()
   @IsUUID()
   promotionId?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsUUID()
+  roomPromoCodeId?: string;
 
   @ApiProperty({ required: false })
   @IsOptional()

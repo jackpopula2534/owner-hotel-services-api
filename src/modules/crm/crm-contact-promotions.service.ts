@@ -34,6 +34,46 @@ export interface ContactIssuedCode {
   issuedAt: Date;
 }
 
+/** การจองห้องพักที่ใช้โค้ดส่วนลดของโรงแรม */
+export interface ContactRoomPromoBooking {
+  id: string;
+  bookingNo: string | null;
+  code: string | null;
+  /** โค้ดเฉพาะคนที่แคมเปญ CRM ออกให้ */
+  fromCampaign: boolean;
+  status: string;
+  checkIn: Date;
+  checkOut: Date;
+  discountAmount: number;
+  total: number;
+  bookedAt: Date;
+}
+
+/** โค้ดส่วนลดห้องพักเฉพาะคนที่แคมเปญออกให้ */
+export interface ContactRoomIssuedCode {
+  id: string;
+  code: string;
+  templateCode: string | null;
+  campaignId: string | null;
+  campaignName: string | null;
+  state: IssuedCodeState;
+  validUntil: string | null;
+  issuedAt: Date;
+}
+
+export interface ContactRoomPromoHistory {
+  summary: {
+    bookings: number;
+    discountTotal: number;
+    /** ยอดการจองที่ใช้โค้ด (ไม่นับที่ยกเลิก) */
+    bookingsTotal: number;
+    codesIssued: number;
+    codesAvailable: number;
+  };
+  bookings: ContactRoomPromoBooking[];
+  issuedCodes: ContactRoomIssuedCode[];
+}
+
 export interface ContactPromoHistory {
   contactId: string;
   guestId: string | null;
@@ -49,7 +89,14 @@ export interface ContactPromoHistory {
   };
   redemptions: ContactPromoRedemption[];
   issuedCodes: ContactIssuedCode[];
+  /** โปรห้องพัก (โค้ดส่วนลดของโรงแรมที่ใช้ตอนจอง) */
+  room: ContactRoomPromoHistory;
 }
+
+const ROOM_NOT_COUNTED = 'cancelled';
+const bangkokToday = (now: Date): string =>
+  new Date(now.getTime() + 7 * 3_600_000).toISOString().slice(0, 10);
+const toYmd = (d: Date | null): string | null => (d ? d.toISOString().slice(0, 10) : null);
 
 const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
 
@@ -92,11 +139,16 @@ export class CrmContactPromotionsService {
       },
       redemptions: [],
       issuedCodes: [],
+      room: {
+        summary: { bookings: 0, discountTotal: 0, bookingsTotal: 0, codesIssued: 0, codesAvailable: 0 },
+        bookings: [],
+        issuedCodes: [],
+      },
     };
     if (!contact.guestId) return empty;
     const guestId = contact.guestId;
 
-    const [redemptionRows, codeRows] = await Promise.all([
+    const [redemptionRows, codeRows, room] = await Promise.all([
       this.prisma.retailPromotionRedemption.findMany({
         where: { tenantId, guestId },
         orderBy: { createdAt: 'desc' },
@@ -109,6 +161,7 @@ export class CrmContactPromotionsService {
         take: HISTORY_LIMIT,
         include: { promotion: { select: { name: true } } },
       }),
+      this.roomHistory(tenantId, guestId),
     ]);
 
     const saleIds = redemptionRows.map((r) => r.saleId);
@@ -181,6 +234,125 @@ export class CrmContactPromotionsService {
         codesAvailable: issuedCodes.filter((c) => c.state === 'available').length,
       },
       redemptions,
+      issuedCodes,
+      room,
+    };
+  }
+
+  /** โค้ดส่วนลดห้องพัก: การจองที่ใช้โค้ด + โค้ดเฉพาะคนที่แคมเปญ CRM ออกให้ */
+  private async roomHistory(tenantId: string, guestId: string): Promise<ContactRoomPromoHistory> {
+    const [bookingRows, codeRows] = await Promise.all([
+      this.prisma.booking.findMany({
+        where: { tenantId, guestId, promoCodeId: { not: null } },
+        orderBy: { createdAt: 'desc' },
+        take: HISTORY_LIMIT,
+        select: {
+          id: true,
+          bookingNo: true,
+          promoCodeId: true,
+          status: true,
+          checkIn: true,
+          checkOut: true,
+          discountAmount: true,
+          grandTotal: true,
+          totalPrice: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.propertyPromoCode.findMany({
+        where: { tenantId, issuedToGuestId: guestId },
+        orderBy: { createdAt: 'desc' },
+        take: HISTORY_LIMIT,
+      }),
+    ]);
+
+    // โค้ดที่การจองใช้ + โค้ดต้นแบบของโค้ดเฉพาะคน + การจองที่ใช้โค้ดเฉพาะคน (นับสถานะ "ใช้แล้ว")
+    const issuedIds = codeRows.map((c) => c.id);
+    const lookupIds = [
+      ...new Set([
+        ...bookingRows.map((b) => b.promoCodeId as string),
+        ...codeRows.map((c) => c.parentId).filter((id): id is string => !!id),
+      ]),
+    ].filter((id) => !issuedIds.includes(id));
+    const campaignIds = [...new Set(codeRows.map((c) => c.campaignId).filter((id): id is string => !!id))];
+    type CodeRow = { id: string; code: string; parentId: string | null };
+    type CampaignRow = { id: string; name: string };
+    type UseRow = { promoCodeId: string | null };
+    const [lookups, campaigns, uses] = await Promise.all([
+      lookupIds.length
+        ? this.prisma.propertyPromoCode.findMany({
+            where: { tenantId, id: { in: lookupIds } },
+            select: { id: true, code: true, parentId: true },
+          })
+        : Promise.resolve<CodeRow[]>([]),
+      campaignIds.length
+        ? this.prisma.crmCampaign.findMany({
+            where: { tenantId, id: { in: campaignIds } },
+            select: { id: true, name: true },
+          })
+        : Promise.resolve<CampaignRow[]>([]),
+      issuedIds.length
+        ? this.prisma.booking.findMany({
+            where: { tenantId, promoCodeId: { in: issuedIds }, status: { not: ROOM_NOT_COUNTED } },
+            select: { promoCodeId: true },
+          })
+        : Promise.resolve<UseRow[]>([]),
+    ]);
+    const codeById = new Map<string, CodeRow>([
+      ...codeRows.map((c): [string, CodeRow] => [c.id, c]),
+      ...lookups.map((c): [string, CodeRow] => [c.id, c]),
+    ]);
+    const campaignName = new Map(campaigns.map((c) => [c.id, c.name]));
+    const usedIds = new Set(uses.map((u) => u.promoCodeId as string));
+
+    const bookings = bookingRows.map<ContactRoomPromoBooking>((b) => {
+      const code = codeById.get(b.promoCodeId as string);
+      return {
+        id: b.id,
+        bookingNo: b.bookingNo,
+        code: code?.code ?? null,
+        fromCampaign: !!code?.parentId,
+        status: b.status,
+        checkIn: b.checkIn,
+        checkOut: b.checkOut,
+        discountAmount: Number(b.discountAmount ?? 0),
+        total: Number(b.grandTotal ?? b.totalPrice ?? 0),
+        bookedAt: b.createdAt,
+      };
+    });
+
+    const today = bangkokToday(new Date());
+    const issuedCodes = codeRows.map<ContactRoomIssuedCode>((c) => {
+      const validUntil = toYmd(c.validUntil);
+      const state: IssuedCodeState = usedIds.has(c.id)
+        ? 'used'
+        : !c.isActive
+          ? 'inactive'
+          : validUntil && validUntil < today
+            ? 'expired'
+            : 'available';
+      return {
+        id: c.id,
+        code: c.code,
+        templateCode: c.parentId ? (codeById.get(c.parentId)?.code ?? null) : null,
+        campaignId: c.campaignId,
+        campaignName: c.campaignId ? (campaignName.get(c.campaignId) ?? null) : null,
+        state,
+        validUntil,
+        issuedAt: c.createdAt,
+      };
+    });
+
+    const counted = bookings.filter((b) => b.status !== ROOM_NOT_COUNTED);
+    return {
+      summary: {
+        bookings: counted.length,
+        discountTotal: round2(counted.reduce((s, b) => s + b.discountAmount, 0)),
+        bookingsTotal: round2(counted.reduce((s, b) => s + b.total, 0)),
+        codesIssued: issuedCodes.length,
+        codesAvailable: issuedCodes.filter((c) => c.state === 'available').length,
+      },
+      bookings,
       issuedCodes,
     };
   }

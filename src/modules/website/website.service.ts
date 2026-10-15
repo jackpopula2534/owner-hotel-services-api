@@ -198,6 +198,7 @@ export class WebsiteService {
       data: {
         status: 'PUBLISHED',
         publishedContent: asJson(content),
+        publishedTemplateKey: templateKey,
         publishedTheme: asJson(sanitizeTheme(site.theme, templateKey)),
         publishedSeo: asJson(sanitizeSeo(site.seo, hotelName)),
         publishedAt: new Date(),

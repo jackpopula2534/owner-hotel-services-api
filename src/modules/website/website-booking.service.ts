@@ -301,6 +301,7 @@ export class WebsiteBookingService {
                 ctx.property.id,
                 ctx.site.tenantId,
                 ctx.promo.code,
+                guestId,
               )
             : undefined;
           const booking = await this.bookings.create(

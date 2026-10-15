@@ -251,6 +251,21 @@ describe('WebsiteService publish', () => {
     expect(data.publishedContent.sections).toHaveLength(8);
   });
 
+  it('snapshots the layout template so draft template changes stay off the live site', async () => {
+    const { svc, prisma } = setup();
+    prisma.websiteSite.findFirst.mockResolvedValueOnce({ ...baseSite, templateKey: 'luxe' });
+    await svc.publish('s1', 't1');
+    expect(prisma.websiteSite.update.mock.calls[0][0].data.publishedTemplateKey).toBe('luxe');
+  });
+
+  it('accepts the new layout templates on update', async () => {
+    const { svc, prisma } = setup();
+    await svc.updateSite('s1', 't1', { templateKey: 'nature' });
+    const data = prisma.websiteSite.update.mock.calls[0][0].data;
+    expect(data.templateKey).toBe('nature');
+    expect(data.theme).toMatchObject({ primary: '#2f4a2c', font: 'serif' });
+  });
+
   it('publish of another tenant site 404s before eligibility', async () => {
     const { svc, entitlement } = setup();
     await expect(svc.publish('s1', 't2')).rejects.toBeInstanceOf(NotFoundException);

@@ -17,7 +17,9 @@ describe('issuedCodeState', () => {
     // ใช้แล้วสำคัญกว่าถูกปิด (ปิดหลังใช้ = ยังนับว่าใช้)
     expect(issuedCodeState({ ...base, usedCount: 1, isActive: false }, now)).toBe('used');
     expect(issuedCodeState({ ...base, isActive: false }, now)).toBe('inactive');
-    expect(issuedCodeState({ ...base, expiresAt: new Date(now.getTime() - DAY) }, now)).toBe('expired');
+    expect(issuedCodeState({ ...base, expiresAt: new Date(now.getTime() - DAY) }, now)).toBe(
+      'expired',
+    );
     expect(issuedCodeState({ ...base, maxUses: null, usedCount: 5 }, now)).toBe('available');
   });
 });
@@ -31,6 +33,8 @@ describe('CrmContactPromotionsService', () => {
     retailPromoCode: { findMany: jest.fn() },
     retailSale: { findMany: jest.fn() },
     crmCampaign: { findMany: jest.fn() },
+    booking: { findMany: jest.fn() },
+    propertyPromoCode: { findMany: jest.fn() },
   };
 
   beforeEach(async () => {
@@ -38,6 +42,8 @@ describe('CrmContactPromotionsService', () => {
       providers: [CrmContactPromotionsService, { provide: PrismaService, useValue: prisma }],
     }).compile();
     service = module.get(CrmContactPromotionsService);
+    prisma.booking.findMany.mockResolvedValue([]);
+    prisma.propertyPromoCode.findMany.mockResolvedValue([]);
   });
 
   afterEach(() => jest.resetAllMocks());
@@ -177,14 +183,134 @@ describe('CrmContactPromotionsService', () => {
       },
     ]);
     prisma.retailPromoCode.findMany.mockResolvedValue([]);
-    prisma.retailSale.findMany.mockResolvedValue([{ id: 's1', receiptNo: 'RS-0001', grandTotal: dec(450) }]);
+    prisma.retailSale.findMany.mockResolvedValue([
+      { id: 's1', receiptNo: 'RS-0001', grandTotal: dec(450) },
+    ]);
 
     const r = await service.history('ct1', 't1');
 
-    expect(r.summary).toMatchObject({ redeemed: 1, reversed: 0, discountTotal: 50, salesTotal: 450 });
+    expect(r.summary).toMatchObject({
+      redeemed: 1,
+      reversed: 0,
+      discountTotal: 50,
+      salesTotal: 450,
+    });
     expect(r.redemptions.map((x) => [x.code, x.autoApplied])).toEqual([
       ['X1', false],
       [null, true],
     ]);
+  });
+
+  describe('room promo codes', () => {
+    const d = (ymd: string) => new Date(`${ymd}T00:00:00.000Z`);
+
+    it('lists bookings that used a hotel code and the personal codes CRM issued', async () => {
+      prisma.crmContact.findFirst.mockResolvedValue({ id: 'ct1', guestId: 'g1' });
+      prisma.retailPromotionRedemption.findMany.mockResolvedValue([]);
+      prisma.retailPromoCode.findMany.mockResolvedValue([]);
+      prisma.booking.findMany
+        // การจองของแขกที่ใช้โค้ด
+        .mockResolvedValueOnce([
+          {
+            id: 'b1',
+            bookingNo: 'BK-1',
+            promoCodeId: 'child-used',
+            status: 'confirmed',
+            checkIn: d('2026-11-01'),
+            checkOut: d('2026-11-03'),
+            discountAmount: 300,
+            grandTotal: 2700,
+            totalPrice: 3000,
+            createdAt: new Date(),
+          },
+          {
+            id: 'b2',
+            bookingNo: 'BK-2',
+            promoCodeId: 'public',
+            status: 'cancelled',
+            checkIn: d('2026-12-01'),
+            checkOut: d('2026-12-02'),
+            discountAmount: 100,
+            grandTotal: null,
+            totalPrice: 900,
+            createdAt: new Date(),
+          },
+        ])
+        // การใช้โค้ดเฉพาะคน
+        .mockResolvedValueOnce([{ promoCodeId: 'child-used' }]);
+      prisma.propertyPromoCode.findMany
+        .mockResolvedValueOnce([
+          {
+            id: 'child-used',
+            code: 'RUSED001',
+            parentId: 'tpl',
+            campaignId: 'c1',
+            isActive: true,
+            validUntil: null,
+            createdAt: new Date(),
+          },
+          {
+            id: 'child-open',
+            code: 'ROPEN001',
+            parentId: 'tpl',
+            campaignId: 'c1',
+            isActive: true,
+            validUntil: null,
+            createdAt: new Date(),
+          },
+          {
+            id: 'child-old',
+            code: 'ROLD0001',
+            parentId: 'tpl',
+            campaignId: 'c1',
+            isActive: true,
+            validUntil: d('2020-01-01'),
+            createdAt: new Date(),
+          },
+        ])
+        .mockResolvedValueOnce([
+          { id: 'public', code: 'SUMMER10', parentId: null },
+          { id: 'tpl', code: 'VIP15', parentId: null },
+        ]);
+      prisma.crmCampaign.findMany.mockResolvedValue([{ id: 'c1', name: 'VIP comeback' }]);
+
+      const r = await service.history('ct1', 't1');
+
+      expect(prisma.booking.findMany.mock.calls[0][0].where).toEqual({
+        tenantId: 't1',
+        guestId: 'g1',
+        promoCodeId: { not: null },
+      });
+      expect(prisma.propertyPromoCode.findMany.mock.calls[0][0].where).toEqual({
+        tenantId: 't1',
+        issuedToGuestId: 'g1',
+      });
+      expect(r.room.bookings.map((b) => [b.bookingNo, b.code, b.fromCampaign, b.total])).toEqual([
+        ['BK-1', 'RUSED001', true, 2700],
+        ['BK-2', 'SUMMER10', false, 900],
+      ]);
+      expect(
+        r.room.issuedCodes.map((c) => [c.code, c.templateCode, c.campaignName, c.state]),
+      ).toEqual([
+        ['RUSED001', 'VIP15', 'VIP comeback', 'used'],
+        ['ROPEN001', 'VIP15', 'VIP comeback', 'available'],
+        ['ROLD0001', 'VIP15', 'VIP comeback', 'expired'],
+      ]);
+      // การจองที่ยกเลิกไม่นับในยอด
+      expect(r.room.summary).toEqual({
+        bookings: 1,
+        discountTotal: 300,
+        bookingsTotal: 2700,
+        codesIssued: 3,
+        codesAvailable: 1,
+      });
+    });
+
+    it('returns an empty room section for contacts not linked to a guest', async () => {
+      prisma.crmContact.findFirst.mockResolvedValue({ id: 'ct1', guestId: null });
+      const r = await service.history('ct1', 't1');
+      expect(r.room.bookings).toEqual([]);
+      expect(prisma.booking.findMany).not.toHaveBeenCalled();
+    });
   });
 });

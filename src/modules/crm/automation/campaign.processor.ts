@@ -11,6 +11,7 @@ import {
   PROMO_CODE_PLACEHOLDER,
   renderPromoMessage,
 } from './campaign-promo-code.service';
+import { CampaignRoomPromoCodeService } from './campaign-room-promo-code.service';
 import {
   CAMPAIGN_JOB,
   CRM_CAMPAIGN_QUEUE,
@@ -35,6 +36,7 @@ export class CampaignProcessor {
     private readonly audience: AudienceResolver,
     private readonly channels: ChannelRegistry,
     private readonly promoCodes: CampaignPromoCodeService,
+    private readonly roomPromoCodes: CampaignRoomPromoCodeService,
   ) {}
 
   // ──────────────────────────────────────────────────────────
@@ -74,7 +76,9 @@ export class CampaignProcessor {
     );
 
     // Filter by adapter eligibility
-    const eligible = audience.filter((m) => AudienceResolver.isEligibleForChannel(campaign.channel, m));
+    const eligible = audience.filter((m) =>
+      AudienceResolver.isEligibleForChannel(campaign.channel, m),
+    );
     this.logger.log(
       `dispatch ${campaignId}: ${audience.length} resolved · ${eligible.length} eligible (${campaign.channel})`,
     );
@@ -155,16 +159,27 @@ export class CampaignProcessor {
     };
 
     // แคมเปญแจกโค้ด: ออกโค้ด UNIQUE ของผู้รับคนนี้ก่อนส่ง — ออกไม่ได้ = ไม่ส่งข้อความเปล่า
+    // (โปรหน้าร้าน → retail_promo_codes · โค้ดห้องพัก → property_promo_codes ลูกของโค้ดต้นแบบ)
     let promoCode: IssuedPromoCode | null = null;
-    if (campaign.promotionId) {
-      const issued = await this.promoCodes.issueForDelivery({
+    const issuer = campaign.promotionId
+      ? this.promoCodes
+      : campaign.roomPromoCodeId
+        ? this.roomPromoCodes
+        : null;
+    if (issuer) {
+      const common = {
         tenantId,
         campaignId,
-        promotionId: campaign.promotionId,
         deliveryId,
         guestId: delivery.guestId,
         validDays: campaign.promoCodeValidDays,
-      });
+      };
+      const issued = campaign.promotionId
+        ? await this.promoCodes.issueForDelivery({ ...common, promotionId: campaign.promotionId })
+        : await this.roomPromoCodes.issueForDelivery({
+            ...common,
+            roomPromoCodeId: campaign.roomPromoCodeId as string,
+          });
       if ('reason' in issued) {
         this.logger.warn(`deliver-one ${deliveryId}: promo code not issued — ${issued.reason}`);
         await this.prisma.crmCampaignDelivery.update({
@@ -176,8 +191,13 @@ export class CampaignProcessor {
         return;
       }
       promoCode = issued.code;
-      message.bodyOverride = renderPromoMessage(campaign.bodyOverride, promoCode.code, promoCode.expiresAt);
-      message.subject = campaign.subject?.split(PROMO_CODE_PLACEHOLDER).join(promoCode.code) ?? campaign.subject;
+      message.bodyOverride = renderPromoMessage(
+        campaign.bodyOverride,
+        promoCode.code,
+        promoCode.expiresAt,
+      );
+      message.subject =
+        campaign.subject?.split(PROMO_CODE_PLACEHOLDER).join(promoCode.code) ?? campaign.subject;
       message.context = {
         promoCode: promoCode.code,
         promoExpiresAt: promoCode.expiresAt?.toISOString() ?? null,
@@ -202,7 +222,7 @@ export class CampaignProcessor {
       await this.bumpCampaignCounter(campaignId, 'totalSent');
     } else {
       this.logger.warn(`deliver-one ${deliveryId} failed: ${result.errorMessage}`);
-      if (promoCode) await this.promoCodes.revokeForDelivery(tenantId, deliveryId);
+      if (promoCode && issuer) await issuer.revokeForDelivery(tenantId, deliveryId);
       await this.prisma.crmCampaignDelivery.update({
         where: { id: deliveryId },
         data: { status: 'failed', errorMessage: result.errorMessage ?? 'unknown' },

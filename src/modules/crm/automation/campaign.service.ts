@@ -4,7 +4,13 @@ import { Queue } from 'bull';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AudienceResolver } from './audience.resolver';
 import { CampaignPromoCodeService } from './campaign-promo-code.service';
-import { CreateCampaignDto, EstimateAudienceDto, QueryCampaignsDto, UpdateCampaignDto } from './dto/campaign.dto';
+import { CampaignRoomPromoCodeService } from './campaign-room-promo-code.service';
+import {
+  CreateCampaignDto,
+  EstimateAudienceDto,
+  QueryCampaignsDto,
+  UpdateCampaignDto,
+} from './dto/campaign.dto';
 import { CRM_CAMPAIGN_QUEUE, CAMPAIGN_JOB, DispatchJobData } from './campaign.constants';
 
 /**
@@ -24,10 +30,11 @@ export class CampaignService {
     'bodyOverride',
     'audienceQuery',
     'promotionId',
+    'roomPromoCodeId',
     'promoCodeValidDays',
   ] as const;
 
-  /** promotionId แก้ไม่ได้หลังสร้าง — โค้ดที่ออกไปแล้วผูกกับโปรเดิม */
+  /** promotionId / roomPromoCodeId แก้ไม่ได้หลังสร้าง — โค้ดที่ออกไปแล้วผูกกับโปรเดิม */
   private static readonly WRITABLE_UPDATE = [
     'name',
     'description',
@@ -42,6 +49,7 @@ export class CampaignService {
     private readonly prisma: PrismaService,
     private readonly audience: AudienceResolver,
     private readonly promoCodes: CampaignPromoCodeService,
+    private readonly roomPromoCodes: CampaignRoomPromoCodeService,
     @InjectQueue(CRM_CAMPAIGN_QUEUE) private readonly queue: Queue,
   ) {}
 
@@ -57,6 +65,7 @@ export class CampaignService {
     if (query.channel) where.channel = query.channel;
     if (query.search) where.name = { contains: query.search };
     if (query.promotionId) where.promotionId = query.promotionId;
+    if (query.roomPromoCodeId) where.roomPromoCodeId = query.roomPromoCodeId;
 
     try {
       const [data, total] = await Promise.all([
@@ -92,7 +101,17 @@ export class CampaignService {
     if (dto.channel === 'email' && !dto.subject && !dto.templateKey) {
       throw new BadRequestException('Email campaigns require subject or templateKey');
     }
-    if (dto.promotionId) await this.promoCodes.assertLinkable(tenantId, dto.promotionId, dto.channel);
+    if (dto.promotionId && dto.roomPromoCodeId) {
+      throw new BadRequestException({
+        code: 'PROMO_CAMPAIGN_BOTH',
+        message: 'แคมเปญหนึ่งแจกได้ทีละแบบ: โปรหน้าร้าน หรือ โค้ดส่วนลดห้องพัก',
+      });
+    }
+    if (dto.promotionId)
+      await this.promoCodes.assertLinkable(tenantId, dto.promotionId, dto.channel);
+    if (dto.roomPromoCodeId) {
+      await this.roomPromoCodes.assertLinkable(tenantId, dto.roomPromoCodeId, dto.channel);
+    }
 
     const sanitized: Record<string, unknown> = {};
     for (const key of CampaignService.WRITABLE_CREATE) {
@@ -146,6 +165,11 @@ export class CampaignService {
   async listForPromotion(promotionId: string, tenantId: string) {
     if (!tenantId) throw new BadRequestException('Tenant ID is required');
     return this.promoCodes.listForPromotion(tenantId, promotionId);
+  }
+
+  async listRoomPromoTemplates(tenantId: string) {
+    if (!tenantId) throw new BadRequestException('Tenant ID is required');
+    return this.roomPromoCodes.listTemplates(tenantId);
   }
 
   /** Returns the resolved audience size for a campaign without sending. */
@@ -210,6 +234,7 @@ export class CampaignService {
       startedAt: campaign.startedAt,
       completedAt: campaign.completedAt,
       promo: await this.promoCodes.statsForCampaign(tenantId, campaign),
+      roomPromo: await this.roomPromoCodes.statsForCampaign(tenantId, campaign),
     };
   }
 

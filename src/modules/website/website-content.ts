@@ -45,6 +45,10 @@ export interface OfferItem {
   validFrom: string | null; // YYYY-MM-DD
   validTo: string | null;
   ctaText: LocalizedText;
+  /** โค้ดส่วนลดห้องพัก (property_promo_codes.id) — กดปุ่มแล้วเปิดหน้าจองพร้อมใส่โค้ดให้ */
+  promoCodeId: string | null;
+  /** เติมตอนสร้าง payload เท่านั้น (ไม่เก็บลง DB): โค้ดที่ยังใช้ได้ / null = ไม่ผูกหรือใช้ไม่ได้แล้ว */
+  promoCode?: string | null;
 }
 
 export interface SectionPropsMap {
@@ -184,6 +188,9 @@ const EMPTY: LocalizedText = lt('', '');
 export const TEMPLATE_THEMES: Record<TemplateKey, Omit<SiteTheme, 'logoUrl'>> = {
   classic: { primary: '#1f1f1f', accent: '#b08d57', font: 'serif' },
   fresh: { primary: '#0f766e', accent: '#f59e0b', font: 'sans' },
+  nature: { primary: '#2f4a2c', accent: '#c8743a', font: 'serif' },
+  luxe: { primary: '#111111', accent: '#b8975a', font: 'serif' },
+  playful: { primary: '#2d2a4a', accent: '#ff7aa2', font: 'sans' },
 };
 
 export function isTemplateKey(v: unknown): v is TemplateKey {
@@ -280,6 +287,10 @@ function cleanOffer(v: unknown, index: number): OfferItem {
     validFrom: cleanDate(o.validFrom),
     validTo: cleanDate(o.validTo),
     ctaText: cleanLocalized(o.ctaText, 40),
+    promoCodeId:
+      typeof o.promoCodeId === 'string' && /^[0-9a-fA-F-]{36}$/.test(o.promoCodeId)
+        ? o.promoCodeId
+        : null,
   };
 }
 
@@ -457,7 +468,10 @@ export function buildDefaultContent(input: DefaultContentInput): SiteContent {
       if (kind !== 'camp') return s;
       if (s.type === 'reviews') return { ...s, enabled: false } as SiteSection;
       if (s.type === 'hero') {
-        return { ...s, props: { ...s.props, images: [...CAMP_DEFAULT_HERO_IMAGES] } } as SiteSection;
+        return {
+          ...s,
+          props: { ...s.props, images: [...CAMP_DEFAULT_HERO_IMAGES] },
+        } as SiteSection;
       }
       if (s.type === 'gallery') {
         return {

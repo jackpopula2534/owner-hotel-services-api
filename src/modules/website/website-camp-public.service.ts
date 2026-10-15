@@ -166,7 +166,10 @@ export class WebsiteCampPublicService {
       select: { name_en: true, district: true, province: true, postal_code: true },
     });
 
-    const templateKey = isTemplateKey(site.templateKey) ? site.templateKey : 'classic';
+    // เว็บจริงใช้เลย์เอาต์ตอนเผยแพร่ (เว็บที่เผยแพร่ก่อนมีคอลัมน์นี้ → ใช้ templateKey ปัจจุบัน)
+    const rawTemplate =
+      source === 'published' ? (site.publishedTemplateKey ?? site.templateKey) : site.templateKey;
+    const templateKey = isTemplateKey(rawTemplate) ? rawTemplate : 'classic';
     const rawContent = source === 'published' ? site.publishedContent : site.draftContent;
     const content = sanitizeSiteContent(rawContent, campground.name, 'camp');
 

@@ -42,6 +42,15 @@ export class CampaignController {
     return this.campaigns.listForPromotion(promotionId, user.tenantId);
   }
 
+  @Get('room-promo-codes')
+  @ApiOperation({
+    summary: 'Hotel room promo codes (all properties) that a campaign can hand out as personal codes',
+  })
+  @Roles('admin', 'manager', 'tenant_admin', 'platform_admin', 'crm_manager', 'crm_agent')
+  async roomPromoCodes(@CurrentUser() user: { tenantId: string }) {
+    return this.campaigns.listRoomPromoTemplates(user.tenantId);
+  }
+
   @Post('audience-estimate')
   @ApiOperation({ summary: 'Estimate audience size for a segment query before creating a campaign' })
   @Roles('admin', 'manager', 'tenant_admin', 'platform_admin', 'crm_manager')

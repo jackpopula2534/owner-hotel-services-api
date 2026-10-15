@@ -6,6 +6,7 @@ import { AudienceResolver } from './audience.resolver';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CRM_CAMPAIGN_QUEUE } from './campaign.constants';
 import { CampaignPromoCodeService } from './campaign-promo-code.service';
+import { CampaignRoomPromoCodeService } from './campaign-room-promo-code.service';
 
 describe('CampaignService', () => {
   let service: CampaignService;
@@ -32,6 +33,11 @@ describe('CampaignService', () => {
     statsForCampaign: jest.fn(),
   };
 
+  const mockRoomPromoCodes = {
+    assertLinkable: jest.fn(),
+    statsForCampaign: jest.fn(),
+  };
+
   const mockQueue = {
     add: jest.fn(),
     getJob: jest.fn(),
@@ -45,6 +51,7 @@ describe('CampaignService', () => {
         { provide: AudienceResolver, useValue: mockResolver },
         { provide: getQueueToken(CRM_CAMPAIGN_QUEUE), useValue: mockQueue },
         { provide: CampaignPromoCodeService, useValue: mockPromoCodes },
+        { provide: CampaignRoomPromoCodeService, useValue: mockRoomPromoCodes },
       ],
     }).compile();
     service = module.get(CampaignService);
@@ -90,6 +97,35 @@ describe('CampaignService', () => {
       mockPrisma.crmCampaign.create.mockImplementation(async ({ data }) => ({ id: 'c1', ...data }));
       await service.create({ name: 'x', channel: 'line' } as never, 't1');
       expect(mockPromoCodes.assertLinkable).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('create — room promo campaign', () => {
+    it('checks the room template code before creating', async () => {
+      mockPrisma.crmCampaign.create.mockImplementation(async ({ data }) => ({ id: 'c1', ...data }));
+      const r = await service.create(
+        { name: 'x', channel: 'email', subject: 's', roomPromoCodeId: 'rp1' } as never,
+        't1',
+      );
+      expect(mockRoomPromoCodes.assertLinkable).toHaveBeenCalledWith('t1', 'rp1', 'email');
+      expect(r.roomPromoCodeId).toBe('rp1');
+    });
+
+    it('refuses a campaign that links both a retail promotion and a room code', async () => {
+      await expect(
+        service.create(
+          { name: 'x', channel: 'line', promotionId: 'p1', roomPromoCodeId: 'rp1' } as never,
+          't1',
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(mockPrisma.crmCampaign.create).not.toHaveBeenCalled();
+    });
+
+    it('never changes roomPromoCodeId after create', async () => {
+      mockPrisma.crmCampaign.findFirst.mockResolvedValue({ id: 'c1', tenantId: 't1', status: 'draft' });
+      mockPrisma.crmCampaign.update.mockResolvedValue({ id: 'c1' });
+      await service.update('c1', { roomPromoCodeId: 'rp2' } as never, 't1');
+      expect(mockPrisma.crmCampaign.update.mock.calls[0][0].data.roomPromoCodeId).toBeUndefined();
     });
   });
 

@@ -4,6 +4,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { AudienceResolver } from './audience.resolver';
 import { ChannelRegistry } from './channels/channel.registry';
 import { CampaignPromoCodeService } from './campaign-promo-code.service';
+import { CampaignRoomPromoCodeService } from './campaign-room-promo-code.service';
 import { CampaignProcessor } from './campaign.processor';
 import { DeliverOneJobData } from './campaign.constants';
 
@@ -17,6 +18,7 @@ describe('CampaignProcessor — deliver-one', () => {
   const adapter = { send: jest.fn() };
   const channels = { resolve: jest.fn(() => adapter) };
   const promoCodes = { issueForDelivery: jest.fn(), revokeForDelivery: jest.fn() };
+  const roomPromoCodes = { issueForDelivery: jest.fn(), revokeForDelivery: jest.fn() };
 
   const job = { data: { deliveryId: 'd1', campaignId: 'c1', tenantId: 't1' } } as Job<DeliverOneJobData>;
 
@@ -39,6 +41,7 @@ describe('CampaignProcessor — deliver-one', () => {
         { provide: AudienceResolver, useValue: {} },
         { provide: ChannelRegistry, useValue: channels },
         { provide: CampaignPromoCodeService, useValue: promoCodes },
+        { provide: CampaignRoomPromoCodeService, useValue: roomPromoCodes },
       ],
     }).compile();
     processor = module.get(CampaignProcessor);
@@ -138,5 +141,47 @@ describe('CampaignProcessor — deliver-one', () => {
     await processor.handleDeliverOne(job);
     expect(prisma.crmCampaign.findFirst).not.toHaveBeenCalled();
     expect(promoCodes.issueForDelivery).not.toHaveBeenCalled();
+  });
+
+  describe('room promo campaign', () => {
+    const roomCampaign = { ...promoCampaign, promotionId: null, roomPromoCodeId: 'rp1' };
+
+    it('issues a personal room code from the template and sends it', async () => {
+      prisma.crmCampaign.findFirst.mockResolvedValue(roomCampaign);
+      roomPromoCodes.issueForDelivery.mockResolvedValue({
+        ok: true,
+        code: { id: 'child1', code: 'RAB12CD', expiresAt: null },
+      });
+      adapter.send.mockResolvedValue({ success: true });
+
+      await processor.handleDeliverOne(job);
+
+      expect(promoCodes.issueForDelivery).not.toHaveBeenCalled();
+      expect(roomPromoCodes.issueForDelivery).toHaveBeenCalledWith({
+        tenantId: 't1',
+        campaignId: 'c1',
+        roomPromoCodeId: 'rp1',
+        deliveryId: 'd1',
+        guestId: 'g1',
+        validDays: 14,
+      });
+      expect(adapter.send.mock.calls[0][0].bodyOverride).toBe('รับส่วนลดด้วยโค้ด RAB12CD');
+      const meta = JSON.parse(prisma.crmCampaignDelivery.update.mock.calls[0][0].data.metadata);
+      expect(meta).toEqual({ promoCodeId: 'child1', promoCode: 'RAB12CD' });
+    });
+
+    it('revokes the room code (not a retail code) when the send fails', async () => {
+      prisma.crmCampaign.findFirst.mockResolvedValue(roomCampaign);
+      roomPromoCodes.issueForDelivery.mockResolvedValue({
+        ok: true,
+        code: { id: 'child1', code: 'RAB12CD', expiresAt: null },
+      });
+      adapter.send.mockResolvedValue({ success: false, errorMessage: 'SMTP down' });
+
+      await processor.handleDeliverOne(job);
+
+      expect(roomPromoCodes.revokeForDelivery).toHaveBeenCalledWith('t1', 'd1');
+      expect(promoCodes.revokeForDelivery).not.toHaveBeenCalled();
+    });
   });
 });

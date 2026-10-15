@@ -8,6 +8,7 @@ import { CampaignService } from './campaign.service';
 import { CampaignController } from './campaign.controller';
 import { CampaignProcessor } from './campaign.processor';
 import { CampaignPromoCodeService } from './campaign-promo-code.service';
+import { CampaignRoomPromoCodeService } from './campaign-room-promo-code.service';
 import { AudienceResolver } from './audience.resolver';
 import { JourneyService } from './journey.service';
 import { JourneyController } from './journey.controller';
@@ -50,6 +51,7 @@ import { PushChannelAdapter } from './channels/push.adapter';
     CampaignService,
     CampaignProcessor,
     CampaignPromoCodeService,
+    CampaignRoomPromoCodeService,
     AudienceResolver,
     JourneyService,
     JourneyScheduler,
