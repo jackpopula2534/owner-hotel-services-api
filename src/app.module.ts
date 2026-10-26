@@ -16,6 +16,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { GuestsModule } from './modules/guests/guests.module';
 import { BookingsModule } from './modules/bookings/bookings.module';
 import { RoomsModule } from './modules/rooms/rooms.module';
+import { HotelMap3dModule } from './modules/hotel-map3d/hotel-map3d.module';
 import { CampModule } from './modules/camp/camp.module';
 import { PropertiesModule } from './modules/properties/properties.module';
 import { RestaurantModule } from './modules/restaurant/restaurant.module';
@@ -36,6 +37,9 @@ import { WebhooksModule } from './webhooks/webhooks.module';
 import { UsageMeteringModule } from './usage-metering/usage-metering.module';
 import { AdminAnalyticsModule } from './admin-analytics/admin-analytics.module';
 import { OperatingCostsModule } from './modules/operating-costs/operating-costs.module';
+import { AiGatewayModule } from './modules/ai-gateway/ai-gateway.module';
+import { AddonQuotaModule } from './modules/addon-quotas/addon-quota.module';
+import { AddonPurchaseModule } from './modules/addon-purchases/addon-purchase.module';
 import { ImpersonationModule } from './impersonation/impersonation.module';
 import { DataExportModule } from './data-export/data-export.module';
 import { StatusPageModule } from './status-page/status-page.module';
@@ -141,6 +145,7 @@ import { TenantGuard } from './common/guards/tenant.guard';
     GuestsModule,
     BookingsModule,
     RoomsModule,
+    HotelMap3dModule,
     CampModule,
     PropertiesModule,
     RestaurantModule,
@@ -162,6 +167,9 @@ import { TenantGuard } from './common/guards/tenant.guard';
     UsageMeteringModule,
     AdminAnalyticsModule,
     OperatingCostsModule,
+    AiGatewayModule,
+    AddonQuotaModule,
+    AddonPurchaseModule,
     ImpersonationModule,
     DataExportModule,
     StatusPageModule,

@@ -160,7 +160,12 @@ export class AddonTrialRequestService {
     // ว่าตอนสร้างคำขอเคยผ่านแล้ว
     await this.addonService.assertAddonAllowedForTenant(request.tenant_id, request.addon_code);
 
-    const trialDays = dto.trialDays ?? 14;
+    // add-on ที่มีโควตา (เช่น CAMP_3D_MAP) ตั้งจำนวนวันทดลองเริ่มต้นไว้ในหน้าแอดมิน
+    const quotaConfig = await this.prisma.addonQuotaConfig.findUnique({
+      where: { addonCode: request.addon_code },
+      select: { trialDays: true },
+    });
+    const trialDays = dto.trialDays ?? quotaConfig?.trialDays ?? 14;
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + trialDays);
 

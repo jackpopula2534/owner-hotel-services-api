@@ -20,8 +20,17 @@ function makeTx(overrides: Record<string, unknown> = {}) {
     campReservation: {
       findFirst: jest.fn().mockResolvedValue(null), // ไม่มี clash
       create: jest.fn().mockImplementation(({ data }) => ({ id: 'res-1', ...data })),
-      update: jest.fn().mockResolvedValue({ id: 'res-1' }),
-      findUniqueOrThrow: jest.fn().mockResolvedValue({ id: 'res-1', addonItems: [] }),
+      update: jest.fn().mockResolvedValue({ id: 'res-1', pitch: { code: 'A1' } }),
+      findUniqueOrThrow: jest
+        .fn()
+        .mockResolvedValue({ id: 'res-1', addonItems: [], pitch: { code: 'A1' } }),
+    },
+    campOpsTask: {
+      create: jest.fn().mockResolvedValue({}),
+      updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+    campOpsEvent: {
+      create: jest.fn().mockResolvedValue({}),
     },
     campAddon: {
       findFirst: jest.fn(),
@@ -267,6 +276,7 @@ describe('ReservationsService.cancel', () => {
     tx.campReservation.findUniqueOrThrow = jest.fn().mockResolvedValue({
       id: 'res-1',
       addonItems: [{ addonId: 'addon-1', qty: 2 }],
+      pitch: { code: 'A1' },
     });
     const service = makeService(tx);
     await service.cancel('res-1');
@@ -282,6 +292,7 @@ describe('ReservationsService.cancel', () => {
       id: 'res-1',
       tenantId: 'tenant-1',
       addonItems: [],
+      pitch: { code: 'A1' },
     });
     const { service, revenuePosting } = makeServiceWithRevenue(tx);
     await service.cancel('res-1');
@@ -383,6 +394,7 @@ describe('ReservationsService.checkOut — แต้มสมาชิก', () =
       campgroundId: 'cg-1',
       guestId,
       totalPrice: 2400,
+      pitch: { code: 'A1' },
     });
     tx.campReservation.findFirst = jest
       .fn()

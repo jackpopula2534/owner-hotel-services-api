@@ -23,6 +23,12 @@ import { RequisitionsService } from './requisitions.service';
 import { CampDashboardController } from './dashboard.controller';
 import { CampDashboardService } from './dashboard.service';
 import { LoyaltyModule } from '../../loyalty/loyalty.module';
+import { AiGatewayModule } from '../ai-gateway/ai-gateway.module';
+import { AddonQuotaModule } from '../addon-quotas/addon-quota.module';
+import { CampMap3dController } from './map3d/camp-map3d.controller';
+import { CampMap3dService } from './map3d/camp-map3d.service';
+import { CampOpsController } from './camp-ops.controller';
+import { CampOpsService } from './camp-ops.service';
 
 /**
  * CampModule — ระบบจัดการลานกางแคมป์ (CampSync sub-system)
@@ -31,6 +37,7 @@ import { LoyaltyModule } from '../../loyalty/loyalty.module';
  *
  * ทุก controller ในโมดูลนี้ติด @RequireAddon('CAMP_MODULE') + AddonGuard
  * (AddonModule ให้ทั้ง guard และ AddonService ที่ guard ต้องใช้)
+ * ฉาก 3D (map3d/) ใช้ add-on CAMP_3D_MAP เพิ่ม — AI ผ่าน AiGatewayModule + โควตาผ่าน AddonQuotaModule
  */
 @Module({
   imports: [
@@ -41,6 +48,8 @@ import { LoyaltyModule } from '../../loyalty/loyalty.module';
     StockMovementsModule,
     RevenueModule,
     LoyaltyModule,
+    AiGatewayModule,
+    AddonQuotaModule,
   ],
   controllers: [
     CampgroundsController,
@@ -51,6 +60,8 @@ import { LoyaltyModule } from '../../loyalty/loyalty.module';
     AddonsController,
     RequisitionsController,
     CampDashboardController,
+    CampMap3dController,
+    CampOpsController,
   ],
   providers: [
     CampgroundsService,
@@ -62,6 +73,8 @@ import { LoyaltyModule } from '../../loyalty/loyalty.module';
     AddonsService,
     RequisitionsService,
     CampDashboardService,
+    CampMap3dService,
+    CampOpsService,
   ],
   exports: [
     CampgroundsService,

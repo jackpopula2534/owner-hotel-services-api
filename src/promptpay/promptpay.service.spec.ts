@@ -7,6 +7,7 @@ import { plainToInstance } from 'class-transformer';
 import { PromptPayService } from './promptpay.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
+import { AddonService } from '../modules/addons/addon.service';
 import { GenerateQRCodeDto, PromptPayType, WebhookPaymentDto } from './dto/promptpay.dto';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -59,6 +60,7 @@ describe('PromptPayService - generateQRCode', () => {
         { provide: PrismaService, useValue: prismaMock },
         { provide: ConfigService, useValue: configMock },
         { provide: EmailService, useValue: emailMock },
+        { provide: AddonService, useValue: { invalidateAddonCache: jest.fn() } },
       ],
     }).compile();
 
@@ -180,6 +182,7 @@ describe('PromptPayService - handleWebhook signature verification', () => {
         { provide: PrismaService, useValue: prismaMock },
         { provide: ConfigService, useValue: configMock },
         { provide: EmailService, useValue: emailMock },
+        { provide: AddonService, useValue: { invalidateAddonCache: jest.fn() } },
       ],
     }).compile();
 

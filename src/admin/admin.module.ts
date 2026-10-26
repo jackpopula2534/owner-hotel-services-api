@@ -33,6 +33,7 @@ import { AdminSubscriptionsService } from './admin-subscriptions.service';
 import { AdminSubscriptionFeaturesService } from './admin-subscription-features.service';
 import { AdminInvoiceAdjustmentsService } from './admin-invoice-adjustments.service';
 import { AdminBillingCycleService } from './admin-billing-cycle.service';
+import { SubscriptionAutoRenewalService } from './subscription-auto-renewal.service';
 import { AdminRefundCreditService } from './admin-refund-credit.service';
 import { AdminFeaturesService } from './admin-features.service';
 import { AdminPlansService } from './admin-plans.service';
@@ -67,6 +68,7 @@ import { AdminPlanAddonsService } from './admin-plan-addons.service';
     AdminPlanAddonsController,
   ],
   providers: [
+    SubscriptionAutoRenewalService,
     AdminHotelsService,
     AdminInvoicesService,
     AdminSubscriptionsService,

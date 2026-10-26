@@ -1,6 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { WebsiteSite } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
+import { AddonService } from '@/modules/addons/addon.service';
+import { CAMP_3D_ADDON } from '@/modules/camp/map3d/camp-map3d.service';
+import { sanitizeMap3dConfig } from '@/modules/camp/map3d/map3d-config';
+import type { Map3dConfig } from '@/modules/camp/map3d/map3d.types';
 import {
   SiteContent,
   sanitizeSeo,
@@ -61,6 +65,10 @@ export interface PublicCampPitch {
   posY: number;
   /** รูปของจุดนี้ที่อัปโหลดในหลังบ้าน (แขกกดหมุดแล้วเห็นรูปจุดจริง) */
   images: string[];
+  /** มุมหมุนบนผัง 3D (องศา) + ขนาดแปลงจริง (เมตร) — ใช้วาดพื้นแปลงในมุมมอง 3D */
+  rotation: number;
+  widthM: number | null;
+  depthM: number | null;
 }
 
 /** รูปแผนผังที่เจ้าของลานอัปโหลดในหลังบ้าน + จุดกางที่เปิดขาย */
@@ -78,6 +86,8 @@ export interface CampSiteExtras {
   facilities: PublicCampFacility[];
   /** null = ลานยังไม่อัปโหลดรูปแผนผัง */
   map: PublicCampMap | null;
+  /** ฉาก 3D ที่เผยแพร่แล้ว — null = ไม่มีฉาก หรือ add-on CAMP_3D_MAP หมดอายุ */
+  map3d: Map3dConfig | null;
   latitude: number | null;
   longitude: number | null;
 }
@@ -132,7 +142,10 @@ const num = (v: { toString(): string } | number | null | undefined): number | nu
  */
 @Injectable()
 export class WebsiteCampPublicService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly addonService: AddonService,
+  ) {}
 
   async findCampground(site: WebsiteSite) {
     if (!site.campgroundId) throw new NotFoundException('Website not found');
@@ -153,6 +166,7 @@ export class WebsiteCampPublicService {
         mapImageUrl: true,
         mapWidth: true,
         mapHeight: true,
+        map3dConfig: true,
       },
     });
     if (!campground) throw new NotFoundException('Website not found');
@@ -195,6 +209,9 @@ export class WebsiteCampPublicService {
       source === 'published' ? zones.roomTypes.filter((r) => !r.hidden) : zones.roomTypes;
     const visibleZones = new Set(roomTypes.map((r) => r.key));
     const mapImageUrl = toMapImageUrl(campground.mapImageUrl);
+    const map3d = mapImageUrl
+      ? await this.publicMap3d(site.tenantId, campground.map3dConfig)
+      : null;
 
     return {
       available: true,
@@ -246,9 +263,47 @@ export class WebsiteCampPublicService {
               pitches: zones.pitches.filter((p) => visibleZones.has(p.zoneKey)),
             }
           : null,
+        map3d,
         latitude: campground.latitude,
         longitude: campground.longitude,
       },
+    };
+  }
+
+  /**
+   * ฉาก 3D ให้แขกดู — หมุดยึดพิกัดเดียวกับแผนผัง 2D จึงส่งเฉพาะเมื่อมีแผนผัง (ผู้เรียกเช็คแล้ว)
+   * ตรวจ shape ซ้ำตอนส่งออก (แถวเก่า/แก้มือใน DB) และตัด confidence/source ที่เป็นข้อมูลภายใน
+   */
+  private async publicMap3d(tenantId: string, raw: unknown): Promise<Map3dConfig | null> {
+    if (!raw) return null;
+    if (!(await this.addonService.hasActiveAddon(tenantId, CAMP_3D_ADDON))) return null;
+    let config: Map3dConfig;
+    try {
+      config = sanitizeMap3dConfig(raw);
+    } catch {
+      return null;
+    }
+    const ground = toMapImageUrl(config.ground.imageUrl);
+    const strip = <T extends { confidence?: number; source?: unknown }>(items: T[]): T[] =>
+      items.map((item) => {
+        const copy = { ...item };
+        delete copy.confidence;
+        delete copy.source;
+        return copy;
+      });
+    return {
+      ...config,
+      ground: { imageUrl: ground, mode: ground ? config.ground.mode : 'procedural' },
+      water: strip(config.water),
+      rivers: strip(config.rivers),
+      roads: strip(config.roads),
+      forests: strip(config.forests),
+      areas: strip(config.areas),
+      // glbUrl ผ่านการตรวจ isOwnUrl ตอนบันทึกแล้ว — กรองซ้ำแบบเดียวกับรูปพื้น เผื่อข้อมูลเก่า/แก้ตรงใน DB
+      props: strip(config.props).map(({ glbUrl, ...prop }) => {
+        const model = toMapImageUrl(glbUrl);
+        return model ? { ...prop, glbUrl: model } : prop;
+      }),
     };
   }
 
@@ -307,7 +362,17 @@ export class WebsiteCampPublicService {
         color: true,
         pitches: {
           where: { status: { notIn: UNSELLABLE_PITCH_STATUSES } },
-          select: { id: true, code: true, posX: true, posY: true, images: true, sizeSqm: true },
+          select: {
+            id: true,
+            code: true,
+            posX: true,
+            posY: true,
+            images: true,
+            sizeSqm: true,
+            rotation: true,
+            widthM: true,
+            depthM: true,
+          },
           orderBy: { code: 'asc' },
         },
       },
@@ -387,6 +452,9 @@ export class WebsiteCampPublicService {
           posX: clamp01(p.posX),
           posY: clamp01(p.posY),
           images: toImageList(p.images).slice(0, MAX_PITCH_IMAGES),
+          rotation: Number.isFinite(p.rotation) ? p.rotation : 0,
+          widthM: num(p.widthM),
+          depthM: num(p.depthM),
         });
       }
     }

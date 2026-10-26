@@ -8,11 +8,24 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
+  AddExtraChargeDto,
+  CancelReservationDto,
+  CheckInReservationDto,
+  CheckOutReservationDto,
   CreateReservationDto,
   RecordPaymentDto,
   UpdateReservationAddonsDto,
   UpdateReservationDto,
 } from './dto/reservation.dto';
+import {
+  baht,
+  chargesJson,
+  extraChargesTotal,
+  guestName,
+  logOpsEvent,
+  newCharge,
+  parseExtraCharges,
+} from './camp-ops-shared';
 import { calcAddonTotal, quoteCampStay } from './camp-pricing';
 import { CampAccountingService } from './camp-accounting.service';
 import { RevenuePostingService, hasPostableRevenue } from '../revenue/revenue-posting.service';
@@ -68,7 +81,7 @@ export class ReservationsService {
   async create(
     dto: CreateReservationDto,
     tenantId?: string,
-    opts: { source?: 'STAFF' | 'WEBSITE'; guestId?: string | null } = {},
+    opts: { source?: 'STAFF' | 'WEBSITE'; guestId?: string | null; actorId?: string | null } = {},
   ) {
     const checkIn = new Date(dto.checkIn);
     const checkOut = new Date(dto.checkOut);
@@ -182,6 +195,16 @@ export class ReservationsService {
         }
       }
 
+      const nights = Math.max(1, Math.round((checkOut.getTime() - checkIn.getTime()) / 86_400_000));
+      await logOpsEvent(tx, {
+        tenantId,
+        campgroundId: dto.campgroundId,
+        type: 'booking',
+        pitchId: pitch.id,
+        reservationId: created.id,
+        actorId: opts.actorId,
+        message: `จอง ${pitch.code} · ${guestName(created)} · ${nights} คืน${opts.source === 'WEBSITE' ? ' (หน้าเว็บ)' : ''}`,
+      });
       this.logger.log(`Reservation created: ${created.id} pitch=${dto.pitchId}`);
       return { success: true, data: created };
     });
@@ -199,13 +222,19 @@ export class ReservationsService {
    * หมายเหตุ: การแก้ add-on ทำผ่าน endpoint แยก (ไม่ปนกับ update นี้) — ที่นี่
    * ใช้ line item เดิมมาคิดยอดต่อ ไม่แตะ stock
    */
-  async update(id: string, dto: UpdateReservationDto, tenantId?: string) {
-    const { addons: _addons, checkIn: checkInRaw, checkOut: checkOutRaw, ...rest } = dto;
+  async update(id: string, dto: UpdateReservationDto, tenantId?: string, actorId?: string | null) {
+    const {
+      addons: _addons,
+      checkIn: checkInRaw,
+      checkOut: checkOutRaw,
+      waivePriceDifference,
+      ...rest
+    } = dto;
 
     return this.prisma.$transaction(async (tx) => {
       const current = await tx.campReservation.findFirst({
         where: { id, ...(tenantId ? { tenantId } : {}) },
-        include: { addonItems: true },
+        include: { addonItems: true, pitch: { select: { id: true, code: true } } },
       });
       if (!current) {
         throw new NotFoundException(`Reservation ${id} not found`);
@@ -243,13 +272,34 @@ export class ReservationsService {
         throw new ConflictException('จุดนี้ถูกจองแล้วในช่วงเวลาที่เลือก');
       }
 
-      const totalPrice = this.computeTotal(
+      const moved = pitchId !== current.pitchId;
+      // ย้ายแขกที่อยู่ในลานแล้ว เข้าจุดที่ปิดซ่อม/ปิดขายไม่ได้ (จุดว่างหรือรอทำความสะอาดได้)
+      if (moved && current.status === 'checked_in' && ['maintenance', 'closed', 'occupied'].includes(pitch.status)) {
+        throw new ConflictException(`จุด ${pitch.code} ยังไม่พร้อมรับแขก`);
+      }
+
+      const charges = parseExtraCharges(current.extraCharges);
+      const numGuests = dto.numGuests ?? current.numGuests;
+      let totalPrice = this.computeTotal(
         pitch.zone,
         checkIn,
         checkOut,
-        dto.numGuests ?? current.numGuests,
+        numGuests,
         current.addonItems,
+        extraChargesTotal(charges),
       );
+      // ย้ายจุดเพราะลานขอเอง — ใส่ส่วนลดเท่าส่วนต่าง ยอดรวมเท่าเดิม
+      const previousTotal = Number(current.totalPrice);
+      if (moved && waivePriceDifference && totalPrice > previousTotal) {
+        const diff = Math.round((totalPrice - previousTotal) * 100) / 100;
+        charges.push(
+          newCharge(
+            { label: `ไม่คิดส่วนต่างย้าย ${current.pitch.code} → ${pitch.code}`, amount: -diff, kind: 'adjustment' },
+            actorId,
+          ),
+        );
+        totalPrice = previousTotal;
+      }
       const { paymentStatus } = this.settlePayment(totalPrice, current.amountPaid);
 
       const data = await tx.campReservation.update({
@@ -264,8 +314,43 @@ export class ReservationsService {
           scheduledCheckOut: checkOut,
           totalPrice,
           paymentStatus,
+          extraCharges: chargesJson(charges),
         },
       });
+
+      // แขกอยู่ในลานแล้วย้ายจุด: จุดใหม่มีแขก จุดเดิมรอแม่บ้าน
+      if (moved && current.status === 'checked_in') {
+        await tx.campPitch.update({ where: { id: pitchId }, data: { status: 'occupied' } });
+        await tx.campPitch.update({ where: { id: current.pitchId }, data: { status: 'cleaning' } });
+        if (current.tenantId) {
+          await tx.campOpsTask.create({
+            data: {
+              tenantId: current.tenantId,
+              campgroundId: current.campgroundId,
+              pitchId: current.pitchId,
+              reservationId: id,
+              type: 'cleaning',
+              title: `ทำความสะอาดหลังย้ายแขกไป ${pitch.code}`,
+              createdBy: actorId ?? null,
+            },
+          });
+        }
+      }
+
+      const extended = checkOut.getTime() !== current.checkOut.getTime();
+      if (moved || extended) {
+        await logOpsEvent(tx, {
+          tenantId: current.tenantId,
+          campgroundId: current.campgroundId,
+          type: moved ? 'move' : 'extend',
+          pitchId,
+          reservationId: id,
+          actorId,
+          message: moved
+            ? `ย้าย ${guestName(current)} ${current.pitch.code} → ${pitch.code}`
+            : `แก้วันออก ${pitch.code} · ${guestName(current)} → ${checkOut.toISOString().slice(0, 10)}`,
+        });
+      }
       this.logger.log(`Reservation updated: ${id} pitch=${pitchId} total=${totalPrice}`);
       return { success: true, data };
     });
@@ -281,7 +366,12 @@ export class ReservationsService {
    *   • ลานที่ไม่ได้เชื่อมคลัง (ไม่มี warehouseId) ไม่เคยตัด stock จึงไม่แตะ stock เลย
    * ราคาคิดใหม่ทั้งก้อนจากโซนปัจจุบัน เพื่อให้ผลลัพธ์ตรงกับ update() เสมอ
    */
-  async updateAddons(id: string, dto: UpdateReservationAddonsDto, tenantId?: string) {
+  async updateAddons(
+    id: string,
+    dto: UpdateReservationAddonsDto,
+    tenantId?: string,
+    actorId?: string | null,
+  ) {
     return this.prisma.$transaction(async (tx) => {
       const current = await tx.campReservation.findFirst({
         where: { id, ...(tenantId ? { tenantId } : {}) },
@@ -345,6 +435,7 @@ export class ReservationsService {
         current.checkOut,
         current.numGuests,
         lineItems,
+        extraChargesTotal(parseExtraCharges(current.extraCharges)),
       );
       const { paymentStatus } = this.settlePayment(totalPrice, current.amountPaid);
 
@@ -380,6 +471,17 @@ export class ReservationsService {
         data: { totalPrice, paymentStatus },
         include: { addonItems: true },
       });
+      await logOpsEvent(tx, {
+        tenantId: current.tenantId,
+        campgroundId: current.campgroundId,
+        type: 'rentals',
+        pitchId: current.pitchId,
+        reservationId: id,
+        actorId,
+        message: `อัปเดตอุปกรณ์เช่า ${current.pitch.code} · ${
+          lineItems.length ? lineItems.map((l) => `${l.name}×${l.qty}`).join(', ') : 'ไม่มี'
+        }`,
+      });
       this.logger.log(
         `Reservation addons updated: ${id} items=${lineItems.length} total=${totalPrice}`,
       );
@@ -401,15 +503,18 @@ export class ReservationsService {
     checkOut: Date,
     numGuests: number,
     addonItems: { qty: number; priceSnapshot: Prisma.Decimal | number }[],
+    extras = 0,
   ): number {
     const stay = quoteCampStay(zone, checkIn, checkOut, numGuests);
-    return (
+    const total =
       stay.lodging +
       stay.electricity +
       calcAddonTotal(
         addonItems.map((item) => ({ qty: item.qty, priceSnapshot: Number(item.priceSnapshot) })),
-      )
-    );
+      ) +
+      extras;
+    // ส่วนลดมากกว่ายอด = ยอดศูนย์ ไม่ติดลบ
+    return Math.max(0, Math.round(total * 100) / 100);
   }
 
   /**
@@ -430,32 +535,133 @@ export class ReservationsService {
     return { paid, paymentStatus: paid >= totalPrice ? 'paid' : paid > 0 ? 'partial' : 'pending' };
   }
 
-  async checkIn(id: string, tenantId?: string) {
-    await this.ensureExists(id, tenantId);
+  /**
+   * เช็คอิน — รับข้อมูลหน้าเคาน์เตอร์ได้ (ตรวจบัตร, จำนวนคนจริง, ทะเบียนรถ)
+   *
+   * กันเคสที่ทำให้ฉากหน้าลานเพี้ยน: จุดมีแขกคนอื่นพักอยู่ หรือจุดปิดซ่อม/ปิดขาย
+   * จุดที่ยังรอแม่บ้านเช็คอินได้ (หน้างานจริงแขกมาก่อนแม่บ้านเสร็จบ่อย) —
+   * งานทำความสะอาดที่ค้างของจุดนั้นปิดให้อัตโนมัติ
+   */
+  async checkIn(
+    id: string,
+    tenantId?: string,
+    dto: CheckInReservationDto = {},
+    actorId?: string | null,
+  ) {
     const data = await this.prisma.$transaction(async (tx) => {
+      const current = await tx.campReservation.findFirst({
+        where: { id, ...(tenantId ? { tenantId } : {}) },
+        include: { addonItems: true, pitch: { include: { zone: true } } },
+      });
+      if (!current) {
+        throw new NotFoundException(`Reservation ${id} not found`);
+      }
+      if (current.status === 'checked_in') {
+        return current;
+      }
+      if (current.status !== 'pending' && current.status !== 'confirmed') {
+        throw new BadRequestException('เช็คอินได้เฉพาะการจองที่ยังไม่เข้าพัก');
+      }
+      if (current.pitch.status === 'maintenance' || current.pitch.status === 'closed') {
+        throw new ConflictException(`จุด ${current.pitch.code} ปิดอยู่ — ย้ายจุดก่อนเช็คอิน`);
+      }
+      const occupiedBy = await tx.campReservation.findFirst({
+        where: { id: { not: id }, pitchId: current.pitchId, status: 'checked_in' },
+        select: { guestFirstName: true },
+      });
+      if (occupiedBy) {
+        throw new ConflictException(
+          `จุด ${current.pitch.code} ยังมีแขก (${occupiedBy.guestFirstName}) พักอยู่ — เช็คเอาท์หรือย้ายจุดก่อน`,
+        );
+      }
+
+      const numGuests = dto.numGuests ?? current.numGuests;
+      const totalPrice = this.computeTotal(
+        current.pitch.zone,
+        current.checkIn,
+        current.checkOut,
+        numGuests,
+        current.addonItems,
+        extraChargesTotal(parseExtraCharges(current.extraCharges)),
+      );
+      const { paymentStatus } = this.settlePayment(totalPrice, current.amountPaid);
+
       const reservation = await tx.campReservation.update({
         where: { id },
-        data: { status: 'checked_in', actualCheckIn: new Date() },
+        data: {
+          status: 'checked_in',
+          actualCheckIn: new Date(),
+          numGuests,
+          totalPrice,
+          paymentStatus,
+          ...(dto.numVehicles !== undefined ? { numVehicles: dto.numVehicles } : {}),
+          ...(dto.vehiclePlate !== undefined ? { vehiclePlate: dto.vehiclePlate.trim() || null } : {}),
+          ...(dto.idVerified ? { idVerifiedAt: new Date() } : {}),
+        },
       });
       await tx.campPitch.update({
-        where: { id: reservation.pitchId },
+        where: { id: current.pitchId },
         data: { status: 'occupied' },
+      });
+      if (current.tenantId) {
+        await tx.campOpsTask.updateMany({
+          where: {
+            tenantId: current.tenantId,
+            pitchId: current.pitchId,
+            type: 'cleaning',
+            status: { in: ['open', 'in_progress'] },
+          },
+          data: { status: 'done', completedAt: new Date(), completedBy: actorId ?? null },
+        });
+      }
+      await logOpsEvent(tx, {
+        tenantId: current.tenantId,
+        campgroundId: current.campgroundId,
+        type: 'check_in',
+        pitchId: current.pitchId,
+        reservationId: id,
+        actorId,
+        message: `เช็คอิน ${current.pitch.code} · ${guestName(current)} · ${numGuests} คน${
+          dto.vehiclePlate ? ` · ${dto.vehiclePlate.trim()}` : ''
+        }`,
       });
       return reservation;
     });
     return { success: true, data };
   }
 
-  async checkOut(id: string, tenantId?: string) {
+  /**
+   * เช็คเอาท์ — ค่าเสียหาย (ถ้ามี) เข้าบิลก่อนปิด แล้วเปิดงานทำความสะอาดจุดให้แม่บ้าน
+   * ยอดค้างไม่บล็อกการเช็คเอาท์ (ลานเก็บเงินทีหลังได้) แต่หน้าจอเตือนก่อนเสมอ
+   */
+  async checkOut(
+    id: string,
+    tenantId?: string,
+    dto: CheckOutReservationDto = {},
+    actorId?: string | null,
+  ) {
     await this.ensureExists(id, tenantId);
     const before = await this.prisma.campReservation.findFirst({
       where: { id, ...(tenantId ? { tenantId } : {}) },
       select: { status: true },
     });
+    if (before?.status === 'cancelled') {
+      throw new BadRequestException('การจองนี้ถูกยกเลิกแล้ว');
+    }
+    const firstTime = before?.status !== 'checked_out';
     const data = await this.prisma.$transaction(async (tx) => {
+      if (firstTime && dto.damageFee && dto.damageFee > 0) {
+        await this.appendCharge(
+          tx,
+          id,
+          { label: dto.damageNote?.trim() || 'ค่าเสียหาย / อุปกรณ์ไม่คืน', amount: dto.damageFee, kind: 'damage' },
+          actorId,
+        );
+      }
       const reservation = await tx.campReservation.update({
         where: { id },
         data: { status: 'checked_out', actualCheckOut: new Date() },
+        include: { pitch: { select: { code: true } } },
       });
       // จุดเข้าสู่สถานะทำความสะอาดก่อนพร้อมขายใหม่
       await tx.campPitch.update({
@@ -463,14 +669,146 @@ export class ReservationsService {
         data: { status: 'cleaning' },
       });
 
+      if (firstTime && reservation.tenantId) {
+        await tx.campOpsTask.create({
+          data: {
+            tenantId: reservation.tenantId,
+            campgroundId: reservation.campgroundId,
+            pitchId: reservation.pitchId,
+            reservationId: id,
+            type: 'cleaning',
+            title: 'ทำความสะอาดหลังเช็คเอาท์',
+            assigneeName: dto.housekeeperName?.trim() || null,
+            status: dto.housekeeperName?.trim() ? 'in_progress' : 'open',
+            startedAt: dto.housekeeperName?.trim() ? new Date() : null,
+            createdBy: actorId ?? null,
+          },
+        });
+        const balance = Number(reservation.totalPrice) - Number(reservation.amountPaid ?? 0);
+        await logOpsEvent(tx, {
+          tenantId: reservation.tenantId,
+          campgroundId: reservation.campgroundId,
+          type: 'check_out',
+          pitchId: reservation.pitchId,
+          reservationId: id,
+          actorId,
+          message: `เช็คเอาท์ ${reservation.pitch.code} · ${guestName(reservation)}${
+            balance > 0 ? ` · ค้างชำระ ${baht(balance)}` : ''
+          }${dto.housekeeperName?.trim() ? ` · มอบหมาย${dto.housekeeperName.trim()}` : ''}`,
+        });
+      }
+
       // แขกออกแล้ว = รายได้เกิดแล้ว ลงสมุดในทรานแซกชันเดียวกับการปิดการจอง
       await this.recordCampRevenue(tx, id, reservation.campgroundId);
 
-      return reservation;
+      const { pitch: _pitch, ...plain } = reservation;
+      return plain;
     });
     // แต้มให้หลังทรานแซกชันเท่านั้น และไม่ให้ซ้ำถ้ากดเช็คเอาต์การจองที่ออกไปแล้ว
-    if (before?.status !== 'checked_out') await this.awardStayPoints(data);
+    if (firstTime) await this.awardStayPoints(data);
     return { success: true, data };
+  }
+
+  /** เพิ่มค่าใช้จ่ายเข้าบิล แล้วคิดยอดรวม/สถานะการชำระใหม่ */
+  async addCharge(id: string, dto: AddExtraChargeDto, tenantId?: string, actorId?: string | null) {
+    if (dto.amount === 0) throw new BadRequestException('จำนวนเงินต้องไม่เป็นศูนย์');
+    if (dto.amount < 0 && dto.kind !== 'adjustment') {
+      throw new BadRequestException('ยอดติดลบ (ส่วนลด) ใช้ได้กับประเภท "ปรับราคา" เท่านั้น');
+    }
+    await this.ensureExists(id, tenantId);
+    const data = await this.prisma.$transaction(async (tx) => {
+      const current = await tx.campReservation.findUniqueOrThrow({
+        where: { id },
+        select: { status: true },
+      });
+      if (current.status === 'cancelled') {
+        throw new BadRequestException('การจองนี้ถูกยกเลิกแล้ว');
+      }
+      return this.appendCharge(tx, id, dto, actorId, true);
+    });
+    return { success: true, data };
+  }
+
+  async removeCharge(id: string, chargeId: string, tenantId?: string, actorId?: string | null) {
+    await this.ensureExists(id, tenantId);
+    const data = await this.prisma.$transaction(async (tx) => {
+      const current = await tx.campReservation.findUniqueOrThrow({
+        where: { id },
+        include: { addonItems: true, pitch: { include: { zone: true } } },
+      });
+      if (current.status === 'checked_out' || current.status === 'cancelled') {
+        throw new BadRequestException('ปิดบิลแล้ว แก้ค่าใช้จ่ายไม่ได้');
+      }
+      const charges = parseExtraCharges(current.extraCharges);
+      const target = charges.find((c) => c.id === chargeId);
+      if (!target) throw new NotFoundException('ไม่พบรายการค่าใช้จ่ายนี้');
+      const rest = charges.filter((c) => c.id !== chargeId);
+      const totalPrice = this.computeTotal(
+        current.pitch.zone,
+        current.checkIn,
+        current.checkOut,
+        current.numGuests,
+        current.addonItems,
+        extraChargesTotal(rest),
+      );
+      const { paymentStatus } = this.settlePayment(totalPrice, current.amountPaid);
+      const updated = await tx.campReservation.update({
+        where: { id },
+        data: { extraCharges: chargesJson(rest), totalPrice, paymentStatus },
+      });
+      await logOpsEvent(tx, {
+        tenantId: current.tenantId,
+        campgroundId: current.campgroundId,
+        type: 'charge',
+        pitchId: current.pitchId,
+        reservationId: id,
+        actorId,
+        message: `ลบค่าใช้จ่าย ${current.pitch.code} · ${target.label} (${baht(target.amount)})`,
+      });
+      return updated;
+    });
+    return { success: true, data };
+  }
+
+  /** ต่อท้าย extraCharges + คิดยอดใหม่ — ใช้ใน transaction ของผู้เรียก */
+  private async appendCharge(
+    tx: Prisma.TransactionClient,
+    id: string,
+    input: { label: string; amount: number; kind?: AddExtraChargeDto['kind'] },
+    actorId?: string | null,
+    log = false,
+  ) {
+    const current = await tx.campReservation.findUniqueOrThrow({
+      where: { id },
+      include: { addonItems: true, pitch: { include: { zone: true } } },
+    });
+    const charge = newCharge(input, actorId);
+    const charges = [...parseExtraCharges(current.extraCharges), charge];
+    const totalPrice = this.computeTotal(
+      current.pitch.zone,
+      current.checkIn,
+      current.checkOut,
+      current.numGuests,
+      current.addonItems,
+      extraChargesTotal(charges),
+    );
+    const { paymentStatus } = this.settlePayment(totalPrice, current.amountPaid);
+    const updated = await tx.campReservation.update({
+      where: { id },
+      data: { extraCharges: chargesJson(charges), totalPrice, paymentStatus },
+    });
+    if (log) {
+      await logOpsEvent(tx, {
+        tenantId: current.tenantId,
+        campgroundId: current.campgroundId,
+        type: 'charge',
+        pitchId: current.pitchId,
+        reservationId: id,
+        actorId,
+        message: `เพิ่มค่าใช้จ่าย ${current.pitch.code} · ${charge.label} ${baht(charge.amount)}`,
+      });
+    }
+    return updated;
   }
 
   /**
@@ -524,13 +862,22 @@ export class ReservationsService {
     await this.revenuePosting.postWithin(tx, revenue);
   }
 
-  async cancel(id: string, tenantId?: string) {
+  /**
+   * ยกเลิก / No-show — เก็บเหตุผลไว้ และบันทึกว่าจะทำอะไรกับมัดจำ
+   * (ระบบไม่โอนเงินคืนเอง: depositAction เป็นบันทึกให้ฝ่ายบัญชีตามต่อ)
+   * ยกเลิกแขกที่อยู่ในลานแล้ว → จุดต้องไปรอแม่บ้าน ไม่ใช่ค้าง "มีแขก"
+   */
+  async cancel(id: string, tenantId?: string, dto: CancelReservationDto = {}, actorId?: string | null) {
     await this.ensureExists(id, tenantId);
     const data = await this.prisma.$transaction(async (tx) => {
       const reservation = await tx.campReservation.findUniqueOrThrow({
         where: { id },
-        include: { addonItems: true },
+        include: { addonItems: true, pitch: { select: { code: true } } },
       });
+      if (reservation.status === 'cancelled') {
+        const { pitch: _p, addonItems: _a, ...plain } = reservation;
+        return plain;
+      }
       // คืน stock อุปกรณ์เช่ากลับคลัง — เฉพาะลานที่เชื่อมระบบคลัง
       // (ลานที่ไม่บริหารคลังไม่เคยตัด stock ตอนจอง จึงไม่ต้องคืน)
       const campground = await tx.campground.findFirst({
@@ -557,9 +904,39 @@ export class ReservationsService {
         });
       }
 
+      if (reservation.status === 'checked_in') {
+        await tx.campPitch.update({ where: { id: reservation.pitchId }, data: { status: 'cleaning' } });
+      }
+      const REASON: Record<string, string> = { no_show: 'No-show', guest: 'ลูกค้าขอยกเลิก', camp: 'ลานยกเลิก' };
+      const DEPOSIT: Record<string, string> = { keep: 'ริบมัดจำ', refund: 'คืนมัดจำ', credit: 'เก็บเป็นเครดิต' };
+      const paid = Number(reservation.amountPaid ?? 0);
+      const memo = [
+        dto.reason ? REASON[dto.reason] : 'ยกเลิก',
+        paid > 0 && dto.depositAction ? `${DEPOSIT[dto.depositAction]} ${baht(paid)}` : null,
+        dto.note?.trim() || null,
+      ]
+        .filter(Boolean)
+        .join(' · ');
+      await logOpsEvent(tx, {
+        tenantId: reservation.tenantId,
+        campgroundId: reservation.campgroundId,
+        type: 'cancel',
+        pitchId: reservation.pitchId,
+        reservationId: id,
+        actorId,
+        message: `${memo} · ${reservation.pitch.code} ${guestName(reservation)}`,
+        meta: { reason: dto.reason ?? null, depositAction: dto.depositAction ?? null, amountPaid: paid },
+      });
+
       return tx.campReservation.update({
         where: { id },
-        data: { status: 'cancelled' },
+        data: {
+          status: 'cancelled',
+          cancelReason: dto.reason ?? null,
+          ...(dto.reason || dto.depositAction || dto.note
+            ? { notes: [reservation.notes, `[${memo}]`].filter(Boolean).join('\n') }
+            : {}),
+        },
       });
     });
     return { success: true, data };
@@ -569,7 +946,12 @@ export class ReservationsService {
    * รับชำระเงินจริง — บันทึกยอดที่รับเข้ามาแบบสะสม แล้วอัปเดตสถานะการชำระ
    * paid เมื่อยอดสะสม >= totalPrice, partial เมื่อ > 0, ไม่งั้น pending
    */
-  async recordPayment(id: string, dto: RecordPaymentDto, tenantId?: string) {
+  async recordPayment(
+    id: string,
+    dto: RecordPaymentDto,
+    tenantId?: string,
+    actorId?: string | null,
+  ) {
     const reservation = await this.prisma.campReservation.findFirst({
       where: { id, ...(tenantId ? { tenantId } : {}) },
       select: {
@@ -580,6 +962,12 @@ export class ReservationsService {
         payments: true,
         reservationNo: true,
         paymentRef: true,
+        tenantId: true,
+        campgroundId: true,
+        pitchId: true,
+        guestFirstName: true,
+        guestLastName: true,
+        pitch: { select: { code: true } },
       },
     });
     if (!reservation) {
@@ -624,6 +1012,18 @@ export class ReservationsService {
         payments: payments as unknown as Prisma.InputJsonValue,
       },
     });
+    const METHOD: Record<string, string> = { cash: 'เงินสด', transfer: 'โอนเงิน', qr: 'PromptPay', card: 'บัตร' };
+    await logOpsEvent(this.prisma, {
+      tenantId: reservation.tenantId,
+      campgroundId: reservation.campgroundId,
+      type: 'payment',
+      pitchId: reservation.pitchId,
+      reservationId: id,
+      actorId,
+      message: `รับชำระ ${reservation.pitch.code} · ${guestName(reservation)} ${baht(dto.amount)} (${
+        METHOD[dto.method] ?? dto.method
+      })`,
+    }).catch((err: Error) => this.logger.warn(`ops event skipped: ${err.message}`));
     this.logger.log(
       `Payment recorded: ${id} +${dto.amount} (${dto.method}) → ${paymentStatus} ${newPaid}/${total}`,
     );

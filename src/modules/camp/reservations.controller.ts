@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Post,
@@ -18,6 +19,10 @@ import { StorageService } from '@/common/storage/storage.service';
 import { ReservationsService } from './reservations.service';
 import { CampAccountingService } from './camp-accounting.service';
 import {
+  AddExtraChargeDto,
+  CancelReservationDto,
+  CheckInReservationDto,
+  CheckOutReservationDto,
   CreateReservationDto,
   RecordPaymentDto,
   UpdateReservationAddonsDto,
@@ -59,7 +64,7 @@ export class ReservationsController {
   @Post('admin/backfill-journal-entries')
   @ApiOperation({ summary: 'Backfill journal entries for camp payments with no accounting entry' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager')
-  backfillJournalEntries(@CurrentUser() user: { tenantId?: string }) {
+  backfillJournalEntries(@CurrentUser() user: { id?: string; tenantId?: string }) {
     return this.campAccounting.backfillJournals(user?.tenantId);
   }
 
@@ -69,7 +74,7 @@ export class ReservationsController {
   findAll(
     @Query('campgroundId') campgroundId: string,
     @Query('status') status: string,
-    @CurrentUser() user: { tenantId?: string },
+    @CurrentUser() user: { id?: string; tenantId?: string },
   ) {
     return this.service.findAll({ campgroundId, status }, user?.tenantId);
   }
@@ -77,15 +82,15 @@ export class ReservationsController {
   @Get(':id')
   @ApiOperation({ summary: 'Get reservation by id' })
   @Roles(...CAMP_READ_ROLES)
-  findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
+  findOne(@Param('id') id: string, @CurrentUser() user: { id?: string; tenantId?: string }) {
     return this.service.findOne(id, user?.tenantId);
   }
 
   @Post()
   @ApiOperation({ summary: 'Create reservation (prevents double-booking)' })
   @Roles(...CAMP_OPS_WRITE_ROLES)
-  create(@Body() dto: CreateReservationDto, @CurrentUser() user: { tenantId?: string }) {
-    return this.service.create(dto, user?.tenantId);
+  create(@Body() dto: CreateReservationDto, @CurrentUser() user: { id?: string; tenantId?: string }) {
+    return this.service.create(dto, user?.tenantId, { actorId: user?.id });
   }
 
   @Put(':id')
@@ -94,9 +99,9 @@ export class ReservationsController {
   update(
     @Param('id') id: string,
     @Body() dto: UpdateReservationDto,
-    @CurrentUser() user: { tenantId?: string },
+    @CurrentUser() user: { id?: string; tenantId?: string },
   ) {
-    return this.service.update(id, dto, user?.tenantId);
+    return this.service.update(id, dto, user?.tenantId, user?.id);
   }
 
   @Put(':id/addons')
@@ -107,30 +112,64 @@ export class ReservationsController {
   updateAddons(
     @Param('id') id: string,
     @Body() dto: UpdateReservationAddonsDto,
-    @CurrentUser() user: { tenantId?: string },
+    @CurrentUser() user: { id?: string; tenantId?: string },
   ) {
-    return this.service.updateAddons(id, dto, user?.tenantId);
+    return this.service.updateAddons(id, dto, user?.tenantId, user?.id);
   }
 
   @Post(':id/check-in')
   @ApiOperation({ summary: 'Check-in reservation' })
   @Roles(...CAMP_OPS_WRITE_ROLES)
-  checkIn(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
-    return this.service.checkIn(id, user?.tenantId);
+  checkIn(
+    @Param('id') id: string,
+    @Body() dto: CheckInReservationDto,
+    @CurrentUser() user: { id?: string; tenantId?: string },
+  ) {
+    return this.service.checkIn(id, user?.tenantId, dto ?? {}, user?.id);
   }
 
   @Post(':id/check-out')
   @ApiOperation({ summary: 'Check-out reservation' })
   @Roles(...CAMP_OPS_WRITE_ROLES)
-  checkOut(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
-    return this.service.checkOut(id, user?.tenantId);
+  checkOut(
+    @Param('id') id: string,
+    @Body() dto: CheckOutReservationDto,
+    @CurrentUser() user: { id?: string; tenantId?: string },
+  ) {
+    return this.service.checkOut(id, user?.tenantId, dto ?? {}, user?.id);
   }
 
   @Post(':id/cancel')
   @ApiOperation({ summary: 'Cancel reservation' })
   @Roles(...CAMP_OPS_WRITE_ROLES)
-  cancel(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
-    return this.service.cancel(id, user?.tenantId);
+  cancel(
+    @Param('id') id: string,
+    @Body() dto: CancelReservationDto,
+    @CurrentUser() user: { id?: string; tenantId?: string },
+  ) {
+    return this.service.cancel(id, user?.tenantId, dto ?? {}, user?.id);
+  }
+
+  @Post(':id/charges')
+  @ApiOperation({ summary: 'Add an extra charge (damage, extra guest, adjustment) to the bill' })
+  @Roles(...CAMP_OPS_WRITE_ROLES)
+  addCharge(
+    @Param('id') id: string,
+    @Body() dto: AddExtraChargeDto,
+    @CurrentUser() user: { id?: string; tenantId?: string },
+  ) {
+    return this.service.addCharge(id, dto, user?.tenantId, user?.id);
+  }
+
+  @Delete(':id/charges/:chargeId')
+  @ApiOperation({ summary: 'Remove an extra charge from an open bill' })
+  @Roles(...CAMP_OPS_WRITE_ROLES)
+  removeCharge(
+    @Param('id') id: string,
+    @Param('chargeId') chargeId: string,
+    @CurrentUser() user: { id?: string; tenantId?: string },
+  ) {
+    return this.service.removeCharge(id, chargeId, user?.tenantId, user?.id);
   }
 
   @Post(':id/payment')
@@ -139,9 +178,9 @@ export class ReservationsController {
   recordPayment(
     @Param('id') id: string,
     @Body() dto: RecordPaymentDto,
-    @CurrentUser() user: { tenantId?: string },
+    @CurrentUser() user: { id?: string; tenantId?: string },
   ) {
-    return this.service.recordPayment(id, dto, user?.tenantId);
+    return this.service.recordPayment(id, dto, user?.tenantId, user?.id);
   }
 
   @Post(':id/payment-slip')
@@ -164,7 +203,7 @@ export class ReservationsController {
   async uploadPaymentSlip(
     @Param('id') id: string,
     @UploadedFile() file: MulterFile,
-    @CurrentUser() user: { tenantId?: string },
+    @CurrentUser() user: { id?: string; tenantId?: string },
   ) {
     if (!file) {
       throw new BadRequestException('ไม่พบไฟล์สลิป');

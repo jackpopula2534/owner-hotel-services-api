@@ -3,6 +3,7 @@ import { round2 } from '@/common/utils/bangkok-day.util';
 import type { PostRevenueInput, RevenueLineInput } from '../revenue-posting.service';
 import { settlementOf } from './settlement.util';
 import { num, type Money } from './money';
+import { nonLodgingCharges, parseExtraCharges } from '../../camp/camp-ops-shared';
 
 /** แถว CampReservation เท่าที่การบันทึกรายได้ต้องใช้ */
 export interface CampRevenueRow {
@@ -15,6 +16,8 @@ export interface CampRevenueRow {
   actualCheckOut: Date | null;
   totalPrice: Money;
   addonItems: { qty: number; priceSnapshot: Money }[];
+  /** ค่าใช้จ่ายเพิ่ม (ค่าเสียหาย ฯลฯ) — ไม่มีคอลัมน์นี้ = ไม่มีค่าใช้จ่ายเพิ่ม */
+  extraCharges?: unknown;
 }
 
 /** ข้อมูลลานที่แถวการจองไม่ได้ถืออยู่เอง */
@@ -34,6 +37,7 @@ export const CAMP_REVENUE_SELECT = {
   actualCheckOut: true,
   totalPrice: true,
   addonItems: { select: { qty: true, priceSnapshot: true } },
+  extraCharges: true,
 } as const;
 
 /**
@@ -68,8 +72,10 @@ export function buildCampRevenueInput(
   // ค่าที่พัก = ยอดรวม − ค่าอุปกรณ์ (ยอดรวมเก็บก้อนเดียว ไม่ได้แยกคอลัมน์ไว้)
   // ถ้าค่าอุปกรณ์เกินยอดรวมเพราะราคาถูกแก้ทีหลัง ให้ค่าที่พักเป็น 0 แล้วตัดค่าอุปกรณ์
   // ลงเท่ายอดรวม — สมุดรายได้ต้องไม่มีวันบันทึกเกินกว่าที่เอกสารบอกว่าเก็บได้
-  const lodging = round2(Math.max(totalPrice - addonTotal, 0));
-  const addons = round2(Math.min(addonTotal, totalPrice));
+  // ค่าเสียหาย/อื่น ๆ ใน extraCharges ไม่ใช่ค่าที่พัก → รวมเข้า OTHER เหมือนค่าอุปกรณ์
+  const otherTotal = round2(addonTotal + nonLodgingCharges(parseExtraCharges(reservation.extraCharges)));
+  const lodging = round2(Math.max(totalPrice - otherTotal, 0));
+  const addons = round2(Math.min(otherTotal, totalPrice));
 
   const lines: RevenueLineInput[] = [];
   if (lodging > 0) lines.push({ revenueType: RevenueType.ROOM, grossAmount: lodging });

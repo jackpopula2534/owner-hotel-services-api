@@ -42,7 +42,7 @@ describe('AdminSubscriptionFeaturesService — product-line separation', () => {
 
   const subscriptionsRepo = { findOne: jest.fn() };
   const featuresRepo = { findOne: jest.fn() };
-  const subscriptionFeaturesRepo = { findOne: jest.fn() };
+  const subscriptionFeaturesRepo = { findOne: jest.fn(), save: jest.fn() };
 
   const prismaMock = {
     add_ons: { findMany: jest.fn() },
@@ -69,7 +69,7 @@ describe('AdminSubscriptionFeaturesService — product-line separation', () => {
         AdminSubscriptionFeaturesService,
         AddonService,
         { provide: getRepositoryToken(SubscriptionFeature), useValue: subscriptionFeaturesRepo },
-        { provide: getRepositoryToken(SubscriptionFeatureLogs), useValue: { findOne: jest.fn() } },
+        { provide: getRepositoryToken(SubscriptionFeatureLogs), useValue: { findOne: jest.fn(), create: jest.fn((v) => v), save: jest.fn() } },
         { provide: getRepositoryToken(Subscription), useValue: subscriptionsRepo },
         { provide: getRepositoryToken(Feature), useValue: featuresRepo },
         { provide: getRepositoryToken(Invoice), useValue: { findOne: jest.fn() } },
@@ -143,5 +143,25 @@ describe('AdminSubscriptionFeaturesService — product-line separation', () => {
     await expect(
       service.addFeature({ subscriptionId: 'sub-1', featureId: 'feat-hr' }),
     ).rejects.toThrow(/already added/);
+  });
+
+  it('removing an add-on clears the tenant entitlement cache', async () => {
+    const addonService = (service as unknown as { addonService: AddonService }).addonService;
+    const invalidate = jest.spyOn(addonService, 'invalidateAddonCache').mockResolvedValue(undefined);
+    subscriptionFeaturesRepo.findOne.mockResolvedValue({
+      id: 'sf-1',
+      subscriptionId: 'sub-1',
+      featureId: 'feat-3d',
+      price: 790,
+      quantity: 1,
+      isActive: true,
+      feature: { name: 'แผนที่ลาน 3D' },
+      subscription: { tenantId: 'tenant-camp', endDate: new Date(Date.now() + 86400000) },
+    });
+
+    await service.removeFeature('sf-1', { createCredit: false });
+
+    expect(subscriptionFeaturesRepo.save).toHaveBeenCalledWith(expect.objectContaining({ isActive: false }));
+    expect(invalidate).toHaveBeenCalledWith('tenant-camp');
   });
 });

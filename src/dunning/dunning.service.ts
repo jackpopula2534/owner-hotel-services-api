@@ -6,6 +6,7 @@ import { EmailService } from '../email/email.service';
 import { EmailTemplate } from '../email/dto/send-email.dto';
 import { TenantLifecycleService } from '../tenants/tenant-lifecycle.service';
 import { TenantStatus } from '../tenants/entities/tenant.entity';
+import { ADDON_PURCHASE_INVOICE_PREFIX } from '@/modules/addon-purchases/addon-purchase.service';
 
 /**
  * Dunning policy. Each rule fires when an invoice has been overdue for the
@@ -168,6 +169,9 @@ export class DunningService {
       where: {
         status: { in: ['pending', 'partially_paid'] as any },
         due_date: { lt: threshold },
+        // ใบซื้อ add-on แบบ self-service เป็นใบเสนอซื้อ ไม่จ่าย = ไม่ได้ add-on
+        // ห้ามนับเป็นหนี้ค้างแล้วพาให้ tenant โดน PAST_DUE / SUSPENDED
+        NOT: { invoice_no: { startsWith: ADDON_PURCHASE_INVOICE_PREFIX } },
       },
       include: { tenants: true },
     });

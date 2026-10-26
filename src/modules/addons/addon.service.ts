@@ -31,6 +31,7 @@ export const ADDON_CODES = {
   ACCOUNTING_MODULE: 'ACCOUNTING_MODULE',
   CRM_MODULE: 'CRM_MODULE',
   CAMP_MODULE: 'CAMP_MODULE',
+  CAMP_3D_MAP: 'CAMP_3D_MAP',
   WEBSITE_BUILDER: 'WEBSITE_BUILDER',
 } as const;
 
@@ -82,20 +83,21 @@ export function isAddonAvailableForSystem(
   return addon === 'BOTH' || addon === plan;
 }
 
-export type AddonSource = 'plan' | 'subscription' | 'trial';
+export type AddonSource = 'plan' | 'subscription' | 'purchase' | 'trial';
 
 export interface AddonStatus {
   code: string;
   name: string;
   isActive: boolean;
-  /** ISO timestamp; only 'trial' entitlements expire — plan/subscription ones are null. */
+  /** ISO timestamp; 'purchase' and 'trial' entitlements expire — plan/subscription ones are null. */
   expiresAt: string | null;
   /**
    * Where the entitlement comes from:
    * - 'plan'         → feature included in the tenant's current plan (set by Admin in Plans → Features)
    * - 'subscription' → standalone add-on attached to the subscription (set by Admin/Tenant in Add-ons)
+   * - 'purchase'     → a paid monthly addon_purchases row whose period hasn't ended (self-service buy)
    * - 'trial'        → an approved, unexpired addon_trial_request (time-boxed, not billed)
-   * All three unlock the same UI; this field is for diagnostics and for the
+   * All of them unlock the same UI; this field is for diagnostics and for the
    * frontend to show "trial ends in N days" banners.
    */
   source: AddonSource;
@@ -270,11 +272,12 @@ export class AddonService {
 
   /**
    * Returns every "module"-type entitlement the tenant currently has,
-   * unioning four sources:
+   * unioning five sources:
    *   1) plan_features        → modules included in the tenant's plan (Admin-controlled)
    *   2) plan_addons          → add-ons curated onto the plan by Admin
    *   3) subscription_features → standalone add-ons attached to the subscription
-   *   4) addon_trial_requests  → approved, not-yet-expired free trials
+   *   4) addon_purchases       → paid self-service months still inside their period
+   *   5) addon_trial_requests  → approved, not-yet-expired free trials
    *
    * Deduplicates by code, in that order: a permanent entitlement always wins
    * over an expiring one, so an approved trial never shadows a module the
@@ -370,18 +373,47 @@ export class AddonService {
             code: f.code,
             name: f.name,
             isActive: true,
-            expiresAt: null,
+            // bill-later ที่สั่งยกเลิกแล้ว: ใช้ได้ถึงวันมีผล (cron ปิดแถวเมื่อถึงวัน)
+            expiresAt: sf.cancel_at ? sf.cancel_at.toISOString() : null,
             source: 'subscription',
           });
         }
 
-        // 4) Free trials the Admin approved and that haven't lapsed yet. These
+        // 4) Self-service monthly purchases (addon_purchases) that are paid and
+        //    still inside their period. Renewals stack back-to-back, so the latest
+        //    periodEnd is the expiry. Kept out of subscription_features on purpose:
+        //    that table has no expiry and is summed into the plan renewal invoice.
+        const purchases = await this.findActivePurchaseGrants(tenantId, now);
+        for (const purchase of purchases) {
+          if (merged.has(purchase.code)) continue; // plan/subscription is permanent
+          merged.set(purchase.code, {
+            code: purchase.code,
+            name: purchase.name,
+            isActive: true,
+            expiresAt: purchase.expiresAt.toISOString(),
+            source: 'purchase',
+          });
+        }
+
+        // 5) Free trials the Admin approved and that haven't lapsed yet. These
         //    stand on their own — a tenant can be granted a trial before they
         //    ever hold a paid subscription, so this source is read even when the
         //    lookup above found nothing.
         const trials = await this.findActiveTrialGrants(tenantId, now);
         for (const trial of trials) {
-          if (merged.has(trial.addon_code)) continue; // a paid entitlement outranks a trial
+          const paid = merged.get(trial.addon_code);
+          if (paid) {
+            // A purchase made mid-trial must not cut the trial short: the tenant
+            // keeps whichever runs longer.
+            if (
+              paid.source === 'purchase' &&
+              paid.expiresAt &&
+              trial.expires_at.toISOString() > paid.expiresAt
+            ) {
+              merged.set(trial.addon_code, { ...paid, expiresAt: trial.expires_at.toISOString() });
+            }
+            continue; // a paid entitlement outranks a trial
+          }
           merged.set(trial.addon_code, {
             code: trial.addon_code,
             name: trial.addon_name ?? trial.addon_code,
@@ -391,7 +423,7 @@ export class AddonService {
           });
         }
 
-        // 5) Parent → child entitlement expansion. Owning a parent module
+        // 6) Parent → child entitlement expansion. Owning a parent module
         //    auto-grants its folded child codes (e.g. ACCOUNTING_MODULE grants
         //    COST_ACCOUNTING_MODULE) so legacy controller guards keep working.
         //    The child inherits the parent's expiry too — a trialled parent must
@@ -433,6 +465,30 @@ export class AddonService {
       select: { addon_code: true, addon_name: true, expires_at: true },
     });
     return rows as TrialGrantRow[];
+  }
+
+  /** Latest paid, unexpired period per add-on code from self-service purchases. */
+  private async findActivePurchaseGrants(
+    tenantId: string,
+    now: Date,
+  ): Promise<{ code: string; name: string; expiresAt: Date }[]> {
+    const rows = await this.prisma.addonPurchase.findMany({
+      where: { tenantId, status: 'paid', periodEnd: { gt: now } },
+      select: { addonCode: true, periodEnd: true },
+    });
+    const latest = new Map<string, Date>();
+    for (const row of rows) {
+      if (!row.periodEnd) continue;
+      const prev = latest.get(row.addonCode);
+      if (!prev || row.periodEnd > prev) latest.set(row.addonCode, row.periodEnd);
+    }
+    if (latest.size === 0) return [];
+    const catalog = await this.listActive();
+    return Array.from(latest, ([code, expiresAt]) => ({
+      code,
+      name: catalog.find((a) => a.code === code)?.name ?? code,
+      expiresAt,
+    }));
   }
 
   /**
@@ -775,7 +831,9 @@ export class AddonService {
 
     const stale = rows.filter(
       (row) =>
-        row.plans && row.add_ons && !isAddonAvailableForSystem(row.add_ons.system, row.plans.system),
+        row.plans &&
+        row.add_ons &&
+        !isAddonAvailableForSystem(row.add_ons.system, row.plans.system),
     );
 
     for (const row of stale) {

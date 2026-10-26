@@ -1,13 +1,5 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
-import {
-  IsBoolean,
-  IsNumber,
-  IsOptional,
-  IsString,
-  Max,
-  MaxLength,
-  Min,
-} from 'class-validator';
+import { IsBoolean, IsNumber, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 
 const FACILITY_TYPE = ['restroom', 'electricity', 'shop', 'service', 'other'] as const;
 const FACILITY_STATUS = ['open', 'closed', 'maintenance'] as const;
@@ -48,6 +40,13 @@ export class CreateFacilityDto {
   @Min(0)
   @Max(1)
   posY?: number;
+
+  @ApiPropertyOptional({ description: 'มุมหมุนบนผัง 3D (องศา 0..360)', default: 0 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(360)
+  rotation?: number;
 
   @ApiPropertyOptional({ example: '08:00' })
   @IsOptional()

@@ -1,3 +1,4 @@
+import type { CheckInDto } from './dto/check-in.dto';
 import {
   Injectable,
   NotFoundException,
@@ -1168,7 +1169,135 @@ export class BookingsService {
     return this.mapBookingResponse(updated);
   }
 
-  async checkIn(id: string, tenantId?: string) {
+  /**
+   * ย้ายห้อง — ใช้แทน PATCH ทั่วไป เพราะ PATCH เขียนทับ roomId ตรง ๆ โดยไม่ตรวจอะไร
+   *   • ห้องปลายทางต้องอยู่โรงแรมเดียวกัน ไม่ปิดซ่อม/ปิดขาย และไม่มีการจองอื่นทับช่วงที่เหลือ
+   *   • แขกเช็คอินแล้ว: ห้องใหม่ = occupied · ห้องเดิม = dirty + เปิดงานแม่บ้าน
+   *   • ราคาคงเดิม (ส่วนต่างอัปเกรด/ดาวน์เกรด เก็บผ่าน folio ตามนโยบายโรงแรม)
+   */
+  async moveRoom(id: string, roomId: string, tenantId?: string, userId?: string, reason?: string) {
+    const booking = await this.prisma.booking.findFirst({
+      where: { id, ...(tenantId ? { tenantId } : {}) },
+      include: { room: { select: { id: true, number: true } } },
+    });
+    if (!booking) throw new NotFoundException(`Booking ${id} not found`);
+    if (!['pending', 'confirmed', 'checked_in'].includes(booking.status)) {
+      throw new BadRequestException('ย้ายห้องได้เฉพาะการจองที่ยังไม่เช็คเอาท์');
+    }
+    if (booking.roomId === roomId) throw new BadRequestException('เป็นห้องเดิมอยู่แล้ว');
+
+    const target = await this.prisma.room.findFirst({
+      where: { id: roomId, propertyId: booking.propertyId, ...(tenantId ? { tenantId } : {}) },
+      select: { id: true, number: true, status: true },
+    });
+    if (!target) throw new NotFoundException('ไม่พบห้องปลายทางในโรงแรมนี้');
+    if (['maintenance', 'out_of_order'].includes(target.status)) {
+      throw new BadRequestException(`ห้อง ${target.number} ปิดซ่อม/ปิดขายอยู่`);
+    }
+
+    const now = new Date();
+    const from = booking.status === 'checked_in' && booking.checkIn < now ? now : booking.checkIn;
+    const clash = await this.prisma.booking.findFirst({
+      where: {
+        id: { not: id },
+        roomId,
+        OR: [
+          { status: 'checked_in' },
+          { status: { in: ['pending', 'confirmed'] }, checkIn: { lt: booking.checkOut }, checkOut: { gt: from } },
+        ],
+      },
+      select: { guestFirstName: true },
+    });
+    if (clash) throw new ConflictException(`ห้อง ${target.number} มีการจอง/แขกพักทับช่วงนี้`);
+
+    const inHouse = booking.status === 'checked_in';
+    // แขกเช็คอินแบบรอห้อง ย้ายไปห้องที่พร้อม = ส่งมอบห้องเลย ห้องเดิมยังไม่มีใครเข้า จึงไม่ต้องส่งแม่บ้านเพิ่ม
+    const waiting = inHouse && Boolean(booking.awaitingRoomSince);
+    if (waiting && ['dirty', 'cleaning'].includes(target.status)) {
+      throw new BadRequestException(`ห้อง ${target.number} ยังไม่พร้อม — เลือกห้องที่ทำความสะอาดแล้ว`);
+    }
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const b = await tx.booking.update({
+        where: { id },
+        data: { roomId, ...(waiting ? { awaitingRoomSince: null } : {}) },
+        include: { guest: true, room: true, property: true },
+      });
+      if (inHouse) {
+        await tx.room.update({ where: { id: roomId }, data: { status: 'occupied' } });
+        if (!waiting) await tx.room.update({ where: { id: booking.roomId }, data: { status: 'dirty' } });
+      }
+      return b;
+    });
+
+    if (inHouse && !waiting) {
+      this.housekeepingService
+        .createTask(
+          {
+            roomId: booking.roomId,
+            bookingId: id,
+            type: TaskType.CHECKOUT,
+            priority: TaskPriority.HIGH,
+            notes: `ย้ายแขก ${booking.guestFirstName} ไปห้อง ${target.number}${reason ? ` · ${reason}` : ''}`,
+          },
+          tenantId ?? booking.tenantId ?? '',
+        )
+        .catch((err: Error) => this.logger.error(`Failed to create room-move housekeeping task: ${err.message}`));
+    }
+
+    this.auditLogService
+      .log({
+        action: AuditAction.BOOKING_UPDATE,
+        resource: AuditResource.BOOKING,
+        resourceId: id,
+        oldValues: { roomId: booking.roomId, roomNumber: booking.room?.number },
+        newValues: { roomId, roomNumber: target.number },
+        userId: userId || 'system',
+        tenantId,
+        description: `Room moved ${booking.room?.number ?? '?'} → ${target.number} for ${booking.guestFirstName} ${booking.guestLastName}${reason ? ` (${reason})` : ''}`,
+      })
+      .catch((err: Error) => this.logger.error(`Failed to log room move: ${err.message}`));
+
+    return this.mapBookingResponse(updated);
+  }
+
+  /**
+   * ส่งมอบห้องให้แขกที่เช็คอินแบบรอห้อง — ห้องต้องพร้อมแล้ว (ไม่สกปรก/ไม่ปิด)
+   */
+  async handOverRoom(id: string, tenantId?: string, keyCards?: number, userId?: string) {
+    const booking = await this.prisma.booking.findFirst({
+      where: { id, ...(tenantId ? { tenantId } : {}) },
+      include: { room: { select: { id: true, number: true, status: true } } },
+    });
+    if (!booking) throw new NotFoundException(`Booking ${id} not found`);
+    if (booking.status !== 'checked_in' || !booking.awaitingRoomSince) {
+      throw new BadRequestException('การจองนี้ไม่ได้รอห้องอยู่');
+    }
+    if (['dirty', 'cleaning', 'maintenance', 'out_of_order'].includes(booking.room.status)) {
+      throw new BadRequestException(`ห้อง ${booking.room.number} ยังไม่พร้อม`);
+    }
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.room.update({ where: { id: booking.roomId }, data: { status: 'occupied' } });
+      return tx.booking.update({
+        where: { id },
+        data: { awaitingRoomSince: null, ...(keyCards != null ? { keyCards } : {}) },
+        include: { guest: true, room: true, property: true },
+      });
+    });
+    this.auditLogService
+      .log({
+        action: AuditAction.BOOKING_UPDATE,
+        resource: AuditResource.BOOKING,
+        resourceId: id,
+        newValues: { awaitingRoomSince: null, keyCards },
+        userId: userId || 'system',
+        tenantId,
+        description: `Room ${booking.room.number} handed over to ${booking.guestFirstName} ${booking.guestLastName}`,
+      })
+      .catch((err: Error) => this.logger.error(`Failed to log room hand-over: ${err.message}`));
+    return this.mapBookingResponse(updated);
+  }
+
+  async checkIn(id: string, tenantId?: string, dto: CheckInDto = {}, userId?: string) {
     const booking = await this.findOne(id, tenantId);
 
     if (booking.status === 'checked_in') {
@@ -1201,17 +1330,40 @@ export class BookingsService {
       );
     }
 
+    const now = new Date();
+    const deposit = dto.depositAmount && dto.depositAmount > 0 ? dto.depositAmount : null;
     const updated = await this.prisma.booking.update({
       where: { id },
       data: {
         status: 'checked_in',
-        actualCheckIn: new Date(),
+        actualCheckIn: now,
+        ...(dto.idVerified ? { idVerifiedAt: now, idVerifiedBy: userId ?? null } : {}),
+        ...(dto.keyCards != null ? { keyCards: dto.keyCards } : {}),
+        ...(deposit ? { depositAmount: deposit, depositMethod: dto.depositMethod ?? 'cash', depositReturnedAt: null } : {}),
+        awaitingRoomSince: dto.awaitingRoom ? now : null,
       },
       include: { guest: true, room: true, property: true },
     });
 
-    // Update room status to occupied
-    if (booking.roomId) {
+    // เลขบัตร/พาสปอร์ตที่ตรวจตอนเช็คอิน → เก็บเข้าโปรไฟล์แขก ใช้ซ้ำครั้งหน้า
+    if (booking.guestId && (dto.idNumber || dto.nationality)) {
+      await this.prisma.guest
+        .update({
+          where: { id: booking.guestId },
+          data: {
+            ...(dto.idNumber
+              ? dto.idDocumentType === 'national_id'
+                ? { nationalId: dto.idNumber.trim() }
+                : { passportNumber: dto.idNumber.trim() }
+              : {}),
+            ...(dto.nationality ? { nationality: dto.nationality.trim() } : {}),
+          },
+        })
+        .catch((err) => this.logger.warn(`Check-in: could not update guest ID (${err.message})`));
+    }
+
+    // ห้องยังไม่พร้อม (เช็คอินก่อน ห้องตามมา) → คงสถานะห้องไว้ให้แม่บ้านทำต่อ ส่งมอบห้องทีหลัง
+    if (booking.roomId && !dto.awaitingRoom) {
       await this.prisma.room
         .update({
           where: { id: booking.roomId },
@@ -1304,6 +1456,9 @@ export class BookingsService {
         data: {
           status: 'checked_out',
           actualCheckOut: now,
+          ...(booking.awaitingRoomSince ? { awaitingRoomSince: null } : {}),
+          // เงินประกันที่ถืออยู่ถือว่าคืนตอนเช็คเอาท์ (หักค่าเสียหายให้ลงเป็นรายการใน folio)
+          ...(booking.depositAmount && !booking.depositReturnedAt ? { depositReturnedAt: now } : {}),
         },
         include: { guest: true, room: true, property: true },
       });

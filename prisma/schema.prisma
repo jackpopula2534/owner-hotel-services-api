@@ -173,6 +173,10 @@ model Property {
   lateCheckOutFeeType      String?                     @default("fixed")
   lateCheckOutFeeAmount    Decimal?                    @db.Decimal(10, 2)
   timezone                 String                      @default("Asia/Bangkok")
+  /// ฉาก 3D ของโรงแรม (อาคาร + ช่องห้อง + ของประกอบ) — ดู hotel-map3d.types.ts
+  map3dConfig              Json?
+  map3dUpdatedAt           DateTime?
+  map3dVersions            HotelMap3dVersion[]
   bookings                 Booking[]
   employees                Employee[]
   maintenanceTasks         MaintenanceTask[]
@@ -411,6 +415,17 @@ model Booking {
   discountAmount        Decimal?           @db.Decimal(10, 2)
   /// จองหลายห้องในครั้งเดียว (หน้าเว็บ) — ทุกห้องในชุดมีค่าเดียวกัน ใช้ QR PromptPay ใบเดียว
   bookingGroupId        String?            @db.VarChar(36)
+  /// เช็คอิน: ตรวจบัตร/พาสปอร์ตตัวจริงแล้ว (ใคร/เมื่อไร)
+  idVerifiedAt          DateTime?
+  idVerifiedBy          String?            @db.VarChar(36)
+  /// จำนวนคีย์การ์ดที่ให้แขก
+  keyCards              Int?
+  /// เงินประกันความเสียหาย (ไม่ใช่รายได้ — คืนตอนเช็คเอาท์)
+  depositAmount         Decimal?           @db.Decimal(10, 2)
+  depositMethod         String?            @db.VarChar(20)
+  depositReturnedAt     DateTime?
+  /// เช็คอินแล้วแต่ห้องยังไม่พร้อม (ยังไม่ส่งมอบห้อง/คีย์) — null = ได้ห้องแล้ว
+  awaitingRoomSince     DateTime?
   addOns                BookingAddOn[]
   arInvoices            ArInvoice[]
   guestFolios           GuestFolio[]
@@ -2270,6 +2285,18 @@ model subscription_features {
   updated_at                DateTime                    @default(now()) @db.DateTime(6)
   subscription_id           String                      @db.VarChar(255)
   feature_id                String                      @db.VarChar(255)
+  /// 'bill_later' = เปิดใช้ก่อน เก็บเงินในรอบบิลถัดไป (null = ราคาคงที่แบบเดิม คิดทุกรอบ)
+  billing_mode              String?                     @db.VarChar(20)
+  activated_at              DateTime?                   @db.DateTime(3)
+  /// วันเริ่มคิดเงิน (ขอบรอบบิล) — ช่วงก่อนหน้านี้คือช่วงใช้ฟรี
+  billing_starts_on         DateTime?                   @db.Date
+  /// คิดเงินแล้วถึงวันนี้ (exclusive) — null = ยังไม่เคยออกบิล
+  billed_through            DateTime?                   @db.Date
+  /// สัญญาขั้นต่ำ 1 รอบที่คิดเงิน — ยกเลิกมีผลไม่ก่อนวันนี้
+  committed_until           DateTime?                   @db.Date
+  cancel_at                 DateTime?                   @db.Date
+  accepted_at               DateTime?                   @db.DateTime(3)
+  accepted_by               String?                     @db.VarChar(36)
   subscription_feature_logs subscription_feature_logs[]
   features                  features                    @relation(fields: [feature_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "FK_2fecc17c6205a70dea764511dc5")
   subscriptions             subscriptions               @relation(fields: [subscription_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "FK_ea26424925db0d7a2429a8b948e")
@@ -7711,33 +7738,40 @@ model CrmChurnScore {
 
 /// ลานกางแคมป์ (เทียบ Property ของระบบโรงแรม)
 model Campground {
-  id                 String            @id @default(uuid()) @db.VarChar(36)
-  tenantId           String?           @db.VarChar(36)
-  name               String            @db.VarChar(180)
-  description        String?           @db.Text
-  address            String?           @db.VarChar(255)
-  phone              String?           @db.VarChar(30)
+  id                 String              @id @default(uuid()) @db.VarChar(36)
+  tenantId           String?             @db.VarChar(36)
+  name               String              @db.VarChar(180)
+  description        String?             @db.Text
+  address            String?             @db.VarChar(255)
+  phone              String?             @db.VarChar(30)
   latitude           Float?
   longitude          Float?
   /// URL รูปแปลนพื้นที่ ใช้เป็น background ของแผนผัง 2D
-  mapImageUrl        String?           @db.VarChar(500)
+  mapImageUrl        String?             @db.VarChar(500)
   /// ขนาด canvas อ้างอิงพิกัด marker (ปกติเก็บพิกัดแบบ normalized 0..1)
   mapWidth           Int?
   mapHeight          Int?
   /// คลังรูปภาพของลาน (gallery) — เก็บเป็น array ของ URL
   images             Json?
   /// active | inactive
-  status             String            @default("active") @db.VarChar(20)
-  checkInTime        String?           @default("14:00") @db.VarChar(10)
-  checkOutTime       String?           @default("12:00") @db.VarChar(10)
+  status             String              @default("active") @db.VarChar(20)
+  checkInTime        String?             @default("14:00") @db.VarChar(10)
+  checkOutTime       String?             @default("12:00") @db.VarChar(10)
   /// คลังย่อยของลานใน Inventory Module (auto-create เมื่อเชื่อมคลังกลาง) — null = โหมดคลังย่อยลาน
-  warehouseId        String?           @db.VarChar(36)
+  warehouseId        String?             @db.VarChar(36)
   /// เวลาที่กดเชื่อมต่อระบบ POS ให้ลานนี้ (ต้องมี add-on POS_MODULE) — null = ยังไม่เชื่อม
   posConnectedAt     DateTime?
   /// เวลาที่กดเชื่อมต่อระบบครัว (KDS) ให้ลานนี้ (มากับแพ็กเกจ POS) — null = ยังไม่เชื่อม
   kitchenConnectedAt DateTime?
-  createdAt          DateTime          @default(now())
-  updatedAt          DateTime          @updatedAt
+  /// ฉาก 3D ที่เผยแพร่แล้ว (add-on CAMP_3D_MAP) — พิกัดทุกจุดเป็น normalized 0..1 แบบเดียวกับ posX/posY
+  map3dConfig        Json?
+  map3dUpdatedAt     DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  mapExtractions     CampMapExtraction[]
+  map3dVersions      CampMap3dVersion[]
+  opsTasks           CampOpsTask[]
+  opsEvents          CampOpsEvent[]
   zones              CampZone[]
   pitches            CampPitch[]
   facilities         CampFacility[]
@@ -7749,6 +7783,120 @@ model Campground {
   @@index([tenantId])
   @@index([status])
   @@map("camp_grounds")
+}
+
+/// ประวัติฉาก 3D ที่เผยแพร่ — ทุกครั้งที่กดเผยแพร่เก็บ snapshot ไว้ (ล่าสุด 30 ครั้งต่อลาน)
+/// หน้าปรับแต่งฉากใช้ย้อนดู/โหลดเวอร์ชันเก่ากลับมาแก้แล้วเผยแพร่ใหม่
+/// งานหน้าลาน: ทำความสะอาดจุด / แจ้งซ่อม (จุดกางหรือสิ่งอำนวยความสะดวก)
+model CampOpsTask {
+  id            String     @id @default(uuid()) @db.VarChar(36)
+  tenantId      String     @db.VarChar(36)
+  campgroundId  String     @db.VarChar(36)
+  pitchId       String?    @db.VarChar(36)
+  facilityId    String?    @db.VarChar(36)
+  reservationId String?    @db.VarChar(36)
+  /// cleaning | maintenance
+  type          String     @db.VarChar(20)
+  /// open | in_progress | done | cancelled
+  status        String     @default("open") @db.VarChar(20)
+  title         String     @db.VarChar(180)
+  /// urgent | normal | low
+  priority      String     @default("normal") @db.VarChar(10)
+  assigneeName  String?    @db.VarChar(120)
+  /// ซ่อมแล้วปิดขายจุดระหว่างซ่อม
+  blocksPitch   Boolean    @default(false)
+  cost          Decimal?   @db.Decimal(10, 2)
+  notes         String?    @db.Text
+  createdBy     String?    @db.VarChar(36)
+  completedBy   String?    @db.VarChar(36)
+  startedAt     DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  campground    Campground @relation(fields: [campgroundId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, campgroundId, status])
+  @@index([pitchId])
+  @@map("camp_ops_tasks")
+}
+
+/// บันทึกกิจกรรมหน้าลาน — ใครทำอะไรกับจุด/การจองไหน (แสดงในหน้า Monitor)
+model CampOpsEvent {
+  id            String     @id @default(uuid()) @db.VarChar(36)
+  tenantId      String     @db.VarChar(36)
+  campgroundId  String     @db.VarChar(36)
+  pitchId       String?    @db.VarChar(36)
+  reservationId String?    @db.VarChar(36)
+  type          String     @db.VarChar(40)
+  message       String     @db.VarChar(500)
+  actorId       String?    @db.VarChar(36)
+  meta          Json?
+  createdAt     DateTime   @default(now())
+  campground    Campground @relation(fields: [campgroundId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, campgroundId, createdAt])
+  @@map("camp_ops_events")
+}
+
+/// ประวัติฉาก 3D ของโรงแรม — เก็บทุกครั้งที่เผยแพร่ (ย้อนกลับได้ ไม่เกิน 30 เวอร์ชันต่อโรงแรม)
+model HotelMap3dVersion {
+  id         String   @id @default(uuid()) @db.VarChar(36)
+  tenantId   String   @db.VarChar(36)
+  propertyId String
+  config     Json
+  summary    Json
+  createdBy  String?  @db.VarChar(36)
+  createdAt  DateTime @default(now())
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, propertyId, createdAt])
+  @@map("hotel_map3d_versions")
+}
+
+model CampMap3dVersion {
+  id           String     @id @default(uuid()) @db.VarChar(36)
+  tenantId     String     @db.VarChar(36)
+  campgroundId String     @db.VarChar(36)
+  /// map3dConfig ณ ตอนเผยแพร่ (ผ่าน sanitizeMap3dConfig แล้ว)
+  config       Json
+  /// จำนวนองค์ประกอบโดยย่อ — แสดงในรายการโดยไม่ต้องโหลด config ทั้งก้อน
+  summary      Json
+  createdBy    String?    @db.VarChar(36)
+  createdAt    DateTime   @default(now())
+  campground   Campground @relation(fields: [campgroundId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, campgroundId, createdAt])
+  @@map("camp_map3d_versions")
+}
+
+/// งาน "ให้ AI ร่างฉาก 3D" จากรูปแปลน 1 ครั้ง = โควตา CAMP_3D_MAP 1 ครั้ง (reservationId)
+/// รันเบื้องหลัง: client ยิง POST แล้ว poll แถวนี้จน succeeded | failed
+model CampMapExtraction {
+  id            String     @id @default(uuid()) @db.VarChar(36)
+  tenantId      String     @db.VarChar(36)
+  campgroundId  String     @db.VarChar(36)
+  imageUrl      String     @db.VarChar(500)
+  imageWidth    Int
+  imageHeight   Int
+  /// { widthM, depthM, northDeg } ที่ผู้ใช้ตั้งในขั้นกำหนดสเกล
+  input         Json
+  /// pending | running | succeeded | failed
+  status        String     @default("pending") @db.VarChar(20)
+  /// vision | segment | build | done — ใช้แสดงแถบความคืบหน้า
+  step          String?    @db.VarChar(20)
+  /// ร่าง map3dConfig + warnings (ยังไม่เผยแพร่จนกว่าผู้ใช้กดบันทึก)
+  result        Json?
+  reservationId String?    @db.VarChar(36)
+  errorCode     String?    @db.VarChar(60)
+  errorMessage  String?    @db.VarChar(255)
+  createdBy     String?    @db.VarChar(36)
+  createdAt     DateTime   @default(now())
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  campground    Campground @relation(fields: [campgroundId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, campgroundId, createdAt])
+  @@map("camp_map_extractions")
 }
 
 /// โซนภายในลาน (เทียบ Room Type) — กำหนดประเภท/ราคาฐาน/ความจุ
@@ -7807,6 +7955,11 @@ model CampPitch {
   /// พิกัด normalized บนแผนผัง (0..1) — responsive ทุกขนาดจอ
   posX         Float             @default(0.5)
   posY         Float             @default(0.5)
+  /// มุมหมุนบนผัง 3D (องศา 0..360, ตามเข็มนาฬิกาเมื่อมองจากบน)
+  rotation     Float             @default(0)
+  /// ขนาดแปลงจริง (เมตร) — ใช้วาดพื้นแปลงบน 3D และตรวจจุดทับกัน
+  widthM       Float?
+  depthM       Float?
   sizeSqm      Float?
   notes        String?           @db.Text
   images       Json?
@@ -7836,6 +7989,8 @@ model CampFacility {
   /// พิกัด normalized บนแผนผัง (0..1)
   posX         Float      @default(0.5)
   posY         Float      @default(0.5)
+  /// มุมหมุนบนผัง 3D (องศา 0..360)
+  rotation     Float      @default(0)
   openingTime  String?    @db.VarChar(10)
   closingTime  String?    @db.VarChar(10)
   open24h      Boolean    @default(false)
@@ -7890,6 +8045,12 @@ model CampReservation {
   /// สลิปที่ลูกค้าแนบจากหน้าเว็บ — รอพนักงานตรวจยอดแล้วกดรับชำระ
   slipUrl           String?                @db.VarChar(500)
   notes             String?                @db.Text
+  /// ค่าใช้จ่ายเพิ่มในบิล [{id,label,amount,kind,at,by}] — kind: damage|extra_guest|adjustment|other (amount ติดลบ = ส่วนลด)
+  extraCharges      Json?
+  vehiclePlate      String?                @db.VarChar(30)
+  idVerifiedAt      DateTime?
+  /// no_show | guest | camp — เหตุผลตอนยกเลิก
+  cancelReason      String?                @db.VarChar(20)
   createdAt         DateTime               @default(now())
   updatedAt         DateTime               @updatedAt
   campground        Campground             @relation(fields: [campgroundId], references: [id], onDelete: Cascade)
@@ -8226,4 +8387,161 @@ model WebsiteInquiry {
   @@index([siteId])
   @@index([bookingId])
   @@map("website_inquiries")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AI Gateway — คีย์ AI ระดับแพลตฟอร์ม + งบ + บันทึกต้นทุนการเรียกใช้
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// คีย์ผู้ให้บริการ AI ของแพลตฟอร์ม (หนึ่งแถวต่อ provider) — ไม่ผูก tenant และ tenant ไม่เคยเห็นคีย์
+model AiProviderConfig {
+  id                String    @id @default(uuid()) @db.VarChar(36)
+  /// openai | fal
+  provider          String    @unique @db.VarChar(20)
+  /// `enc:<base64>` จาก EncryptionService — ถอดรหัสได้เฉพาะใน AiGatewayService เท่านั้น
+  apiKeyEnc         String?   @db.Text
+  /// 4 ตัวท้ายของคีย์ ไว้แสดงแบบปิดบังโดยไม่ต้องถอดรหัส
+  keyLast4          String?   @db.VarChar(8)
+  enabled           Boolean   @default(false)
+  /// { [task]: { model, inputPer1M?, outputPer1M?, perUnit? } } — ราคา USD ที่แอดมินตั้งเอง ใช้คิดต้นทุนตอนเรียก
+  models            Json
+  lastTestedAt      DateTime?
+  lastTestOk        Boolean?
+  lastTestMessage   String?   @db.VarChar(255)
+  lastTestLatencyMs Int?
+  updatedBy         String?   @db.VarChar(36)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@map("ai_provider_configs")
+}
+
+/// งบ AI ทั้งแพลตฟอร์ม — มีแถวเดียว (id = 'default')
+model AiPlatformSettings {
+  id                String   @id @default("default") @db.VarChar(20)
+  monthlyBudgetUsd  Decimal  @default(100.00) @db.Decimal(12, 2)
+  /// ใช้เกินงบเดือนนี้แล้วปฏิเสธการเรียก AI ใหม่ทั้งหมด (ลูกค้ากลับไปใช้โหมดที่ไม่พึ่ง AI)
+  hardStopOnBudget  Boolean  @default(true)
+  /// % ของงบที่หน้าแอดมินเริ่มเตือน
+  alertThresholdPct Int      @default(80)
+  /// ใช้แปลงต้นทุนเป็นบาทบนหน้าจอเท่านั้น
+  usdToThb          Decimal  @default(36.0000) @db.Decimal(10, 4)
+  updatedBy         String?  @db.VarChar(36)
+  updatedAt         DateTime @updatedAt
+
+  @@map("ai_platform_settings")
+}
+
+/// หนึ่งแถวต่อการเรียก AI หนึ่งครั้ง — costUsd คิด ณ ตอนเรียกจากราคาใน AiProviderConfig.models (แก้ราคาทีหลังไม่ย้อนแก้)
+model AiUsageLog {
+  id           String   @id @default(uuid()) @db.VarChar(36)
+  /// null = เรียกจากฝั่งแอดมิน (เช่น ทดสอบคีย์)
+  tenantId     String?  @db.VarChar(36)
+  provider     String   @db.VarChar(20)
+  model        String   @db.VarChar(120)
+  /// งานที่เรียก เช่น CAMP_3D_EXTRACT, ADMIN_TEST
+  feature      String   @db.VarChar(60)
+  /// ขั้นย่อยของงาน เช่น vision, segment, depth
+  task         String?  @db.VarChar(40)
+  /// success | failed | blocked
+  status       String   @db.VarChar(20)
+  inputTokens  Int?
+  outputTokens Int?
+  /// จำนวนหน่วยของ provider ที่คิดเงินต่อครั้ง (รูป/จุด/คำขอ)
+  units        Int?
+  costUsd      Decimal  @default(0) @db.Decimal(12, 6)
+  latencyMs    Int?
+  errorMessage String?  @db.VarChar(255)
+  /// ทรัพยากรที่เกี่ยวข้อง เช่น refType = campground
+  refType      String?  @db.VarChar(40)
+  refId        String?  @db.VarChar(36)
+  createdBy    String?  @db.VarChar(36)
+  createdAt    DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([createdAt])
+  @@index([provider, createdAt])
+  @@map("ai_usage_logs")
+}
+
+// ─── Add-on usage quotas (เช่น CAMP_3D_MAP: AI ร่างฉาก 3D) ─────────────────────
+
+/// โควตาการใช้งานของ add-on ที่คิดตามจำนวนครั้ง — หนึ่งแถวต่อ add-on (แพลตฟอร์ม ไม่ผูก tenant)
+/// ราคารายเดือนไม่ได้เก็บที่นี่ ใช้ add_ons.price (+ features.price_monthly ของแถว module) เป็นต้นฉบับ
+model AddonQuotaConfig {
+  id                  String   @id @default(uuid()) @db.VarChar(36)
+  addonCode           String   @unique @db.VarChar(80)
+  /// usage_counters.metric_code ที่นับ เช่น CAMP_3D_AI_EXTRACT
+  metricCode          String   @db.VarChar(80)
+  /// จำนวนครั้งที่รวมในแพ็กต่อเดือน (period YYYY-MM แบบ UTC ตาม usage_counters)
+  includedPerPeriod   Int      @default(0)
+  /// ราคาต่อครั้งเมื่อใช้เกิน (บาท) — 0 = ไม่ขายส่วนเกิน ใช้ครบแล้วหยุด
+  overageUnitPriceThb Decimal  @default(0) @db.Decimal(10, 2)
+  /// เพดานส่วนเกินต่อเดือนกันบิลบาน — null = ไม่จำกัด
+  maxOveragePerPeriod Int?
+  /// ค่าเริ่มต้นจำนวนวันทดลองใช้ตอนแอดมินอนุมัติคำขอ (ถ้าไม่ได้ระบุเอง)
+  trialDays           Int      @default(14)
+  /// จำนวนครั้งที่ใช้ได้ตลอดช่วงทดลองใช้ (ทดลองใช้ไม่มีส่วนเกิน)
+  trialIncluded       Int      @default(0)
+  /// จำนวนครั้งสูงสุดต่อ tenant ต่อนาที — 0 = ไม่จำกัด
+  rateLimitPerMinute  Int      @default(0)
+  /// งานล้มเหลวแล้วคืนโควตาให้อัตโนมัติ
+  refundOnFailure     Boolean  @default(true)
+  updatedBy           String?  @db.VarChar(36)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@map("addon_quota_configs")
+}
+
+/// หนึ่งแถวต่อการใช้โควตาหนึ่งครั้ง: จองก่อนเริ่มงาน → committed เมื่อสำเร็จ / refunded เมื่อล้มเหลว
+/// usage_counters เพิ่มตอนจอง และลดตอนคืน — แถวนี้เป็นหลักฐานว่าคืนไปแล้วหรือยัง (กันคืนซ้ำ)
+model AddonUsageReservation {
+  id            String    @id @default(uuid()) @db.VarChar(36)
+  tenantId      String    @db.VarChar(36)
+  addonCode     String    @db.VarChar(80)
+  metricCode    String    @db.VarChar(80)
+  period        String    @db.VarChar(7)
+  /// paid | trial
+  source        String    @db.VarChar(20)
+  /// ครั้งนี้เกินโควตาที่รวมในแพ็ก (คิดเงินส่วนเกิน)
+  isOverage     Boolean   @default(false)
+  /// reserved | committed | refunded
+  status        String    @default("reserved") @db.VarChar(20)
+  refType       String?   @db.VarChar(40)
+  refId         String?   @db.VarChar(36)
+  failureReason String?   @db.VarChar(255)
+  createdBy     String?   @db.VarChar(36)
+  createdAt     DateTime  @default(now())
+  settledAt     DateTime?
+
+  @@index([tenantId, addonCode, createdAt])
+  @@index([tenantId, metricCode, period])
+  @@index([addonCode, period])
+  @@map("addon_usage_reservations")
+}
+
+/// การซื้อ add-on แบบรายเดือน (คิดเต็มเดือน ไม่ prorate) — 1 แถวต่อ 1 ใบแจ้งหนี้
+/// ไม่เก็บใน subscription_features เพราะตารางนั้นไม่มีวันหมดอายุและถูกรวมเข้ายอดต่ออายุแพลน
+/// สิทธิ์ให้เฉพาะแถว status=paid ที่ periodEnd > now (AddonService.getActiveAddons)
+model AddonPurchase {
+  id          String    @id @default(uuid()) @db.VarChar(36)
+  tenantId    String    @db.VarChar(36)
+  addonCode   String    @db.VarChar(80)
+  invoiceId   String    @unique @db.VarChar(36)
+  /// pending → paid (ตอนแอดมินแพลตฟอร์มอนุมัติสลิป) | cancelled
+  status      String    @default("pending") @db.VarChar(20)
+  months      Int       @default(1)
+  /// ราคาก่อน VAT ต่อเดือน ณ วันออกใบแจ้งหนี้
+  unitPrice   Decimal   @db.Decimal(10, 2)
+  /// ช่วงสิทธิ์ — ตั้งตอนอนุมัติ ต่อจากวันหมดอายุเดิมถ้ายังไม่หมด
+  periodStart DateTime?
+  periodEnd   DateTime?
+  paidAt      DateTime?
+  createdBy   String?   @db.VarChar(36)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([tenantId, addonCode, status])
+  @@map("addon_purchases")
 }

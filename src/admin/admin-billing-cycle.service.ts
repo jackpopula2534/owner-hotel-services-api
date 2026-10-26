@@ -16,6 +16,16 @@ import { BillingHistory, BillingEventType } from '../subscriptions/entities/bill
 import { Invoice, InvoiceStatus } from '../invoices/entities/invoice.entity';
 import { SubscriptionFeature } from '../subscription-features/entities/subscription-feature.entity';
 import { Plan } from '../plans/entities/plan.entity';
+import { Prisma } from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
+import {
+  AddonCharge,
+  SAAS_VAT_RATE,
+  addMonthsUtc,
+  addonChargesForRenewal,
+  utcMidnight,
+  vatOnTop,
+} from '../common/billing/addon-billing';
 import {
   UpdateBillingCycleDto,
   RenewSubscriptionDto,
@@ -43,6 +53,7 @@ export class AdminBillingCycleService {
     private subscriptionFeaturesRepository: Repository<SubscriptionFeature>,
     @InjectRepository(Plan)
     private plansRepository: Repository<Plan>,
+    private readonly prisma: PrismaService,
   ) {}
 
   /**
@@ -251,34 +262,60 @@ export class AdminBillingCycleService {
     } else {
       periodMonths =
         dto.periodMonths || (subscription.billingCycle === BillingCycle.YEARLY ? 12 : 1);
-      newEndDate = new Date(newStartDate);
-      newEndDate.setMonth(newEndDate.getMonth() + periodMonths);
+      newEndDate = addMonthsUtc(newStartDate, periodMonths);
     }
 
-    // Calculate renewal amount
+    // Calculate renewal amount — แพ็กเกจ × เดือน + add-on (bill-later คิดตามช่วงที่ถึงกำหนด)
     const planPrice = Number(subscription.plan?.priceMonthly || 0);
-    const addons = await this.subscriptionFeaturesRepository.find({
-      where: { subscriptionId: subscription.id, isActive: true },
+    const featureRows = await this.prisma.subscription_features.findMany({
+      where: { subscription_id: subscription.id, is_active: 1 },
+      include: { features: { select: { name: true, code: true } } },
     });
-    const addonAmount = addons.reduce((sum, a) => sum + Number(a.price || 0), 0);
-    const monthlyTotal = planPrice + addonAmount;
+    const charges = addonChargesForRenewal(
+      featureRows.map((f) => ({
+        id: f.id,
+        price: Number(f.price || 0),
+        billingMode: f.billing_mode,
+        billingStartsOn: f.billing_starts_on,
+        billedThrough: f.billed_through,
+        cancelAt: f.cancel_at,
+      })),
+      utcMidnight(newStartDate),
+      utcMidnight(newEndDate),
+      periodMonths,
+    );
+    const addonAmount = charges.reduce((sum, c) => sum + c.amount, 0);
+    const planAmount = periodDays
+      ? Math.round((planPrice / 30) * periodDays)
+      : planPrice * periodMonths;
 
     // For sub-month (week) renewals, prorate by days; otherwise multiply by months.
-    const computedAmount = periodDays
-      ? Math.round((monthlyTotal / 30) * periodDays)
-      : monthlyTotal * periodMonths;
-    const renewalAmount = dto.customPrice !== undefined ? dto.customPrice : computedAmount;
+    // customPrice = ยอดรวมสุดท้ายที่แอดมินกำหนด (รวม VAT แล้ว)
+    const computed = vatOnTop(planAmount + addonAmount);
+    const renewalAmount = dto.customPrice !== undefined ? dto.customPrice : computed.total;
 
     // Create invoice if requested
     let invoiceNo: string | undefined;
+    let invoiceId: string | undefined;
     const createInvoice = dto.createInvoice !== false;
 
     if (createInvoice) {
       // Block double-billing: refuse to issue a new subscription invoice while
       // the tenant still has an outstanding (unpaid) one.
       await this.assertNoOutstandingSubscriptionInvoices(subscription.tenantId);
-      const invoice = await this.createRenewalInvoice(subscription, renewalAmount, periodMonths);
+      const names = new Map(featureRows.map((f) => [f.id, f.features?.name ?? 'Add-on']));
+      const invoice = await this.createRenewalInvoice(subscription, {
+        planAmount,
+        planLabel: `${subscription.plan?.name ?? 'แพ็กเกจ'} — ${
+          periodDays ? `${periodDays} วัน` : `${periodMonths} เดือน`
+        }`,
+        charges: charges.map((c) => ({ ...c, name: names.get(c.id) ?? 'Add-on' })),
+        featureRefs: new Map(featureRows.map((f) => [f.id, f.feature_id])),
+        customTotal: dto.customPrice,
+        periodMonths,
+      });
       invoiceNo = invoice.invoiceNo;
+      invoiceId = invoice.id;
     }
 
     // Update subscription
@@ -299,9 +336,7 @@ export class AdminBillingCycleService {
       newAmount: renewalAmount,
       periodStart: newStartDate,
       periodEnd: newEndDate,
-      invoiceId: invoiceNo
-        ? (await this.invoicesRepository.findOne({ where: { invoiceNo } }))?.id
-        : undefined,
+      invoiceId,
       createdBy: adminId,
       metadata: { periodMonths, notes: dto.notes },
     });
@@ -590,31 +625,108 @@ export class AdminBillingCycleService {
     }
   }
 
+  /**
+   * ใบต่ออายุแบบแยกรายการ: แพ็กเกจ + add-on แต่ละตัว, VAT 7% บวกเพิ่ม (เหมือนหน้าชำระแพ็กเกจ)
+   * บันทึก billed_through ของ add-on bill-later ใน transaction เดียวกับการออกใบ
+   * — ใบไม่ออก = ไม่ถือว่าเก็บแล้ว รอบหน้าจะคิดย้อนให้ครบ
+   */
   private async createRenewalInvoice(
     subscription: Subscription,
-    amount: number,
-    periodMonths: number,
-  ): Promise<Invoice> {
+    input: {
+      planAmount: number;
+      planLabel: string;
+      charges: Array<AddonCharge & { name: string }>;
+      featureRefs: Map<string, string>;
+      customTotal?: number;
+      periodMonths: number;
+    },
+  ): Promise<{ id: string; invoiceNo: string; amount: number }> {
     const invoiceNo = `INV-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
-    const dueDate = new Date();
-    dueDate.setDate(dueDate.getDate() + 15);
+    const dueDate = utcMidnight(new Date());
+    dueDate.setUTCDate(dueDate.getUTCDate() + 15);
 
-    const invoice = this.invoicesRepository.create({
-      tenantId: subscription.tenantId,
-      subscriptionId: subscription.id,
-      invoiceNo,
-      amount,
-      originalAmount: amount,
-      status: InvoiceStatus.PENDING,
-      dueDate,
-      notes: `Renewal for ${periodMonths} month(s)`,
+    const net = input.planAmount + input.charges.reduce((sum, c) => sum + c.amount, 0);
+    const totals =
+      input.customTotal !== undefined
+        ? // ยอดที่แอดมินกำหนดถือว่ารวม VAT แล้ว — ถอด VAT ออกเพื่อแสดงรายการ
+          (() => {
+            const subtotal =
+              Math.round((input.customTotal / (1 + SAAS_VAT_RATE / 100)) * 100) / 100;
+            return {
+              subtotal,
+              vatRate: SAAS_VAT_RATE,
+              vatAmount: Math.round((input.customTotal - subtotal) * 100) / 100,
+              total: input.customTotal,
+            };
+          })()
+        : vatOnTop(net);
+
+    const items: Prisma.invoice_itemsCreateWithoutInvoicesInput[] = [];
+    if (input.planAmount > 0) {
+      items.push({
+        type: 'plan',
+        quantity: 1,
+        unit_price: input.planAmount,
+        amount: input.planAmount,
+        ref_id: subscription.planId ?? null,
+        description: input.planLabel.slice(0, 255),
+      });
+    }
+    for (const c of input.charges) {
+      items.push({
+        type: 'feature',
+        quantity: c.months,
+        unit_price: c.amount / c.months,
+        amount: c.amount,
+        ref_id: input.featureRefs.get(c.id) ?? null,
+        description: `${c.name} — ${c.months} เดือน`.slice(0, 255),
+      });
+    }
+    if (
+      input.customTotal !== undefined &&
+      Math.round(totals.subtotal * 100) !== Math.round(net * 100)
+    ) {
+      const diff = Math.round((totals.subtotal - net) * 100) / 100;
+      items.push({
+        type: 'adjustment',
+        quantity: 1,
+        unit_price: diff,
+        amount: diff,
+        description: 'ปรับยอดโดยทีมงาน',
+      });
+    }
+
+    const invoice = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.invoices.create({
+        data: {
+          tenant_id: subscription.tenantId,
+          subscription_id: subscription.id,
+          invoice_no: invoiceNo,
+          amount: totals.total,
+          original_amount: totals.total,
+          subtotal: totals.subtotal,
+          vat_rate: totals.vatRate,
+          vat_amount: totals.vatAmount,
+          status: 'pending',
+          due_date: dueDate,
+          notes: `Renewal for ${input.periodMonths} month(s)`,
+          invoice_items: { create: items },
+        },
+        select: { id: true, invoice_no: true },
+      });
+      for (const c of input.charges) {
+        if (!c.billedThrough) continue;
+        await tx.subscription_features.update({
+          where: { id: c.id },
+          data: { billed_through: c.billedThrough },
+        });
+      }
+      return created;
     });
 
-    await this.invoicesRepository.save(invoice);
+    this.logger.log(`Created renewal invoice ${invoiceNo} for ${totals.total}`);
 
-    this.logger.log(`Created renewal invoice ${invoiceNo} for ${amount}`);
-
-    return invoice;
+    return { id: invoice.id, invoiceNo: invoice.invoice_no, amount: totals.total };
   }
 
   private async createBillingHistory(data: Partial<BillingHistory>): Promise<void> {

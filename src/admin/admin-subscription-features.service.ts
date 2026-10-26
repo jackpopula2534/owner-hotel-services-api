@@ -289,6 +289,7 @@ export class AdminSubscriptionFeaturesService {
     // Mark as inactive (soft delete)
     feature.isActive = false;
     await this.subscriptionFeaturesRepository.save(feature);
+    await this.invalidateEntitlements(feature.subscription?.tenantId);
 
     // Log the removal
     await this.createLog({
@@ -468,6 +469,7 @@ export class AdminSubscriptionFeaturesService {
 
       // Commit transaction
       await queryRunner.commitTransaction();
+      await this.invalidateEntitlements(subscription.tenantId);
 
       this.logger.log(
         `Added feature ${feature.name} to subscription ${subscription.subscriptionCode || subscription.id}`,
@@ -590,6 +592,14 @@ export class AdminSubscriptionFeaturesService {
     // Prorated amount = (amount / totalDays) * remainingDays
     const prorated = Math.round((amount / totalDays) * remainingDays);
     return prorated;
+  }
+
+  /** ล้าง cache สิทธิ์ add-on (5 นาที) หลัง commit — ไม่งั้น tenant ยังติด gate/403 */
+  private async invalidateEntitlements(tenantId?: string): Promise<void> {
+    if (!tenantId) return;
+    await this.addonService.invalidateAddonCache(tenantId).catch((err) => {
+      this.logger.warn(`Failed to invalidate add-on cache for tenant ${tenantId}: ${err.message}`);
+    });
   }
 
   /**

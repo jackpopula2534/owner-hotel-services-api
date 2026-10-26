@@ -19,6 +19,8 @@ import {
   RefundRequestDto,
 } from './dto/promptpay.dto';
 import { isInvoiceSettled } from '../common/billing/invoice-settlement';
+import { AddonService } from '../modules/addons/addon.service';
+import { grantAddonPurchaseForInvoice } from '../modules/addon-purchases/addon-purchase-grant';
 
 @Injectable()
 export class PromptPayService {
@@ -29,6 +31,7 @@ export class PromptPayService {
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
     private readonly emailService: EmailService,
+    private readonly addonService: AddonService,
   ) {
     this.promptpayId = this.configService.get<string>('PROMPTPAY_ID', '');
     if (!this.promptpayId) {
@@ -670,6 +673,7 @@ export class PromptPayService {
           id: uuidv4(),
           payment_no: paymentNo,
           invoice_id: invoiceId,
+          tenant_id: invoice.tenant_id,
           amount,
           method: 'qr',
           status: 'approved',
@@ -677,22 +681,34 @@ export class PromptPayService {
         },
       });
 
-      // ใบแจ้งหนี้ของการจอง: ปิดเมื่อยอดอนุมัติครบเท่านั้น (QR มัดจำจากหน้าเว็บ ≠ ชำระครบ)
-      const settled =
-        !invoice.booking_id ||
-        isInvoiceSettled(
-          invoice,
-          await this.prisma.payments.findMany({
-            where: { invoice_id: invoiceId, status: 'approved' },
-            select: { amount: true },
-          }),
-        );
+      // ปิดใบเมื่อยอดอนุมัติครบเท่านั้น — QR มัดจำจากหน้าเว็บ ≠ ชำระครบ และยอด QR มาจาก
+      // client ได้ (generate-qr) จึงห้ามให้ QR ยอดต่ำปิดใบแจ้งหนี้/เปิดสิทธิ์ add-on ฟรี
+      const settled = isInvoiceSettled(
+        invoice,
+        await this.prisma.payments.findMany({
+          where: { invoice_id: invoiceId, status: 'approved' },
+          select: { amount: true },
+        }),
+      );
       if (settled) {
-        await this.prisma.invoices.update({
-          where: { id: invoiceId },
-          data: { status: 'paid' },
+        // ปิดใบ + เปิดสิทธิ์ add-on (ซื้อแบบชำระทันที) ใน transaction เดียว — ล้มก็ไม่ค้างครึ่งทาง
+        const granted = await this.prisma.$transaction(async (tx) => {
+          await tx.invoices.update({
+            where: { id: invoiceId },
+            data: { status: 'paid' },
+          });
+          return grantAddonPurchaseForInvoice(tx, invoiceId, tenantId);
         });
         this.logger.log(`Invoice ${invoiceId} marked as paid`);
+        if (granted && tenantId) {
+          this.logger.log(
+            `Add-on ${granted.addonCode} granted via PromptPay until ${granted.periodEnd.toISOString()}`,
+          );
+          // หลัง commit — ไม่งั้น read พร้อมกันอุ่น cache จากข้อมูลที่ยังไม่ commit
+          await this.addonService.invalidateAddonCache(tenantId).catch((err: Error) => {
+            this.logger.error(`Failed to invalidate addon cache: ${err.message}`);
+          });
+        }
       } else {
         this.logger.log(`Invoice ${invoiceId} received ${amount} — balance still outstanding`);
       }

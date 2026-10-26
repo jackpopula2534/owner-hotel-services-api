@@ -20,6 +20,7 @@ import { ReadyMadeGoodsSeeder } from './ready-made-goods.seeder';
 import { RetailPromotionsSeeder } from './retail-promotions.seeder';
 import { WarehouseGroupsSeeder } from './warehouse-groups.seeder';
 import { CAMP_PREMIUM_TENANT_NAME, CampPremiumSeeder } from './camp-premium.seeder';
+import { Hotel3dDemoSeeder } from './hotel-3d-demo.seeder';
 import {
   CostCenterType,
   CostCategory,
@@ -74,6 +75,7 @@ export class SeederService {
     private retailPromotions: RetailPromotionsSeeder,
     private warehouseGroups: WarehouseGroupsSeeder,
     private campPremium: CampPremiumSeeder,
+    private hotel3dDemo: Hotel3dDemoSeeder,
   ) {}
 
   /**
@@ -86,6 +88,7 @@ export class SeederService {
       await this.seedPlans();
       await this.seedFeatures();
       await this.seedAddOns();
+      await this.seedAddonUsageQuotas();
       await this.seedModuleFeatures();
       await this.seedPlanFeatures();
       await this.seedPlanAddons();
@@ -101,6 +104,8 @@ export class SeederService {
       await this.seedEmployeesForAllTenants();
       await this.seedKpiTemplates();
       await this.seedHotelStaff();
+      // ห้อง/การจอง/งานแม่บ้าน-ซ่อม "วันนี้" + ฉาก 3D ของ Mountain View — รีเฟรชรายวันด้วย npm run seed:hotel-3d
+      await this.hotel3dDemo.seed();
       await this.seedOperationalStaff();
       await this.seedPremiumHrData();
       await this.seedHrPerformanceData();
@@ -519,6 +524,17 @@ export class SeederService {
         priceMonthly: 590,
         isActive: true,
       },
+      {
+        code: 'CAMP_3D_MAP',
+        name: 'แผนที่ลาน 3D (Campground 3D Map)',
+        description: 'สิทธิ์ใช้ add-on CAMP_3D_MAP เมื่อซื้อแยกผ่าน subscription',
+        type: FeatureType.MODULE,
+        category: 'CAMP',
+        icon: 'Box',
+        displayOrder: 20,
+        priceMonthly: 790,
+        isActive: true,
+      },
     ];
 
     for (const featureData of features) {
@@ -820,6 +836,23 @@ export class SeederService {
         maxQuantity: 1,
         isActive: true,
       },
+      // ขายแยกบนแผนลานกางเต็นท์ — สิทธิ์มาทาง subscription_features → features(CAMP_3D_MAP)
+      // โควตา AI ร่างฉากอยู่ที่ addon_quota_configs (ดู seedAddonUsageQuotas)
+      {
+        code: 'CAMP_3D_MAP',
+        name: 'แผนที่ลาน 3D (Campground 3D Map)',
+        system: 'CAMP',
+        description:
+          'แผนผังลานกางเต็นท์แบบ 3D หมุน/ซูมได้ ผูกกับโซนและจุดกางเต็นท์จริง เห็นสถานะว่าง/จองในแผนที่ พร้อม AI ร่างฉากจากรูปแผนผังที่อัปโหลด (มีโควตาต่อเดือน ใช้เกินคิดเป็นครั้ง)',
+        price: 790,
+        billingCycle: AddonBillingCycle.MONTHLY,
+        category: 'CAMP',
+        icon: 'Box',
+        displayOrder: 820,
+        minQuantity: 1,
+        maxQuantity: 1,
+        isActive: true,
+      },
     ];
 
     // Add-on codes ที่เลิกขายแล้ว (placeholder ยังไม่มีของจริง หรือถูกยุบเป็น
@@ -865,6 +898,50 @@ export class SeederService {
     }
 
     this.logger.log(`  ✅ Seeded ${addons.length} sellable module add-ons (HOTEL/CAMP)`);
+  }
+
+  /**
+   * 2️⃣B′ Usage metric + โควตาของ add-on ที่คิดตามจำนวนครั้ง (CAMP_3D_MAP)
+   *
+   * ราคาส่วนเกินเก็บที่ addon_quota_configs ที่เดียว — usage_metric_definitions
+   * ตั้ง overage_unit_price = 0 ไว้ ไม่ให้ OverageBillingService คิดซ้ำทางแผน
+   * update ไม่ทับค่าที่แอดมินแก้ไว้แล้ว (seed ซ้ำบน production ได้)
+   */
+  private async seedAddonUsageQuotas(): Promise<void> {
+    this.logger.log('📏 Seeding add-on usage metrics + quotas...');
+    const metricCode = 'CAMP_3D_AI_EXTRACT';
+
+    await this.prisma.usage_metric_definitions.upsert({
+      where: { code: metricCode },
+      update: { name: 'AI ร่างฉาก 3D', unit: 'count', is_active: 1 },
+      create: {
+        code: metricCode,
+        name: 'AI ร่างฉาก 3D',
+        description: 'จำนวนครั้งที่ลูกค้าใช้ AI ร่างฉาก 3D จากรูปแผนผังลาน (add-on CAMP_3D_MAP)',
+        unit: 'count',
+        aggregation: 'sum_per_period',
+        overage_unit_price: 0,
+        is_active: 1,
+      },
+    });
+
+    await this.prisma.addonQuotaConfig.upsert({
+      where: { addonCode: 'CAMP_3D_MAP' },
+      update: { metricCode },
+      create: {
+        addonCode: 'CAMP_3D_MAP',
+        metricCode,
+        includedPerPeriod: 3,
+        overageUnitPriceThb: 79,
+        maxOveragePerPeriod: 20,
+        trialDays: 14,
+        trialIncluded: 1,
+        rateLimitPerMinute: 5,
+        refundOnFailure: true,
+      },
+    });
+
+    this.logger.log(`  ✓ CAMP_3D_MAP ↔ ${metricCode}`);
   }
 
   /**

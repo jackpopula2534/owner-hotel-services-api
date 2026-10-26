@@ -4,6 +4,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import { AppModule } from './app.module';
+import { Hotel3dDemoSeeder } from './seeder/hotel-3d-demo.seeder';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
@@ -24,7 +25,12 @@ async function bootstrap() {
     if (!existsSync(uploadsPath)) {
       mkdirSync(uploadsPath, { recursive: true });
     }
-    app.useStaticAssets(uploadsPath, { prefix: '/uploads' });
+    app.useStaticAssets(uploadsPath, {
+      prefix: '/uploads',
+      // static ถูก mount ก่อน enableCors — ไฟล์ใน uploads เปิดสาธารณะอยู่แล้ว แต่ WebGL
+      // (ฉาก 3D ของลาน) โหลดรูปเป็น texture ข้าม origin ได้ต่อเมื่อมี CORS header
+      setHeaders: (res) => res.setHeader('Access-Control-Allow-Origin', '*'),
+    });
     logger.log('Serving local uploads at /uploads (STORAGE_DRIVER=local)');
   } else {
     logger.log('STORAGE_DRIVER=s3 — uploads served from object storage');
@@ -128,5 +134,14 @@ async function bootstrap() {
 
   await app.listen(port);
   logger.log(`Application is running on: http://localhost:${port}`);
+
+  // dev เท่านั้น: เติมข้อมูลเดโม Monitor ห้องพัก 3D ให้เป็น "วันนี้" (วันละครั้ง ไม่บล็อกการสตาร์ต)
+  // ปิดได้ด้วย HOTEL_3D_DEMO_AUTOSEED=false
+  if (process.env.NODE_ENV !== 'production' && process.env.HOTEL_3D_DEMO_AUTOSEED !== 'false') {
+    app
+      .get(Hotel3dDemoSeeder)
+      .seedDaily()
+      .catch((e: Error) => logger.warn(`Hotel 3D demo seed skipped: ${e.message}`));
+  }
 }
 bootstrap();

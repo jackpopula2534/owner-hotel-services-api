@@ -23,7 +23,7 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { memoryStorage } from 'multer';
-import { PaymentsService } from './payments.service';
+import { PaymentActor, PaymentsService } from './payments.service';
 import { StorageService } from '../common/storage/storage.service';
 import { SkipSubscriptionCheck } from '../common/decorators/skip-subscription-check.decorator';
 import { CreatePaymentDto } from './dto/create-payment.dto';
@@ -102,10 +102,8 @@ export class PaymentsController {
   async create(
     @Body() body: any,
     @UploadedFile()
-    slip:
-      | { buffer: Buffer; originalname: string; mimetype: string }
-      | undefined,
-    @CurrentUser() user: { tenantId?: string },
+    slip: { buffer: Buffer; originalname: string; mimetype: string } | undefined,
+    @CurrentUser() user: { tenantId?: string; isPlatformAdmin?: boolean },
   ) {
     let slipUrl: string | undefined = body.slipUrl;
     if (slip) {
@@ -132,7 +130,7 @@ export class PaymentsController {
       throw new BadRequestException('method is required (transfer | qr | cash)');
     }
 
-    return this.paymentsService.create(dto);
+    return this.paymentsService.create(dto, actorOf(user));
   }
 
   @Get()
@@ -165,11 +163,11 @@ export class PaymentsController {
   approve(
     @Param('id') id: string,
     @Body() approvePaymentDto: ApprovePaymentDto,
-    @CurrentUser() user: { id?: string; tenantId?: string },
+    @CurrentUser() user: { id?: string; tenantId?: string; isPlatformAdmin?: boolean },
   ) {
     // Fall back to the authenticated admin's id when not supplied in the body.
     const adminId = approvePaymentDto.adminId ?? user?.id ?? 'system';
-    return this.paymentsService.approvePayment(id, adminId, user?.tenantId);
+    return this.paymentsService.approvePayment(id, adminId, user?.tenantId, actorOf(user));
   }
 
   @Post(':id/reject')
@@ -178,23 +176,35 @@ export class PaymentsController {
   reject(
     @Param('id') id: string,
     @Body() approvePaymentDto: ApprovePaymentDto,
-    @CurrentUser() user: { id?: string; tenantId?: string },
+    @CurrentUser() user: { id?: string; tenantId?: string; isPlatformAdmin?: boolean },
   ) {
     const adminId = approvePaymentDto.adminId ?? user?.id ?? 'system';
-    return this.paymentsService.rejectPayment(id, adminId, user?.tenantId);
+    return this.paymentsService.rejectPayment(id, adminId, user?.tenantId, actorOf(user));
   }
 
   @Patch(':id')
   @ApiOperation({ summary: 'Update payment' })
   @Roles('admin', 'platform_admin', 'tenant_admin')
-  update(@Param('id') id: string, @Body() updatePaymentDto: UpdatePaymentDto) {
-    return this.paymentsService.update(id, updatePaymentDto);
+  update(
+    @Param('id') id: string,
+    @Body() updatePaymentDto: UpdatePaymentDto,
+    @CurrentUser() user: { tenantId?: string; isPlatformAdmin?: boolean },
+  ) {
+    return this.paymentsService.update(id, updatePaymentDto, user?.tenantId, actorOf(user));
   }
 
   @Delete(':id')
   @ApiOperation({ summary: 'Delete payment' })
   @Roles('admin', 'platform_admin', 'tenant_admin')
-  remove(@Param('id') id: string) {
-    return this.paymentsService.remove(id);
+  remove(
+    @Param('id') id: string,
+    @CurrentUser() user: { tenantId?: string; isPlatformAdmin?: boolean },
+  ) {
+    return this.paymentsService.remove(id, user?.tenantId, actorOf(user));
   }
+}
+
+/** isPlatformAdmin comes from the JWT claim only — never from a role name ('admin' is a tenant role). */
+function actorOf(user: { isPlatformAdmin?: boolean } | undefined): PaymentActor {
+  return { isPlatformAdmin: user?.isPlatformAdmin === true };
 }

@@ -302,6 +302,7 @@ describe('AddonService - Tenant entitlements', () => {
     subscription_features: { findFirst: jest.fn(), findMany: jest.fn() },
     subscriptions: subscriptionsClient,
     addon_trial_requests: { findMany: jest.fn() },
+    addonPurchase: { findMany: jest.fn() },
     $transaction: jest.fn(),
   };
 
@@ -324,6 +325,7 @@ describe('AddonService - Tenant entitlements', () => {
     // No approved trials unless a test says otherwise — trials are a fourth
     // entitlement source and every getActiveAddons() call reads them.
     prismaMock.addon_trial_requests.findMany.mockResolvedValue([]);
+    prismaMock.addonPurchase.findMany.mockResolvedValue([]);
   });
 
   describe('getActiveAddons', () => {
@@ -658,6 +660,71 @@ describe('AddonService - Tenant entitlements', () => {
     });
   });
 
+  describe('getActiveAddons — self-service purchases', () => {
+    const DAY = 24 * 60 * 60 * 1000;
+    const bare = () => {
+      subscriptionsClient.findFirst.mockResolvedValue(null);
+      prismaMock.add_ons.findMany.mockResolvedValue([]);
+    };
+
+    it('grants a paid month with the latest period end as expiry', async () => {
+      const first = new Date(Date.now() + 10 * DAY);
+      const renewed = new Date(Date.now() + 40 * DAY);
+      bare();
+      prismaMock.addonPurchase.findMany.mockResolvedValue([
+        { addonCode: 'CAMP_3D_MAP', periodEnd: first },
+        { addonCode: 'CAMP_3D_MAP', periodEnd: renewed },
+      ]);
+
+      const result = await service.getActiveAddons('tenant-p1');
+
+      expect(result).toEqual([
+        {
+          code: 'CAMP_3D_MAP',
+          name: 'CAMP_3D_MAP',
+          isActive: true,
+          expiresAt: renewed.toISOString(),
+          source: 'purchase',
+        },
+      ]);
+      const where = prismaMock.addonPurchase.findMany.mock.calls[0][0].where;
+      expect(where).toMatchObject({ tenantId: 'tenant-p1', status: 'paid' });
+      expect(where.periodEnd.gt).toBeInstanceOf(Date);
+    });
+
+    it('a longer-running trial keeps its end date over a shorter purchase', async () => {
+      const paidEnd = new Date(Date.now() + 5 * DAY);
+      const trialEnd = new Date(Date.now() + 9 * DAY);
+      bare();
+      prismaMock.addonPurchase.findMany.mockResolvedValue([{ addonCode: 'CAMP_3D_MAP', periodEnd: paidEnd }]);
+      prismaMock.addon_trial_requests.findMany.mockResolvedValue([
+        { addon_code: 'CAMP_3D_MAP', addon_name: null, expires_at: trialEnd },
+      ]);
+
+      const [grant] = await service.getActiveAddons('tenant-p2');
+
+      expect(grant).toMatchObject({ source: 'purchase', expiresAt: trialEnd.toISOString() });
+    });
+
+    it('never stamps an expiry on a module the plan already includes', async () => {
+      subscriptionsClient.findFirst.mockResolvedValue({
+        id: 'sub-p3',
+        plans_subscriptions_plan_idToplans: {
+          plan_features: [{ features: { code: 'CAMP_3D_MAP', name: '3D', type: 'module', is_active: 1 } }],
+        },
+        subscription_features: [],
+      });
+      prismaMock.add_ons.findMany.mockResolvedValue([]);
+      prismaMock.addonPurchase.findMany.mockResolvedValue([
+        { addonCode: 'CAMP_3D_MAP', periodEnd: new Date(Date.now() + DAY) },
+      ]);
+
+      const [grant] = await service.getActiveAddons('tenant-p3');
+
+      expect(grant).toMatchObject({ source: 'plan', expiresAt: null });
+    });
+  });
+
   describe('invalidateAddonCacheForPlan', () => {
     it('invalidates cache for every active/trial tenant on the plan', async () => {
       subscriptionsClient.findMany.mockResolvedValue([
@@ -718,6 +785,7 @@ describe('AddonService - Product line separation', () => {
     features: { findMany: jest.fn() },
     subscription_features: { findFirst: jest.fn(), findMany: jest.fn() },
     addon_trial_requests: { findMany: jest.fn() },
+    addonPurchase: { findMany: jest.fn() },
     $transaction: jest.fn(),
   };
 
@@ -747,6 +815,7 @@ describe('AddonService - Product line separation', () => {
     prismaMock.subscriptions.findMany.mockResolvedValue([]);
     prismaMock.plan_addons.deleteMany.mockResolvedValue({ count: 1 });
     prismaMock.addon_trial_requests.findMany.mockResolvedValue([]);
+    prismaMock.addonPurchase.findMany.mockResolvedValue([]);
   });
 
   describe('isAddonAvailableForSystem', () => {

@@ -11,6 +11,22 @@ import { BillingHistory } from '../subscriptions/entities/billing-history.entity
 import { Invoice } from '../invoices/entities/invoice.entity';
 import { SubscriptionFeature } from '../subscription-features/entities/subscription-feature.entity';
 import { Plan } from '../plans/entities/plan.entity';
+import { PrismaService } from '../prisma/prisma.service';
+
+const createPrismaMock = () => {
+  const prisma = {
+    subscription_features: {
+      findMany: jest.fn().mockResolvedValue([]),
+      update: jest.fn().mockResolvedValue({}),
+    },
+    invoices: {
+      create: jest.fn().mockResolvedValue({ id: 'inv-p1', invoice_no: 'INV-P1' }),
+    },
+    $transaction: jest.fn(),
+  };
+  prisma.$transaction.mockImplementation((fn: (tx: unknown) => unknown) => fn(prisma));
+  return prisma;
+};
 
 describe('AdminBillingCycleService.getBillingInfo - nextBillingDate', () => {
   let service: AdminBillingCycleService;
@@ -37,7 +53,10 @@ describe('AdminBillingCycleService.getBillingInfo - nextBillingDate', () => {
     return { ...base, ...overrides } as Subscription;
   };
 
+  let prisma: ReturnType<typeof createPrismaMock>;
+
   beforeEach(async () => {
+    prisma = createPrismaMock();
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AdminBillingCycleService,
@@ -68,6 +87,7 @@ describe('AdminBillingCycleService.getBillingInfo - nextBillingDate', () => {
           provide: getRepositoryToken(Plan),
           useValue: { findByIds: jest.fn().mockResolvedValue([]) },
         },
+        { provide: PrismaService, useValue: prisma },
       ],
     }).compile();
 
@@ -158,7 +178,10 @@ describe('AdminBillingCycleService.renewSubscription - flexible periods', () => 
   let invoicesRepo: any;
   let billingHistoryRepo: any;
 
+  let prisma: ReturnType<typeof createPrismaMock>;
+
   beforeEach(async () => {
+    prisma = createPrismaMock();
     subsRepo = { findOne: jest.fn(), save: jest.fn(async (s: any) => s) };
     invoicesRepo = {
       findOne: jest.fn(),
@@ -185,6 +208,7 @@ describe('AdminBillingCycleService.renewSubscription - flexible periods', () => 
           provide: getRepositoryToken(Plan),
           useValue: { findByIds: jest.fn().mockResolvedValue([]) },
         },
+        { provide: PrismaService, useValue: prisma },
       ],
     }).compile();
 
@@ -248,5 +272,51 @@ describe('AdminBillingCycleService.renewSubscription - flexible periods', () => 
 
     // 2026-06-01 + 3 months = 2026-09-01
     expect(res.data.newEndDate).toBe('2026-09-01');
+  });
+
+  it('itemizes plan + due bill-later add-on with 7% VAT on top and advances billed_through', async () => {
+    subsRepo.findOne.mockResolvedValue({
+      ...baseSub(),
+      plan: { name: 'Camp Plus', priceMonthly: 1290 },
+    });
+    invoicesRepo.find = jest.fn().mockResolvedValue([]);
+    prisma.subscription_features.findMany.mockResolvedValue([
+      {
+        id: 'sf-free',
+        feature_id: 'f-free',
+        price: 790,
+        billing_mode: 'bill_later',
+        billing_starts_on: new Date('2026-07-01T00:00:00Z'),
+        billed_through: null,
+        cancel_at: null,
+        features: { name: 'ยังฟรี', code: 'X' },
+      },
+      {
+        id: 'sf-due',
+        feature_id: 'f-due',
+        price: 200,
+        billing_mode: 'bill_later',
+        billing_starts_on: new Date('2026-06-01T00:00:00Z'),
+        billed_through: null,
+        cancel_at: null,
+        features: { name: 'แผนผัง 3D', code: 'CAMP_3D_MAP' },
+      },
+    ]);
+
+    await service.renewSubscription('sub-1', { periodMonths: 1, createInvoice: true });
+
+    const data = prisma.invoices.create.mock.calls[0][0].data;
+    // (1290 + 200) × 1.07 = 1594.30 — add-on ที่ยังอยู่ช่วงฟรีไม่ถูกคิด
+    expect(data.subtotal).toBe(1490);
+    expect(data.vat_amount).toBe(104.3);
+    expect(data.amount).toBe(1594.3);
+    expect(data.invoice_items.create).toEqual([
+      expect.objectContaining({ type: 'plan', amount: 1290 }),
+      expect.objectContaining({ type: 'feature', amount: 200, ref_id: 'f-due', quantity: 1 }),
+    ]);
+    expect(prisma.subscription_features.update).toHaveBeenCalledWith({
+      where: { id: 'sf-due' },
+      data: { billed_through: new Date('2026-07-01T00:00:00Z') },
+    });
   });
 });

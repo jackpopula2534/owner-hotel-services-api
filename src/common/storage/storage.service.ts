@@ -180,6 +180,19 @@ export class StorageService implements OnModuleInit {
   }
 
   /**
+   * URL นี้เป็นไฟล์ที่ระบบเราเก็บไว้ในโฟลเดอร์ `folder` หรือไม่ (ทั้งแบบ URL เต็มที่ save()
+   * คืนมาและแบบ relative) — ใช้ตรวจ URL ที่ client ส่งกลับมาก่อนบันทึก กันฝัง URL ภายนอก
+   */
+  isOwnUrl(url: string, folder: string): boolean {
+    if (url.includes('..') || /[\s?#]/.test(url)) return false;
+    const prefixes =
+      this.driver === 's3'
+        ? [`${this.s3PublicUrl}/${folder}/`]
+        : [`${this.publicBaseUrl}/uploads/${folder}/`, `/uploads/${folder}/`];
+    return prefixes.some((prefix) => url.startsWith(prefix) && url.length > prefix.length);
+  }
+
+  /**
    * ลบไฟล์ตาม key (folder/filename). best-effort — ไม่ throw ถ้าลบไม่ได้
    */
   async remove(key: string): Promise<void> {

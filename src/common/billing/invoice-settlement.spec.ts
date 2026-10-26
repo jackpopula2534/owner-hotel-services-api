@@ -12,7 +12,9 @@ describe('isInvoiceSettled', () => {
   });
 
   it('uses the adjusted (checkout) total when present', () => {
-    expect(isInvoiceSettled({ amount: 3177.9, adjusted_amount: 3500 }, [{ amount: 3177.9 }])).toBe(false);
+    expect(isInvoiceSettled({ amount: 3177.9, adjusted_amount: 3500 }, [{ amount: 3177.9 }])).toBe(
+      false,
+    );
   });
 
   it('treats a legacy payment without an amount as paying in full', () => {

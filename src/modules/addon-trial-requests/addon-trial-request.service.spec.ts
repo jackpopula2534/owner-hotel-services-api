@@ -50,6 +50,7 @@ describe('AddonTrialRequestService — product-line separation', () => {
     subscription_features: { findFirst: jest.fn(), findMany: jest.fn() },
     features: { findFirst: jest.fn(), findMany: jest.fn() },
     notification: { create: jest.fn() },
+    addonQuotaConfig: { findUnique: jest.fn() },
     $transaction: jest.fn(),
   };
 
@@ -90,6 +91,7 @@ describe('AddonTrialRequestService — product-line separation', () => {
     ]);
     // getActiveAddons() now reads approved trials as an entitlement source.
     trialRequests.findMany.mockResolvedValue([]);
+    prismaMock.addonQuotaConfig.findUnique.mockResolvedValue(null);
   });
 
   describe('createRequest', () => {
@@ -209,6 +211,29 @@ describe('AddonTrialRequestService — product-line separation', () => {
 
       // Cache is dropped, so the new entitlement shows up immediately.
       expect(cacheMock.del).toHaveBeenCalled();
+    });
+
+    it('defaults the trial length to the add-on quota config when admin leaves it blank', async () => {
+      const pending = {
+        id: 'req-3d',
+        tenant_id: 'tenant-camp',
+        addon_code: 'CAMP_MODULE',
+        addon_name: 'Campground',
+        status: 'pending',
+      };
+      trialRequests.findUnique.mockResolvedValue(pending);
+      trialRequests.update.mockImplementation(({ data }: { data: Record<string, unknown> }) =>
+        Promise.resolve({ ...pending, ...data, created_at: new Date(), updated_at: new Date() }),
+      );
+      prismaMock.addonQuotaConfig.findUnique.mockResolvedValue({ trialDays: 7 });
+      tenantOnLine('CAMP');
+
+      const before = Date.now();
+      await service.approve('req-3d', 'admin-1', {});
+
+      const expires = (trialRequests.update.mock.calls[0][0].data.expires_at as Date).getTime();
+      const days = Math.round((expires - before) / (24 * 60 * 60 * 1000));
+      expect(days).toBe(7);
     });
 
     it('surfaces the entitlement to the tenant right after approval', async () => {

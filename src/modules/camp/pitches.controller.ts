@@ -19,6 +19,7 @@ import { memoryStorage } from 'multer';
 import { StorageService } from '@/common/storage/storage.service';
 import { PitchesService } from './pitches.service';
 import {
+  BatchUpdatePositionsDto,
   BulkCreatePitchDto,
   BulkDeletePitchDto,
   CreatePitchDto,
@@ -153,6 +154,16 @@ export class PitchesController {
     });
     const imageUrls = saved.map((s) => s.url);
     return this.service.addImages(id, imageUrls, user?.tenantId);
+  }
+
+  @Patch('positions')
+  @ApiOperation({ summary: 'Batch update pitch + facility positions (drag in 3D scene)' })
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
+  updatePositions(
+    @Body() dto: BatchUpdatePositionsDto,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    return this.service.updatePositions(dto, user?.tenantId);
   }
 
   @Patch(':id/position')

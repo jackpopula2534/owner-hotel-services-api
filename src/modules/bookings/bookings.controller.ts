@@ -1,3 +1,4 @@
+import { CheckInDto, HandOverRoomDto } from './dto/check-in.dto';
 import {
   Controller,
   Get,
@@ -20,6 +21,7 @@ import { AddFolioChargeDto } from './dto/add-folio-charge.dto';
 import { AddFolioPaymentDto } from './dto/add-folio-payment.dto';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { WalkInDto } from './dto/walk-in.dto';
+import { MoveRoomDto } from './dto/move-room.dto';
 import { UndoCheckOutDto } from './dto/undo-checkout.dto';
 import { RequestEarlyCheckInDto } from './dto/request-early-checkin.dto';
 import { RequestLateCheckOutDto } from './dto/request-late-checkout.dto';
@@ -180,8 +182,50 @@ export class BookingsController {
     'hotel_manager',
     'front_desk',
   )
-  async checkIn(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
-    return this.bookingsService.checkIn(id, user?.tenantId);
+  async checkIn(
+    @Param('id') id: string,
+    @Body() dto: CheckInDto,
+    @CurrentUser() user: { tenantId?: string; id?: string },
+  ) {
+    return this.bookingsService.checkIn(id, user?.tenantId, dto ?? {}, user?.id);
+  }
+
+  @Post(':id/hand-over-room')
+  @ApiOperation({ summary: 'Hand the room over to a guest who checked in before the room was ready' })
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'receptionist',
+    'hotel_manager',
+    'front_desk',
+  )
+  async handOverRoom(
+    @Param('id') id: string,
+    @Body() dto: HandOverRoomDto,
+    @CurrentUser() user: { tenantId?: string; id?: string },
+  ) {
+    return this.bookingsService.handOverRoom(id, user?.tenantId, dto?.keyCards, user?.id);
+  }
+
+  @Post(':id/move-room')
+  @ApiOperation({ summary: 'Move a booking to another room (clash-checked; updates room statuses when in-house)' })
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'receptionist',
+    'hotel_manager',
+    'front_desk',
+  )
+  async moveRoom(
+    @Param('id') id: string,
+    @Body() dto: MoveRoomDto,
+    @CurrentUser() user: { tenantId?: string; id?: string },
+  ) {
+    return this.bookingsService.moveRoom(id, dto.roomId, user?.tenantId, user?.id, dto.reason);
   }
 
   @Post('walk-in')

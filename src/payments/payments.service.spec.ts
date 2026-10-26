@@ -10,7 +10,7 @@
  * Prisma and class-validator already protects the DTO shape.
  */
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailEventsService } from '../email/email-events.service';
@@ -30,6 +30,12 @@ describe('PaymentsService', () => {
       findFirstOrThrow: jest.fn(),
       findMany: jest.fn(),
       count: jest.fn(),
+      create: jest.fn(),
+    },
+    addonPurchase: {
+      count: jest.fn(),
+      findFirst: jest.fn(),
+      updateMany: jest.fn(),
     },
     promptPayTransaction: {
       updateMany: jest.fn(),
@@ -397,6 +403,85 @@ describe('PaymentsService', () => {
           }),
         }),
       );
+    });
+  });
+
+  describe('StaySync bills are settled by the platform only', () => {
+    const tenantActor = { isPlatformAdmin: false };
+    const platformActor = { isPlatformAdmin: true };
+    const pendingOn = (invoiceId: string) =>
+      prismaMock.payments.findFirst.mockResolvedValue({
+        id: 'payment-9',
+        invoice_id: invoiceId,
+        tenant_id: 'tenant-1',
+        status: 'pending',
+      });
+
+    it('refuses a tenant approving its own subscription payment', async () => {
+      pendingOn('inv-sub');
+      prismaMock.invoices.findFirst.mockResolvedValue({ subscription_id: 'sub-1' });
+
+      await expect(
+        service.approvePayment('payment-9', 'user-1', 'tenant-1', tenantActor),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(prismaMock.payments.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('refuses a tenant approving or rejecting an add-on purchase payment', async () => {
+      pendingOn('inv-add');
+      prismaMock.invoices.findFirst.mockResolvedValue({ subscription_id: null });
+      prismaMock.addonPurchase.count.mockResolvedValue(1);
+
+      await expect(
+        service.approvePayment('payment-9', 'user-1', 'tenant-1', tenantActor),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(
+        service.rejectPayment('payment-9', 'user-1', 'tenant-1', tenantActor),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(prismaMock.payments.update).not.toHaveBeenCalled();
+    });
+
+    it('still lets a tenant approve its guests\' booking payments', async () => {
+      pendingOn('inv-booking');
+      prismaMock.invoices.findFirst.mockResolvedValue({ subscription_id: null, booking_id: null });
+      prismaMock.addonPurchase.count.mockResolvedValue(0);
+      prismaMock.payments.updateMany.mockResolvedValue({ count: 1 });
+      prismaMock.payments.findFirstOrThrow.mockResolvedValue({ id: 'payment-9', status: 'approved' });
+
+      await service.approvePayment('payment-9', 'user-1', 'tenant-1', tenantActor);
+
+      expect(prismaMock.payments.updateMany).toHaveBeenCalled();
+    });
+
+    it('grants the purchased add-on month inside the platform approval', async () => {
+      pendingOn('inv-add');
+      prismaMock.invoices.findFirst.mockResolvedValue({ subscription_id: null, booking_id: null });
+      prismaMock.addonPurchase.count.mockResolvedValue(1);
+      prismaMock.payments.updateMany.mockResolvedValue({ count: 1 });
+      prismaMock.payments.findFirstOrThrow.mockResolvedValue({ id: 'payment-9', status: 'approved' });
+      prismaMock.addonPurchase.findFirst
+        .mockResolvedValueOnce({ id: 'pur-1', addonCode: 'CAMP_3D_MAP', months: 1 })
+        .mockResolvedValueOnce(null);
+      prismaMock.addonPurchase.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.approvePayment('payment-9', 'admin-1', undefined, platformActor);
+
+      expect(prismaMock.addonPurchase.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'pur-1', tenantId: 'tenant-1', status: 'pending' },
+          data: expect.objectContaining({ status: 'paid' }),
+        }),
+      );
+      expect(addonMock.invalidateAddonCache).toHaveBeenCalledWith('tenant-1');
+    });
+
+    it('drops a status a tenant tries to set on a slip for a StaySync bill', async () => {
+      prismaMock.invoices.findFirst.mockResolvedValue({ subscription_id: 'sub-1' });
+      prismaMock.payments.create.mockResolvedValue({ id: 'payment-10' });
+
+      await service.create({ invoiceId: 'inv-sub', method: 'transfer', status: 'approved' } as never, tenantActor);
+
+      expect(prismaMock.payments.create.mock.calls[0][0].data).not.toHaveProperty('status');
     });
   });
 });

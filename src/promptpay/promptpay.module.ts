@@ -3,9 +3,10 @@ import { PromptPayService } from './promptpay.service';
 import { PromptPayController } from './promptpay.controller';
 import { PrismaModule } from '../prisma/prisma.module';
 import { EmailModule } from '../email/email.module';
+import { AddonModule } from '../modules/addons/addon.module';
 
 @Module({
-  imports: [PrismaModule, EmailModule],
+  imports: [PrismaModule, EmailModule, AddonModule],
   controllers: [PromptPayController],
   providers: [PromptPayService],
   exports: [PromptPayService],
