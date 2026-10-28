@@ -2,6 +2,22 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UpdateDocumentSettingsDto } from './dto/update-document-settings.dto';
 
+/**
+ * The tenant's own company profile ("ข้อมูลกิจการ"), shaped like the document
+ * settings fields it can stand in for. Printers use it for any field the
+ * property's document settings leave blank, so a PO never goes out without a
+ * buyer name just because nobody opened the procurement settings page.
+ */
+export interface DocumentCompanyFallback {
+  companyName: string | null;
+  companyNameEn: string | null;
+  taxId: string | null;
+  address: string | null;
+  phone: string | null;
+  email: string | null;
+  website: string | null;
+}
+
 @Injectable()
 export class DocumentSettingsService {
   private readonly logger = new Logger(DocumentSettingsService.name);
@@ -23,6 +39,39 @@ export class DocumentSettingsService {
 
     this.logger.log(`Created default document settings for property ${propertyId}`);
     return created as unknown as Record<string, unknown>;
+  }
+
+  /** Company details from the tenant row, for fields the settings leave blank. */
+  async getCompanyFallback(tenantId: string): Promise<DocumentCompanyFallback | null> {
+    const t = await this.prisma.tenants.findUnique({
+      where: { id: tenantId },
+      select: {
+        name: true,
+        name_en: true,
+        tax_id: true,
+        address: true,
+        district: true,
+        province: true,
+        postal_code: true,
+        phone: true,
+        email: true,
+        website: true,
+      },
+    });
+    if (!t) return null;
+    const address = [t.address, t.district, t.province, t.postal_code]
+      .map((part) => part?.trim())
+      .filter(Boolean)
+      .join(' ');
+    return {
+      companyName: t.name || null,
+      companyNameEn: t.name_en || null,
+      taxId: t.tax_id || null,
+      address: address || null,
+      phone: t.phone || null,
+      email: t.email || null,
+      website: t.website || null,
+    };
   }
 
   /** Update document settings */

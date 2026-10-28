@@ -25,10 +25,17 @@ import {
   ApiConsumes,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
+import { RolesGuard } from '@/common/guards/roles.guard';
+import { Roles } from '@/common/decorators/roles.decorator';
 import { AllowSystems } from '@/common/decorators/allow-systems.decorator';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
 import { DocumentSettingsService } from './document-settings.service';
 import { UpdateDocumentSettingsDto } from './dto/update-document-settings.dto';
+
+// The legal entity printed on every PO, receipt and tax invoice — editing it is
+// a manager's call. procurement_manager is the floor, so manager / tenant_admin /
+// admin inherit; owner and accounting_manager carry no rank and are named outright.
+const SETTINGS_EDITORS = ['procurement_manager', 'owner', 'accounting_manager'] as const;
 
 interface AuthUser {
   tenantId: string;
@@ -37,7 +44,7 @@ interface AuthUser {
 
 @ApiTags('Document Settings')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('document-settings')
 export class DocumentSettingsController {
   constructor(
@@ -58,14 +65,19 @@ export class DocumentSettingsController {
     @Query('propertyId') propertyId: string,
     @CurrentUser() user: AuthUser,
   ): Promise<{ success: boolean; data: Record<string, unknown> }> {
-    const data = await this.service.getByProperty(user.tenantId, propertyId);
-    return { success: true, data };
+    const [data, companyFallback] = await Promise.all([
+      this.service.getByProperty(user.tenantId, propertyId),
+      this.service.getCompanyFallback(user.tenantId),
+    ]);
+    return { success: true, data: { ...data, companyFallback } };
   }
 
   @ApiOperation({ summary: 'Update document settings for a property' })
   @ApiQuery({ name: 'propertyId', required: true, description: 'Property ID' })
   @ApiResponse({ status: 200, description: 'Document settings updated' })
   @Patch()
+  @Roles(...SETTINGS_EDITORS)
+  @ApiResponse({ status: 403, description: 'Role may not edit document settings' })
   async update(
     @Query('propertyId') propertyId: string,
     @Body() dto: UpdateDocumentSettingsDto,
@@ -81,6 +93,8 @@ export class DocumentSettingsController {
   @ApiResponse({ status: 200, description: 'Logo uploaded successfully' })
   @ApiResponse({ status: 400, description: 'Invalid file type or size' })
   @Post('logo')
+  @Roles(...SETTINGS_EDITORS)
+  @ApiResponse({ status: 403, description: 'Role may not edit document settings' })
   @HttpCode(HttpStatus.OK)
   @UseInterceptors(
     FileInterceptor('logo', {
@@ -118,6 +132,8 @@ export class DocumentSettingsController {
   @ApiQuery({ name: 'propertyId', required: true, description: 'Property ID' })
   @ApiResponse({ status: 200, description: 'Logo removed' })
   @Delete('logo')
+  @Roles(...SETTINGS_EDITORS)
+  @ApiResponse({ status: 403, description: 'Role may not edit document settings' })
   async removeLogo(
     @Query('propertyId') propertyId: string,
     @CurrentUser() user: AuthUser,
