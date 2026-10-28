@@ -20,6 +20,7 @@ import {
 } from '@nestjs/swagger';
 import { ReservationService } from './reservation.service';
 import { CreateReservationDto } from './dto/create-reservation.dto';
+import { MoveReservationTableDto } from './dto/move-reservation-table.dto';
 import { UpdateReservationDto } from './dto/update-reservation.dto';
 import { QueryReservationsDto } from './dto/query-reservations.dto';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
@@ -97,6 +98,22 @@ export class ReservationController {
       user.tenantId,
       user?.id,
     );
+  }
+
+  @Patch(':reservationId/move-table')
+  @ApiOperation({
+    summary: 'Move a booking to another table — its open bills move with it, the old table goes to cleaning',
+  })
+  @ApiParam({ name: 'restaurantId' })
+  @ApiParam({ name: 'reservationId' })
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'waiter', 'receptionist')
+  async moveTable(
+    @Param('restaurantId') restaurantId: string,
+    @Param('reservationId') reservationId: string,
+    @Body() dto: MoveReservationTableDto,
+    @CurrentUser() user: { tenantId: string; id?: string },
+  ) {
+    return this.reservationService.moveTable(restaurantId, reservationId, dto, user.tenantId, user?.id);
   }
 
   @Patch(':reservationId/seat')

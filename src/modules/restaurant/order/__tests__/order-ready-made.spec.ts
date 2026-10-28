@@ -3,8 +3,9 @@
  *
  * บั๊กที่สเปกชุดนี้กันไว้:
  *  - บิลที่มีแต่ของสำเร็จรูปเคยส่งเข้าครัวไม่ได้เลย พนักงานจึงปิดบิลไม่ได้
- *  - ถ้าปล่อยของสำเร็จรูปขึ้นจอครัว ตั๋วจะค้างรอเชฟกด ready ทั้งที่ไม่มีอะไรต้องทำ
- *  - บิลผสมต้องออกตั๋วครัวใบเดียวที่มีเฉพาะของที่ต้องปรุง
+ *  - เดิมของสำเร็จรูปถูกปั๊ม "เสิร์ฟแล้ว" ทันทีทั้งที่ยังไม่มีใครหยิบ — ตอนนี้ขึ้นจอครัว
+ *    ในส่วนสำเร็จรูป (รอหยิบ → หยิบแล้ว) แล้วส่งเสิร์ฟพร้อมของอื่นจากช่องพร้อมเสิร์ฟ
+ *  - บิลผสมออกตั๋วครัวใบเดียว
  */
 
 import { Test } from '@nestjs/testing';
@@ -84,20 +85,20 @@ describe('OrderService — sendToKitchen กับของสำเร็จร
   /** ค่าที่สั่งเขียนของ updateMany ครั้งที่ n */
   const updateCall = (n: number) => prisma.orderItem.updateMany.mock.calls[n][0];
 
-  it('บิลที่มีแต่ของสำเร็จรูป: เสิร์ฟทันที ไม่ออกตั๋วครัว และไม่ดันบิลไป PREPARING', async () => {
+  it('บิลที่มีแต่ของสำเร็จรูป: ขึ้นจอครัวในส่วนสำเร็จรูป (รอหยิบ) — ไม่ปั๊มเสิร์ฟแล้วทันที', async () => {
     const items = [line('i1', 'READY_MADE', 'น้ำดื่ม'), line('i2', 'READY_MADE', 'ไอศกรีมแท่ง')];
     prisma.order.findFirst.mockResolvedValue(orderWith(items));
 
     await service.sendToKitchen(RESTAURANT, ORDER_ID, TENANT);
 
-    expect(prisma.kitchenOrder.create).not.toHaveBeenCalled();
-    expect(kitchenGateway.emitNewOrder).not.toHaveBeenCalled();
-    expect(updateCall(0).data).toMatchObject({ sentToKitchen: true, status: 'SERVED' });
-    expect(updateCall(0).data.servedAt).toBeInstanceOf(Date);
-    expect(prisma.order.update.mock.calls[0][0].data.status).toBe('PENDING');
+    expect(prisma.kitchenOrder.create).toHaveBeenCalledTimes(1);
+    expect(updateCall(0).data).toEqual({ sentToKitchen: true, sentAt: expect.any(Date), status: 'SENT' });
+    expect(prisma.order.update.mock.calls[0][0].data.status).toBe('PREPARING');
+    const emitted = kitchenGateway.emitNewOrder.mock.calls[0][2];
+    expect(emitted.items.map((i: { name: string }) => i.name)).toEqual(['น้ำดื่ม', 'ไอศกรีมแท่ง']);
   });
 
-  it('บิลผสม: ตั๋วครัวใบเดียวที่มีเฉพาะของที่ต้องปรุง ส่วนของสำเร็จรูปเสิร์ฟไปเลย', async () => {
+  it('บิลผสม: ตั๋วครัวใบเดียว ทั้งของต้องปรุงและของที่ต้องหยิบ', async () => {
     const items = [
       line('i1', 'READY_MADE', 'น้ำดื่ม'),
       line('i2', 'COOKED', 'ผัดไทยกุ้งสด'),
@@ -107,14 +108,9 @@ describe('OrderService — sendToKitchen กับของสำเร็จร
     await service.sendToKitchen(RESTAURANT, ORDER_ID, TENANT);
 
     expect(prisma.kitchenOrder.create).toHaveBeenCalledTimes(1);
-    expect(updateCall(0)).toMatchObject({ where: { id: { in: ['i1'] } } });
-    expect(updateCall(0).data).toMatchObject({ status: 'SERVED' });
-    expect(updateCall(1)).toMatchObject({ where: { id: { in: ['i2'] } } });
-    expect(updateCall(1).data).toMatchObject({ status: 'SENT' });
+    expect(updateCall(0)).toMatchObject({ where: { id: { in: ['i1'] } }, data: { status: 'SENT' } });
+    expect(updateCall(1)).toMatchObject({ where: { id: { in: ['i2'] } }, data: { status: 'SENT' } });
     expect(prisma.order.update.mock.calls[0][0].data.status).toBe('PREPARING');
-
-    const emitted = kitchenGateway.emitNewOrder.mock.calls[0][2];
-    expect(emitted.items.map((i: { name: string }) => i.name)).toEqual(['ผัดไทยกุ้งสด']);
   });
 
   it('บิลที่ปรุงอย่างเดียวยังทำงานเหมือนเดิม', async () => {

@@ -11,20 +11,23 @@ import {
   ValidateIf,
 } from 'class-validator';
 
-export type PaymentAccountKind = 'promptpay' | 'bank';
+export type PaymentAccountKind = 'promptpay' | 'bank' | 'qr_image';
+
+export const PAYMENT_ACCOUNT_KINDS: PaymentAccountKind[] = ['promptpay', 'bank', 'qr_image'];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Create DTO
 // kind === 'promptpay' → ต้องมี promptpayId (และ accountName recommended)
 // kind === 'bank'      → ต้องมี bankCode + accountNumber + accountName
+// kind === 'qr_image'  → ต้องมี qrImageUrl + accountName (รูป QR คงที่ ไม่มียอดในตัว)
 // ─────────────────────────────────────────────────────────────────────────────
 export class CreatePaymentAccountDto {
   @ApiProperty({
     description: 'Channel kind',
-    enum: ['promptpay', 'bank'],
+    enum: PAYMENT_ACCOUNT_KINDS,
     example: 'promptpay',
   })
-  @IsIn(['promptpay', 'bank'])
+  @IsIn(PAYMENT_ACCOUNT_KINDS)
   kind: PaymentAccountKind;
 
   @ApiPropertyOptional({ description: 'ป้ายแสดงผล (ไม่บังคับ)', example: 'บัญชีหลัก สาขากรุงเทพ' })
@@ -52,11 +55,26 @@ export class CreatePaymentAccountDto {
   @MaxLength(16)
   bankCode?: string;
 
-  @ApiPropertyOptional({ description: 'เลขบัญชีธนาคาร (ตัวเลข 8-15 หลัก)', example: '1234567890' })
+  @ApiPropertyOptional({
+    description: 'เลขบัญชีธนาคาร (ตัวเลข 8-15 หลัก) — kind=qr_image ใส่ได้แค่ 4 ตัวท้าย (ไม่บังคับ)',
+    example: '1234567890',
+  })
   @ValidateIf((o: CreatePaymentAccountDto) => o.kind === 'bank')
   @IsString()
   @Matches(/^\d{8,15}$/, { message: 'เลขบัญชีต้องเป็นตัวเลข 8-15 หลัก' })
   accountNumber?: string;
+
+  @ApiPropertyOptional({ description: 'URL รูป QR ที่อัปโหลด (kind=qr_image)' })
+  @ValidateIf((o: CreatePaymentAccountDto) => o.kind === 'qr_image')
+  @IsString()
+  @MaxLength(500)
+  qrImageUrl?: string;
+
+  @ApiPropertyOptional({ description: 'ที่มาของ QR เช่น K SHOP, แม่มณี (kind=qr_image)', example: 'K SHOP' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  qrProvider?: string;
 
   @ApiProperty({ description: 'ชื่อบัญชี', example: 'นายสมชาย ใจดี' })
   @IsString()

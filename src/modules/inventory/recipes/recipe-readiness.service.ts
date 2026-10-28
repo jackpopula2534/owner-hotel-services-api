@@ -55,7 +55,7 @@ export class RecipeReadinessService {
    */
   async getReadiness(
     tenantId: string,
-    opts: { search?: string; restaurantId?: string } = {},
+    opts: { search?: string; restaurantId?: string; menuItemId?: string } = {},
   ): Promise<{ menus: ReadinessMenu[]; summary: ReadinessSummary }> {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID is required');
@@ -64,6 +64,7 @@ export class RecipeReadinessService {
     const menuItemWhere: any = { tenantId };
     if (opts.restaurantId) menuItemWhere.restaurantId = opts.restaurantId;
     if (opts.search) menuItemWhere.name = { contains: opts.search };
+    if (opts.menuItemId) menuItemWhere.id = opts.menuItemId;
 
     const recipes = await this.prisma.menuItemRecipe.findMany({
       where: { menuItem: menuItemWhere },

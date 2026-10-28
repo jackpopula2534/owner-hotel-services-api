@@ -291,32 +291,39 @@ model PaymentSettings {
 /// Multi-account payment configuration per property
 /// kind = "promptpay" → ใช้ promptpayId / accountName
 /// kind = "bank"      → ใช้ bankCode / accountNumber / accountName / branch
+/// kind = "qr_image"  → ใช้ qrImageUrl / qrProvider / accountName (accountNumber = เลข 4 ตัวท้าย ไม่บังคับ)
 model PaymentAccount {
-  id            String   @id @default(uuid())
-  propertyId    String
+  id                  String       @id @default(uuid())
+  propertyId          String
   /// Channel kind: 'promptpay' | 'bank'
-  kind          String   @db.VarChar(20)
+  kind                String       @db.VarChar(20)
   /// Display label (optional)
-  label         String?  @db.VarChar(120)
+  label               String?      @db.VarChar(120)
   /// PromptPay-specific: เบอร์โทร / เลข ปชช.
-  promptpayId   String?  @db.VarChar(20)
+  promptpayId         String?      @db.VarChar(20)
   /// Bank-specific: bank short code (e.g. KBANK, SCB)
-  bankCode      String?  @db.VarChar(16)
+  bankCode            String?      @db.VarChar(16)
   /// Bank account number
-  accountNumber String?  @db.VarChar(20)
+  accountNumber       String?      @db.VarChar(20)
   /// Account holder name (ใช้ทั้ง promptpay และ bank)
-  accountName   String?  @db.VarChar(200)
+  accountName         String?      @db.VarChar(200)
   /// Bank branch (ไม่บังคับ)
-  branch        String?  @db.VarChar(120)
+  branch              String?      @db.VarChar(120)
+  /// kind = "qr_image": รูป QR คงที่ที่ร้านแนบเอง (K SHOP / แม่มณี ฯลฯ) — ไม่มียอดเงินในตัว
+  qrImageUrl          String?      @db.VarChar(500)
+  /// kind = "qr_image": ที่มาของ QR เช่น K SHOP, แม่มณี (แสดงผลเท่านั้น)
+  qrProvider          String?      @db.VarChar(60)
   /// บัญชีหลัก (default per kind) — มีได้แค่ 1 ต่อ kind ต่อ property
-  isDefault     Boolean  @default(false)
+  isDefault           Boolean      @default(false)
   /// ใช้งานหรือไม่
-  isActive      Boolean  @default(true)
+  isActive            Boolean      @default(true)
   /// ลำดับการแสดงผล
-  sortOrder     Int      @default(0)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  property      Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  sortOrder           Int          @default(0)
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+  property            Property     @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  qrRestaurants       Restaurant[] @relation("RestaurantQrAccount")
+  transferRestaurants Restaurant[] @relation("RestaurantTransferAccount")
 
   @@index([propertyId])
   @@index([propertyId, kind])
@@ -465,48 +472,60 @@ model Review {
 }
 
 model Restaurant {
-  id                   String            @id @default(uuid())
-  tenantId             String?
-  name                 String
+  id                       String            @id @default(uuid())
+  tenantId                 String?
+  name                     String
   // Scoped per tenant, like every other coded document in the schema. A global
   // unique here meant the first tenant to take RES-001 blocked every other
   // tenant from ever creating their first restaurant.
-  code                 String
-  description          String?
-  location             String?
-  capacity             Int?
-  createdAt            DateTime          @default(now())
-  updatedAt            DateTime          @updatedAt
-  type                 RestaurantType    @default(CASUAL)
-  openTime             String?
-  closeTime            String?
-  isActive             Boolean           @default(true)
+  code                     String
+  description              String?
+  location                 String?
+  capacity                 Int?
+  createdAt                DateTime          @default(now())
+  updatedAt                DateTime          @updatedAt
+  type                     RestaurantType    @default(CASUAL)
+  openTime                 String?
+  closeTime                String?
+  isActive                 Boolean           @default(true)
   // ── Charge policy ────────────────────────────────────────────────────────
   // Per outlet, not per property: a hotel routinely runs a 10% service charge
   // in the restaurant and none on room service, and a non-VAT-registered
   // outlet must be able to stop charging VAT entirely. Each order snapshots
   // these onto itself at creation, so changing them never rewrites old bills.
-  vatEnabled           Boolean           @default(true)
-  vatRate              Decimal           @default(7.00) @db.Decimal(5, 2)
-  serviceChargeEnabled Boolean           @default(true)
-  serviceRate          Decimal           @default(10.00) @db.Decimal(5, 2)
-  layoutData           Json?
-  propertyId           String?
+  vatEnabled               Boolean           @default(true)
+  vatRate                  Decimal           @default(7.00) @db.Decimal(5, 2)
+  serviceChargeEnabled     Boolean           @default(true)
+  serviceRate              Decimal           @default(10.00) @db.Decimal(5, 2)
+  layoutData               Json?
+  propertyId               String?
   // Which warehouse this outlet draws retail stock from. A bottle of water sold
   // at the lobby bar does not come out of the kitchen store, so the source is a
   // per-outlet choice; null keeps the old behaviour (KITCHEN → default → any).
-  warehouseId          String?
-  warehouse            Warehouse?        @relation(fields: [warehouseId], references: [id])
-  menuCategories       MenuCategory[]
-  orders               Order[]
-  tables               RestaurantTable[]
-  property             Property?         @relation(fields: [propertyId], references: [id])
-  staffCalls           StaffCall[]
+  warehouseId              String?
+  warehouse                Warehouse?        @relation(fields: [warehouseId], references: [id])
+  // ── Payment policy ──────────────────────────────────────────────────────
+  // วิธีชำระที่ POS ของร้านนี้แสดง (array ของ PaymentMethodEnum) — null = ทุกวิธี (พฤติกรรมเดิม)
+  acceptedPaymentMethods   Json?
+  defaultPaymentMethod     String?           @db.VarChar(20)
+  // บัญชีรับเงินของร้าน — null = ใช้บัญชีหลัก (isDefault) ของ property ตามเดิม
+  // หลายร้านชี้บัญชีเดียวกันได้ ลบบัญชีแล้วร้านกลับไปใช้บัญชีหลักเอง
+  qrPaymentAccountId       String?
+  qrPaymentAccount         PaymentAccount?   @relation("RestaurantQrAccount", fields: [qrPaymentAccountId], references: [id], onDelete: SetNull)
+  transferPaymentAccountId String?
+  transferPaymentAccount   PaymentAccount?   @relation("RestaurantTransferAccount", fields: [transferPaymentAccountId], references: [id], onDelete: SetNull)
+  menuCategories           MenuCategory[]
+  orders                   Order[]
+  tables                   RestaurantTable[]
+  property                 Property?         @relation(fields: [propertyId], references: [id])
+  staffCalls               StaffCall[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
   @@index([propertyId])
   @@index([warehouseId])
+  @@index([qrPaymentAccountId])
+  @@index([transferPaymentAccountId])
   @@map("restaurants")
 }
 
@@ -547,7 +566,8 @@ model TableReservation {
   id              String            @id @default(uuid())
   tenantId        String?
   restaurantId    String
-  tableId         String
+  /// null = booked without a table yet; staff pick one when the party orders
+  tableId         String?
   guestName       String
   guestPhone      String?
   guestEmail      String?
@@ -558,13 +578,15 @@ model TableReservation {
   status          ReservationStatus @default(PENDING)
   specialRequests String?
   notes           String?           @db.Text
+  /// Table moves, oldest first: [{ fromTableId, fromTableNumber, toTableId, toTableNumber, reason, at, byUserId, byName }]
+  tableMoves      Json?
   confirmedAt     DateTime?
   seatedAt        DateTime?
   completedAt     DateTime?
   cancelledAt     DateTime?
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
-  table           RestaurantTable   @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  table           RestaurantTable?  @relation(fields: [tableId], references: [id], onDelete: Cascade)
   orders          Order[]
 
   @@index([tenantId])
@@ -594,6 +616,8 @@ model MenuCategory {
   /// Food Cost% เพี้ยนน้อยกว่าการเดาผิดฝั่งเครื่องดื่ม (ต้นทุนอาหารเป็นตัวเศษที่ใหญ่กว่า)
   /// ค่าที่ยอมรับจำกัดไว้ที่ FOOD | BEVERAGE | OTHER ในชั้น DTO — ดู MENU_REVENUE_TYPES
   revenueType  RevenueType @default(FOOD)
+  /// สถานีบนจอครัว: KITCHEN | BAR · null = ตามประเภทรายได้ (BEVERAGE → BAR, อื่น ๆ → KITCHEN)
+  kitchenStation String?
   restaurant   Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   items        MenuItem[]
 
@@ -626,6 +650,8 @@ model MenuItem {
   /// ตัวเดียวที่ตัดสินว่ารายการนี้ขึ้นจอครัวไหม — ไม่ผูกกับการนับสต๊อก เพราะร้านที่
   /// ขายน้ำขวดโดยไม่อยากนับสต๊อกก็ยังต้องไม่ให้บิลไปรอเชฟกด ready
   itemKind          MenuItemKind            @default(COOKED)
+  /// สถานีที่ทำรายการนี้บนจอครัว: KITCHEN | BAR · null = ตามหมวด (MenuCategory.kitchenStation)
+  kitchenStation    String?
   /// นับสต๊อกในตัวเมนูเอง — สำหรับ tenant ที่ไม่ได้ซื้อ INVENTORY_MODULE
   /// ห้ามเปิดพร้อม inventoryItemId (สองแหล่งความจริง) — ดู resolveStockMode()
   trackStock        Boolean                 @default(false)

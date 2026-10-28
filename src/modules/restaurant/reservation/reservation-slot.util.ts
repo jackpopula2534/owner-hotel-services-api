@@ -70,10 +70,24 @@ export function startOfDay(value: string | Date): Date {
     : new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
 }
 
-/** Today's calendar day (server local time), normalized the same way as stored dates. */
-export function today(): Date {
-  const now = new Date();
-  return new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+/** The restaurant's calendar — bookings, "today" and the floor all follow it. */
+export const RESERVATION_TIME_ZONE = 'Asia/Bangkok';
+
+const businessDay = new Intl.DateTimeFormat('en-CA', {
+  timeZone: RESERVATION_TIME_ZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
+/**
+ * Today's calendar day in Bangkok, normalized the same way as stored dates.
+ * Not the server's local day: on a UTC server that is still "yesterday" from
+ * 00:00 to 07:00 Bangkok time, and today's bookings would drop off the floor.
+ */
+export function today(now: Date = new Date()): Date {
+  const [y, m, d] = businessDay.format(now).split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d));
 }
 
 export function isToday(date: Date): boolean {

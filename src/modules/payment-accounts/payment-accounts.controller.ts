@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -11,9 +12,21 @@ import {
   Post,
   Query,
   UnauthorizedException,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
+import {
+  ApiBearerAuth,
+  ApiConsumes,
+  ApiOperation,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
+import { StorageService, UploadableFile } from '@/common/storage/storage.service';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -38,6 +51,7 @@ export class PaymentAccountsController {
   constructor(
     private readonly service: PaymentAccountsService,
     private readonly prisma: PrismaService,
+    private readonly storage: StorageService,
   ) {}
 
   // ─── List ────────────────────────────────────────────────────────────────
@@ -46,7 +60,7 @@ export class PaymentAccountsController {
   @ApiQuery({
     name: 'kind',
     required: false,
-    enum: ['promptpay', 'bank'],
+    enum: ['promptpay', 'bank', 'qr_image'],
     description: 'Filter by channel kind',
   })
   @ApiQuery({
@@ -63,6 +77,43 @@ export class PaymentAccountsController {
     const propertyId = await this.resolvePropertyId(user, propertyIdQuery);
     const data = await this.service.list(propertyId, kind);
     return { success: true, data };
+  }
+
+  // ─── Upload QR image ─────────────────────────────────────────────────────
+  // ขั้นแรกของการสร้างบัญชี kind=qr_image: อัปโหลดรูปก่อน แล้วส่ง url ที่ได้ไปกับ POST /
+  @Post('qr-image')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Upload a static QR image (for kind=qr_image)' })
+  @ApiConsumes('multipart/form-data')
+  @ApiResponse({ status: 200 })
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      fileFilter: (_req, file, cb) => {
+        if (!file.mimetype.match(/^image\/(jpeg|jpg|png|webp)$/)) {
+          return cb(new BadRequestException('อนุญาตเฉพาะไฟล์ภาพ (JPG, PNG, WebP) เท่านั้น'), false);
+        }
+        cb(null, true);
+      },
+      limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+    }),
+  )
+  async uploadQrImage(
+    @CurrentUser() user: JwtUser,
+    @UploadedFile() file?: UploadableFile,
+  ) {
+    if (!user.tenantId) {
+      throw new UnauthorizedException('Tenant not found in token');
+    }
+    if (!file) {
+      throw new BadRequestException('กรุณาเลือกรูป QR');
+    }
+    const saved = await this.storage.save({
+      folder: PaymentAccountsService.QR_IMAGE_FOLDER,
+      file,
+      prefix: 'qr',
+    });
+    return { success: true, data: { url: saved.path } };
   }
 
   // ─── Get one ─────────────────────────────────────────────────────────────

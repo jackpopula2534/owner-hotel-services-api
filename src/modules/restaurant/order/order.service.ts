@@ -63,6 +63,29 @@ const RESERVATION_LINK_SELECT = {
   reservationDate: true,
   startTime: true,
   seatedAt: true,
+  // The kitchen shows the guest's request (e.g. มังสวิรัติ 2 ท่าน) on the ticket.
+  specialRequests: true,
+} as const;
+
+/**
+ * What a kitchen display needs to know about a dish on a bill: what it is
+ * (cooked / ready-made), which station makes it, the target time and the
+ * dietary flags the cook must see. The recipe itself is fetched on demand.
+ */
+export const ORDER_ITEM_MENU_SELECT = {
+  id: true,
+  name: true,
+  image: true,
+  preparationTime: true,
+  itemKind: true,
+  kitchenStation: true,
+  isVegetarian: true,
+  isVegan: true,
+  isGlutenFree: true,
+  isSpicy: true,
+  spicyLevel: true,
+  allergens: true,
+  category: { select: { id: true, name: true, kitchenStation: true, revenueType: true } },
 } as const;
 
 /**
@@ -171,8 +194,12 @@ export class OrderService {
         include: {
           table: { select: { id: true, tableNumber: true, zone: true } },
           items: {
-            include: { menuItem: { select: { id: true, name: true, image: true } } },
+            include: { menuItem: { select: ORDER_ITEM_MENU_SELECT as never } },
+            orderBy: { createdAt: 'asc' },
           },
+          // The kitchen board needs to know whether a round was accepted yet.
+          // stationName + notes carry a recall (ดึงกลับ) and its reason.
+          kitchenOrders: { select: { id: true, status: true, startedAt: true, createdAt: true, stationName: true, notes: true }, orderBy: { createdAt: 'asc' } },
           // The list has to be able to say "this bill is ปิยะ's booking" without a
           // second round-trip per row.
           reservation: { select: RESERVATION_LINK_SELECT },
@@ -191,15 +218,7 @@ export class OrderService {
         table: true,
         items: {
           include: {
-            menuItem: {
-              select: {
-                id: true,
-                name: true,
-                image: true,
-                preparationTime: true,
-                itemKind: true,
-              },
-            },
+            menuItem: { select: ORDER_ITEM_MENU_SELECT as never },
           },
           orderBy: { createdAt: 'asc' },
         },
@@ -458,8 +477,9 @@ export class OrderService {
     const pendingItems =
       order.items?.filter((i) => !i.sentToKitchen && i.status !== 'CANCELLED') ?? [];
 
-    // น้ำขวด ขนม ไอศกรีม ไม่ต้องรอเชฟกด ready — ถ้าปล่อยขึ้นจอครัวบิลจะค้างรอคนกด
-    // ให้เสิร์ฟทันทีตรงนี้แทน และบิลที่มีแต่ของสำเร็จรูปก็ต้องไม่ถูกปฏิเสธ
+    // น้ำขวด ขนม ไอศกรีม ไม่ต้องปรุง แต่ต้องมีคน "หยิบ" และ "ส่งเสิร์ฟ" จริง —
+    // ขึ้นจอครัวในส่วนสำเร็จรูป (รอหยิบ → หยิบแล้ว) แล้วไปช่องพร้อมเสิร์ฟพร้อมของอื่น
+    // แทนการปั๊ม SERVED ทันที (ระบบเคยบอกว่าเสิร์ฟแล้วทั้งที่ของยังไม่ถึงโต๊ะ)
     const toCook = pendingItems.filter((i) => (i as any).menuItem?.itemKind !== 'READY_MADE');
     const readyMade = pendingItems.filter((i) => (i as any).menuItem?.itemKind === 'READY_MADE');
 
@@ -475,7 +495,7 @@ export class OrderService {
       writes.push(
         this.prisma.orderItem.updateMany({
           where: { id: { in: readyMade.map((i) => i.id) } },
-          data: { sentToKitchen: true, sentAt: now, status: 'SERVED', servedAt: now },
+          data: { sentToKitchen: true, sentAt: now, status: 'SENT' },
         }),
       );
     }
@@ -489,19 +509,19 @@ export class OrderService {
       );
     }
 
-    // บิลที่ไม่มีอะไรต้องปรุงข้าม PREPARING ไปเลย — ไม่มีครัวให้รอ
+    // ทุกรอบที่ส่งครัวมีของให้ครัว/คนหยิบทำ — บิลกลับเป็น PREPARING จนทุกรายการพร้อม
     writes.push(
       this.prisma.order.update({
         where: { id: orderId },
         data: {
-          status: toCook.length > 0 ? 'PREPARING' : order.status,
+          status: 'PREPARING',
           confirmedAt: order.confirmedAt ?? now,
         },
       }),
     );
 
-    // ใบสั่งครัวออกเฉพาะเมื่อมีของต้องปรุงจริง ไม่งั้นจอครัวจะมีตั๋วเปล่าค้าง
-    if (toCook.length > 0) {
+    // ใบสั่งครัวออกทุกรอบที่มีรายการใหม่ (รวมของสำเร็จรูปที่ต้องหยิบ)
+    if (pendingItems.length > 0) {
       writes.push(
         this.prisma.kitchenOrder.create({
           data: { orderId, tenantId, status: 'SENT', priority: 'NORMAL' },
@@ -510,8 +530,7 @@ export class OrderService {
     }
 
     const results = await this.prisma.$transaction(writes);
-    const kitchenOrder =
-      toCook.length > 0 ? (results[results.length - 1] as { id: string }) : null;
+    const kitchenOrder = results[results.length - 1] as { id: string };
 
     const updatedOrder = await this.findOne(restaurantId, orderId, tenantId);
 
@@ -522,7 +541,7 @@ export class OrderService {
         orderId,
         orderNumber: updatedOrder.orderNumber,
         tableNumber: updatedOrder.table?.tableNumber ?? null,
-        items: toCook.map((i) => ({
+        items: pendingItems.map((i) => ({
           id: i.id,
           name: (i as any).menuItem?.name ?? i.menuItemId,
           quantity: i.quantity,
@@ -572,6 +591,30 @@ export class OrderService {
     }
 
     const updatedOrder = await this.prisma.$transaction(async (tx) => {
+      // The bill and its items must agree, or the kitchen board (which moves a
+      // bill by its items) drags it back: "พร้อมเสิร์ฟ" from the till readies
+      // whatever the kitchen has not finished, "เสิร์ฟแล้ว" serves what is ready.
+      if (status === 'READY') {
+        await tx.orderItem.updateMany({
+          where: { orderId, sentToKitchen: true, status: { in: ['SENT', 'PREPARING'] } },
+          data: { status: 'READY', preparedAt: now },
+        });
+        await tx.kitchenOrder.updateMany({
+          where: { orderId, status: { in: ['SENT', 'PREPARING'] } },
+          data: { status: 'READY', completedAt: now },
+        });
+      }
+      if (status === 'SERVED') {
+        await tx.orderItem.updateMany({
+          where: { orderId, sentToKitchen: true, status: { in: ['SENT', 'PREPARING', 'READY'] } },
+          data: { status: 'SERVED', servedAt: now },
+        });
+        await tx.kitchenOrder.updateMany({
+          where: { orderId, status: { in: ['SENT', 'PREPARING'] } },
+          data: { status: 'READY', completedAt: now },
+        });
+      }
+
       const result = await tx.order.update({
         where: { id: orderId },
         data: { status, ...timestamps },
@@ -767,6 +810,17 @@ export class OrderService {
       throw new BadRequestException('Cannot process payment for a cancelled order');
     }
 
+    // ร้านกำหนดช่องทางที่รับได้เอง (null = รับทุกช่องทาง) — POS ซ่อนปุ่มให้แล้ว
+    // แต่ต้องกันที่นี่ด้วย ไม่งั้นยิง API ตรงก็ปิดบิลด้วยช่องทางที่ร้านไม่รับได้
+    const outlet = await this.prisma.restaurant.findFirst({
+      where: { id: restaurantId, tenantId },
+      select: { acceptedPaymentMethods: true },
+    });
+    const accepted = outlet?.acceptedPaymentMethods;
+    if (Array.isArray(accepted) && !accepted.includes(dto.paymentMethod)) {
+      throw new BadRequestException('ร้านนี้ไม่ได้เปิดรับช่องทางชำระเงินที่เลือก');
+    }
+
     const isRoomCharge = dto.paymentMethod === PaymentMethodEnum.ROOM_CHARGE;
     if (isRoomCharge && !dto.bookingId && !dto.guestRoom) {
       throw new BadRequestException('ต้องเลือกห้องพัก (การจอง) สำหรับการชาร์จเข้าห้อง');
@@ -944,7 +998,7 @@ export class OrderService {
         guestName: order.guestName,
         guestRoom: order.guestRoom,
         items: order.items?.map((item) => ({
-          name: item.menuItem?.name,
+          name: (item.menuItem as { name?: string } | null)?.name,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
           totalPrice: item.totalPrice,

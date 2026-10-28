@@ -14,6 +14,17 @@ import {
   summariseFulfillment,
 } from './pr-fulfillment.util';
 
+/** An RFQ this PR was sent out in — just what the progress tracker needs. */
+interface RfqLinkRow {
+  id: string;
+  rfqNumber: string;
+  status: string;
+  round: number;
+  deadline: Date | null;
+  createdAt: Date;
+  recipients: { respondedAt: Date | null; declinedAt: Date | null }[];
+}
+
 @Injectable()
 export class PurchaseRequisitionsService {
   private readonly logger = new Logger(PurchaseRequisitionsService.name);
@@ -226,6 +237,28 @@ export class PurchaseRequisitionsService {
           },
           orderBy: { receiveDate: 'desc' },
         },
+        // แถบขั้นตอนในหน้ารายละเอียด — ใบนี้ไปถึง RFQ / PO ไหนแล้ว
+        purchaseOrders: {
+          where: { tenantId },
+          select: { id: true, poNumber: true, status: true, expectedDate: true, createdAt: true },
+          orderBy: { createdAt: 'desc' },
+        },
+        rfqLinks: {
+          select: {
+            requestForQuotation: {
+              select: {
+                id: true,
+                rfqNumber: true,
+                status: true,
+                round: true,
+                deadline: true,
+                createdAt: true,
+                recipients: { select: { respondedAt: true, declinedAt: true } },
+              },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+        },
       },
     });
 
@@ -294,6 +327,22 @@ export class PurchaseRequisitionsService {
         totalAmount: quote.totalAmount,
         itemCount: quote.items.length,
       })),
+      // Newest first. The progress tracker reads the latest RFQ / PO of this PR.
+      purchaseOrders: ((pr as { purchaseOrders?: unknown[] }).purchaseOrders ?? []) as {
+        id: string; poNumber: string; status: string; expectedDate: Date | null; createdAt: Date;
+      }[],
+      rfqs: ((pr as { rfqLinks?: { requestForQuotation: RfqLinkRow }[] }).rfqLinks ?? [])
+        .map((l) => l.requestForQuotation)
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+        .map((r) => ({
+          id: r.id,
+          rfqNumber: r.rfqNumber,
+          status: r.status,
+          round: r.round,
+          deadline: r.deadline,
+          recipients: r.recipients.length,
+          responded: r.recipients.filter((x) => x.respondedAt).length,
+        })),
       materialRequisitions: (pr.materialRequisitions ?? []).map((req) => ({
         id: req.id,
         reqNumber: req.reqNumber,

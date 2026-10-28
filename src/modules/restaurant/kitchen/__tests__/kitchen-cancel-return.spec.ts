@@ -20,7 +20,8 @@ describe('KitchenService — ยกเลิกรายการแล้วค
   let service: KitchenService;
   let menuStock: ReturnType<typeof buildMenuStockStub>;
 
-  const tx = { orderItem: { update: jest.fn() } };
+  // order.findFirst → null: the bill-status sync has nothing to do in these cases
+  const tx = { orderItem: { update: jest.fn(), findMany: jest.fn() }, order: { findFirst: jest.fn().mockResolvedValue(null), update: jest.fn() }, kitchenOrder: { updateMany: jest.fn() } };
   const prisma = {
     orderItem: { findFirst: jest.fn() },
     $transaction: jest.fn(),

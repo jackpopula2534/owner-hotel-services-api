@@ -68,6 +68,26 @@ export class RestaurantController {
     return this.restaurantService.findOne(id, user?.tenantId);
   }
 
+  // แยกจาก GET :id เพราะแคชเชียร์/บาร์เทนเดอร์ต้องอ่านได้ตอนรับเงิน แต่ไม่ควรได้ทั้งเมนู/โต๊ะ/ผังร้าน
+  @Get(':id/payment-config')
+  @ApiOperation({ summary: 'Payment methods + receiving accounts for the POS of this outlet' })
+  @ApiResponse({ status: 200 })
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'chef',
+    'waiter',
+    'receptionist',
+    'staff',
+    'cashier',
+    'bartender',
+  )
+  async paymentConfig(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
+    return this.restaurantService.paymentConfig(id, user?.tenantId);
+  }
+
   @Post()
   @ApiOperation({ summary: 'Create a new restaurant' })
   @ApiResponse({ status: 201, description: 'Restaurant created successfully' })

@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { StorageService } from '@/common/storage/storage.service';
 import {
   CreatePaymentAccountDto,
   PaymentAccountKind,
@@ -14,20 +15,33 @@ import {
 //    (ตอน create/update จะ unset default ของรายการอื่นใน kind เดียวกัน)
 //  - ห้ามลบบัญชีสุดท้ายที่ isDefault = true ถ้ายังมีบัญชีอื่น — auto promote
 //    บัญชีต่อไปให้เป็น default แทน
+//  - kind=qr_image รับเฉพาะ URL รูปที่อัปโหลดผ่าน /payment-accounts/qr-image เท่านั้น
+//    (QR คือปลายทางเงิน — ห้ามให้ฝัง URL รูปจากภายนอก)
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Injectable()
 export class PaymentAccountsService {
   private readonly logger = new Logger(PaymentAccountsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  static readonly QR_IMAGE_FOLDER = 'payment-qr';
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storage: StorageService,
+  ) {}
 
   // ─── List ────────────────────────────────────────────────────────────────
+  // แนบร้านที่ใช้บัญชีนั้นอยู่ด้วย — dropdown "บัญชีที่เคยใช้" ในหน้าตั้งค่าร้านต้องบอกได้
+  // ว่าแก้บัญชีนี้แล้วกระทบร้านไหนบ้าง
   async list(propertyId: string, kind?: PaymentAccountKind) {
     return this.prisma.paymentAccount.findMany({
       where: {
         propertyId,
         ...(kind ? { kind } : {}),
+      },
+      include: {
+        qrRestaurants: { select: { id: true, name: true } },
+        transferRestaurants: { select: { id: true, name: true } },
       },
       orderBy: [{ isDefault: 'desc' }, { sortOrder: 'asc' }, { createdAt: 'asc' }],
     });
@@ -70,9 +84,11 @@ export class PaymentAccountsService {
           label: dto.label,
           promptpayId: dto.kind === 'promptpay' ? dto.promptpayId : null,
           bankCode: dto.kind === 'bank' ? dto.bankCode : null,
-          accountNumber: dto.kind === 'bank' ? dto.accountNumber : null,
+          accountNumber: this.accountNumberFor(dto.kind, dto.accountNumber),
           accountName: dto.accountName,
           branch: dto.kind === 'bank' ? dto.branch : null,
+          qrImageUrl: dto.kind === 'qr_image' ? dto.qrImageUrl : null,
+          qrProvider: dto.kind === 'qr_image' ? dto.qrProvider : null,
           isDefault: shouldBeDefault,
           isActive: dto.isActive ?? true,
           sortOrder: dto.sortOrder ?? existingCount,
@@ -92,6 +108,8 @@ export class PaymentAccountsService {
 
     // ถ้าเปลี่ยน kind ต้องตรวจ field ใหม่
     const finalKind = dto.kind ?? (existing.kind as PaymentAccountKind);
+    if (dto.accountNumber !== undefined) this.assertAccountNumber(finalKind, dto.accountNumber);
+    if (dto.qrImageUrl) this.assertQrImageUrl(dto.qrImageUrl);
     if (dto.kind && dto.kind !== existing.kind) {
       this.assertChannelFields({
         ...existing,
@@ -127,7 +145,13 @@ export class PaymentAccountsService {
             bankCode: finalKind === 'bank' ? dto.bankCode : null,
           }),
           ...(dto.accountNumber !== undefined && {
-            accountNumber: finalKind === 'bank' ? dto.accountNumber : null,
+            accountNumber: this.accountNumberFor(finalKind, dto.accountNumber),
+          }),
+          ...(dto.qrImageUrl !== undefined && {
+            qrImageUrl: finalKind === 'qr_image' ? dto.qrImageUrl : null,
+          }),
+          ...(dto.qrProvider !== undefined && {
+            qrProvider: finalKind === 'qr_image' ? dto.qrProvider : null,
           }),
           ...(dto.accountName !== undefined && {
             accountName: dto.accountName,
@@ -193,6 +217,26 @@ export class PaymentAccountsService {
   }
 
   // ─── Helpers ─────────────────────────────────────────────────────────────
+  /** bank เก็บเลขเต็ม, qr_image เก็บแค่ 4 ตัวท้ายไว้ให้คนจำได้ว่าเป็นบัญชีไหน, promptpay ไม่มี */
+  private accountNumberFor(kind: PaymentAccountKind, accountNumber?: string | null): string | null {
+    if (kind === 'bank') return accountNumber ?? null;
+    if (kind === 'qr_image') return accountNumber?.trim() || null;
+    return null;
+  }
+
+  private assertQrImageUrl(url?: string | null): void {
+    if (!url) return;
+    if (!this.storage.isOwnUrl(url, PaymentAccountsService.QR_IMAGE_FOLDER)) {
+      throw new BadRequestException('รูป QR ต้องอัปโหลดผ่านระบบเท่านั้น');
+    }
+  }
+
+  private assertAccountNumber(kind: PaymentAccountKind, accountNumber?: string | null): void {
+    if (kind === 'qr_image' && accountNumber?.trim() && !/^\d{4}$/.test(accountNumber.trim())) {
+      throw new BadRequestException('เลขบัญชี 4 ตัวท้ายต้องเป็นตัวเลข 4 หลัก');
+    }
+  }
+
   private assertChannelFields(dto: CreatePaymentAccountDto): void {
     if (dto.kind === 'promptpay') {
       if (!dto.promptpayId) {
@@ -202,7 +246,13 @@ export class PaymentAccountsService {
       if (!dto.bankCode || !dto.accountNumber) {
         throw new BadRequestException('bankCode and accountNumber are required for kind=bank');
       }
+    } else if (dto.kind === 'qr_image') {
+      if (!dto.qrImageUrl?.trim()) {
+        throw new BadRequestException('qrImageUrl is required for kind=qr_image');
+      }
     }
+    if (dto.kind === 'qr_image' || dto.qrImageUrl) this.assertQrImageUrl(dto.qrImageUrl);
+    this.assertAccountNumber(dto.kind, dto.accountNumber);
     if (!dto.accountName?.trim()) {
       throw new BadRequestException('accountName is required');
     }

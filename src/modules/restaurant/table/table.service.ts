@@ -64,6 +64,8 @@ export class TableService {
             startTime: true,
             endTime: true,
             status: true,
+            // The POS shows it when staff check the party in (birthday, high chair, …).
+            specialRequests: true,
           },
         },
         orders: {
@@ -76,6 +78,20 @@ export class TableService {
             status: true,
             paymentStatus: true,
             total: true,
+            // Live Monitor: how long the party has been seated, and how many.
+            partySize: true,
+            createdAt: true,
+          },
+        },
+        // Live Monitor: calls still waiting on staff — PAYMENT is "ขอเช็คบิล".
+        staffCalls: {
+          where: { status: { in: ['PENDING', 'ACKNOWLEDGED'] } },
+          orderBy: { createdAt: 'asc' },
+          select: {
+            id: true,
+            callType: true,
+            status: true,
+            createdAt: true,
           },
         },
       },

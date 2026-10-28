@@ -1103,6 +1103,8 @@ export class PurchaseOrdersService {
             receiveDate: true,
           },
         },
+        // แถบขั้นตอนในหน้ารายละเอียด PO — PR ต้นทางอยู่ขั้นไหน
+        purchaseRequisition: { select: { id: true, prNumber: true, status: true } },
       },
     });
 
@@ -1151,6 +1153,9 @@ export class PurchaseOrdersService {
       quotationNumber: po.quotationNumber,
       quotationDate: po.quotationDate,
       purchaseRequisitionId: po.purchaseRequisitionId,
+      purchaseRequisition:
+        (poRaw as unknown as { purchaseRequisition?: { id: string; prNumber: string; status: string } | null })
+          .purchaseRequisition ?? null,
       subtotal: po.subtotal,
       discountAmount: po.discountAmount,
       discountMode: po.discountMode,

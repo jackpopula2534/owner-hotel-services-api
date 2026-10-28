@@ -1,3 +1,5 @@
+import { IsIn, ValidateIf } from 'class-validator';
+import { KITCHEN_STATIONS, type KitchenStation } from '../../kitchen/kitchen-station';
 import {
   IsString,
   IsNotEmpty,
@@ -61,4 +63,15 @@ export class CreateMenuCategoryDto {
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
+
+  @ApiPropertyOptional({
+    enum: KITCHEN_STATIONS,
+    nullable: true,
+    example: 'BAR',
+    description: 'สถานีบนจอครัว · null = ตามประเภทรายได้ (เครื่องดื่ม → บาร์)',
+  })
+  @ValidateIf((_o, v) => v !== null)
+  @IsIn(KITCHEN_STATIONS)
+  @IsOptional()
+  kitchenStation?: KitchenStation | null;
 }

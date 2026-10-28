@@ -1,4 +1,7 @@
 import {
+  ArrayNotEmpty,
+  ArrayUnique,
+  IsArray,
   IsBoolean,
   IsEnum,
   IsInt,
@@ -15,6 +18,7 @@ import {
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsStrictBoolean } from '../../../common/decorators/strict-boolean.decorator';
+import { PaymentMethodEnum } from '../order/dto/process-payment.dto';
 
 export enum RestaurantTypeEnum {
   FINE_DINING = 'FINE_DINING',
@@ -121,6 +125,42 @@ export class CreateRestaurantDto {
   @Max(100)
   @IsOptional()
   serviceRate?: number;
+
+  @ApiPropertyOptional({
+    description: 'ช่องทางชำระเงินที่ร้านนี้รับ — null = รับทุกช่องทาง',
+    enum: PaymentMethodEnum,
+    isArray: true,
+    example: ['CASH', 'QR_PAYMENT', 'ROOM_CHARGE'],
+  })
+  @ValidateIf((_, value) => value !== null)
+  @IsArray()
+  @ArrayNotEmpty({ message: 'ต้องเปิดรับอย่างน้อย 1 ช่องทาง' })
+  @ArrayUnique()
+  @IsEnum(PaymentMethodEnum, { each: true })
+  @IsOptional()
+  acceptedPaymentMethods?: PaymentMethodEnum[] | null;
+
+  @ApiPropertyOptional({ enum: PaymentMethodEnum, description: 'ช่องทางที่ POS เลือกไว้ให้ก่อน' })
+  @ValidateIf((_, value) => value !== null)
+  @IsEnum(PaymentMethodEnum)
+  @IsOptional()
+  defaultPaymentMethod?: PaymentMethodEnum | null;
+
+  @ApiPropertyOptional({
+    description: 'บัญชี QR ของร้าน (kind promptpay / qr_image) — null = ใช้บัญชีหลักของโรงแรม',
+  })
+  @ValidateIf((_, value) => value !== null)
+  @IsString()
+  @IsOptional()
+  qrPaymentAccountId?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'บัญชีธนาคารรับโอนของร้าน (kind bank) — null = ใช้บัญชีหลักของโรงแรม',
+  })
+  @ValidateIf((_, value) => value !== null)
+  @IsString()
+  @IsOptional()
+  transferPaymentAccountId?: string | null;
 
   @ApiPropertyOptional({
     description: 'Floor plan layout data (positions, zones, grid size)',
