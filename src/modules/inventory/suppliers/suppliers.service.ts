@@ -64,12 +64,14 @@ export class SuppliersService {
     search?: string,
     page: number = 1,
     limit: number = 20,
+    isActive?: boolean,
   ): Promise<PaginatedResponse<any>> {
     const skip = (page - 1) * limit;
 
     const where = {
       tenantId,
       deletedAt: null,
+      ...(isActive !== undefined && { isActive }),
       // mode: 'insensitive' is not supported by Prisma v5 + MySQL
       ...(search && {
         OR: [{ name: { contains: search } }, { code: { contains: search } }],
@@ -94,14 +96,56 @@ export class SuppliersService {
       this.prisma.supplier.count({ where }),
     ]);
 
+    const stats = await this.purchaseStatsBySupplier(
+      tenantId,
+      data.map((s) => s.id),
+    );
+
     return {
-      data: data.map((supplier) => maskSupplierTaxId(deserializeSupplier(supplier))),
+      data: data.map((supplier) => ({
+        ...maskSupplierTaxId(deserializeSupplier(supplier)),
+        purchaseStats: stats.get(supplier.id) ?? { spendTotal: 0, lastOrderAt: null },
+      })),
       meta: {
         page,
         limit,
         total,
       },
     };
+  }
+
+  /**
+   * Spend and last order date per supplier, for the supplier list.
+   *
+   * Only POs that were actually issued count — a DRAFT was never sent and a
+   * CANCELLED one was never paid, so either would inflate the figure people
+   * use to rank vendors.
+   */
+  private async purchaseStatsBySupplier(
+    tenantId: string,
+    supplierIds: string[],
+  ): Promise<Map<string, { spendTotal: number; lastOrderAt: Date | null }>> {
+    const result = new Map<string, { spendTotal: number; lastOrderAt: Date | null }>();
+    if (supplierIds.length === 0) return result;
+
+    const rows = await this.prisma.purchaseOrder.groupBy({
+      by: ['supplierId'],
+      where: {
+        tenantId,
+        supplierId: { in: supplierIds },
+        status: { notIn: ['DRAFT', 'CANCELLED'] },
+      },
+      _sum: { totalAmount: true },
+      _max: { orderDate: true },
+    });
+
+    for (const row of rows) {
+      result.set(row.supplierId, {
+        spendTotal: Number(row._sum.totalAmount?.toString() ?? 0),
+        lastOrderAt: row._max.orderDate ?? null,
+      });
+    }
+    return result;
   }
 
   async findOne(id: string, tenantId: string): Promise<any> {

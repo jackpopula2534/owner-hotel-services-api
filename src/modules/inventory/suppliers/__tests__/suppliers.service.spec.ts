@@ -151,3 +151,92 @@ describe('SuppliersService — code allocation', () => {
     );
   });
 });
+
+/**
+ * ยอดซื้อต่อซัพพลายเออร์ในหน้ารายการ
+ *
+ * หน้าจัดการซัพพลายเออร์เรียงและโชว์ "ยอดซื้อ" ต่อราย — ตัวเลขนี้ต้องมาจาก PO
+ * ที่ออกจริงเท่านั้น ร่าง (DRAFT) และที่ยกเลิก (CANCELLED) ไม่ใช่เงินที่จ่าย
+ * และต้องกรอง tenant ด้วย เพราะ groupBy ไม่ผ่าน include ของ supplier
+ */
+describe('SuppliersService — findAll purchase stats', () => {
+  let service: SuppliersService;
+  let mockPrisma: {
+    supplier: { findMany: jest.Mock; count: jest.Mock };
+    purchaseOrder: { groupBy: jest.Mock };
+  };
+
+  const TENANT = 'tenant-1';
+
+  beforeEach(async () => {
+    mockPrisma = {
+      supplier: {
+        findMany: jest.fn().mockResolvedValue([
+          { id: 'sup-a', name: 'A', code: 'SUP-A', taxId: null, tags: null },
+          { id: 'sup-b', name: 'B', code: 'SUP-B', taxId: null, tags: null },
+        ]),
+        count: jest.fn().mockResolvedValue(2),
+      },
+      purchaseOrder: {
+        groupBy: jest.fn().mockResolvedValue([
+          {
+            supplierId: 'sup-a',
+            _sum: { totalAmount: { toString: () => '53840.53' } },
+            _max: { orderDate: new Date('2026-10-28T07:05:20Z') },
+          },
+        ]),
+      },
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [SuppliersService, { provide: PrismaService, useValue: mockPrisma }],
+    }).compile();
+
+    service = module.get<SuppliersService>(SuppliersService);
+  });
+
+  it('แนบยอดซื้อและวันสั่งล่าสุดให้แต่ละราย — รายที่ไม่เคยสั่งได้ 0', async () => {
+    const res = await service.findAll(TENANT);
+
+    expect(res.data[0].purchaseStats).toEqual({
+      spendTotal: 53840.53,
+      lastOrderAt: new Date('2026-10-28T07:05:20Z'),
+    });
+    expect(res.data[1].purchaseStats).toEqual({ spendTotal: 0, lastOrderAt: null });
+  });
+
+  it('นับเฉพาะ PO ที่ออกจริงของ tenant นี้ — ไม่รวมร่างและที่ยกเลิก', async () => {
+    await service.findAll(TENANT);
+
+    expect(mockPrisma.purchaseOrder.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        by: ['supplierId'],
+        where: {
+          tenantId: TENANT,
+          supplierId: { in: ['sup-a', 'sup-b'] },
+          status: { notIn: ['DRAFT', 'CANCELLED'] },
+        },
+      }),
+    );
+  });
+
+  it('isActive=true กรองรายที่ปิดใช้งานออก — ไม่ส่งมา = เห็นทุกราย', async () => {
+    await service.findAll(TENANT, undefined, 1, 100, true);
+    expect(mockPrisma.supplier.findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ isActive: true }) }),
+    );
+
+    await service.findAll(TENANT);
+    const where = mockPrisma.supplier.findMany.mock.calls.at(-1)[0].where;
+    expect(where).not.toHaveProperty('isActive');
+  });
+
+  it('หน้าว่างไม่ต้องยิง groupBy', async () => {
+    mockPrisma.supplier.findMany.mockResolvedValue([]);
+    mockPrisma.supplier.count.mockResolvedValue(0);
+
+    await service.findAll(TENANT);
+
+    expect(mockPrisma.purchaseOrder.groupBy).not.toHaveBeenCalled();
+  });
+});

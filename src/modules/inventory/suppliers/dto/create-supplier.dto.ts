@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsEmail, IsInt, Min, MaxLength, IsArray } from 'class-validator';
+import { IsString, IsOptional, IsEmail, IsInt, Min, MaxLength, IsArray, IsBoolean } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 
@@ -125,4 +125,12 @@ export class CreateSupplierDto {
   @IsString()
   @MaxLength(10)
   emoji?: string;
+
+  @ApiPropertyOptional({
+    description: 'Inactive suppliers are hidden from PR, RFQ and PO pickers',
+    example: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
 }

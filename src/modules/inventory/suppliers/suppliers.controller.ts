@@ -18,11 +18,23 @@ import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AddonGuard } from '@/common/guards/addon.guard';
+import { RolesGuard } from '@/common/guards/roles.guard';
 import { RequireAddon } from '@/common/decorators/require-addon.decorator';
+import { Roles } from '@/common/decorators/roles.decorator';
+
+// Matches the purchasing UI's `supplier.manage` permission, which by default only
+// procurement managers hold. Buyers and other staff can still read the list.
+const SUPPLIER_MANAGERS = [
+  'procurement_manager',
+  'admin',
+  'platform_admin',
+  'tenant_admin',
+  'manager',
+] as const;
 
 @ApiTags('Inventory - Suppliers')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, AddonGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, AddonGuard)
 @RequireAddon('INVENTORY_MODULE')
 @Controller({ path: 'inventory/suppliers', version: '1' })
 export class SuppliersController {
@@ -36,12 +48,16 @@ export class SuppliersController {
     @Query('search') search?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('isActive') isActive?: string,
   ): Promise<PaginatedResponse<any>> {
     const pageNum = Math.max(1, Number(page) || 1);
     const limitNum = Math.min(100, Math.max(1, Number(limit) || 20));
     // Return paginated result directly — TransformInterceptor จะ wrap { success, data, meta } ให้เอง
     // ห้าม double-wrap ด้วย { success: true, data: paginatedResult } เพราะจะทำให้ meta ออกมาผิดชั้น
-    return this.suppliersService.findAll(req.user.tenantId, search, pageNum, limitNum);
+    // Pickers (RFQ, cash purchase) send isActive=true so deactivated vendors
+    // drop out of them; the management page sends nothing and sees everyone.
+    const activeFilter = isActive === 'true' ? true : isActive === 'false' ? false : undefined;
+    return this.suppliersService.findAll(req.user.tenantId, search, pageNum, limitNum, activeFilter);
   }
 
   @Get(':id')
@@ -57,9 +73,11 @@ export class SuppliersController {
   }
 
   @Post()
+  @Roles(...SUPPLIER_MANAGERS)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create new supplier' })
   @ApiResponse({ status: 201, description: 'Supplier created' })
+  @ApiResponse({ status: 403, description: 'Role cannot manage suppliers' })
   @ApiResponse({ status: 409, description: 'Code already exists' })
   async create(
     @Body() dto: CreateSupplierDto,
@@ -70,6 +88,7 @@ export class SuppliersController {
   }
 
   @Patch(':id')
+  @Roles(...SUPPLIER_MANAGERS)
   @ApiOperation({ summary: 'Update supplier' })
   @ApiResponse({ status: 200, description: 'Supplier updated' })
   @ApiResponse({ status: 404, description: 'Not found' })
@@ -83,6 +102,7 @@ export class SuppliersController {
   }
 
   @Delete(':id')
+  @Roles(...SUPPLIER_MANAGERS)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete supplier (soft delete)' })
   @ApiResponse({ status: 204, description: 'Supplier deleted' })
