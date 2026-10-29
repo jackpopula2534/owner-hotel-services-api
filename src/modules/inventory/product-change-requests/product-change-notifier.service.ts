@@ -20,9 +20,10 @@ export class ProductChangeNotifierService {
     private readonly auditLog: AuditLogService,
   ) {}
 
-  async nameOf(userId: string): Promise<string | null> {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
+  /** ชื่อผู้ใช้สำหรับ timeline — User เป็น tenant-scoped จึงต้องกรอง tenantId (ห้าม findUnique) */
+  async nameOf(actor: Pick<ChangeRequestActor, 'userId' | 'tenantId'>): Promise<string | null> {
+    const user = await this.prisma.user.findFirst({
+      where: { id: actor.userId, tenantId: actor.tenantId },
       select: { firstName: true, lastName: true, email: true },
     });
     if (!user) return null;

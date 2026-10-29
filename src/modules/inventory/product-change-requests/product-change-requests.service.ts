@@ -73,7 +73,7 @@ export class ProductChangeRequestsService {
   ): Promise<ProductRequestDetail> {
     assertRole(actor, REQUESTER_ROLES, 'ส่งคำขอสร้างสินค้า');
     await this.validateNewItemProposal(actor.tenantId, dto.proposal, dto.suggestedWarehouse);
-    const actorName = await this.notifier.nameOf(actor.userId);
+    const actorName = await this.notifier.nameOf(actor);
 
     const created = await this.prisma.$transaction(async (tx) => {
       const request = await tx.productChangeRequest.create({
@@ -110,7 +110,7 @@ export class ProductChangeRequestsService {
     assertRole(actor, REQUESTER_ROLES, 'ส่งคำขอแก้ไขสินค้า');
     const { baseline, changes } = await this.diffForItem(actor.tenantId, dto.itemId, dto.changes);
     await this.assertNoOpenUpdate(actor.tenantId, dto.itemId);
-    const actorName = await this.notifier.nameOf(actor.userId);
+    const actorName = await this.notifier.nameOf(actor);
 
     const created = await this.prisma.$transaction(async (tx) => {
       const request = await tx.productChangeRequest.create({
@@ -181,7 +181,7 @@ export class ProductChangeRequestsService {
       };
     }
 
-    const actorName = await this.notifier.nameOf(actor.userId);
+    const actorName = await this.notifier.nameOf(actor);
     const updated = await this.prisma.$transaction(async (tx) => {
       const row = await tx.productChangeRequest.update({
         where: { id: request.id },
@@ -210,7 +210,7 @@ export class ProductChangeRequestsService {
     if (!permissionsFor(actor, request).canCancel) {
       throw new ForbiddenException('ยกเลิกได้เฉพาะคำขอที่ยังไม่ถูกตัดสิน โดยผู้ส่งคำขอ');
     }
-    const actorName = await this.notifier.nameOf(actor.userId);
+    const actorName = await this.notifier.nameOf(actor);
     await this.prisma.$transaction(async (tx) => {
       const row = await tx.productChangeRequest.update({
         where: { id },
@@ -232,7 +232,7 @@ export class ProductChangeRequestsService {
     if (request.status !== 'PENDING') {
       throw new ConflictException('คำขอนี้ไม่ได้อยู่ในสถานะรอพิจารณา');
     }
-    const actorName = await this.notifier.nameOf(actor.userId);
+    const actorName = await this.notifier.nameOf(actor);
     const now = new Date();
     const review = {
       reviewedById: actor.userId,
@@ -312,7 +312,7 @@ export class ProductChangeRequestsService {
     if (request.status !== 'PENDING') {
       throw new ConflictException('คำขอนี้ไม่ได้อยู่ในสถานะรอพิจารณา');
     }
-    const actorName = await this.notifier.nameOf(actor.userId);
+    const actorName = await this.notifier.nameOf(actor);
     await this.prisma.$transaction(async (tx) => {
       const row = await tx.productChangeRequest.update({
         where: { id },
@@ -337,7 +337,7 @@ export class ProductChangeRequestsService {
       });
       if (!dup) throw new BadRequestException('ไม่พบสินค้าที่อ้างว่าซ้ำ');
     }
-    const actorName = await this.notifier.nameOf(actor.userId);
+    const actorName = await this.notifier.nameOf(actor);
     await this.prisma.$transaction(async (tx) => {
       const row = await tx.productChangeRequest.update({
         where: { id },
@@ -367,7 +367,7 @@ export class ProductChangeRequestsService {
     });
     if (!request || request.status !== 'PENDING' || request.events.length > 0) return;
     if (request.requestedById === actor.userId) return;
-    const actorName = await this.notifier.nameOf(actor.userId);
+    const actorName = await this.notifier.nameOf(actor);
     await this.addEvent(this.prisma, request, 'VIEWED', actor.userId, actorName, null);
   }
 
