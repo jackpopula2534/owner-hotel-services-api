@@ -9,6 +9,8 @@ describe('PurchaseRequisitionsService', () => {
 
   const mockTenantId = 'tenant-001';
   const mockUserId = 'user-001';
+  // tenant_admin อนุมัติเอกสารตัวเองได้ — เทสต์กฎสิทธิ์อยู่ใน common/__tests__/approval-access.spec.ts
+  const adminActor = { userId: mockUserId, tenantId: mockTenantId, role: 'tenant_admin' };
   const mockPropertyId = 'property-001';
   const mockPRId = 'pr-001';
 
@@ -154,8 +156,7 @@ describe('PurchaseRequisitionsService', () => {
 
       expect((result.data[0] as any).cashPurchaseCount).toBe(2);
       // นับเฉพาะใบซื้อสดของ tenant นี้ — ใบรับของถือ tenantId ของตัวเอง
-      const select = mockPrismaService.purchaseRequisition.findMany.mock.calls[0][0]
-        .select as any;
+      const select = mockPrismaService.purchaseRequisition.findMany.mock.calls[0][0].select as any;
       expect(select.goodsReceives.where).toEqual({
         tenantId: mockTenantId,
         source: 'CASH_PURCHASE',
@@ -305,18 +306,14 @@ describe('PurchaseRequisitionsService', () => {
             totalAmount: 870,
             paidBy: 'user-payer',
             warehouse: { name: 'คลังครัวกลาง' },
-            items: [
-              { itemId: 'inv-1', receivedQty: 1000, unitCost: 0.87, totalCost: 870 },
-            ],
+            items: [{ itemId: 'inv-1', receivedQty: 1000, unitCost: 0.87, totalCost: 870 }],
           },
         ],
         ...over,
       });
 
       it('ส่งใบรับของที่ผูกไว้กลับไปด้วย พร้อมสรุปว่าได้ของครบหรือยัง', async () => {
-        mockPrismaService.purchaseRequisition.findFirst.mockResolvedValue(
-          closedByCashPurchase(),
-        );
+        mockPrismaService.purchaseRequisition.findFirst.mockResolvedValue(closedByCashPurchase());
         mockPrismaService.user.findMany.mockResolvedValue([
           { id: 'user-payer', firstName: 'สมชาย', lastName: 'ใจดี', email: 's@x.co' },
         ]);
@@ -338,9 +335,7 @@ describe('PurchaseRequisitionsService', () => {
       });
 
       it('บรรทัดที่ได้ของแล้ว ต้องพกราคาที่จ่ายจริงกลับไป ไม่ใช่แค่ประมาณการที่ว่างเปล่า', async () => {
-        mockPrismaService.purchaseRequisition.findFirst.mockResolvedValue(
-          closedByCashPurchase(),
-        );
+        mockPrismaService.purchaseRequisition.findFirst.mockResolvedValue(closedByCashPurchase());
         mockPrismaService.user.findMany.mockResolvedValue([]);
 
         const result = (await service.findOne(mockPRId, mockTenantId)) as any;
@@ -355,9 +350,7 @@ describe('PurchaseRequisitionsService', () => {
       });
 
       it('ดึงเฉพาะใบรับของของ tenant นี้', async () => {
-        mockPrismaService.purchaseRequisition.findFirst.mockResolvedValue(
-          closedByCashPurchase(),
-        );
+        mockPrismaService.purchaseRequisition.findFirst.mockResolvedValue(closedByCashPurchase());
         mockPrismaService.user.findMany.mockResolvedValue([]);
 
         await service.findOne(mockPRId, mockTenantId);
@@ -368,9 +361,7 @@ describe('PurchaseRequisitionsService', () => {
       });
 
       it('หาชื่อคนออกเงินเฉพาะใน tenant นี้ — id มาจาก client ไม่มี foreign key คุม', async () => {
-        mockPrismaService.purchaseRequisition.findFirst.mockResolvedValue(
-          closedByCashPurchase(),
-        );
+        mockPrismaService.purchaseRequisition.findFirst.mockResolvedValue(closedByCashPurchase());
         mockPrismaService.user.findMany.mockResolvedValue([]);
 
         await service.findOne(mockPRId, mockTenantId);
@@ -781,7 +772,7 @@ describe('PurchaseRequisitionsService', () => {
         prNumber: 'PR-202604-0001',
       });
 
-      const result = await service.approve(mockPRId, mockUserId, mockTenantId);
+      const result = await service.approve(mockPRId, adminActor);
       expect((result as any).status).toBe('APPROVED');
       expect((result as any).approvedBy).toBe(mockUserId);
     });
@@ -793,9 +784,7 @@ describe('PurchaseRequisitionsService', () => {
         status: 'DRAFT',
       });
 
-      await expect(service.approve(mockPRId, mockUserId, mockTenantId)).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(service.approve(mockPRId, adminActor)).rejects.toThrow(BadRequestException);
     });
   });
 
@@ -837,7 +826,7 @@ describe('PurchaseRequisitionsService', () => {
         prNumber: 'PR-202604-0001',
       });
 
-      const result = await service.cancel(mockPRId, 'Budget cut', mockUserId, mockTenantId);
+      const result = await service.cancel(mockPRId, 'Budget cut', adminActor);
       expect((result as any).status).toBe('CANCELLED');
       expect((result as any).cancelReason).toBe('Budget cut');
     });
@@ -849,7 +838,7 @@ describe('PurchaseRequisitionsService', () => {
         status: 'PO_CREATED',
       });
 
-      await expect(service.cancel(mockPRId, 'Too late', mockUserId, mockTenantId)).rejects.toThrow(
+      await expect(service.cancel(mockPRId, 'Too late', adminActor)).rejects.toThrow(
         BadRequestException,
       );
     });
@@ -1131,7 +1120,7 @@ describe('PurchaseRequisitionsService', () => {
         prNumber: 'PR-202604-0001',
       });
 
-      const approved = await service.approve(mockPRId, mockUserId, mockTenantId);
+      const approved = await service.approve(mockPRId, adminActor);
       expect((approved as any).status).toBe('APPROVED');
       expect((approved as any).approvedBy).toBe(mockUserId);
 
@@ -1171,12 +1160,7 @@ describe('PurchaseRequisitionsService', () => {
         prNumber: 'PR-202604-0001',
       });
 
-      const cancelled = await service.cancel(
-        mockPRId,
-        'No longer needed',
-        mockUserId,
-        mockTenantId,
-      );
+      const cancelled = await service.cancel(mockPRId, 'No longer needed', adminActor);
       expect((cancelled as any).status).toBe('CANCELLED');
       expect((cancelled as any).cancelReason).toBe('No longer needed');
     });
@@ -1238,7 +1222,10 @@ describe('PurchaseRequisitionsService', () => {
 
     it('never writes a PO line at 0 baht just because an estimate was missing', async () => {
       mockPrismaService.purchaseRequisition.findFirst.mockResolvedValue(
-        buildPR([{ itemId: 'item-a', quantity: 10, notes: null, item: { name: 'ถั่วฝักยาว' } }], []),
+        buildPR(
+          [{ itemId: 'item-a', quantity: 10, notes: null, item: { name: 'ถั่วฝักยาว' } }],
+          [],
+        ),
       );
 
       await expect(

@@ -9,6 +9,11 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
 import {
+  ApprovalActor,
+  assertCanApproveProcurement,
+  assertCanCancelProcurement,
+} from '../common/approval-access';
+import {
   calculatePurchaseOrderTotals,
   CalculationBreakdown,
   DiscountMode,
@@ -1697,7 +1702,8 @@ export class PurchaseOrdersService {
     return this.findOne(updated.id, tenantId);
   }
 
-  async approve(id: string, userId: string, tenantId: string): Promise<Record<string, unknown>> {
+  async approve(id: string, actor: ApprovalActor): Promise<Record<string, unknown>> {
+    const { userId, tenantId } = actor;
     const po = await this.prisma.purchaseOrder.findFirst({
       where: { id, tenantId },
     });
@@ -1705,6 +1711,8 @@ export class PurchaseOrdersService {
     if (!po || po.tenantId !== tenantId) {
       throw new NotFoundException('Purchase order not found');
     }
+
+    await assertCanApproveProcurement(this.prisma, actor, 'po.approve', po.requestedBy);
 
     if (po.status !== PurchaseOrderStatus.PENDING_APPROVAL) {
       throw new BadRequestException('Only PENDING_APPROVAL purchase orders can be approved');
@@ -1737,12 +1745,8 @@ export class PurchaseOrdersService {
     return this.findOne(updated.id, tenantId);
   }
 
-  async cancel(
-    id: string,
-    userId: string,
-    reason: string,
-    tenantId: string,
-  ): Promise<Record<string, unknown>> {
+  async cancel(id: string, reason: string, actor: ApprovalActor): Promise<Record<string, unknown>> {
+    const { userId, tenantId } = actor;
     const po = await this.prisma.purchaseOrder.findFirst({
       where: { id, tenantId },
     });
@@ -1750,6 +1754,8 @@ export class PurchaseOrdersService {
     if (!po || po.tenantId !== tenantId) {
       throw new NotFoundException('Purchase order not found');
     }
+
+    await assertCanCancelProcurement(this.prisma, actor, 'po.approve', po.requestedBy);
 
     const nonCancellableStatuses = [PurchaseOrderStatus.FULLY_RECEIVED, PurchaseOrderStatus.CLOSED];
 

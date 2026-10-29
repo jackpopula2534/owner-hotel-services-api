@@ -6,6 +6,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '@/prisma/prisma.service';
+import { ApprovalActor, assertCanApproveStockCount } from '../common/approval-access';
 import { CreateStockCountDto, CountTypeDto } from './dto/create-stock-count.dto';
 import { UpdateStockCountItemDto } from './dto/update-stock-count-item.dto';
 import { QueryStockCountDto } from './dto/query-stock-count.dto';
@@ -461,7 +462,9 @@ export class StockCountsService {
   /**
    * Approve stock count and post adjustments (COMPLETED → APPROVED)
    */
-  async approveCount(id: string, userId: string, tenantId: string): Promise<StockCountDetail> {
+  async approveCount(id: string, actor: ApprovalActor): Promise<StockCountDetail> {
+    assertCanApproveStockCount(actor);
+    const { userId, tenantId } = actor;
     return await this.prisma.$transaction(async (tx) => {
       const count = await tx.stockCount.findFirst({
         where: { id, tenantId },

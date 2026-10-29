@@ -191,9 +191,13 @@ export class PurchaseOrdersController {
   @ApiResponse({ status: 200, description: 'Purchase order approved' })
   async approve(
     @Param('id') id: string,
-    @Req() req: { user: { id: string; tenantId: string } },
+    @Req() req: { user: { id: string; tenantId: string; role: string } },
   ): Promise<{ success: boolean; data: unknown }> {
-    const data = await this.purchaseOrdersService.approve(id, req.user.id, req.user.tenantId);
+    const data = await this.purchaseOrdersService.approve(id, {
+      userId: req.user.id,
+      tenantId: req.user.tenantId,
+      role: req.user.role,
+    });
     return { success: true, data };
   }
 
@@ -203,14 +207,13 @@ export class PurchaseOrdersController {
   async cancel(
     @Param('id') id: string,
     @Body() body: { reason: string },
-    @Req() req: { user: { id: string; tenantId: string } },
+    @Req() req: { user: { id: string; tenantId: string; role: string } },
   ): Promise<{ success: boolean; data: unknown }> {
-    const data = await this.purchaseOrdersService.cancel(
-      id,
-      req.user.id,
-      body.reason,
-      req.user.tenantId,
-    );
+    const data = await this.purchaseOrdersService.cancel(id, body.reason, {
+      userId: req.user.id,
+      tenantId: req.user.tenantId,
+      role: req.user.role,
+    });
     return { success: true, data };
   }
 

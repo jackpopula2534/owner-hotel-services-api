@@ -236,7 +236,11 @@ export class StockCountsController {
     @CurrentUser() user: JwtPayload,
     @Param('id') id: string,
   ): Promise<{ success: boolean; data: StockCountDetail }> {
-    const data = await this.stockCountsService.approveCount(id, user.id, user.tenantId);
+    const data = await this.stockCountsService.approveCount(id, {
+      userId: user.id,
+      tenantId: user.tenantId,
+      role: user.role,
+    });
     return { success: true, data };
   }
 

@@ -1,6 +1,11 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
+import {
+  ApprovalActor,
+  assertCanApproveProcurement,
+  assertCanCancelProcurement,
+} from '../common/approval-access';
 import { CreatePurchaseRequisitionDto } from './dto/create-purchase-requisition.dto';
 import { UpdatePurchaseRequisitionDto } from './dto/update-purchase-requisition.dto';
 import {
@@ -266,8 +271,7 @@ export class PurchaseRequisitionsService {
       throw new NotFoundException('Purchase requisition not found');
     }
 
-    const receives = ((pr as { goodsReceives?: ReceiveRow[] }).goodsReceives ??
-      []) as ReceiveRow[];
+    const receives = ((pr as { goodsReceives?: ReceiveRow[] }).goodsReceives ?? []) as ReceiveRow[];
 
     // Resolve user names for requestedBy, approvedBy, cancelledBy — plus whoever
     // fronted the money on each linked receipt, which is the one name a reader of
@@ -329,7 +333,11 @@ export class PurchaseRequisitionsService {
       })),
       // Newest first. The progress tracker reads the latest RFQ / PO of this PR.
       purchaseOrders: ((pr as { purchaseOrders?: unknown[] }).purchaseOrders ?? []) as {
-        id: string; poNumber: string; status: string; expectedDate: Date | null; createdAt: Date;
+        id: string;
+        poNumber: string;
+        status: string;
+        expectedDate: Date | null;
+        createdAt: Date;
       }[],
       rfqs: ((pr as { rfqLinks?: { requestForQuotation: RfqLinkRow }[] }).rfqLinks ?? [])
         .map((l) => l.requestForQuotation)
@@ -567,7 +575,8 @@ export class PurchaseRequisitionsService {
     return this.findOne(updated.id, tenantId);
   }
 
-  async approve(id: string, userId: string, tenantId: string): Promise<unknown> {
+  async approve(id: string, actor: ApprovalActor): Promise<unknown> {
+    const { userId, tenantId } = actor;
     const pr = await this.prisma.purchaseRequisition.findFirst({
       where: { id, tenantId },
     });
@@ -575,6 +584,8 @@ export class PurchaseRequisitionsService {
     if (!pr || pr.tenantId !== tenantId) {
       throw new NotFoundException('Purchase requisition not found');
     }
+
+    await assertCanApproveProcurement(this.prisma, actor, 'pr.approve', pr.requestedBy);
 
     if (pr.status !== PurchaseRequisitionStatus.PENDING_APPROVAL) {
       throw new BadRequestException('Only PENDING_APPROVAL purchase requisitions can be approved');
@@ -653,7 +664,8 @@ export class PurchaseRequisitionsService {
     return this.findOne(updated.id, tenantId);
   }
 
-  async cancel(id: string, reason: string, userId: string, tenantId: string): Promise<unknown> {
+  async cancel(id: string, reason: string, actor: ApprovalActor): Promise<unknown> {
+    const { userId, tenantId } = actor;
     const pr = await this.prisma.purchaseRequisition.findFirst({
       where: { id, tenantId },
     });
@@ -661,6 +673,8 @@ export class PurchaseRequisitionsService {
     if (!pr || pr.tenantId !== tenantId) {
       throw new NotFoundException('Purchase requisition not found');
     }
+
+    await assertCanCancelProcurement(this.prisma, actor, 'pr.approve', pr.requestedBy);
 
     const nonCancellableStatuses = [PurchaseRequisitionStatus.PO_CREATED];
 
