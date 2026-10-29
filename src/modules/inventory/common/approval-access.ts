@@ -17,6 +17,17 @@ export const APPROVAL_OWNER_ROLES: ReadonlySet<string> = new Set([
   'manager',
 ]);
 
+/**
+ * อนุมัติเอกสารที่ตัวเองสร้างได้ — เฉพาะเจ้าของกิจการ/แอดมิน (โรงแรมเล็กที่เจ้าของทำเองทุกขั้น)
+ * `manager` (GM) อนุมัติของคนอื่นได้ แต่ของตัวเองต้องให้เจ้าของอนุมัติ — แยกอำนาจผู้ขอกับผู้อนุมัติ
+ */
+export const SELF_APPROVE_ROLES: ReadonlySet<string> = new Set([
+  'platform_admin',
+  'admin',
+  'tenant_admin',
+  'owner',
+]);
+
 /** หัวหน้าจัดซื้อมีทุกสิทธิ์ของระบบจัดซื้อ (ตรงกับ hasPermission ฝั่ง frontend) */
 const PROCUREMENT_SUPER_ROLE = 'procurement_manager';
 
@@ -76,7 +87,7 @@ export async function hasProcurementApproval(
 
 /**
  * อนุมัติ PR/PO: ต้องมีสิทธิ์ และห้ามอนุมัติเอกสารที่ตัวเองสร้าง
- * (เจ้าของ/แอดมินยกเว้น — โรงแรมเล็กที่เจ้าของทำเองทุกขั้น)
+ * (ยกเว้น SELF_APPROVE_ROLES)
  */
 export async function assertCanApproveProcurement(
   prisma: PrismaService,
@@ -88,7 +99,7 @@ export async function assertCanApproveProcurement(
   if (!(await hasProcurementApproval(prisma, actor, permission))) {
     throw new ForbiddenException(`บทบาท ${actor.role} ไม่มีสิทธิ์อนุมัติ${DOC_LABEL[permission]}`);
   }
-  if (requestedBy === actor.userId && !APPROVAL_OWNER_ROLES.has(actor.role)) {
+  if (requestedBy === actor.userId && !SELF_APPROVE_ROLES.has(actor.role)) {
     throw new ForbiddenException(`ห้ามอนุมัติ${DOC_LABEL[permission]}ที่ตัวเองสร้าง`);
   }
 }

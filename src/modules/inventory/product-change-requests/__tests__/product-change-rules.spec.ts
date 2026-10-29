@@ -104,6 +104,11 @@ describe('permissionsFor', () => {
     expect(
       permissionsFor({ userId: 'u-1', tenantId: 't', role: 'tenant_admin' }, own).canReview,
     ).toBe(true);
+    const gm = permissionsFor({ userId: 'u-1', tenantId: 't', role: 'manager' }, own);
+    expect(gm.canReview).toBe(false);
+    expect(
+      permissionsFor({ userId: 'u-2', tenantId: 't', role: 'manager' }, own).canReview,
+    ).toBe(true);
   });
 
   it('allows resubmit only while NEEDS_INFO', () => {

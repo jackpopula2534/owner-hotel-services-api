@@ -60,7 +60,16 @@ export class MenuController {
   @ApiOperation({ summary: 'Get full menu (categories + available items)' })
   @ApiParam({ name: 'restaurantId', description: 'Restaurant ID' })
   @ApiResponse({ status: 200, description: 'Full menu with categories and items' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'waiter', 'staff')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'chef',
+    'waiter',
+    'staff',
+  )
   async getFullMenu(
     @Param('restaurantId') restaurantId: string,
     @CurrentUser() user: { tenantId: string },
@@ -78,6 +87,7 @@ export class MenuController {
     'tenant_admin',
     'admin',
     'manager',
+    'restaurant_manager',
     'chef',
     'waiter',
     'staff',
@@ -95,7 +105,7 @@ export class MenuController {
   @ApiOperation({ summary: 'Create menu category' })
   @ApiParam({ name: 'restaurantId' })
   @ApiResponse({ status: 201, description: 'Category created' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager', 'chef')
   async createCategory(
     @Param('restaurantId') restaurantId: string,
     @Body() dto: CreateMenuCategoryDto,
@@ -107,7 +117,7 @@ export class MenuController {
   @Patch('menu-categories/reorder')
   @ApiOperation({ summary: 'Reorder menu categories' })
   @ApiParam({ name: 'restaurantId' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager', 'chef')
   async reorderCategories(
     @Param('restaurantId') restaurantId: string,
     @Body() dto: ReorderCategoriesDto,
@@ -124,7 +134,7 @@ export class MenuController {
   })
   @ApiParam({ name: 'restaurantId' })
   @ApiResponse({ status: 201, description: 'Created mockup categories' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager', 'chef')
   async autoMockupCategories(
     @Param('restaurantId') restaurantId: string,
     @Body() dto: AutoMockupCategoriesDto,
@@ -137,7 +147,7 @@ export class MenuController {
   @ApiOperation({ summary: 'Update menu category' })
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'categoryId' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager', 'chef')
   async updateCategory(
     @Param('restaurantId') restaurantId: string,
     @Param('categoryId') categoryId: string,
@@ -153,7 +163,7 @@ export class MenuController {
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'categoryId' })
   @ApiResponse({ status: 204, description: 'Category deleted' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager')
   async removeCategory(
     @Param('restaurantId') restaurantId: string,
     @Param('categoryId') categoryId: string,
@@ -177,6 +187,7 @@ export class MenuController {
     'tenant_admin',
     'admin',
     'manager',
+    'restaurant_manager',
     'chef',
     'waiter',
     'staff',
@@ -215,6 +226,7 @@ export class MenuController {
     'tenant_admin',
     'admin',
     'manager',
+    'restaurant_manager',
     'chef',
     'waiter',
     'staff',
@@ -233,7 +245,16 @@ export class MenuController {
   @ApiOperation({ summary: 'Get menu item by ID' })
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'itemId' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'waiter', 'staff')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'chef',
+    'waiter',
+    'staff',
+  )
   async findOneItem(
     @Param('restaurantId') restaurantId: string,
     @Param('itemId') itemId: string,
@@ -246,7 +267,7 @@ export class MenuController {
   @ApiOperation({ summary: 'Create menu item' })
   @ApiParam({ name: 'restaurantId' })
   @ApiResponse({ status: 201, description: 'Menu item created' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager', 'chef')
   async createItem(
     @Param('restaurantId') restaurantId: string,
     @Body() dto: CreateMenuItemDto,
@@ -259,7 +280,7 @@ export class MenuController {
   @ApiOperation({ summary: 'Update menu item' })
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'itemId' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager', 'chef')
   async updateItem(
     @Param('restaurantId') restaurantId: string,
     @Param('itemId') itemId: string,
@@ -273,7 +294,7 @@ export class MenuController {
   @ApiOperation({ summary: 'Toggle menu item availability' })
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'itemId' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager', 'chef')
   async toggleAvailability(
     @Param('restaurantId') restaurantId: string,
     @Param('itemId') itemId: string,
@@ -295,7 +316,7 @@ export class MenuController {
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'itemId' })
   @ApiResponse({ status: 204, description: 'Menu item deleted' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager', 'chef')
   async removeItem(
     @Param('restaurantId') restaurantId: string,
     @Param('itemId') itemId: string,
@@ -311,7 +332,15 @@ export class MenuController {
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'itemId' })
   @ApiQuery({ name: 'limit', required: false, example: 50 })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'staff')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'chef',
+    'staff',
+  )
   async listStockMovements(
     @Param('restaurantId') restaurantId: string,
     @Param('itemId') itemId: string,
@@ -332,7 +361,7 @@ export class MenuController {
   @ApiParam({ name: 'itemId' })
   @ApiResponse({ status: 201, description: 'บันทึกแล้ว พร้อมยอดคงเหลือใหม่' })
   @ApiResponse({ status: 400, description: 'เมนูผูกคลังกลาง / ไม่ได้เปิดนับสต๊อก / ยอดติดลบ' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager', 'chef')
   async applyStockMovement(
     @Param('restaurantId') restaurantId: string,
     @Param('itemId') itemId: string,
@@ -353,7 +382,7 @@ export class MenuController {
   @ApiResponse({ status: 201, description: 'ย้ายแล้ว คืนรหัสสินค้าและคลังปลายทาง' })
   @ApiResponse({ status: 400, description: 'ไม่มีระบบคลัง / ไม่มีคลังที่ใช้งานได้' })
   @ApiResponse({ status: 409, description: 'เมนูผูกกับสินค้าในคลังอยู่แล้ว' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager')
   async promoteToInventory(
     @Param('restaurantId') restaurantId: string,
     @Param('itemId') itemId: string,
@@ -375,7 +404,7 @@ export class MenuController {
   @ApiResponse({ status: 201, description: 'ถอดแล้ว คืนจำนวนที่ดึงกลับและโหมดใหม่' })
   @ApiResponse({ status: 400, description: 'ดึงเกินของที่มี / มีเมนูอื่นผูกอยู่ ต้องระบุจำนวนเอง' })
   @ApiResponse({ status: 409, description: 'เมนูนี้ไม่ได้ผูกกับสินค้าในคลัง' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager')
   async demoteFromInventory(
     @Param('restaurantId') restaurantId: string,
     @Param('itemId') itemId: string,
@@ -392,7 +421,16 @@ export class MenuController {
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'itemId' })
   @ApiResponse({ status: 200, description: 'Recipe with ingredients, or null' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'waiter', 'staff')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'chef',
+    'waiter',
+    'staff',
+  )
   async getRecipe(
     @Param('restaurantId') restaurantId: string,
     @Param('itemId') itemId: string,
@@ -406,7 +444,7 @@ export class MenuController {
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'itemId' })
   @ApiResponse({ status: 200, description: 'Recipe saved with ingredients' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager', 'chef')
   async upsertRecipe(
     @Param('restaurantId') restaurantId: string,
     @Param('itemId') itemId: string,
@@ -422,7 +460,7 @@ export class MenuController {
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'itemId' })
   @ApiResponse({ status: 204, description: 'Recipe deleted' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager', 'chef')
   async deleteRecipe(
     @Param('restaurantId') restaurantId: string,
     @Param('itemId') itemId: string,

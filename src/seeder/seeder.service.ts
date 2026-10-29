@@ -6016,7 +6016,7 @@ export class SeederService {
     // ── POS staff accounts ────────────────────────────────────────────────────
     // Each staff member gets allowedSystems scoped to their role:
     //   waiter / chef / cashier → ["pos"] only
-    //   manager (restaurant manager) → ["main","pos"]
+    //   restaurant_manager → ["main","pos"]
     const posStaff = [
       {
         email: 'waiter1@mountainviewresort.test',
@@ -6054,7 +6054,7 @@ export class SeederService {
         email: 'restaurant.manager@mountainviewresort.test',
         firstName: 'ประสิทธิ์',
         lastName: 'บริหารเก่ง',
-        role: 'manager',
+        role: 'restaurant_manager',
         employeeId: 'MVR-M001',
         allowedSystems: '["main","pos"]',
       },

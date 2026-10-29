@@ -39,6 +39,7 @@ export class RestaurantController {
     'tenant_admin',
     'admin',
     'manager',
+    'restaurant_manager',
     'chef',
     'waiter',
     'receptionist',
@@ -59,6 +60,7 @@ export class RestaurantController {
     'tenant_admin',
     'admin',
     'manager',
+    'restaurant_manager',
     'chef',
     'waiter',
     'receptionist',
@@ -77,6 +79,7 @@ export class RestaurantController {
     'tenant_admin',
     'admin',
     'manager',
+    'restaurant_manager',
     'chef',
     'waiter',
     'receptionist',
@@ -102,7 +105,7 @@ export class RestaurantController {
   @Patch(':id')
   @ApiOperation({ summary: 'Update restaurant' })
   @ApiResponse({ status: 200, description: 'Restaurant updated successfully' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager', 'chef')
   async update(
     @Param('id') id: string,
     @Body() updateRestaurantDto: UpdateRestaurantDto,
@@ -114,6 +117,7 @@ export class RestaurantController {
   @Delete(':id')
   @ApiOperation({ summary: 'Delete restaurant' })
   @ApiResponse({ status: 200, description: 'Restaurant deleted successfully' })
+  // ไม่มี restaurant_manager — เปิด/ปิดร้านเป็นการตัดสินใจระดับเจ้าของ/GM
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager')
   async remove(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.restaurantService.remove(id, user?.tenantId);

@@ -26,8 +26,16 @@ export const VIEWER_ROLES: ReadonlySet<string> = new Set([
   'qc_officer',
 ]);
 
-/** ผู้ดูแลที่ส่งคำขอเองแล้วอนุมัติเองได้ (โรงแรมเล็กที่เจ้าของทำทุกอย่าง) */
-export const SELF_REVIEW_ROLES: ReadonlySet<string> = new Set(OWNER_ROLES);
+/**
+ * ผู้ดูแลที่ส่งคำขอเองแล้วอนุมัติเองได้ (โรงแรมเล็กที่เจ้าของทำทุกอย่าง)
+ * ไม่รวม `manager` (GM) — ตรงกับ SELF_APPROVE_ROLES ของ PR/PO ใน common/approval-access.ts
+ */
+/** เจ้าของ/ผู้ดูแล (รวม GM) — แก้ข้อมูลที่จัดซื้อเป็นเจ้าของได้ตรง ๆ กรณีเร่งด่วน, ยกเลิก/ส่งซ้ำคำขอของคนอื่นได้ */
+export const DIRECT_EDIT_ROLES: ReadonlySet<string> = new Set(OWNER_ROLES);
+
+export const SELF_REVIEW_ROLES: ReadonlySet<string> = new Set(
+  OWNER_ROLES.filter((r) => r !== 'manager'),
+);
 
 /**
  * role ของระบบจัดซื้อที่ห้ามสร้าง/แก้สินค้าตรงๆ — ต้องส่งคำขอให้คลังแทน
@@ -87,7 +95,7 @@ export function assertProcurementOwnedFieldsUnchanged(
   current: Record<ProcurementOwnedItemField, string | null>,
   incoming: Partial<Record<ProcurementOwnedItemField, string | null>>,
 ): void {
-  if (role && SELF_REVIEW_ROLES.has(role)) return;
+  if (role && DIRECT_EDIT_ROLES.has(role)) return;
   const changed = PROCUREMENT_OWNED_ITEM_FIELDS.filter(
     (f) => incoming[f] !== undefined && normText(incoming[f]) !== normText(current[f]),
   );
@@ -104,7 +112,7 @@ export function assertProcurementOwnedFieldsUnchanged(
  * เขียนตรงได้เฉพาะเจ้าของ/ผู้ดูแลระบบ
  */
 export function assertCanWriteItemSuppliers(role: string | undefined): void {
-  if (!role || !SELF_REVIEW_ROLES.has(role)) {
+  if (!role || !DIRECT_EDIT_ROLES.has(role)) {
     throw new ForbiddenException({
       code: 'ITEM_SUPPLIER_VIA_CHANGE_REQUEST',
       message:

@@ -11,6 +11,7 @@ import {
   REQUESTER_ROLES,
   REVIEWER_ROLES,
   SELF_REVIEW_ROLES,
+  DIRECT_EDIT_ROLES,
 } from './product-change-access';
 import { FieldChange, ProcurementFieldKey, isProcurementFieldKey } from './product-change-fields';
 import type { DuplicateCandidate, StockImpact } from './product-change-apply.service';
@@ -125,17 +126,18 @@ export function isOverdue(
 
 /**
  * สิทธิ์ของผู้ใช้คนนี้ต่อคำขอนี้ — frontend ใช้ซ่อน/แสดงปุ่ม, backend ใช้บังคับจริง
- * ผู้ส่งคำขออนุมัติคำขอตัวเองไม่ได้ ยกเว้นเจ้าของ/ผู้ดูแลระบบ (โรงแรมเล็กที่ทำทุกอย่างเอง)
+ * ผู้ส่งคำขออนุมัติคำขอตัวเองไม่ได้ ยกเว้นเจ้าของ/ผู้ดูแลระบบ (โรงแรมเล็กที่ทำทุกอย่างเอง) — GM ไม่ยกเว้น
  */
 export function permissionsFor(
   actor: ChangeRequestActor,
   request: Pick<ProductChangeRequest, 'status' | 'requestedById'>,
 ): RequestPermissions {
   const isRequester = request.requestedById === actor.userId;
-  const isOwnerAdmin = SELF_REVIEW_ROLES.has(actor.role);
+  const canSelfReview = SELF_REVIEW_ROLES.has(actor.role);
+  const isOwnerAdmin = DIRECT_EDIT_ROLES.has(actor.role);
   const open = isOpen(request.status);
   return {
-    canReview: REVIEWER_ROLES.has(actor.role) && open && (!isRequester || isOwnerAdmin),
+    canReview: REVIEWER_ROLES.has(actor.role) && open && (!isRequester || canSelfReview),
     canCancel: open && (isRequester || (isOwnerAdmin && REQUESTER_ROLES.has(actor.role))),
     canResubmit: request.status === 'NEEDS_INFO' && (isRequester || isOwnerAdmin),
   };

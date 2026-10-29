@@ -77,6 +77,16 @@ describe('approval-access', () => {
       ).rejects.toThrow('ตัวเองสร้าง');
     });
 
+    it('manager (GM) อนุมัติของคนอื่นได้ แต่ของตัวเองไม่ได้', async () => {
+      const { prisma } = prismaWith(null);
+      await expect(
+        assertCanApproveProcurement(prisma, actor('manager'), 'po.approve', 'someone-else'),
+      ).resolves.toBeUndefined();
+      await expect(
+        assertCanApproveProcurement(prisma, actor('manager'), 'po.approve', 'me'),
+      ).rejects.toThrow('ตัวเองสร้าง');
+    });
+
     it('เจ้าของอนุมัติเอกสารที่ตัวเองสร้างได้ (โรงแรมเล็ก)', async () => {
       const { prisma } = prismaWith(null);
       await expect(

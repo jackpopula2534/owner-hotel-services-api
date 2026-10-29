@@ -5,7 +5,8 @@ export const ROLES_KEY = 'roles';
 // NOTE:
 // - platform_admin: SaaS platform admin (ดูแลทุก tenant) → login ผ่าน /admin/login
 // - tenant_admin: เจ้าของโรงแรม / ผู้ซื้อ subscription → login ผ่าน /login
-// - manager: ผู้จัดการโรงแรม
+// - manager: ผู้จัดการโรงแรม (GM)
+// - restaurant_manager: ผู้จัดการร้านอาหาร / POS (ไม่สืบทอดสิทธิ์ GM)
 // - receptionist: พนักงานต้อนรับ / Front Desk
 // - housekeeper: แม่บ้าน / Housekeeping
 // - chef: เชฟ / หัวหน้าครัว
@@ -53,6 +54,9 @@ export type UserRole =
   // only and inherit nothing else. See ROLE_LEVELS in guards/roles.guard.ts.
   | 'cashier'
   | 'bartender'
+  // ผู้จัดการร้านอาหาร/POS — แยกจาก 'manager' (GM) เพื่อไม่ให้สืบทอดสิทธิ์ level 80 ทั้งระบบ
+  // ไม่อยู่ใน ROLE_LEVELS: เข้าได้เฉพาะ endpoint ที่เอ่ยชื่อตรง ๆ (restaurant module)
+  | 'restaurant_manager'
   | 'system';
 
 export const Roles = (...roles: UserRole[]) => SetMetadata(ROLES_KEY, roles);

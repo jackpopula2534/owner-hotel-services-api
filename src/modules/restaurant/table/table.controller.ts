@@ -52,6 +52,7 @@ export class TableController {
     'tenant_admin',
     'admin',
     'manager',
+    'restaurant_manager',
     'chef',
     'waiter',
     'staff',
@@ -72,7 +73,16 @@ export class TableController {
   @ApiQuery({ name: 'date', required: true, example: '2026-04-15' })
   @ApiQuery({ name: 'startTime', required: true, example: '19:00' })
   @ApiQuery({ name: 'partySize', required: false, type: Number })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'waiter', 'receptionist', 'staff')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'waiter',
+    'receptionist',
+    'staff',
+  )
   async checkAvailability(
     @Param('restaurantId') restaurantId: string,
     @Query() query: { date: string; startTime: string; partySize?: number },
@@ -85,7 +95,16 @@ export class TableController {
   @ApiOperation({ summary: 'Get table by ID' })
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'tableId' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'waiter', 'staff')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'chef',
+    'waiter',
+    'staff',
+  )
   async findOne(
     @Param('restaurantId') restaurantId: string,
     @Param('tableId') tableId: string,
@@ -98,7 +117,7 @@ export class TableController {
   @ApiOperation({ summary: 'Create table' })
   @ApiParam({ name: 'restaurantId' })
   @ApiResponse({ status: 201, description: 'Table created' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager')
   async create(
     @Param('restaurantId') restaurantId: string,
     @Body() dto: CreateTableDto,
@@ -110,7 +129,7 @@ export class TableController {
   @Patch('layout')
   @ApiOperation({ summary: 'Save floor plan layout (bulk position update)' })
   @ApiParam({ name: 'restaurantId' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager')
   async saveLayout(
     @Param('restaurantId') restaurantId: string,
     @Body() dto: SaveLayoutDto,
@@ -123,7 +142,7 @@ export class TableController {
   @ApiOperation({ summary: 'Update table' })
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'tableId' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager')
   async update(
     @Param('restaurantId') restaurantId: string,
     @Param('tableId') tableId: string,
@@ -144,6 +163,7 @@ export class TableController {
     'tenant_admin',
     'admin',
     'manager',
+    'restaurant_manager',
     'waiter',
     'staff',
     'cashier',
@@ -172,7 +192,7 @@ export class TableController {
       },
     },
   })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager')
   async generateQrCode(
     @Param('restaurantId') restaurantId: string,
     @Param('tableId') tableId: string,
@@ -186,7 +206,7 @@ export class TableController {
   @ApiOperation({ summary: 'Delete table' })
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'tableId' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager')
   async remove(
     @Param('restaurantId') restaurantId: string,
     @Param('tableId') tableId: string,

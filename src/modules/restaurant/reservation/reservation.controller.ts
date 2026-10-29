@@ -11,13 +11,7 @@ import {
   HttpStatus,
   UseGuards,
 } from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiBearerAuth,
-  ApiResponse,
-  ApiParam,
-} from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { ReservationService } from './reservation.service';
 import { CreateReservationDto } from './dto/create-reservation.dto';
 import { MoveReservationTableDto } from './dto/move-reservation-table.dto';
@@ -42,10 +36,20 @@ export class ReservationController {
 
   @Get()
   @ApiOperation({
-    summary: 'Get reservations — one day (`date`), a range (`from`/`to`), or all when neither is set',
+    summary:
+      'Get reservations — one day (`date`), a range (`from`/`to`), or all when neither is set',
   })
   @ApiParam({ name: 'restaurantId' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'waiter', 'receptionist', 'staff')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'waiter',
+    'receptionist',
+    'staff',
+  )
   async findAll(
     @Param('restaurantId') restaurantId: string,
     @Query() query: QueryReservationsDto,
@@ -58,7 +62,16 @@ export class ReservationController {
   @ApiOperation({ summary: 'Get reservation by ID' })
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'reservationId' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'waiter', 'receptionist', 'staff')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'waiter',
+    'receptionist',
+    'staff',
+  )
   async findOne(
     @Param('restaurantId') restaurantId: string,
     @Param('reservationId') reservationId: string,
@@ -71,7 +84,16 @@ export class ReservationController {
   @ApiOperation({ summary: 'Create reservation' })
   @ApiParam({ name: 'restaurantId' })
   @ApiResponse({ status: 201, description: 'Reservation created' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'waiter', 'receptionist', 'staff')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'waiter',
+    'receptionist',
+    'staff',
+  )
   async create(
     @Param('restaurantId') restaurantId: string,
     @Body() dto: CreateReservationDto,
@@ -84,7 +106,15 @@ export class ReservationController {
   @ApiOperation({ summary: 'Update reservation' })
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'reservationId' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'waiter', 'receptionist')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'waiter',
+    'receptionist',
+  )
   async update(
     @Param('restaurantId') restaurantId: string,
     @Param('reservationId') reservationId: string,
@@ -102,18 +132,33 @@ export class ReservationController {
 
   @Patch(':reservationId/move-table')
   @ApiOperation({
-    summary: 'Move a booking to another table — its open bills move with it, the old table goes to cleaning',
+    summary:
+      'Move a booking to another table — its open bills move with it, the old table goes to cleaning',
   })
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'reservationId' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'waiter', 'receptionist')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'waiter',
+    'receptionist',
+  )
   async moveTable(
     @Param('restaurantId') restaurantId: string,
     @Param('reservationId') reservationId: string,
     @Body() dto: MoveReservationTableDto,
     @CurrentUser() user: { tenantId: string; id?: string },
   ) {
-    return this.reservationService.moveTable(restaurantId, reservationId, dto, user.tenantId, user?.id);
+    return this.reservationService.moveTable(
+      restaurantId,
+      reservationId,
+      dto,
+      user.tenantId,
+      user?.id,
+    );
   }
 
   @Patch(':reservationId/seat')
@@ -122,7 +167,15 @@ export class ReservationController {
   })
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'reservationId' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'waiter', 'receptionist')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'waiter',
+    'receptionist',
+  )
   async seat(
     @Param('restaurantId') restaurantId: string,
     @Param('reservationId') reservationId: string,
@@ -135,7 +188,15 @@ export class ReservationController {
   @ApiOperation({ summary: 'Mark reservation as no-show' })
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'reservationId' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'waiter', 'receptionist')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'waiter',
+    'receptionist',
+  )
   async markAsNoShow(
     @Param('restaurantId') restaurantId: string,
     @Param('reservationId') reservationId: string,
@@ -155,7 +216,7 @@ export class ReservationController {
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'reservationId' })
   @ApiResponse({ status: 204 })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager')
   async remove(
     @Param('restaurantId') restaurantId: string,
     @Param('reservationId') reservationId: string,

@@ -36,7 +36,15 @@ export class KitchenController {
   @ApiOperation({ summary: 'Get active kitchen orders queue (KDS)' })
   @ApiParam({ name: 'restaurantId' })
   @ApiResponse({ status: 200, description: 'Active kitchen orders sorted by priority and time' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'staff')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'chef',
+    'staff',
+  )
   async getActiveOrders(
     @Param('restaurantId') restaurantId: string,
     @CurrentUser() user: { tenantId: string },
@@ -46,24 +54,37 @@ export class KitchenController {
 
   @Get('menu-items/:menuItemId/readiness')
   @ApiOperation({
-    summary: 'How many plates of one dish the kitchen stock still covers, per ingredient (recipe drawer)',
+    summary:
+      'How many plates of one dish the kitchen stock still covers, per ingredient (recipe drawer)',
   })
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'menuItemId' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'staff', 'bartender')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'chef',
+    'staff',
+    'bartender',
+  )
   async readiness(
     @Param('restaurantId') restaurantId: string,
     @Param('menuItemId') menuItemId: string,
     @CurrentUser() user: { tenantId: string },
   ) {
-    const { menus } = await this.readinessService.getReadiness(user.tenantId, { restaurantId, menuItemId });
+    const { menus } = await this.readinessService.getReadiness(user.tenantId, {
+      restaurantId,
+      menuItemId,
+    });
     return menus[0] ?? null;
   }
 
   @Get('stats')
   @ApiOperation({ summary: 'Get kitchen stats (avg prep time, queue size, completed today)' })
   @ApiParam({ name: 'restaurantId' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager', 'chef')
   async getStats(
     @Param('restaurantId') restaurantId: string,
     @CurrentUser() user: { tenantId: string },
@@ -75,7 +96,15 @@ export class KitchenController {
   @ApiOperation({ summary: 'Start preparing kitchen order' })
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'kitchenOrderId' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'staff')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'chef',
+    'staff',
+  )
   async startOrder(
     @Param('restaurantId') restaurantId: string,
     @Param('kitchenOrderId') kitchenOrderId: string,
@@ -88,7 +117,15 @@ export class KitchenController {
   @ApiOperation({ summary: 'Mark kitchen order as ready (all items prepared)' })
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'kitchenOrderId' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'staff')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'chef',
+    'staff',
+  )
   async completeOrder(
     @Param('restaurantId') restaurantId: string,
     @Param('kitchenOrderId') kitchenOrderId: string,
@@ -117,6 +154,7 @@ export class KitchenController {
     'tenant_admin',
     'admin',
     'manager',
+    'restaurant_manager',
     'chef',
     'staff',
     'cashier',
@@ -138,10 +176,21 @@ export class KitchenController {
   }
 
   @Patch('bills/:orderId/accept')
-  @ApiOperation({ summary: 'Accept a new round on the kitchen board (opens its tickets, items untouched)' })
+  @ApiOperation({
+    summary: 'Accept a new round on the kitchen board (opens its tickets, items untouched)',
+  })
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'orderId' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'staff', 'bartender')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'chef',
+    'staff',
+    'bartender',
+  )
   async acceptBill(
     @Param('restaurantId') restaurantId: string,
     @Param('orderId') orderId: string,
@@ -154,33 +203,77 @@ export class KitchenController {
   @ApiOperation({ summary: 'Serve ready items of a bill (all READY items, or only itemIds)' })
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'orderId' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'staff', 'waiter', 'cashier', 'bartender')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'chef',
+    'staff',
+    'waiter',
+    'cashier',
+    'bartender',
+  )
   async serveItems(
     @Param('restaurantId') restaurantId: string,
     @Param('orderId') orderId: string,
     @Body() dto: ServeItemsDto,
     @CurrentUser() user: { tenantId: string; id?: string },
   ) {
-    return this.kitchenService.serveItems(restaurantId, orderId, dto.itemIds, user.tenantId, user?.id);
+    return this.kitchenService.serveItems(
+      restaurantId,
+      orderId,
+      dto.itemIds,
+      user.tenantId,
+      user?.id,
+    );
   }
 
   @Get('history')
-  @ApiOperation({ summary: 'Bills fully served since `since` (default today) — the kitchen history tab' })
+  @ApiOperation({
+    summary: 'Bills fully served since `since` (default today) — the kitchen history tab',
+  })
   @ApiParam({ name: 'restaurantId' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'staff', 'bartender')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'chef',
+    'staff',
+    'bartender',
+  )
   async history(
     @Param('restaurantId') restaurantId: string,
     @Query() query: KitchenHistoryQueryDto,
     @CurrentUser() user: { tenantId: string },
   ) {
-    return this.kitchenService.getHistory(restaurantId, user.tenantId, query.since ? new Date(query.since) : undefined);
+    return this.kitchenService.getHistory(
+      restaurantId,
+      user.tenantId,
+      query.since ? new Date(query.since) : undefined,
+    );
   }
 
   @Patch('bills/:orderId/recall')
-  @ApiOperation({ summary: 'Bring served items of a bill back to the kitchen (remake, wrong dish, served by mistake)' })
+  @ApiOperation({
+    summary:
+      'Bring served items of a bill back to the kitchen (remake, wrong dish, served by mistake)',
+  })
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'orderId' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'staff', 'bartender')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'chef',
+    'staff',
+    'bartender',
+  )
   async recallBill(
     @Param('restaurantId') restaurantId: string,
     @Param('orderId') orderId: string,
@@ -201,7 +294,7 @@ export class KitchenController {
       },
     },
   })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager', 'chef')
   async setPriority(
     @Param('restaurantId') restaurantId: string,
     @Param('kitchenOrderId') kitchenOrderId: string,

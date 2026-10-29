@@ -48,7 +48,7 @@ export class RestaurantAnalyticsController {
   })
   @ApiResponse({ status: 200, description: 'Monthly sales report' })
   @ApiResponse({ status: 404, description: 'Restaurant not found for this tenant' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'accountant')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager', 'accountant')
   async getMonthlySales(
     @Param('restaurantId') restaurantId: string,
     @Query('month') month?: string,
@@ -75,7 +75,7 @@ export class RestaurantAnalyticsController {
   })
   @ApiResponse({ status: 200, description: 'Daily sales report' })
   @ApiResponse({ status: 404, description: 'Restaurant not found for this tenant' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'accountant')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager', 'accountant')
   async getDailySales(
     @Param('restaurantId') restaurantId: string,
     @Query('date') date?: string,
@@ -109,7 +109,7 @@ export class RestaurantAnalyticsController {
     status: 200,
     description: 'Revenue summary with timeline, payment breakdown, and order type breakdown',
   })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'accountant')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager', 'accountant')
   async getRevenueSummary(
     @Param('restaurantId') restaurantId: string,
     @Query('from') from?: string,
@@ -137,7 +137,15 @@ export class RestaurantAnalyticsController {
     status: 200,
     description: 'Daily summary: revenue, orders, guests, kitchen, table stats',
   })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'accountant')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'chef',
+    'accountant',
+  )
   async getDailySummary(
     @Param('restaurantId') restaurantId: string,
     @Query('date') date?: string,
@@ -158,7 +166,15 @@ export class RestaurantAnalyticsController {
     example: 10,
   })
   @ApiResponse({ status: 200, description: 'Ranked menu items with quantity and revenue data' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'accountant')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'chef',
+    'accountant',
+  )
   async getTopMenuItems(
     @Param('restaurantId') restaurantId: string,
     @Query('from') from?: string,
@@ -182,7 +198,7 @@ export class RestaurantAnalyticsController {
     status: 200,
     description: 'Per-table stats: orders served, revenue, avg turnover time',
   })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'accountant')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager', 'accountant')
   async getTableUtilization(
     @Param('restaurantId') restaurantId: string,
     @Query('from') from?: string,
@@ -201,7 +217,7 @@ export class RestaurantAnalyticsController {
     status: 200,
     description: 'Heatmap grid: orders and revenue per [dayOfWeek, hour] cell',
   })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'accountant')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager', 'accountant')
   async getHourlyHeatmap(
     @Param('restaurantId') restaurantId: string,
     @Query('from') from?: string,
