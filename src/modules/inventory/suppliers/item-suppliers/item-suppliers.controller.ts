@@ -18,6 +18,7 @@ import { UpdateItemSupplierDto } from './dto/update-item-supplier.dto';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AddonGuard } from '@/common/guards/addon.guard';
 import { RequireAddon } from '@/common/decorators/require-addon.decorator';
+import { assertCanWriteItemSuppliers } from '../../product-change-requests/product-change-access';
 
 @ApiTags('Inventory - Item Suppliers')
 @ApiBearerAuth()
@@ -32,7 +33,7 @@ export class ItemSuppliersController {
   @ApiResponse({ status: 200, description: 'Item suppliers retrieved' })
   async findByItem(
     @Param('itemId') itemId: string,
-    @Req() req: { user: { tenantId: string } },
+    @Req() req: { user: { tenantId: string; role?: string } },
   ): Promise<{ success: boolean; data: unknown }> {
     const data = await this.itemSuppliersService.findByItem(itemId, req.user.tenantId);
     return { success: true, data };
@@ -43,7 +44,7 @@ export class ItemSuppliersController {
   @ApiResponse({ status: 200, description: 'Supplier items retrieved' })
   async findBySupplier(
     @Param('supplierId') supplierId: string,
-    @Req() req: { user: { tenantId: string } },
+    @Req() req: { user: { tenantId: string; role?: string } },
   ): Promise<{ success: boolean; data: unknown }> {
     const data = await this.itemSuppliersService.findBySupplier(supplierId, req.user.tenantId);
     return { success: true, data };
@@ -56,8 +57,9 @@ export class ItemSuppliersController {
   @ApiResponse({ status: 400, description: 'Invalid item or supplier' })
   async create(
     @Body() dto: CreateItemSupplierDto,
-    @Req() req: { user: { tenantId: string } },
+    @Req() req: { user: { tenantId: string; role?: string } },
   ): Promise<{ success: boolean; data: unknown }> {
+    assertCanWriteItemSuppliers(req.user.role);
     const data = await this.itemSuppliersService.create(dto, req.user.tenantId);
     return { success: true, data };
   }
@@ -68,8 +70,9 @@ export class ItemSuppliersController {
   async update(
     @Param('id') id: string,
     @Body() dto: UpdateItemSupplierDto,
-    @Req() req: { user: { tenantId: string } },
+    @Req() req: { user: { tenantId: string; role?: string } },
   ): Promise<{ success: boolean; data: unknown }> {
+    assertCanWriteItemSuppliers(req.user.role);
     const data = await this.itemSuppliersService.update(id, dto, req.user.tenantId);
     return { success: true, data };
   }
@@ -78,7 +81,11 @@ export class ItemSuppliersController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Remove item-supplier link' })
   @ApiResponse({ status: 204, description: 'Item-supplier link deleted' })
-  async remove(@Param('id') id: string, @Req() req: { user: { tenantId: string } }): Promise<void> {
+  async remove(
+    @Param('id') id: string,
+    @Req() req: { user: { tenantId: string; role?: string } },
+  ): Promise<void> {
+    assertCanWriteItemSuppliers(req.user.role);
     return this.itemSuppliersService.remove(id, req.user.tenantId);
   }
 
@@ -88,8 +95,9 @@ export class ItemSuppliersController {
   async setPreferred(
     @Param('itemId') itemId: string,
     @Param('supplierId') supplierId: string,
-    @Req() req: { user: { tenantId: string } },
+    @Req() req: { user: { tenantId: string; role?: string } },
   ): Promise<{ success: boolean; data: unknown }> {
+    assertCanWriteItemSuppliers(req.user.role);
     const data = await this.itemSuppliersService.setPreferred(
       itemId,
       supplierId,

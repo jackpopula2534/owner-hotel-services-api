@@ -3374,6 +3374,11 @@ model InventoryItem {
   defaultQCTemplateId        String?
   requiresLotTracking        Boolean                     @default(false)
   requiresQC                 Boolean                     @default(false)
+  /// หน่วยซื้อ (จัดซื้อเป็นเจ้าของ) — null = ซื้อเป็นหน่วยเดียวกับหน่วยนับคลัง
+  purchaseUnit               ItemUnit?
+  /// 1 หน่วยซื้อ = N หน่วยนับคลัง (เช่น 1 ลัง = 24 ขวด) — เปลี่ยนได้ผ่านคำขอที่คลังอนุมัติเท่านั้น
+  purchaseUnitFactor         Decimal?                    @db.Decimal(10, 3)
+  productChangeRequests      ProductChangeRequest[]
   goodsReceiveItems          GoodsReceiveItem[]
   materialRequisitionItems   MaterialRequisitionItem[]
   category                   ItemCategory?               @relation(fields: [categoryId], references: [id])
@@ -8570,4 +8575,87 @@ model AddonPurchase {
 
   @@index([tenantId, addonCode, status])
   @@map("addon_purchases")
+}
+
+
+/// คำขอสร้าง/แก้ไขสินค้าจากฝั่งจัดซื้อ — สินค้าสร้างได้จากฝั่งคลังเท่านั้น
+/// และข้อมูลที่จัดซื้อเป็นเจ้าของ ทุกการเปลี่ยนแปลงต้องผ่านคลัง (รับทราบ / อนุมัติ)
+model ProductChangeRequest {
+  id              String                       @id @default(uuid())
+  tenantId        String
+  requestNumber   String
+  type            ProductChangeRequestType
+  status          ProductChangeRequestStatus   @default(PENDING)
+  /// ระดับสูงสุดของฟิลด์ในคำขอ — APPROVAL ถ้ามีฟิลด์ที่กระทบสต๊อก
+  level           ProductChangeLevel
+  /// UPDATE: สินค้าที่ขอแก้ · CREATE: สินค้าที่ถูกสร้างหลังอนุมัติ
+  itemId          String?
+  /// CREATE: ข้อมูลสินค้า + การจัดซื้อที่เสนอ · UPDATE: { field: newValue }
+  proposed        Json
+  /// UPDATE: ค่าเดิม ณ ตอนส่งคำขอ
+  baseline        Json?
+  /// UPDATE: [{ field, from, to, level, decision }]
+  changes         Json?
+  /// CREATE: ค่าฝั่งคลังที่จัดซื้อเสนอ (ไม่ผูกมัด)
+  suggestedWarehouse Json?
+  /// CREATE: ค่าฝั่งคลังที่คลังยืนยันตอนอนุมัติ
+  warehouseData   Json?
+  reason          String?                      @db.Text
+  prReference     String?
+  neededBy        DateTime?
+  effectiveDate   DateTime?
+  requestedById   String
+  requestedByName String?
+  reviewedById    String?
+  reviewedByName  String?
+  reviewedAt      DateTime?
+  reviewNote      String?                      @db.Text
+  duplicateOfItemId String?
+  appliedAt       DateTime?
+  createdAt       DateTime                     @default(now())
+  updatedAt       DateTime                     @updatedAt
+  item            InventoryItem?               @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  events          ProductChangeRequestEvent[]
+
+  @@unique([tenantId, requestNumber])
+  @@index([tenantId, status])
+  @@index([tenantId, type])
+  @@index([itemId])
+  @@map("product_change_requests")
+}
+
+model ProductChangeRequestEvent {
+  id        String               @id @default(uuid())
+  requestId String
+  tenantId  String
+  /// SUBMITTED | VIEWED | NEEDS_INFO | RESUBMITTED | APPROVED | ACKNOWLEDGED | REJECTED | CANCELLED | APPLIED
+  action    String               @db.VarChar(32)
+  actorId   String?
+  actorName String?
+  note      String?              @db.Text
+  createdAt DateTime             @default(now())
+  request   ProductChangeRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([requestId])
+  @@index([tenantId])
+  @@map("product_change_request_events")
+}
+
+enum ProductChangeRequestType {
+  CREATE
+  UPDATE
+}
+
+enum ProductChangeRequestStatus {
+  PENDING
+  NEEDS_INFO
+  APPROVED
+  ACKNOWLEDGED
+  REJECTED
+  CANCELLED
+}
+
+enum ProductChangeLevel {
+  ACKNOWLEDGE
+  APPROVAL
 }

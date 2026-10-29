@@ -6,6 +6,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '@/prisma/prisma.service';
+import { assertProcurementOwnedFieldsUnchanged } from '../product-change-requests/product-change-access';
 import { CreateItemDto } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
 import { QueryItemDto, SortField, SortOrder } from './dto/query-item.dto';
@@ -71,6 +72,9 @@ export interface ItemSearchResult {
   isPerishable: boolean;
   defaultShelfLifeDays: number | null;
   reorderPoint: number;
+  /** หน่วยซื้อ + อัตราแปลง (จัดซื้อเป็นเจ้าของ) — ฟอร์ม PR/PO ใช้ช่วยปัดจำนวนให้เต็มหน่วยซื้อ */
+  purchaseUnit: string | null;
+  purchaseUnitFactor: number | null;
   /**
    * On-hand balance of the item in the warehouse passed via `warehouseId`.
    * `null` when no warehouse was supplied (the generic typeahead does not join
@@ -293,6 +297,8 @@ export class ItemsService {
           defaultShelfLifeDays: true,
           requiresLotTracking: true,
           reorderPoint: true,
+          purchaseUnit: true,
+          purchaseUnitFactor: true,
           category: { select: { id: true, name: true } },
           // Only join stock rows when a warehouse was supplied — keeps the
           // generic typeahead lightweight (see DTO docblock).
@@ -318,6 +324,8 @@ export class ItemsService {
           category: item.category ?? null,
           // Decimal → number ตั้งแต่ตรงนี้ หน้าจอจะได้ไม่ต้องแปลงเอง (แล้วลืมแปลง)
           sellingPrice: item.sellingPrice === null ? null : Number(item.sellingPrice),
+          purchaseUnitFactor:
+            item.purchaseUnitFactor === null ? null : Number(item.purchaseUnitFactor),
           stockQuantity: dto.warehouseId
             ? (warehouseStocks ?? []).reduce((sum, ws) => sum + ws.quantity, 0)
             : null,
@@ -555,9 +563,18 @@ export class ItemsService {
    * Update an item
    * Validate SKU uniqueness if changed
    */
-  async update(id: string, dto: UpdateItemDto, tenantId: string): Promise<any> {
+  async update(id: string, dto: UpdateItemDto, tenantId: string, role?: string): Promise<any> {
     try {
       const item = await this.findOne(id, tenantId);
+
+      // ชื่อ/สเปก/ยี่ห้อ เป็นข้อมูลของจัดซื้อ — ฝั่งคลังเปลี่ยนเองไม่ได้ (ต้องผ่านคำขอสินค้า)
+      if (role) {
+        assertProcurementOwnedFieldsUnchanged(
+          role,
+          { name: item.name, description: item.description ?? null, brand: item.brand ?? null },
+          { name: dto.name, description: dto.description, brand: dto.brand },
+        );
+      }
 
       // Check for duplicate SKU if SKU is being changed
       if (dto.sku && dto.sku !== item.sku) {
