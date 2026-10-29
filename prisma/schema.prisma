@@ -2456,6 +2456,8 @@ model Notification {
   message   String
   type      String   @default("info")
   category  String?
+  /// path ในแอปที่กดแล้วพาไปหน้าต้นเรื่อง (เช่น /inventory/product-requests/<id>)
+  link      String?  @db.VarChar(500)
   isRead    Boolean  @default(false)
   createdAt DateTime @default(now()) @db.DateTime(6)
   updatedAt DateTime @default(now()) @updatedAt @db.DateTime(6)
@@ -2463,6 +2465,7 @@ model Notification {
 
   @@index([userId])
   @@index([tenantId])
+  @@index([userId, category, isRead])
   @@map("notifications")
 }
 

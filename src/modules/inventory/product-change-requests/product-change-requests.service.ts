@@ -218,6 +218,10 @@ export class ProductChangeRequestsService {
       });
       await this.addEvent(tx, row, 'CANCELLED', actor.userId, actorName, dto.note);
     });
+    await this.notifier.notifyReviewers(
+      request,
+      `จัดซื้อยกเลิกคำขอแล้ว${dto.note ? `: ${dto.note}` : ''}`,
+    );
     return this.queries.findOne(actor, id);
   }
 
@@ -299,6 +303,7 @@ export class ProductChangeRequestsService {
       request.type === 'CREATE'
         ? `คลังอนุมัติสร้างสินค้าแล้ว (SKU ${dto.warehouseData?.sku})`
         : 'คลังรับทราบ/อนุมัติการแก้ไขแล้ว',
+      'success',
     );
     return this.queries.findOne(actor, id);
   }
@@ -320,7 +325,7 @@ export class ProductChangeRequestsService {
       });
       await this.addEvent(tx, row, 'NEEDS_INFO', actor.userId, actorName, dto.note);
     });
-    await this.notifier.notifyRequester(request, `คลังขอข้อมูลเพิ่ม: ${dto.note}`);
+    await this.notifier.notifyRequester(request, `คลังขอข้อมูลเพิ่ม: ${dto.note}`, 'warning');
     return this.queries.findOne(actor, id);
   }
 
@@ -353,7 +358,7 @@ export class ProductChangeRequestsService {
       await this.addEvent(tx, row, 'REJECTED', actor.userId, actorName, dto.note);
     });
     await this.notifier.audit(actor, request, 'rejected');
-    await this.notifier.notifyRequester(request, `คลังปฏิเสธคำขอ: ${dto.note}`);
+    await this.notifier.notifyRequester(request, `คลังปฏิเสธคำขอ: ${dto.note}`, 'error');
     return this.queries.findOne(actor, id);
   }
 

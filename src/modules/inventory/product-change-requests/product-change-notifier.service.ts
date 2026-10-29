@@ -4,7 +4,10 @@ import { PrismaService } from '@/prisma/prisma.service';
 import { NotificationsService } from '@/notifications/notifications.service';
 import { AuditLogService } from '@/audit-log/audit-log.service';
 import { AuditAction, AuditCategory, AuditResource } from '@/audit-log/dto/audit-log.dto';
-import type { ChangeRequestActor } from './product-change-access';
+import { REVIEWER_ROLES, type ChangeRequestActor } from './product-change-access';
+
+/** platform_admin ไม่ใช่คนของโรงแรม — ไม่ต้องรับแจ้งเตือนงานประจำวัน */
+const REVIEWER_NOTIFY_ROLES = [...REVIEWER_ROLES].filter((r) => r !== 'platform_admin');
 
 /**
  * แจ้งเตือน + audit log ของคำขอสินค้า
@@ -31,11 +34,19 @@ export class ProductChangeNotifierService {
     return full || user.email;
   }
 
-  /** แจ้งหัวหน้าคลังทุกคนของ tenant (ยกเว้นผู้ส่งเอง) */
+  /**
+   * แจ้งฝั่งคลัง = ทุกคนที่มีสิทธิ์พิจารณา (หัวหน้าคลัง + เจ้าของ/แอดมิน) ยกเว้นผู้ส่งเอง
+   * — โรงแรมเล็กไม่มี warehouse_manager เจ้าของคือคนอนุมัติ ถ้าแจ้งแค่ warehouse_manager จะไม่มีใครรู้
+   * ขึ้นที่กระดิ่งของระบบคลัง (category 'inventory')
+   */
   async notifyReviewers(request: ProductChangeRequest, message: string): Promise<void> {
     try {
       const reviewers = await this.prisma.user.findMany({
-        where: { tenantId: request.tenantId, role: 'warehouse_manager', status: 'active' },
+        where: {
+          tenantId: request.tenantId,
+          role: { in: REVIEWER_NOTIFY_ROLES },
+          status: 'active',
+        },
         select: { id: true },
         take: 50,
       });
@@ -50,6 +61,7 @@ export class ProductChangeNotifierService {
               message,
               type: 'info',
               category: 'inventory',
+              link: `/inventory/product-requests/${request.id}`,
             }),
           ),
       );
@@ -60,15 +72,21 @@ export class ProductChangeNotifierService {
     }
   }
 
-  async notifyRequester(request: ProductChangeRequest, message: string): Promise<void> {
+  /** แจ้งผู้ส่งคำขอ — ขึ้นที่กระดิ่งของระบบจัดซื้อ (category 'procurement') */
+  async notifyRequester(
+    request: ProductChangeRequest,
+    message: string,
+    type: 'info' | 'success' | 'warning' | 'error' = 'info',
+  ): Promise<void> {
     try {
       await this.notifications.create({
         userId: request.requestedById,
         tenantId: request.tenantId,
         title: `คำขอสินค้า ${request.requestNumber}`,
         message,
-        type: 'info',
+        type,
         category: 'procurement',
+        link: `/purchasing/product-requests/${request.id}`,
       });
     } catch (error) {
       this.logger.warn(

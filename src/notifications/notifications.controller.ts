@@ -30,8 +30,11 @@ export class NotificationsController {
   }
 
   @Patch('read-all')
-  async markAllAsRead(@CurrentUser() user: { userId: string }) {
-    return this.notificationsService.markAllAsRead(user.userId);
+  async markAllAsRead(
+    @CurrentUser() user: { userId: string },
+    @Query('category') category?: string,
+  ) {
+    return this.notificationsService.markAllAsRead(user.userId, category);
   }
 
   @Delete(':id')

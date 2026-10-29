@@ -79,6 +79,7 @@ describe('NotificationsService', () => {
           limit: 10,
           totalPages: 1,
         },
+        unreadCount: 1,
       });
       expect(prisma.notification.findMany).toHaveBeenCalled();
       expect(prisma.notification.count).toHaveBeenCalled();
@@ -98,6 +99,23 @@ describe('NotificationsService', () => {
           }),
         }),
       );
+    });
+
+    it('filters by module category and counts unread within that category only', async () => {
+      mockPrismaService.notification.findMany.mockResolvedValue([]);
+      mockPrismaService.notification.count.mockResolvedValueOnce(4).mockResolvedValueOnce(2);
+
+      const result = await service.findAll('user-1', { category: 'procurement' });
+
+      expect(prisma.notification.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { userId: 'user-1', category: { in: ['procurement'] } },
+        }),
+      );
+      expect(prisma.notification.count).toHaveBeenLastCalledWith({
+        where: { userId: 'user-1', category: { in: ['procurement'] }, isRead: false },
+      });
+      expect(result.unreadCount).toBe(2);
     });
   });
 
@@ -151,6 +169,17 @@ describe('NotificationsService', () => {
       expect(result.count).toBe(5);
       expect(prisma.notification.updateMany).toHaveBeenCalledWith({
         where: { userId: 'user-1', isRead: false },
+        data: { isRead: true },
+      });
+    });
+
+    it('only clears the given module category', async () => {
+      mockPrismaService.notification.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.markAllAsRead('user-1', 'inventory');
+
+      expect(prisma.notification.updateMany).toHaveBeenCalledWith({
+        where: { userId: 'user-1', isRead: false, category: { in: ['inventory'] } },
         data: { isRead: true },
       });
     });

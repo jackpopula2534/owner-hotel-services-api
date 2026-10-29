@@ -22,6 +22,11 @@ export class CreateNotificationDto {
   @IsString()
   @IsOptional()
   category?: string;
+
+  /** path ในแอปของหน้าต้นเรื่อง */
+  @IsString()
+  @IsOptional()
+  link?: string;
 }
 
 export class NotificationQueryDto {
@@ -36,4 +41,17 @@ export class NotificationQueryDto {
   @IsOptional()
   @IsString()
   isRead?: string;
+
+  /** กรองตามโมดูล คั่นด้วย comma ได้ เช่น "inventory" หรือ "procurement,inventory" */
+  @IsOptional()
+  @IsString()
+  category?: string;
+}
+
+/** แยก "a,b" → ['a','b'] (ตัดค่าว่าง) */
+export function parseCategories(raw?: string): string[] {
+  return (raw ?? '')
+    .split(',')
+    .map((c) => c.trim())
+    .filter(Boolean);
 }
