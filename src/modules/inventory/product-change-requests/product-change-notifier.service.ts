@@ -35,8 +35,10 @@ export class ProductChangeNotifierService {
   }
 
   /**
-   * แจ้งฝั่งคลัง = ทุกคนที่มีสิทธิ์พิจารณา (หัวหน้าคลัง + เจ้าของ/แอดมิน) ยกเว้นผู้ส่งเอง
+   * แจ้งฝั่งคลัง = ทุกคนที่มีสิทธิ์พิจารณา (หัวหน้าคลัง + เจ้าของ/แอดมิน)
    * — โรงแรมเล็กไม่มี warehouse_manager เจ้าของคือคนอนุมัติ ถ้าแจ้งแค่ warehouse_manager จะไม่มีใครรู้
+   * — ไม่ตัดผู้ส่งออก: คนที่ส่งแล้วอยู่ใน role ผู้พิจารณาได้คือเจ้าของที่อนุมัติเองได้ (SELF_REVIEW_ROLES)
+   *   งานนี้ต้องขึ้นในกระดิ่งคลังของเขาเหมือนกัน (buyer/procurement ไม่อยู่ใน role นี้อยู่แล้ว)
    * ขึ้นที่กระดิ่งของระบบคลัง (category 'inventory')
    */
   async notifyReviewers(request: ProductChangeRequest, message: string): Promise<void> {
@@ -51,19 +53,17 @@ export class ProductChangeNotifierService {
         take: 50,
       });
       await Promise.all(
-        reviewers
-          .filter((r) => r.id !== request.requestedById)
-          .map((r) =>
-            this.notifications.create({
-              userId: r.id,
-              tenantId: request.tenantId,
-              title: `คำขอสินค้าจากจัดซื้อ ${request.requestNumber}`,
-              message,
-              type: 'info',
-              category: 'inventory',
-              link: `/inventory/product-requests/${request.id}`,
-            }),
-          ),
+        reviewers.map((r) =>
+          this.notifications.create({
+            userId: r.id,
+            tenantId: request.tenantId,
+            title: `คำขอสินค้าจากจัดซื้อ ${request.requestNumber}`,
+            message,
+            type: 'info',
+            category: 'inventory',
+            link: `/inventory/product-requests/${request.id}`,
+          }),
+        ),
       );
     } catch (error) {
       this.logger.warn(

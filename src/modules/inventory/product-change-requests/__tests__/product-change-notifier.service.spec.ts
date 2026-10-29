@@ -57,8 +57,8 @@ describe('ProductChangeNotifierService notifications', () => {
 
   beforeEach(() => jest.clearAllMocks());
 
-  it('notifies every reviewer role (owners included), skips the requester, links to the inventory page', async () => {
-    prisma.user.findMany.mockResolvedValue([{ id: 'owner-1' }, { id: 'buyer-1' }]);
+  it('notifies every reviewer role (owners included), links to the inventory page', async () => {
+    prisma.user.findMany.mockResolvedValue([{ id: 'owner-1' }]);
 
     await service.notifyReviewers(request, 'ขอสร้างสินค้าใหม่: ไข่ไก่');
 
@@ -68,6 +68,7 @@ describe('ProductChangeNotifierService notifications', () => {
       expect.arrayContaining(['warehouse_manager', 'tenant_admin', 'owner']),
     );
     expect(where.role.in).not.toContain('platform_admin');
+    expect(where.role.in).not.toContain('buyer');
     expect(notifications.create).toHaveBeenCalledTimes(1);
     expect(notifications.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -75,6 +76,16 @@ describe('ProductChangeNotifierService notifications', () => {
         category: 'inventory',
         link: '/inventory/product-requests/req-1',
       }),
+    );
+  });
+
+  it('still notifies an owner who submitted the request themselves (they review it too)', async () => {
+    prisma.user.findMany.mockResolvedValue([{ id: 'buyer-1' }]);
+
+    await service.notifyReviewers(request, 'ขอสร้างสินค้าใหม่');
+
+    expect(notifications.create).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'buyer-1', category: 'inventory' }),
     );
   });
 
