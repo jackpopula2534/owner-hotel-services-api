@@ -211,6 +211,7 @@ export enum AuditResource {
   INTERVIEW = 'interview',
   HIRE_RECORD = 'hire_record',
   EQUIPMENT_ISSUANCE = 'equipment_issuance',
+  PRODUCT_CHANGE_REQUEST = 'product_change_request',
 }
 
 /** Category tags for grouping audit logs by system area */

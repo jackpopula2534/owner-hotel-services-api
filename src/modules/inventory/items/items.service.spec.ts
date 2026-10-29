@@ -56,14 +56,15 @@ describe('ItemsService — searchItems', () => {
     expect(Array.isArray(args.where.OR)).toBe(true);
   });
 
-  it('matches name (insensitive), sku (insensitive), and barcode (exact)', async () => {
+  // MySQL collation is already case-insensitive; Prisma v5 + MySQL rejects `mode: 'insensitive'`
+  it('matches name, sku (contains) and barcode (exact)', async () => {
     mockPrismaService.inventoryItem.findMany.mockResolvedValue([]);
     await service.searchItems(tenantId, { q: 'abc' });
 
     const args = mockPrismaService.inventoryItem.findMany.mock.calls[0][0];
     expect(args.where.OR).toEqual([
-      { name: { contains: 'abc', mode: 'insensitive' } },
-      { sku: { contains: 'abc', mode: 'insensitive' } },
+      { name: { contains: 'abc' } },
+      { sku: { contains: 'abc' } },
       { barcode: { equals: 'abc' } },
     ]);
   });

@@ -43,6 +43,7 @@ import { AddonGuard } from '@/common/guards/addon.guard';
 import { RequireAddon } from '@/common/decorators/require-addon.decorator';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
 import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
+import { assertNotProcurementOnly } from '../product-change-requests/product-change-access';
 
 interface JwtPayload {
   sub: string;
@@ -388,6 +389,8 @@ export class ItemsController {
   @ApiResponse({ status: 400, description: 'Invalid input or invalid categoryId' })
   @ApiResponse({ status: 409, description: 'Item SKU already exists' })
   async create(@CurrentUser() user: JwtPayload, @Body() dto: CreateItemDto) {
+    // สินค้าสร้างได้จากฝั่งคลังเท่านั้น — จัดซื้อต้องส่ง /inventory/product-change-requests/new-items
+    assertNotProcurementOnly(user.role);
     const data = await this.itemsService.create(dto, user.tenantId);
     return { success: true, data };
   }
@@ -433,7 +436,9 @@ export class ItemsController {
     @Param('id') id: string,
     @Body() dto: UpdateItemDto,
   ) {
-    const data = await this.itemsService.update(id, dto, user.tenantId);
+    // จัดซื้อแก้สินค้าตรงๆ ไม่ได้ — ต้องผ่านคำขอให้คลังรับทราบ/อนุมัติ
+    assertNotProcurementOnly(user.role);
+    const data = await this.itemsService.update(id, dto, user.tenantId, user.role);
     return { success: true, data };
   }
 
@@ -463,6 +468,7 @@ export class ItemsController {
     @Param('id') id: string,
     @UploadedFile() file: MulterFile,
   ) {
+    assertNotProcurementOnly(user.role);
     if (!file) {
       throw new BadRequestException('ไม่พบไฟล์รูปภาพ');
     }
@@ -482,6 +488,7 @@ export class ItemsController {
   @ApiResponse({ status: 204, description: 'Item deleted successfully' })
   @ApiResponse({ status: 404, description: 'Item not found' })
   async remove(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    assertNotProcurementOnly(user.role);
     await this.itemsService.remove(id, user.tenantId);
   }
 }

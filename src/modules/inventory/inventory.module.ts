@@ -33,6 +33,8 @@ import { ProcurementEventsModule } from './procurement-events/procurement-events
 // Retail / POS checkout + sales history
 import { RetailSalesModule } from './retail-sales/retail-sales.module';
 import { MinibarModule } from './minibar/minibar.module';
+// คำขอสร้าง/แก้ไขสินค้าจากจัดซื้อ → คลังอนุมัติ (สินค้าสร้างได้จากฝั่งคลังเท่านั้น)
+import { ProductChangeRequestsModule } from './product-change-requests/product-change-requests.module';
 // สินค้าหน้าร้าน — มุมมองของสินค้าสำเร็จรูปที่ขายได้ (ตั้งราคา / ผูกเป็นเมนู / กำไรต่อชิ้น)
 import { RetailProductsModule } from './retail-products/retail-products.module';
 import {
@@ -75,6 +77,7 @@ import { PrismaModule } from '@/prisma/prisma.module';
     RetailSalesModule,
     RetailProductsModule,
     MinibarModule,
+    ProductChangeRequestsModule,
     BullModule.registerQueue({ name: INVENTORY_QUEUE }),
   ],
   controllers: [InventoryDashboardController, InventoryReportsController],
@@ -108,6 +111,7 @@ import { PrismaModule } from '@/prisma/prisma.module';
     ProcurementStockModule,
     ProcurementEventsModule,
     RetailSalesModule,
+    ProductChangeRequestsModule,
   ],
 })
 export class InventoryModule {}
