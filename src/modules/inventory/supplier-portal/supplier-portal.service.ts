@@ -323,6 +323,7 @@ export class SupplierPortalService {
               quantity: true,
               unitPrice: true,
               discount: true,
+              discountType: true,
               taxRate: true,
               leadTimeDays: true,
               notes: true,
@@ -363,6 +364,10 @@ export class SupplierPortalService {
         validUntil: quote.validUntil,
         notes: quote.notes,
         totalAmount: quote.totalAmount,
+        discountMode: quote.discountMode,
+        headerDiscount: quote.headerDiscount,
+        headerDiscountType: quote.headerDiscountType,
+        pricesIncludeVat: quote.pricesIncludeVat,
       },
       purchaseRequisition: quote.purchaseRequisition,
       // Prefill from existing quote items (so supplier can edit after reopen)

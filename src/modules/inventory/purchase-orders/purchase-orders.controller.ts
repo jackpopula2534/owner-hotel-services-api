@@ -99,6 +99,27 @@ export class PurchaseOrdersController {
     return { success: true, data };
   }
 
+  /**
+   * POs that deviate from the winning supplier quote (reason + diff).
+   * Registered before `:id`.
+   */
+  @Get('quote-variance')
+  @ApiOperation({ summary: 'Variance report — PO vs the supplier quote it was issued from' })
+  @ApiResponse({ status: 200, description: 'Quote variance retrieved' })
+  async findQuoteVariance(
+    @Query('from') from: string | undefined,
+    @Query('to') to: string | undefined,
+    @Query('supplierId') supplierId: string | undefined,
+    @Req() req: { user: { tenantId: string } },
+  ): Promise<{ success: boolean; data: unknown }> {
+    const data = await this.purchaseOrdersService.findQuoteVariance(req.user.tenantId, {
+      from,
+      to,
+      supplierId,
+    });
+    return { success: true, data };
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get purchase order detail' })
   @ApiResponse({ status: 200, description: 'Purchase order retrieved' })

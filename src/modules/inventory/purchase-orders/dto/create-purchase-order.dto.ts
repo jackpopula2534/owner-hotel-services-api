@@ -9,6 +9,7 @@ import {
   Min,
   Max,
   ArrayMinSize,
+  MaxLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -161,6 +162,25 @@ export class CreatePurchaseOrderDto {
   @IsOptional()
   @IsString()
   deliveryAddress?: string;
+
+  // ─── Quote lock (PO issued from the winning supplier quote) ───
+  @ApiPropertyOptional({
+    description:
+      'Supplier quote this PO is issued from. Prices/discounts must match it unless priceOverrideReason is given.',
+  })
+  @IsOptional()
+  @IsString()
+  sourceQuoteId?: string;
+
+  @ApiPropertyOptional({
+    example: 'คลังยังมีของ 5 กระสอบ',
+    description:
+      'Required when the PO deviates from sourceQuoteId (stored for audit / variance report)',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  priceOverrideReason?: string;
 
   // ─── Discount / VAT configuration ────────────────────────────
   @ApiPropertyOptional({

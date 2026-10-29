@@ -284,4 +284,50 @@ describe('calculatePurchaseOrderTotals', () => {
       expect(result.grandTotal).toBeCloseTo(61941.82, 1);
     });
   });
+
+  describe('pricesIncludeVat', () => {
+    it('backs VAT out of inclusive prices instead of adding it', () => {
+      const result = calculatePurchaseOrderTotals({
+        pricesIncludeVat: true,
+        lines: [{ quantity: 1, unitPrice: 107, taxRate: 7 }],
+      });
+      expect(result.grandTotal).toBe(107);
+      expect(result.vatAmount).toBe(7);
+      expect(result.netBeforeTax).toBe(100);
+      expect(result.pricesIncludeVat).toBe(true);
+    });
+
+    it('applies line + header discounts on inclusive amounts', () => {
+      const result = calculatePurchaseOrderTotals({
+        pricesIncludeVat: true,
+        headerDiscount: { value: 10, type: 'PERCENT' },
+        lines: [
+          { quantity: 2, unitPrice: 107, discountType: 'AMOUNT', discountValue: 14, taxRate: 7 },
+        ],
+      });
+      // gross 214 - 14 = 200, header 10% = 20 → 180 incl VAT
+      expect(result.headerDiscountAmount).toBe(20);
+      expect(result.grandTotal).toBe(180);
+      expect(result.vatAmount).toBeCloseTo(11.78, 2);
+      expect(result.netBeforeTax).toBeCloseTo(168.22, 2);
+    });
+
+    it('ignores AFTER_VAT mode when prices are inclusive', () => {
+      const result = calculatePurchaseOrderTotals({
+        pricesIncludeVat: true,
+        discountMode: 'AFTER_VAT',
+        lines: [{ quantity: 1, unitPrice: 107, discountValue: 10, taxRate: 7 }],
+      });
+      expect(result.grandTotal).toBe(96.3);
+      expect(result.discountMode).toBe(DEFAULT_DISCOUNT_MODE);
+    });
+
+    it('defaults to false (VAT added on top)', () => {
+      const result = calculatePurchaseOrderTotals({
+        lines: [{ quantity: 1, unitPrice: 100, taxRate: 7 }],
+      });
+      expect(result.pricesIncludeVat).toBe(false);
+      expect(result.grandTotal).toBe(107);
+    });
+  });
 });

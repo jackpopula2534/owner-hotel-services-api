@@ -11,6 +11,10 @@
  *         BEFORE_VAT  (default) — discounts reduce VAT base
  *         AFTER_VAT              — VAT computed first on gross;
  *                                  discounts applied post-tax
+ *   - VAT-inclusive pricing (pricesIncludeVat) — unit prices and
+ *     AMOUNT discounts already contain VAT; VAT is backed out of
+ *     each line instead of added on top (common in Thai supplier
+ *     quotes stating "ราคารวม VAT แล้ว")
  *   - Full step-by-step breakdown useful for audit logging /
  *     persisting as JSON on the PurchaseOrder row.
  *
@@ -63,6 +67,12 @@ export interface CalculationInput {
   lines: LineInput[];
   headerDiscount?: HeaderDiscountInput;
   discountMode?: DiscountMode;
+  /**
+   * When true, unitPrice / AMOUNT discounts are VAT-inclusive.
+   * discountMode is ignored (discounting an inclusive price already
+   * reduces the VAT base proportionally).
+   */
+  pricesIncludeVat?: boolean;
 }
 
 export interface CalculationBreakdown {
@@ -86,6 +96,8 @@ export interface CalculationBreakdown {
   discountMode: DiscountMode;
   headerDiscountType: DiscountType;
   headerDiscountValue: number;
+  /** Echoes input — when true subtotal / discounts are VAT-inclusive figures */
+  pricesIncludeVat: boolean;
   lines: LineBreakdown[];
 }
 
@@ -140,6 +152,7 @@ export function calculatePurchaseOrderTotals(input: CalculationInput): Calculati
   const mode: DiscountMode = input.discountMode ?? DEFAULT_DISCOUNT_MODE;
   const headerType: DiscountType = input.headerDiscount?.type ?? 'AMOUNT';
   const headerValue = clampNonNegative(input.headerDiscount?.value ?? 0);
+  const pricesIncludeVat = input.pricesIncludeVat === true;
 
   // ── Step 1 — per-line gross + line-level discount ────────────
   const prelim = input.lines.map((line) => {
@@ -184,7 +197,11 @@ export function calculatePurchaseOrderTotals(input: CalculationInput): Calculati
 
     let vatAmount = 0;
     let lineTotal = 0;
-    if (mode === 'BEFORE_VAT') {
+    if (pricesIncludeVat) {
+      // lineNet already contains VAT — back it out
+      lineTotal = lineNet;
+      vatAmount = lineNet - lineNet / (1 + l.taxRate / 100);
+    } else if (mode === 'BEFORE_VAT') {
       // discount already applied — VAT computed on post-discount line net
       vatAmount = lineNet * (l.taxRate / 100);
       lineTotal = lineNet + vatAmount;
@@ -214,6 +231,27 @@ export function calculatePurchaseOrderTotals(input: CalculationInput): Calculati
   });
 
   const vatAmount = lines.reduce((acc, l) => acc + l.vatAmount, 0);
+
+  if (pricesIncludeVat) {
+    const grandTotal = lines.reduce((acc, l) => acc + l.lineTotal, 0);
+    const exVatNet = grandTotal - vatAmount;
+    return {
+      subtotal: round2(subtotal),
+      totalLineDiscount: round2(totalLineDiscount),
+      subtotalAfterLineDiscount: round2(subtotalAfterLineDiscount),
+      headerDiscountAmount: round2(headerDiscountAmount),
+      netBeforeTax: round2(exVatNet),
+      vatBase: round2(exVatNet),
+      vatAmount: round2(vatAmount),
+      grandTotal: round2(grandTotal),
+      discountMode: DEFAULT_DISCOUNT_MODE,
+      headerDiscountType: headerType,
+      headerDiscountValue: headerValue,
+      pricesIncludeVat: true,
+      lines,
+    };
+  }
+
   const vatBase = mode === 'BEFORE_VAT' ? netBeforeTax : subtotal;
   const grandTotal =
     mode === 'BEFORE_VAT'
@@ -232,6 +270,7 @@ export function calculatePurchaseOrderTotals(input: CalculationInput): Calculati
     discountMode: mode,
     headerDiscountType: headerType,
     headerDiscountValue: headerValue,
+    pricesIncludeVat: false,
     lines,
   };
 }

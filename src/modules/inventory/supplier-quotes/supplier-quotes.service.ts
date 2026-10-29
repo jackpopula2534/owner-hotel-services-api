@@ -10,6 +10,39 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
 import { SubmitQuoteDto, QuerySupplierQuoteDto } from './dto';
 import { RfqsService } from '../rfqs/rfqs.service';
+import {
+  calculatePurchaseOrderTotals,
+  DEFAULT_DISCOUNT_MODE,
+} from '@/common/purchase-order/po-calculation';
+import type { DiscountMode, DiscountType } from '@/common/purchase-order/po-calculation';
+
+const DEFAULT_TAX_RATE = 7;
+
+interface QuoteTotals {
+  subtotal: number;
+  taxAmount: number;
+  discountAmount: number;
+  totalAmount: number;
+}
+
+interface QuoteItemCreate {
+  itemId: string;
+  quantity: number;
+  unitPrice: number;
+  discount: number;
+  discountType: DiscountType;
+  taxRate: number;
+  totalPrice: number;
+  leadTimeDays?: number;
+  notes?: string;
+}
+
+interface QuoteDiscountConfig {
+  discountMode: DiscountMode;
+  headerDiscount: number;
+  headerDiscountType: DiscountType;
+  pricesIncludeVat: boolean;
+}
 
 @Injectable()
 export class SupplierQuotesService {
@@ -139,6 +172,7 @@ export class SupplierQuotesService {
             quantity: true,
             unitPrice: true,
             discount: true,
+            discountType: true,
             taxRate: true,
             totalPrice: true,
             leadTimeDays: true,
@@ -183,6 +217,10 @@ export class SupplierQuotesService {
       subtotal: quote.subtotal,
       taxAmount: quote.taxAmount,
       discountAmount: quote.discountAmount,
+      discountMode: quote.discountMode,
+      headerDiscount: quote.headerDiscount,
+      headerDiscountType: quote.headerDiscountType,
+      pricesIncludeVat: quote.pricesIncludeVat,
       totalAmount: quote.totalAmount,
       currency: quote.currency,
       notes: quote.notes,
@@ -200,6 +238,7 @@ export class SupplierQuotesService {
         quantity: item.quantity,
         unitPrice: item.unitPrice,
         discount: item.discount,
+        discountType: item.discountType,
         taxRate: item.taxRate,
         totalPrice: item.totalPrice,
         leadTimeDays: item.leadTimeDays,
@@ -237,36 +276,8 @@ export class SupplierQuotesService {
     try {
       const result = await this.prisma.$transaction(async (tx) => {
         // Calculate totals
-        let subtotal = 0;
-        let taxAmount = 0;
-        let discountAmount = 0;
-
-        const itemsToCreate = dto.items.map((item) => {
-          const discount = item.discount || 0;
-          const taxRate = item.taxRate || 7;
-
-          const basePrice = item.quantity * item.unitPrice;
-          const discountedPrice = basePrice * ((100 - discount) / 100);
-          const itemTax = discountedPrice * (taxRate / 100);
-          const itemTotal = discountedPrice + itemTax;
-
-          subtotal += basePrice - (basePrice * discount) / 100;
-          taxAmount += itemTax;
-          discountAmount += (basePrice * discount) / 100;
-
-          return {
-            itemId: item.itemId,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            discount,
-            taxRate,
-            totalPrice: itemTotal,
-            leadTimeDays: item.leadTimeDays,
-            notes: item.notes,
-          };
-        });
-
-        const totalAmount = subtotal + taxAmount;
+        const { itemsToCreate, totals } = this.calculateQuote(dto);
+        const { subtotal, taxAmount, discountAmount, totalAmount } = totals;
 
         // Delete existing items if any
         await tx.supplierQuoteItem.deleteMany({
@@ -289,6 +300,7 @@ export class SupplierQuotesService {
             taxAmount,
             discountAmount,
             totalAmount,
+            ...this.discountConfig(dto),
             receivedAt: new Date(),
             items: {
               createMany: {
@@ -486,6 +498,10 @@ export class SupplierQuotesService {
       subtotal: quote.subtotal,
       taxAmount: quote.taxAmount,
       discountAmount: quote.discountAmount,
+      discountMode: quote.discountMode,
+      headerDiscount: quote.headerDiscount,
+      headerDiscountType: quote.headerDiscountType,
+      pricesIncludeVat: quote.pricesIncludeVat,
       deliveryDays: quote.deliveryDays,
       paymentTerms: quote.paymentTerms,
       notes: quote.notes,
@@ -498,6 +514,7 @@ export class SupplierQuotesService {
         quantity: item.quantity,
         unitPrice: item.unitPrice,
         discount: item.discount,
+        discountType: item.discountType,
         taxRate: item.taxRate,
         totalPrice: item.totalPrice,
         leadTimeDays: item.leadTimeDays,
@@ -554,35 +571,8 @@ export class SupplierQuotesService {
 
     try {
       const result = await this.prisma.$transaction(async (tx) => {
-        let subtotal = 0;
-        let taxAmount = 0;
-        let discountAmount = 0;
-
-        const itemsToCreate = dto.items.map((item) => {
-          const discount = item.discount || 0;
-          const taxRate = item.taxRate || 7;
-          const basePrice = item.quantity * item.unitPrice;
-          const discountedPrice = basePrice * ((100 - discount) / 100);
-          const itemTax = discountedPrice * (taxRate / 100);
-          const itemTotal = discountedPrice + itemTax;
-
-          subtotal += basePrice - (basePrice * discount) / 100;
-          taxAmount += itemTax;
-          discountAmount += (basePrice * discount) / 100;
-
-          return {
-            itemId: item.itemId,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            discount,
-            taxRate,
-            totalPrice: itemTotal,
-            leadTimeDays: item.leadTimeDays,
-            notes: item.notes,
-          };
-        });
-
-        const totalAmount = subtotal + taxAmount;
+        const { itemsToCreate, totals } = this.calculateQuote(dto);
+        const { subtotal, taxAmount, discountAmount, totalAmount } = totals;
 
         // Delete existing items
         await tx.supplierQuoteItem.deleteMany({
@@ -605,6 +595,7 @@ export class SupplierQuotesService {
             taxAmount,
             discountAmount,
             totalAmount,
+            ...this.discountConfig(dto),
             receivedAt: quote.receivedAt || new Date(),
             items: {
               createMany: { data: itemsToCreate },
@@ -773,5 +764,66 @@ export class SupplierQuotesService {
     );
 
     return { quoteId: id, resent: mail.resent, skipped: mail.skipped };
+  }
+
+  /**
+   * Header-level discount / VAT settings to persist — same semantics as
+   * PurchaseOrder so a PO created from this quote reproduces its totals.
+   */
+  private discountConfig(dto: SubmitQuoteDto): QuoteDiscountConfig {
+    return {
+      discountMode: dto.discountMode ?? DEFAULT_DISCOUNT_MODE,
+      headerDiscount: dto.headerDiscount ?? 0,
+      headerDiscountType: dto.headerDiscountType ?? 'AMOUNT',
+      pricesIncludeVat: dto.pricesIncludeVat ?? false,
+    };
+  }
+
+  /**
+   * Compute quote totals with the shared PO calculator (line %/amount
+   * discounts, header discount, VAT mode, VAT-inclusive prices).
+   * discountAmount = line discounts + header discount.
+   */
+  private calculateQuote(dto: SubmitQuoteDto): {
+    itemsToCreate: QuoteItemCreate[];
+    totals: QuoteTotals;
+  } {
+    const config = this.discountConfig(dto);
+    const lines = dto.items.map((item) => ({
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      discountValue: item.discount ?? 0,
+      discountType: item.discountType ?? ('PERCENT' as DiscountType),
+      taxRate: item.taxRate ?? DEFAULT_TAX_RATE,
+    }));
+
+    const breakdown = calculatePurchaseOrderTotals({
+      lines,
+      headerDiscount: { value: config.headerDiscount, type: config.headerDiscountType },
+      discountMode: config.discountMode,
+      pricesIncludeVat: config.pricesIncludeVat,
+    });
+
+    const itemsToCreate = dto.items.map((item, i) => ({
+      itemId: item.itemId,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      discount: lines[i].discountValue,
+      discountType: lines[i].discountType,
+      taxRate: lines[i].taxRate,
+      totalPrice: breakdown.lines[i].lineTotal,
+      leadTimeDays: item.leadTimeDays,
+      notes: item.notes,
+    }));
+
+    return {
+      itemsToCreate,
+      totals: {
+        subtotal: breakdown.netBeforeTax,
+        taxAmount: breakdown.vatAmount,
+        discountAmount: breakdown.totalLineDiscount + breakdown.headerDiscountAmount,
+        totalAmount: breakdown.grandTotal,
+      },
+    };
   }
 }

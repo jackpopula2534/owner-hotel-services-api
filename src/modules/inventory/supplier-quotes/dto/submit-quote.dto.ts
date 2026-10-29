@@ -9,9 +9,16 @@ import {
   ValidateNested,
   ArrayMinSize,
   IsArray,
+  IsEnum,
+  IsBoolean,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import type { DiscountMode, DiscountType } from '@/common/purchase-order/po-calculation';
+import {
+  DISCOUNT_MODES,
+  DISCOUNT_TYPES,
+} from '../../purchase-orders/dto/create-purchase-order.dto';
 
 export class SubmitQuoteItemDto {
   @ApiProperty({
@@ -39,15 +46,24 @@ export class SubmitQuoteItemDto {
 
   @ApiProperty({
     example: 5,
-    description: 'Discount percentage (0-100)',
+    description:
+      'Discount value — percent (0-100) when discountType=PERCENT, absolute amount when discountType=AMOUNT',
     required: false,
     default: 0,
   })
   @IsOptional()
   @IsNumber()
   @Min(0)
-  @Max(100)
   discount?: number;
+
+  @ApiPropertyOptional({
+    enum: DISCOUNT_TYPES,
+    default: 'PERCENT',
+    description: 'Whether the line discount is a percentage or a fixed amount',
+  })
+  @IsOptional()
+  @IsEnum(DISCOUNT_TYPES)
+  discountType?: DiscountType;
 
   @ApiProperty({
     example: 7,
@@ -145,6 +161,43 @@ export class SubmitQuoteDto {
   @IsOptional()
   @IsString()
   attachmentUrl?: string;
+
+  // ─── Discount / VAT configuration (parity with PurchaseOrder) ───
+  @ApiPropertyOptional({
+    enum: DISCOUNT_MODES,
+    default: 'BEFORE_VAT',
+    description: 'Discount vs VAT order (ignored when pricesIncludeVat=true)',
+  })
+  @IsOptional()
+  @IsEnum(DISCOUNT_MODES)
+  discountMode?: DiscountMode;
+
+  @ApiPropertyOptional({
+    example: 500,
+    description: 'Header-level (end-of-bill) discount value',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  headerDiscount?: number;
+
+  @ApiPropertyOptional({
+    enum: DISCOUNT_TYPES,
+    default: 'AMOUNT',
+    description: 'Whether headerDiscount is a percentage (0-100) or absolute amount',
+  })
+  @IsOptional()
+  @IsEnum(DISCOUNT_TYPES)
+  headerDiscountType?: DiscountType;
+
+  @ApiPropertyOptional({
+    example: false,
+    default: false,
+    description: 'True when unit prices already include VAT (ราคารวม VAT แล้ว)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  pricesIncludeVat?: boolean;
 
   @ApiProperty({
     type: [SubmitQuoteItemDto],

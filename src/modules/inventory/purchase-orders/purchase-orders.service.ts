@@ -15,6 +15,11 @@ import {
   DiscountType,
   LineBreakdown,
 } from '@/common/purchase-order/po-calculation';
+import {
+  detectQuoteVariance,
+  type VarianceEntry,
+  type VarianceQuote,
+} from '@/common/purchase-order/quote-variance';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { QueryPurchaseOrderDto, PurchaseOrderStatus } from './dto/query-purchase-order.dto';
@@ -105,6 +110,29 @@ export interface PurchaseOrderReceivingGrSummary {
   invoiceNumber: string | null;
   totalAmount: number;
   itemCount: number;
+}
+
+/**
+ * Quote variance — a PO that deviated from the winning supplier quote it
+ * was issued from (see checkQuoteLock / quote-variance.ts).
+ */
+export interface QuoteVarianceChange extends VarianceEntry {
+  itemName?: string | null;
+}
+
+export interface PurchaseOrderQuoteVarianceRow {
+  poId: string;
+  poNumber: string;
+  status: string;
+  createdAt: Date;
+  supplier: { id: string; name: string };
+  quote: { id: string; quoteNumber: string | null; totalAmount: number } | null;
+  poTotal: number;
+  /** poTotal − quote total (negative = PO cheaper than the quote) */
+  deltaAmount: number;
+  reason: string | null;
+  requestedBy: string | null;
+  changes: QuoteVarianceChange[];
 }
 
 /**
@@ -587,6 +615,115 @@ export class PurchaseOrdersService {
    * delta (qty differs from ordered, or PO is overdue/force-closed).
    * Rows with `reason: 'NONE'` are excluded from the response.
    */
+  /**
+   * POs that deviate from the supplier quote they were issued from, with
+   * the buyer's reason and a field-level diff — the "PO ต่างจากใบเสนอราคา"
+   * tab of the Variance Report.
+   */
+  async findQuoteVariance(
+    tenantId: string,
+    query: { from?: string; to?: string; supplierId?: string },
+  ): Promise<{
+    data: PurchaseOrderQuoteVarianceRow[];
+    meta: { total: number; netDeltaAmount: number; byField: Record<string, number> };
+  }> {
+    const createdAt: Prisma.DateTimeFilter = {
+      ...(query.from && { gte: new Date(query.from) }),
+      ...(query.to && { lte: new Date(query.to) }),
+    };
+    const where = {
+      tenantId,
+      status: { not: PurchaseOrderStatus.CANCELLED },
+      sourceQuoteId: { not: null },
+      priceOverrideReason: { not: null },
+      ...(query.supplierId && { supplierId: query.supplierId }),
+      ...((query.from || query.to) && { createdAt }),
+    } as unknown as Prisma.PurchaseOrderWhereInput;
+
+    const pos = (await this.prisma.purchaseOrder.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: 500,
+      include: { supplier: { select: { id: true, name: true } } },
+    })) as unknown as Array<{
+      id: string;
+      poNumber: string;
+      status: string;
+      createdAt: Date;
+      totalAmount: Prisma.Decimal | number;
+      supplierId: string;
+      supplier: { id: string; name: string } | null;
+      requestedBy: string | null;
+      sourceQuoteId: string | null;
+      priceOverrideReason: string | null;
+      quoteVariance: unknown;
+    }>;
+
+    const quoteIds = Array.from(
+      new Set(pos.map((p) => p.sourceQuoteId).filter((x): x is string => !!x)),
+    );
+    const changesOf = (p: (typeof pos)[number]): VarianceEntry[] =>
+      Array.isArray(p.quoteVariance) ? (p.quoteVariance as VarianceEntry[]) : [];
+    const itemIds = Array.from(
+      new Set(
+        pos.flatMap((p) => changesOf(p).map((c) => c.itemId)).filter((x): x is string => !!x),
+      ),
+    );
+
+    const [quotes, items, userNames] = await Promise.all([
+      quoteIds.length
+        ? this.prisma.supplierQuote.findMany({
+            where: { tenantId, id: { in: quoteIds } },
+            select: { id: true, quoteNumber: true, totalAmount: true },
+          })
+        : Promise.resolve([]),
+      itemIds.length
+        ? this.prisma.inventoryItem.findMany({
+            where: { tenantId, id: { in: itemIds } },
+            select: { id: true, name: true },
+          })
+        : Promise.resolve([]),
+      this.resolveUserNames(pos.map((p) => p.requestedBy)),
+    ]);
+    const quoteById = new Map(quotes.map((q) => [q.id, q]));
+    const itemName = new Map(items.map((i) => [i.id, i.name]));
+
+    const byField: Record<string, number> = {};
+    const data: PurchaseOrderQuoteVarianceRow[] = pos.map((p) => {
+      const q = p.sourceQuoteId ? quoteById.get(p.sourceQuoteId) : undefined;
+      const poTotal = Number(p.totalAmount) || 0;
+      const quoteTotal = q ? Number(q.totalAmount) || 0 : poTotal;
+      const changes = changesOf(p).map((c) => {
+        byField[c.field] = (byField[c.field] ?? 0) + 1;
+        return { ...c, itemName: c.itemId ? (itemName.get(c.itemId) ?? null) : undefined };
+      });
+      return {
+        poId: p.id,
+        poNumber: p.poNumber,
+        status: p.status,
+        createdAt: p.createdAt,
+        supplier: { id: p.supplierId, name: p.supplier?.name ?? '' },
+        quote: q
+          ? { id: q.id, quoteNumber: q.quoteNumber, totalAmount: Number(q.totalAmount) || 0 }
+          : null,
+        poTotal,
+        deltaAmount: Math.round((poTotal - quoteTotal) * 100) / 100,
+        reason: p.priceOverrideReason,
+        requestedBy: p.requestedBy ? (userNames.get(p.requestedBy) ?? null) : null,
+        changes,
+      };
+    });
+
+    return {
+      data,
+      meta: {
+        total: data.length,
+        netDeltaAmount: Math.round(data.reduce((a, r) => a + r.deltaAmount, 0) * 100) / 100,
+        byField,
+      },
+    };
+  }
+
   async findVariance(
     tenantId: string,
     query: { from?: string; to?: string; supplierId?: string },
@@ -1153,9 +1290,16 @@ export class PurchaseOrdersService {
       quotationNumber: po.quotationNumber,
       quotationDate: po.quotationDate,
       purchaseRequisitionId: po.purchaseRequisitionId,
+      sourceQuoteId: (poRaw as unknown as { sourceQuoteId?: string | null }).sourceQuoteId ?? null,
+      priceOverrideReason:
+        (poRaw as unknown as { priceOverrideReason?: string | null }).priceOverrideReason ?? null,
+      quoteVariance: (poRaw as unknown as { quoteVariance?: unknown }).quoteVariance ?? null,
       purchaseRequisition:
-        (poRaw as unknown as { purchaseRequisition?: { id: string; prNumber: string; status: string } | null })
-          .purchaseRequisition ?? null,
+        (
+          poRaw as unknown as {
+            purchaseRequisition?: { id: string; prNumber: string; status: string } | null;
+          }
+        ).purchaseRequisition ?? null,
       subtotal: po.subtotal,
       discountAmount: po.discountAmount,
       discountMode: po.discountMode,
@@ -1259,6 +1403,10 @@ export class PurchaseOrdersService {
       }
     }
 
+    // Quote lock: a PO issued from a supplier quote must reproduce it,
+    // otherwise a reason is required and the diff is stored for audit.
+    const { quoteVariance, priceOverrideReason } = await this.checkQuoteLock(dto, tenantId);
+
     // Verify all items exist
     const itemIds = dto.items.map((item) => item.itemId);
     const existingItems = await this.prisma.inventoryItem.findMany({
@@ -1320,6 +1468,12 @@ export class PurchaseOrdersService {
           taxAmount: breakdown.vatAmount,
           totalAmount: breakdown.grandTotal,
           requestedBy: userId,
+          sourceQuoteId: dto.sourceQuoteId || null,
+          priceOverrideReason,
+          quoteVariance:
+            quoteVariance.length > 0
+              ? (quoteVariance as unknown as Prisma.InputJsonValue)
+              : undefined,
         } as unknown as Prisma.PurchaseOrderUncheckedCreateInput,
       });
 
@@ -1339,7 +1493,64 @@ export class PurchaseOrdersService {
     });
 
     this.logger.log(`Purchase order created: ${po.id} (${po.poNumber})`);
+    if (quoteVariance.length > 0) {
+      this.logger.warn(
+        `PO ${po.poNumber} deviates from quote ${dto.sourceQuoteId} (${quoteVariance.length} change(s)) — reason: ${priceOverrideReason}`,
+      );
+    }
     return this.findOne(po.id, tenantId);
+  }
+
+  /**
+   * Validate a PO against the supplier quote it was issued from.
+   * Returns the variance list (empty = identical) and the reason to persist.
+   */
+  private async checkQuoteLock(
+    dto: CreatePurchaseOrderDto,
+    tenantId: string,
+  ): Promise<{ quoteVariance: VarianceEntry[]; priceOverrideReason: string | null }> {
+    if (!dto.sourceQuoteId) return { quoteVariance: [], priceOverrideReason: null };
+
+    const quote = await this.prisma.supplierQuote.findFirst({
+      where: { id: dto.sourceQuoteId, tenantId },
+      include: { items: true },
+    });
+    if (!quote) {
+      throw new NotFoundException('Source quote not found');
+    }
+    if (quote.supplierId !== dto.supplierId) {
+      throw new BadRequestException({
+        code: 'PO_QUOTE_SUPPLIER_MISMATCH',
+        message: 'ซัพพลายเออร์ของ PO ไม่ตรงกับใบเสนอราคาที่อ้างอิง',
+      });
+    }
+    if (dto.purchaseRequisitionId && quote.purchaseRequisitionId !== dto.purchaseRequisitionId) {
+      throw new BadRequestException({
+        code: 'PO_QUOTE_PR_MISMATCH',
+        message: 'ใบเสนอราคาที่อ้างอิงไม่ได้อยู่ใน PR นี้',
+      });
+    }
+
+    const variance = detectQuoteVariance(quote as unknown as VarianceQuote, {
+      discountMode: dto.discountMode,
+      headerDiscount: dto.headerDiscount,
+      headerDiscountType: dto.headerDiscountType,
+      items: dto.items.map((i) => ({
+        itemId: i.itemId,
+        quantity: i.quantity,
+        unitPrice: i.unitPrice,
+        discount: i.discount,
+        discountType: i.discountType,
+      })),
+    });
+    const reason = dto.priceOverrideReason?.trim() || '';
+    if (variance.length > 0 && reason.length < 3) {
+      throw new BadRequestException({
+        code: 'PO_QUOTE_VARIANCE_REASON_REQUIRED',
+        message: 'PO ต่างจากใบเสนอราคาที่อนุมัติ — กรุณาระบุเหตุผล',
+      });
+    }
+    return { quoteVariance: variance, priceOverrideReason: variance.length > 0 ? reason : null };
   }
 
   async update(
