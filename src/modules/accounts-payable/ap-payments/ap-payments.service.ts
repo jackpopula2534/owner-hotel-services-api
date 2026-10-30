@@ -5,7 +5,7 @@ import {
   BadRequestException,
   Optional,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { ApInvoiceStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
 import { CreateApPaymentDto } from './dto/create-ap-payment.dto';
 import { JournalEntriesService } from '@/modules/accounting/journal-entries/journal-entries.service';
@@ -16,6 +16,8 @@ import {
   resolveAccountIds,
   settlementAccountCode,
 } from '@/modules/accounting/ledger/posting-accounts.util';
+import { businessDateOf, shiftDate, shiftMonth, toBangkokDate, toBangkokMonth } from '@/common/utils/bangkok-day.util';
+import { findSourceJournals } from '../ap-journals.util';
 
 const roundMoney = (n: number): number => Math.round(n * 100) / 100;
 
@@ -25,6 +27,7 @@ interface PaymentQuery {
   dateFrom?: string;
   dateTo?: string;
   status?: string;
+  search?: string;
   page?: number;
   limit?: number;
 }
@@ -50,7 +53,7 @@ export class ApPaymentsService {
   }
 
   async findAll(tenantId: string, query: PaymentQuery) {
-    const { page = 1, limit = 20, propertyId, supplierId, dateFrom, dateTo, status } = query;
+    const { page = 1, limit = 20, propertyId, supplierId, dateFrom, dateTo, status, search } = query;
     const skip = (page - 1) * limit;
 
     const where: Record<string, unknown> = { tenantId };
@@ -62,6 +65,14 @@ export class ApPaymentsService {
         ...(dateFrom ? { gte: new Date(dateFrom) } : {}),
         ...(dateTo ? { lte: new Date(dateTo) } : {}),
       };
+    }
+    if (search) {
+      where.OR = [
+        { paymentNo: { contains: search } },
+        { reference: { contains: search } },
+        { supplier: { name: { contains: search } } },
+        { allocations: { some: { invoice: { invoiceNo: { contains: search } } } } },
+      ];
     }
 
     const [total, data] = await Promise.all([
@@ -81,6 +92,99 @@ export class ApPaymentsService {
     ]);
 
     return { data, total, page, limit };
+  }
+
+  /** รายละเอียดสำหรับแผงข้าง: ใบแจ้งหนี้ที่ตัด + หนังสือรับรอง 50 ทวิ + รายการบัญชี */
+  async findDetail(id: string, tenantId: string) {
+    const payment = await this.prisma.apPayment.findFirst({
+      where: { id, tenantId },
+      include: {
+        supplier: { select: { id: true, name: true, taxId: true, address: true } },
+        allocations: {
+          include: {
+            invoice: {
+              select: {
+                id: true,
+                invoiceNo: true,
+                supplierInvoiceNo: true,
+                dueDate: true,
+                totalAmount: true,
+                netPayable: true,
+                balance: true,
+                status: true,
+              },
+            },
+          },
+        },
+        whtCerts: { select: { id: true, certNo: true, status: true, whtAmount: true } },
+      },
+    });
+    if (!payment) throw new NotFoundException(`AP Payment ${id} not found`);
+    const journals = await findSourceJournals(this.prisma, tenantId, 'AP_PAYMENT', payment.id);
+    return { ...payment, journals };
+  }
+
+  /**
+   * ตัวเลขหัวหน้าจ่ายชำระ: รออนุมัติ / จ่ายแล้วเดือนนี้ / ภาษีหัก ณ ที่จ่ายเดือนนี้ / เจ้าหนี้ครบกำหนด 7 วัน
+   * paymentDate, dueDate เป็น @db.Date → เทียบกับ UTC midnight ของวันไทย
+   */
+  async summary(tenantId: string, propertyId: string, month?: string) {
+    if (!propertyId) throw new BadRequestException('propertyId is required');
+    const ym = month && /^\d{4}-\d{2}$/.test(month) ? month : toBangkokMonth(new Date());
+    const monthStart = businessDateOf(`${ym}-01`);
+    const monthEnd = businessDateOf(`${shiftMonth(ym, 1)}-01`);
+    const todayStr = toBangkokDate(new Date());
+    const today = businessDateOf(todayStr);
+    const weekEnd = businessDateOf(shiftDate(todayStr, 7));
+    const openStatuses: ApInvoiceStatus[] = ['APPROVED', 'PARTIAL', 'OVERDUE'];
+    const openInvoice = { tenantId, propertyId, status: { in: openStatuses }, balance: { gt: 0 } };
+
+    const [pending, paid, outstanding, overdue, dueSoon, invoicePending] = await Promise.all([
+      this.prisma.apPayment.aggregate({
+        where: { tenantId, propertyId, status: 'PENDING' },
+        _count: { _all: true },
+        _sum: { netAmount: true },
+      }),
+      this.prisma.apPayment.aggregate({
+        where: { tenantId, propertyId, status: 'APPROVED', paymentDate: { gte: monthStart, lt: monthEnd } },
+        _count: { _all: true },
+        _sum: { netAmount: true, whtAmount: true },
+      }),
+      this.prisma.apInvoice.aggregate({ where: { ...openInvoice }, _count: { _all: true }, _sum: { balance: true } }),
+      this.prisma.apInvoice.aggregate({
+        where: { ...openInvoice, dueDate: { lt: today } },
+        _count: { _all: true },
+        _sum: { balance: true },
+      }),
+      this.prisma.apInvoice.aggregate({
+        where: { ...openInvoice, dueDate: { gte: today, lte: weekEnd } },
+        _count: { _all: true },
+        _sum: { balance: true },
+      }),
+      this.prisma.apInvoice.aggregate({
+        where: { tenantId, propertyId, status: 'PENDING' },
+        _count: { _all: true },
+        _sum: { netPayable: true },
+      }),
+    ]);
+
+    const num = (v: unknown): number => roundMoney(Number(v ?? 0));
+    return {
+      month: ym,
+      pendingCount: pending._count._all,
+      pendingTotal: num(pending._sum.netAmount),
+      paidCount: paid._count._all,
+      paidTotal: num(paid._sum.netAmount),
+      whtTotal: num(paid._sum.whtAmount),
+      outstandingCount: outstanding._count._all,
+      outstandingTotal: num(outstanding._sum.balance),
+      overdueCount: overdue._count._all,
+      overdueTotal: num(overdue._sum.balance),
+      dueSoonCount: dueSoon._count._all,
+      dueSoonTotal: num(dueSoon._sum.balance),
+      invoicePendingCount: invoicePending._count._all,
+      invoicePendingTotal: num(invoicePending._sum.netPayable),
+    };
   }
 
   /**

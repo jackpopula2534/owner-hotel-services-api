@@ -68,7 +68,7 @@ export class ApInvoicesController {
   @Get(':id')
   @ApiOperation({ summary: 'ดู AP Invoice รายละเอียด' })
   async findOne(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
-    const data = await this.service.findOne(id, user.tenantId);
+    const data = await this.service.findDetail(id, user.tenantId);
     return { success: true, data };
   }
 

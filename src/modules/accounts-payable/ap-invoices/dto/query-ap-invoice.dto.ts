@@ -1,4 +1,4 @@
-import { IsOptional, IsEnum, IsUUID, IsDateString, IsString, IsInt, Min } from 'class-validator';
+import { IsOptional, IsEnum, IsIn, IsUUID, IsDateString, IsString, IsInt, Min } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 
@@ -18,6 +18,11 @@ export class QueryApInvoiceDto {
   @IsOptional()
   @IsEnum(ApInvoiceStatus)
   status?: ApInvoiceStatus;
+  /** OPEN = อนุมัติแล้วยังค้างจ่าย, OVERDUE = ค้างจ่ายและเลยวันครบกำหนด (ทับ status) */
+  @ApiPropertyOptional({ enum: ['OPEN', 'OVERDUE'] })
+  @IsOptional()
+  @IsIn(['OPEN', 'OVERDUE'])
+  bucket?: 'OPEN' | 'OVERDUE';
   @ApiPropertyOptional() @IsOptional() @IsUUID() supplierId?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() dateFrom?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() dateTo?: string;

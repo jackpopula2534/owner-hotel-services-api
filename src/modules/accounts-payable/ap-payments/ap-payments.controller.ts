@@ -11,14 +11,14 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { ApPaymentsService } from './ap-payments.service';
 import { CreateApPaymentDto } from './dto/create-ap-payment.dto';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AddonGuard } from '@/common/guards/addon.guard';
 import { RequireAddon } from '@/common/decorators/require-addon.decorator';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
-import { IsOptional, IsUUID, IsDateString, IsInt, IsIn, Min } from 'class-validator';
+import { IsOptional, IsUUID, IsDateString, IsInt, IsIn, IsString, MaxLength, Min } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { RolesGuard } from '@/common/guards/roles.guard';
@@ -30,6 +30,7 @@ class QueryApPaymentDto {
   @ApiPropertyOptional() @IsOptional() @IsUUID() supplierId?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() dateFrom?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() dateTo?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(100) search?: string;
   @ApiPropertyOptional({ enum: ['PENDING', 'APPROVED', 'VOID'] }) @IsOptional() @IsIn(['PENDING', 'APPROVED', 'VOID']) status?: string;
   @ApiPropertyOptional({ default: 1 })
   @IsOptional()
@@ -66,6 +67,26 @@ export class ApPaymentsController {
   async findAll(@CurrentUser() user: JwtPayload, @Query() query: QueryApPaymentDto) {
     const result = await this.service.findAll(user.tenantId, query);
     return withPaginationMeta(result);
+  }
+
+  @Get('summary')
+  @ApiOperation({ summary: 'สรุปเจ้าหนี้: รออนุมัติจ่าย / จ่ายแล้วเดือนนี้ / WHT / ครบกำหนด 7 วัน' })
+  @ApiQuery({ name: 'propertyId', required: true })
+  @ApiQuery({ name: 'month', required: false, description: 'YYYY-MM (ค่าเริ่มต้น = เดือนนี้ เวลาไทย)' })
+  async summary(
+    @CurrentUser() user: JwtPayload,
+    @Query('propertyId') propertyId: string,
+    @Query('month') month?: string,
+  ) {
+    const data = await this.service.summary(user.tenantId, propertyId, month);
+    return { success: true, data };
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'ดูใบสำคัญจ่าย + ใบแจ้งหนี้ที่ตัด + รายการบัญชี' })
+  async findOne(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    const data = await this.service.findDetail(id, user.tenantId);
+    return { success: true, data };
   }
 
   @Post()

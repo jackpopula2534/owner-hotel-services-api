@@ -5,14 +5,29 @@ import {
   BadRequestException,
   Optional,
 } from '@nestjs/common';
+import { ApInvoiceStatus } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
 import { CreateApInvoiceDto } from './dto/create-ap-invoice.dto';
 import { QueryApInvoiceDto } from './dto/query-ap-invoice.dto';
 import { JournalEntriesService } from '@/modules/accounting/journal-entries/journal-entries.service';
 import { JournalSourceTypeEnum } from '@/modules/accounting/journal-entries/dto/create-journal-entry.dto';
 import { ensureDefaultChartOfAccounts } from '@/modules/accounting/chart-of-accounts/default-chart-of-accounts';
+import { toBangkokDate } from '@/common/utils/bangkok-day.util';
+import { findSourceJournals } from '../ap-journals.util';
 
 const roundMoney = (n: number): number => Math.round(n * 100) / 100;
+
+/** ใบที่ตั้งเจ้าหนี้แล้วและยังจ่ายไม่ครบ */
+const OPEN_STATUSES: ApInvoiceStatus[] = ['APPROVED', 'PARTIAL', 'OVERDUE'];
+
+const todayUtcMidnight = (): Date => new Date(`${toBangkokDate(new Date())}T00:00:00.000Z`);
+
+/** สถานะ OVERDUE ไม่มีงานไหนปั๊มให้ — คิดจากวันครบกำหนดเทียบวันนี้ (เวลาไทย) */
+function daysOverdueOf(inv: { status: string; balance: unknown; dueDate: Date }, today: Date): number {
+  if (!OPEN_STATUSES.includes(inv.status as ApInvoiceStatus) || Number(inv.balance) <= 0) return 0;
+  const days = Math.floor((today.getTime() - new Date(inv.dueDate).getTime()) / 86_400_000);
+  return days > 0 ? days : 0;
+}
 
 @Injectable()
 export class ApInvoicesService {
@@ -52,12 +67,19 @@ export class ApInvoicesService {
       dateFrom,
       dateTo,
       search,
+      bucket,
     } = query;
     const skip = (page - 1) * limit;
+    const today = todayUtcMidnight();
 
     const where: Record<string, unknown> = { tenantId };
     if (propertyId) where.propertyId = propertyId;
     if (status) where.status = status;
+    if (bucket) {
+      where.status = { in: OPEN_STATUSES };
+      where.balance = { gt: 0 };
+      if (bucket === 'OVERDUE') where.dueDate = { lt: today };
+    }
     if (supplierId) where.supplierId = supplierId;
     if (dateFrom || dateTo) {
       where.invoiceDate = {
@@ -66,7 +88,12 @@ export class ApInvoicesService {
       };
     }
     if (search) {
-      where.OR = [{ invoiceNo: { contains: search } }, { supplierInvoiceNo: { contains: search } }];
+      where.OR = [
+        { invoiceNo: { contains: search } },
+        { supplierInvoiceNo: { contains: search } },
+        { supplier: { name: { contains: search } } },
+        { supplier: { taxId: { contains: search } } },
+      ];
     }
 
     const [total, data] = await Promise.all([
@@ -83,7 +110,27 @@ export class ApInvoicesService {
       }),
     ]);
 
-    return { data, total, page, limit };
+    const rows = data.map((inv) => ({ ...inv, daysOverdue: daysOverdueOf(inv, today) }));
+    return { data: rows, total, page, limit };
+  }
+
+  /** รายละเอียดสำหรับแผงข้าง: ใบสำคัญจ่ายที่ตัดใบนี้ + รายการบัญชี (รวมรายการกลับเมื่อยกเลิก) */
+  async findDetail(id: string, tenantId: string) {
+    const invoice = await this.prisma.apInvoice.findFirst({
+      where: { id, tenantId },
+      include: {
+        lines: { orderBy: { lineNo: 'asc' }, include: { account: { select: { code: true, name: true } } } },
+        supplier: { select: { id: true, name: true, taxId: true, address: true } },
+        payments: {
+          include: {
+            payment: { select: { id: true, paymentNo: true, paymentDate: true, method: true, status: true } },
+          },
+        },
+      },
+    });
+    if (!invoice) throw new NotFoundException(`AP Invoice ${id} not found`);
+    const journals = await findSourceJournals(this.prisma, tenantId, 'AP_INVOICE', invoice.id);
+    return { ...invoice, daysOverdue: daysOverdueOf(invoice, todayUtcMidnight()), journals };
   }
 
   async findOne(id: string, tenantId: string) {
@@ -313,7 +360,7 @@ export class ApInvoicesService {
       where: {
         tenantId,
         propertyId,
-        status: { in: ['APPROVED', 'PARTIAL', 'OVERDUE'] },
+        status: { in: OPEN_STATUSES },
         balance: { gt: 0 },
       },
       include: {
