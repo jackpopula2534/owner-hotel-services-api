@@ -14,6 +14,8 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { IsOptional, IsString } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { CityLedgerBillingService } from './city-ledger-billing.service';
+import { CreateCityLedgerInvoiceDto } from './dto/create-city-ledger-invoice.dto';
 import { ArInvoicesService } from './ar-invoices.service';
 import { CreateArInvoiceDto } from './dto/create-ar-invoice.dto';
 import { QueryArInvoiceDto } from './dto/query-ar-invoice.dto';
@@ -42,7 +44,10 @@ interface JwtPayload {
 @RequireAddon('ACCOUNTING_MODULE')
 @Controller({ path: 'accounting/ar-invoices', version: '1' })
 export class ArInvoicesController {
-  constructor(private readonly service: ArInvoicesService) {}
+  constructor(
+    private readonly service: ArInvoicesService,
+    private readonly cityLedger: CityLedgerBillingService,
+  ) {}
 
   @Get('aging')
   @ApiOperation({ summary: 'AR Aging Report' })
@@ -62,6 +67,29 @@ export class ArInvoicesController {
   @ApiQuery({ name: 'yearMonth', required: false, description: 'e.g. 202605' })
   async sequenceAudit(@CurrentUser() user: JwtPayload, @Query('yearMonth') yearMonth?: string) {
     const data = await this.service.detectSequenceGaps(user.tenantId, { yearMonth });
+    return { success: true, data };
+  }
+
+  @Get('city-ledger/unbilled')
+  @ApiOperation({
+    summary: 'ยอด City Ledger ที่โอนจาก Folio แล้วยังไม่ได้วางบิล (จัดกลุ่มตามบริษัท)',
+  })
+  @ApiQuery({ name: 'propertyId', required: true })
+  async unbilledCityLedger(
+    @CurrentUser() user: JwtPayload,
+    @Query('propertyId') propertyId: string,
+  ) {
+    const data = await this.cityLedger.listUnbilled(user.tenantId, propertyId);
+    return { success: true, data };
+  }
+
+  @Post('city-ledger')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'สร้างใบแจ้งหนี้รวบยอด City Ledger จากยอดโอน Folio (ร่าง) — ออกใบแล้วไม่ลงรายได้ซ้ำ',
+  })
+  async createCityLedger(@CurrentUser() user: JwtPayload, @Body() dto: CreateCityLedgerInvoiceDto) {
+    const data = await this.cityLedger.createInvoice(dto, user.tenantId, user.sub);
     return { success: true, data };
   }
 

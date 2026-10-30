@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '@/prisma/prisma.service';
 import { CreateArReceiptDto } from './dto/create-ar-receipt.dto';
+import { ArReceiptAllocationService } from './ar-receipt-allocation.service';
 import { JournalEntriesService } from '@/modules/accounting/journal-entries/journal-entries.service';
 import { JournalSourceTypeEnum } from '@/modules/accounting/journal-entries/dto/create-journal-entry.dto';
 import { assertPeriodOpen } from '@/modules/accounting/ledger/journal-posting.util';
@@ -20,6 +21,7 @@ const roundMoney = (n: number): number => Math.round(n * 100) / 100;
 
 interface ReceiptQuery {
   propertyId?: string;
+  search?: string;
   dateFrom?: string;
   dateTo?: string;
   status?: string;
@@ -34,6 +36,7 @@ export class ArReceiptsService {
   constructor(
     private readonly prisma: PrismaService,
     @Optional() private readonly journalEntriesService?: JournalEntriesService,
+    @Optional() private readonly allocationService?: ArReceiptAllocationService,
   ) {}
 
   private async generateReceiptNo(tenantId: string): Promise<string> {
@@ -48,12 +51,22 @@ export class ArReceiptsService {
   }
 
   async findAll(tenantId: string, query: ReceiptQuery) {
-    const { page = 1, limit = 20, propertyId, dateFrom, dateTo, status } = query;
+    const { page = 1, limit = 20, propertyId, dateFrom, dateTo, status, search } = query;
     const skip = (page - 1) * limit;
 
     const where: Record<string, unknown> = { tenantId };
     if (propertyId) where.propertyId = propertyId;
     if (status) where.status = status;
+    const term = search?.trim();
+    if (term) {
+      where.OR = [
+        { receiptNo: { contains: term } },
+        { companyName: { contains: term } },
+        { reference: { contains: term } },
+        { guest: { firstName: { contains: term } } },
+        { guest: { lastName: { contains: term } } },
+      ];
+    }
     if (dateFrom || dateTo) {
       where.receiptDate = {
         ...(dateFrom ? { gte: new Date(dateFrom) } : {}),
@@ -66,8 +79,9 @@ export class ArReceiptsService {
       this.prisma.arReceipt.findMany({
         where,
         include: {
+          guest: { select: { id: true, firstName: true, lastName: true } },
           allocations: {
-            include: { invoice: { select: { invoiceNo: true, totalAmount: true } } },
+            include: { invoice: { select: { invoiceNo: true, totalAmount: true, balance: true } } },
           },
         },
         orderBy: [{ receiptDate: 'desc' }, { receiptNo: 'desc' }],
@@ -76,11 +90,31 @@ export class ArReceiptsService {
       }),
     ]);
 
-    return { data, total, page, limit };
+    // เลข JE หลักของแต่ละใบ + ยอดที่ยังไม่ได้จัดสรร ให้ตารางแสดงได้โดยไม่ต้องเปิดทีละใบ
+    const entries = data.length
+      ? await this.prisma.journalEntry.findMany({
+          where: { tenantId, sourceType: 'AR_RECEIPT', sourceId: { in: data.map((r) => r.id) } },
+          select: { sourceId: true, entryNo: true, status: true },
+        })
+      : [];
+    const entryOf = new Map(entries.map((e) => [e.sourceId, e]));
+    const rows = data.map((r) => {
+      const allocated = roundMoney(r.allocations.reduce((s, a) => s + Number(a.amount), 0));
+      return {
+        ...r,
+        allocatedAmount: allocated,
+        unallocatedAmount: r.status === 'VOID' ? 0 : roundMoney(Number(r.totalAmount) - allocated),
+        journalEntryNo: entryOf.get(r.id)?.entryNo ?? null,
+      };
+    });
+
+    return { data: rows, total, page, limit };
   }
 
   async create(dto: CreateArReceiptDto, tenantId: string, createdBy: string) {
-    const allocatedTotal = roundMoney((dto.allocations ?? []).reduce((sum, a) => sum + a.amount, 0));
+    const allocatedTotal = roundMoney(
+      (dto.allocations ?? []).reduce((sum, a) => sum + a.amount, 0),
+    );
     const invoiceIds = (dto.allocations ?? []).map((a) => a.invoiceId);
     if (new Set(invoiceIds).size !== invoiceIds.length) {
       throw new BadRequestException('ตัดชำระใบแจ้งหนี้ใบเดียวกันซ้ำในใบเสร็จเดียวไม่ได้');
@@ -286,6 +320,12 @@ export class ArReceiptsService {
       receipt.id,
       voidedBy,
       `ยกเลิกใบเสร็จ ${receipt.receiptNo}`,
+    );
+    await this.allocationService?.reverseAllocationJournals(
+      receipt.id,
+      tenantId,
+      voidedBy,
+      receipt.receiptNo,
     );
 
     await this.prisma.$transaction(async (tx) => {

@@ -11,6 +11,7 @@ import { QueryArInvoiceDto } from './dto/query-ar-invoice.dto';
 import { JournalEntriesService } from '@/modules/accounting/journal-entries/journal-entries.service';
 import { JournalSourceTypeEnum } from '@/modules/accounting/journal-entries/dto/create-journal-entry.dto';
 import { ensureDefaultChartOfAccounts } from '@/modules/accounting/chart-of-accounts/default-chart-of-accounts';
+import { toBangkokDate } from '@/common/utils/bangkok-day.util';
 
 const roundMoney = (n: number): number => Math.round(n * 100) / 100;
 
@@ -31,7 +32,8 @@ export class ArInvoicesService {
     });
   }
 
-  private async generateInvoiceNo(tenantId: string): Promise<string> {
+  /** เลขที่ใบแจ้งหนี้ถัดไป (ใช้ร่วมกับ CityLedgerBillingService) */
+  async generateInvoiceNo(tenantId: string): Promise<string> {
     const now = new Date();
     const yearMonth = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
     const seq = await this.prisma.documentSequence.upsert({
@@ -43,12 +45,29 @@ export class ArInvoicesService {
   }
 
   async findAll(tenantId: string, query: QueryArInvoiceDto) {
-    const { page = 1, limit = 20, propertyId, status, guestId, dateFrom, dateTo, search } = query;
+    const {
+      page = 1,
+      limit = 20,
+      propertyId,
+      status,
+      guestId,
+      dateFrom,
+      dateTo,
+      search,
+      bucket,
+    } = query;
     const skip = (page - 1) * limit;
+    const today = new Date(`${toBangkokDate(new Date())}T00:00:00.000Z`);
 
     const where: Record<string, unknown> = { tenantId };
     if (propertyId) where.propertyId = propertyId;
     if (status) where.status = status;
+    if (bucket) {
+      // สถานะ OVERDUE ไม่มีงานไหนปั๊มให้ — ใช้วันครบกำหนดตัดสินแทน
+      where.status = { in: ['ISSUED', 'PARTIAL', 'OVERDUE'] };
+      where.balance = { gt: 0 };
+      if (bucket === 'OVERDUE') where.dueDate = { lt: today };
+    }
     if (guestId) where.guestId = guestId;
     if (dateFrom || dateTo) {
       where.issueDate = {
@@ -57,7 +76,11 @@ export class ArInvoicesService {
       };
     }
     if (search) {
-      where.OR = [{ invoiceNo: { contains: search } }, { companyName: { contains: search } }];
+      where.OR = [
+        { invoiceNo: { contains: search } },
+        { companyName: { contains: search } },
+        { companyTaxId: { contains: search } },
+      ];
     }
 
     const [total, data] = await Promise.all([
@@ -74,7 +97,32 @@ export class ArInvoicesService {
       }),
     ]);
 
-    return { data, total, page, limit };
+    const rows = data.map((inv) => {
+      const open = ['ISSUED', 'PARTIAL', 'OVERDUE'].includes(inv.status) && Number(inv.balance) > 0;
+      const days = Math.floor((today.getTime() - new Date(inv.dueDate).getTime()) / 86_400_000);
+      return {
+        ...inv,
+        daysOverdue: open && days > 0 ? days : 0,
+        fromFolio:
+          inv.lines.length > 0 && inv.lines.every((l) => l.sourceRef?.startsWith('FOLIO_PAYMENT:')),
+      };
+    });
+
+    return { data: rows, total, page, limit };
+  }
+
+  /** โหลดใบพร้อมบรรทัด/การรับชำระ — ใช้ภายใน (issue/void) ไม่ต้องดึง JE */
+  private async loadInvoice(id: string, tenantId: string) {
+    const invoice = await this.prisma.arInvoice.findFirst({
+      where: { id, tenantId },
+      include: {
+        lines: true,
+        guest: { select: { id: true, firstName: true, lastName: true } },
+        receipts: { include: { receipt: true } },
+      },
+    });
+    if (!invoice) throw new NotFoundException(`AR Invoice ${id} not found`);
+    return invoice;
   }
 
   async findOne(id: string, tenantId: string) {
@@ -87,7 +135,23 @@ export class ArInvoicesService {
       },
     });
     if (!invoice) throw new NotFoundException(`AR Invoice ${id} not found`);
-    return invoice;
+    const journal = await this.prisma.journalEntry.findFirst({
+      where: { tenantId, sourceType: 'AR_INVOICE', sourceId: invoice.id },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        entryNo: true,
+        status: true,
+        lines: {
+          orderBy: { lineNo: 'asc' },
+          select: { debit: true, credit: true, account: { select: { code: true, name: true } } },
+        },
+      },
+    });
+    const fromFolio =
+      invoice.lines.length > 0 &&
+      invoice.lines.every((line) => line.sourceRef?.startsWith('FOLIO_PAYMENT:'));
+    return { ...invoice, fromFolio, journalEntry: journal };
   }
 
   async create(dto: CreateArInvoiceDto, tenantId: string, createdBy: string) {
@@ -162,7 +226,7 @@ export class ArInvoicesService {
   }
 
   async issue(id: string, tenantId: string, issuedBy: string) {
-    const invoice = await this.findOne(id, tenantId);
+    const invoice = await this.loadInvoice(id, tenantId);
     if (invoice.status !== 'DRAFT') {
       throw new BadRequestException(`Cannot issue invoice with status: ${invoice.status}`);
     }
@@ -189,6 +253,22 @@ export class ArInvoicesService {
           'ไม่สามารถออกใบกำกับภาษีแบบ City Ledger ได้: ต้องระบุเลขประจำตัวผู้เสียภาษีของบริษัทผู้ซื้อ (companyTaxId)',
         );
       }
+    }
+
+    // ใบรวบยอดจาก Folio: รายได้รับรู้แล้วตอน Night Audit และยอดอยู่ใน 1103/1104 แล้ว
+    // ออกใบเป็นเอกสารวางบิลอย่างเดียว — ลง JE ซ้ำจะทำให้รายได้ขึ้นสองเท่า
+    const fromFolio =
+      invoice.lines.length > 0 &&
+      invoice.lines.every((line) => line.sourceRef?.startsWith('FOLIO_PAYMENT:'));
+    if (fromFolio) {
+      const issued = await this.prisma.arInvoice.update({
+        where: { id },
+        data: { status: 'ISSUED', issuedBy, issuedAt: new Date(), isPosted: false },
+      });
+      this.logger.log(
+        `AR Invoice ${invoice.invoiceNo} issued (from folio, no journal) by ${issuedBy}`,
+      );
+      return issued;
     }
 
     const arAccountCode = invoice.invoiceType === 'CITY_LEDGER' ? '1104' : '1103';
@@ -257,7 +337,13 @@ export class ArInvoicesService {
     // ไม่ใช่ ISSUED ที่ไม่มีรายการบัญชีรองรับ (ลงซ้ำได้: createAndPostAutoEntry กันซ้ำตาม source)
     const updated = await this.prisma.arInvoice.update({
       where: { id },
-      data: { status: 'ISSUED', issuedBy, issuedAt: new Date(), isPosted: true, postedAt: new Date() },
+      data: {
+        status: 'ISSUED',
+        issuedBy,
+        issuedAt: new Date(),
+        isPosted: true,
+        postedAt: new Date(),
+      },
     });
 
     this.logger.log(`AR Invoice ${invoice.invoiceNo} issued by ${issuedBy}`);
@@ -328,7 +414,7 @@ export class ArInvoicesService {
   }
 
   async void(id: string, tenantId: string, voidedBy: string, reason?: string) {
-    const invoice = await this.findOne(id, tenantId);
+    const invoice = await this.loadInvoice(id, tenantId);
     if (invoice.status === 'PAID') {
       throw new BadRequestException('Cannot void a PAID invoice');
     }

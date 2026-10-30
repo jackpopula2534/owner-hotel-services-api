@@ -24,7 +24,9 @@ describe('ArInvoicesService - issue() tax-ID enforcement', () => {
       },
       accountChart: {
         count: jest.fn().mockResolvedValue(69),
-        findFirst: jest.fn(({ where }) => Promise.resolve({ id: `acc-${where.code}`, code: where.code })),
+        findFirst: jest.fn(({ where }) =>
+          Promise.resolve({ id: `acc-${where.code}`, code: where.code }),
+        ),
       },
     };
     const journalEntries: any = { createAndPostAutoEntry: jest.fn().mockResolvedValue({}) };

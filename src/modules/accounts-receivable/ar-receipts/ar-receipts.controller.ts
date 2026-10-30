@@ -12,13 +12,24 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
+import { ArReceiptAllocationService } from './ar-receipt-allocation.service';
+import { AllocateArReceiptDto } from './dto/allocate-ar-receipt.dto';
 import { ArReceiptsService } from './ar-receipts.service';
 import { CreateArReceiptDto } from './dto/create-ar-receipt.dto';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AddonGuard } from '@/common/guards/addon.guard';
 import { RequireAddon } from '@/common/decorators/require-addon.decorator';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
-import { IsOptional, IsUUID, IsDateString, IsInt, IsIn, Min } from 'class-validator';
+import {
+  IsOptional,
+  IsUUID,
+  IsDateString,
+  IsInt,
+  IsIn,
+  IsString,
+  MaxLength,
+  Min,
+} from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { RolesGuard } from '@/common/guards/roles.guard';
@@ -28,7 +39,15 @@ class QueryArReceiptDto {
   @ApiPropertyOptional() @IsOptional() @IsUUID() propertyId?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() dateFrom?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() dateTo?: string;
-  @ApiPropertyOptional({ enum: ['DRAFT', 'CLEARED', 'VOID'] }) @IsOptional() @IsIn(['DRAFT', 'CLEARED', 'VOID']) status?: string;
+  @ApiPropertyOptional({ enum: ['DRAFT', 'CLEARED', 'VOID'] })
+  @IsOptional()
+  @IsIn(['DRAFT', 'CLEARED', 'VOID'])
+  status?: string;
+  @ApiPropertyOptional({ description: 'ค้นหาเลขใบเสร็จ / ลูกค้า / อ้างอิง' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  search?: string;
   @ApiPropertyOptional({ default: 1 })
   @IsOptional()
   @IsInt()
@@ -57,7 +76,44 @@ interface JwtPayload {
 @RequireAddon('ACCOUNTING_MODULE')
 @Controller({ path: 'accounting/ar-receipts', version: '1' })
 export class ArReceiptsController {
-  constructor(private readonly service: ArReceiptsService) {}
+  constructor(
+    private readonly service: ArReceiptsService,
+    private readonly allocation: ArReceiptAllocationService,
+  ) {}
+
+  @Get('summary')
+  @ApiOperation({
+    summary: 'สรุปหน้ารับชำระ: รับเดือนนี้ / ยังไม่จัดสรร (2105) / ลูกหนี้ค้าง-เกินกำหนด',
+  })
+  @ApiQuery({ name: 'propertyId', required: true })
+  @ApiQuery({ name: 'month', required: false, description: 'YYYY-MM (ค่าเริ่มต้น = เดือนนี้)' })
+  async summary(
+    @CurrentUser() user: JwtPayload,
+    @Query('propertyId') propertyId: string,
+    @Query('month') month?: string,
+  ) {
+    const data = await this.allocation.summary(user.tenantId, propertyId, month);
+    return { success: true, data };
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'รายละเอียดใบเสร็จ: การตัดชำระ + JE ทั้งหมด' })
+  async findOne(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    const data = await this.allocation.findOne(id, user.tenantId);
+    return { success: true, data };
+  }
+
+  @Post(':id/allocate')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'จัดสรรเงินที่ยังไม่ได้ตัดเข้าใบแจ้งหนี้ (Dr 2105 / Cr 1103|1104)' })
+  async allocate(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: AllocateArReceiptDto,
+  ) {
+    const data = await this.allocation.allocate(id, dto, user.tenantId, user.sub);
+    return { success: true, data };
+  }
 
   @Get()
   @ApiOperation({ summary: 'ดูรายการ AR Receipt ทั้งหมด' })
