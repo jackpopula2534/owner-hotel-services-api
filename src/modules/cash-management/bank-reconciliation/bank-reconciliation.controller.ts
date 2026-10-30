@@ -7,6 +7,8 @@ import {
   Param,
   Body,
   Query,
+  Delete,
+  BadRequestException,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -15,6 +17,7 @@ import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger'
 import { BankReconciliationService } from './bank-reconciliation.service';
 import { CreateBankReconDto } from './dto/create-bank-recon.dto';
 import { CreateReconLineDto } from './dto/create-recon-line.dto';
+import { ClearBookLinesDto } from './dto/clear-book-lines.dto';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AddonGuard } from '@/common/guards/addon.guard';
 import { RequireAddon } from '@/common/decorators/require-addon.decorator';
@@ -66,6 +69,43 @@ export class BankReconciliationController {
     });
     // ต้องมี meta ไม่งั้น apiClient ฝั่งเว็บแกะเหลือแค่ array แล้ว total หาย
     return withPaginationMeta(data);
+  }
+
+  @Get('overview')
+  @ApiOperation({ summary: 'ภาพรวมต่อบัญชีเงินฝากธนาคาร (ยอด GL, งวดที่กระทบล่าสุด, งวดค้าง)' })
+  @ApiQuery({ name: 'propertyId', required: true })
+  async overview(@CurrentUser() user: JwtPayload, @Query('propertyId') propertyId?: string) {
+    if (!propertyId) throw new BadRequestException('propertyId is required');
+    const data = await this.service.overview(user.tenantId, propertyId);
+    return { success: true, data };
+  }
+
+  @Get(':id/workspace')
+  @ApiOperation({ summary: 'พื้นที่ทำงานกระทบยอด: รายการสมุดบัญชี + รายการเฉพาะ Statement + สูตรกระทบยอด' })
+  async workspace(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    const data = await this.service.getWorkspace(id, user.tenantId);
+    return { success: true, data };
+  }
+
+  @Post(':id/clear')
+  @ApiOperation({ summary: 'ทำเครื่องหมายรายการสมุดบัญชีว่าปรากฏใน Statement แล้ว (หรือยกเลิก)' })
+  async clear(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() dto: ClearBookLinesDto) {
+    const data = await this.service.clearBookLines(id, user.tenantId, dto.journalLineIds, dto.cleared);
+    return { success: true, data };
+  }
+
+  @Patch(':id/refresh-book')
+  @ApiOperation({ summary: 'ดึงยอดตามบัญชีใหม่จากสมุดแยกประเภท' })
+  async refreshBook(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    const data = await this.service.refreshBook(id, user.tenantId);
+    return { success: true, data };
+  }
+
+  @Delete('lines/:lineId')
+  @ApiOperation({ summary: 'ลบรายการกระทบยอด (เฉพาะงวดที่ยังไม่อนุมัติ)' })
+  async removeLine(@CurrentUser() user: JwtPayload, @Param('lineId') lineId: string) {
+    const data = await this.service.removeLine(lineId, user.tenantId);
+    return { success: true, data };
   }
 
   @Get(':id')
