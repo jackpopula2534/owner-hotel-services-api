@@ -9,6 +9,7 @@ import {
 } from '@/modules/accounting/ledger/posting-accounts.util';
 import { toBangkokDate, toBangkokMonth, bangkokMonthRange } from '@/common/utils/bangkok-day.util';
 import { AllocateArReceiptDto } from './dto/allocate-ar-receipt.dto';
+import { settleInvoice } from '../ar-invoice-balance.util';
 
 const round2 = (v: number): number => Math.round(v * 100) / 100;
 
@@ -24,6 +25,9 @@ export interface ArReceiptSummary {
   outstandingTotal: number;
   overdueTotal: number;
   overdueCount: number;
+  /** ภาษีที่ลูกค้าหัก ณ ที่จ่ายแล้วแต่ยังไม่ได้หนังสือรับรอง 50 ทวิ */
+  whtPendingTotal: number;
+  whtPendingCount: number;
 }
 
 /**
@@ -92,7 +96,9 @@ export class ArReceiptAllocationService {
       ...receipt,
       allocatedAmount: allocated,
       unallocatedAmount:
-        receipt.status === 'VOID' ? 0 : round2(Number(receipt.totalAmount) - allocated),
+        receipt.status === 'VOID'
+          ? 0
+          : round2(Number(receipt.totalAmount) + Number(receipt.whtAmount) - allocated),
       journals,
     };
   }
@@ -105,7 +111,7 @@ export class ArReceiptAllocationService {
     const monthStart = new Date(`${ym}-01T00:00:00.000Z`);
     const monthEnd = new Date(monthStart.getTime() + (end.getTime() - start.getTime()));
 
-    const [received, cleared, outstanding, overdue] = await Promise.all([
+    const [received, cleared, outstanding, overdue, whtPending] = await Promise.all([
       this.prisma.arReceipt.aggregate({
         where: {
           tenantId,
@@ -118,7 +124,11 @@ export class ArReceiptAllocationService {
       }),
       this.prisma.arReceipt.findMany({
         where: { tenantId, propertyId, status: 'CLEARED' },
-        select: { totalAmount: true, allocations: { select: { amount: true } } },
+        select: {
+          totalAmount: true,
+          whtAmount: true,
+          allocations: { select: { amount: true } },
+        },
       }),
       this.prisma.arInvoice.aggregate({
         where: {
@@ -140,11 +150,20 @@ export class ArReceiptAllocationService {
         _count: { _all: true },
         _sum: { balance: true },
       }),
+      this.prisma.arReceipt.aggregate({
+        where: { tenantId, propertyId, status: 'CLEARED', whtAmount: { gt: 0 }, whtCertNo: null },
+        _count: { _all: true },
+        _sum: { whtAmount: true },
+      }),
     ]);
 
     const unallocated = cleared
       .map((r) =>
-        round2(Number(r.totalAmount) - r.allocations.reduce((s, a) => s + Number(a.amount), 0)),
+        round2(
+          Number(r.totalAmount) +
+            Number(r.whtAmount) -
+            r.allocations.reduce((s, a) => s + Number(a.amount), 0),
+        ),
       )
       .filter((v) => v > 0.005);
 
@@ -157,6 +176,8 @@ export class ArReceiptAllocationService {
       outstandingTotal: round2(Number(outstanding._sum.balance ?? 0)),
       overdueTotal: round2(Number(overdue._sum.balance ?? 0)),
       overdueCount: overdue._count._all,
+      whtPendingTotal: round2(Number(whtPending._sum.whtAmount ?? 0)),
+      whtPendingCount: whtPending._count._all,
     };
   }
 
@@ -173,7 +194,7 @@ export class ArReceiptAllocationService {
     }
 
     const already = receipt.allocations.reduce((s, a) => s + Number(a.amount), 0);
-    const available = round2(Number(receipt.totalAmount) - already);
+    const available = round2(Number(receipt.totalAmount) + Number(receipt.whtAmount) - already);
     const requested = round2(dto.allocations.reduce((s, a) => s + a.amount, 0));
     if (requested <= 0) throw new BadRequestException('ยอดจัดสรรต้องมากกว่า 0');
     if (requested - available > 0.005) {
@@ -220,15 +241,17 @@ export class ArReceiptAllocationService {
           data: { tenantId, receiptId: receipt.id, invoiceId: a.invoiceId, amount: a.amount },
         });
         rows.push(row.id);
-        const paid = round2(Number(inv.paidAmount) + a.amount);
-        const balance = round2(Number(inv.totalAmount) - paid);
+        // อ่านใหม่ใน tx — ระหว่างตรวจกับบันทึกอาจมีใบลดหนี้/ใบเสร็จอื่นตัดยอดไปแล้ว
+        const fresh = await tx.arInvoice.findFirstOrThrow({ where: { id: inv.id, tenantId } });
+        if (a.amount - Number(fresh.balance) > 0.005) {
+          throw new BadRequestException(
+            `ยอดตัดชำระเกินยอดคงค้างของ ${fresh.invoiceNo} (${Number(fresh.balance)})`,
+          );
+        }
+        const settled = settleInvoice(fresh, { paid: a.amount });
         await tx.arInvoice.update({
           where: { id: inv.id },
-          data: {
-            paidAmount: paid,
-            balance: Math.max(0, balance),
-            status: balance <= 0.01 ? 'PAID' : 'PARTIAL',
-          },
+          data: { paidAmount: settled.paidAmount, balance: settled.balance, status: settled.status },
         });
       }
       return rows;
@@ -274,10 +297,11 @@ export class ArReceiptAllocationService {
       // ลงบัญชีไม่ผ่าน → ถอยการจัดสรรออก ห้ามมีการตัดยอดลูกหนี้ที่ไม่มีรายการบัญชีรองรับ
       await this.prisma.$transaction(async (tx) => {
         for (const a of dto.allocations) {
-          const inv = byId.get(a.invoiceId)!;
+          const inv = await tx.arInvoice.findFirstOrThrow({ where: { id: a.invoiceId, tenantId } });
+          const settled = settleInvoice(inv, { paid: -a.amount });
           await tx.arInvoice.update({
             where: { id: inv.id },
-            data: { paidAmount: inv.paidAmount, balance: inv.balance, status: inv.status },
+            data: { paidAmount: settled.paidAmount, balance: settled.balance, status: settled.status },
           });
         }
         await tx.arReceiptAllocation.deleteMany({ where: { tenantId, id: { in: created } } });

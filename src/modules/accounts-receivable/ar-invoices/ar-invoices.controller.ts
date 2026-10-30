@@ -18,6 +18,7 @@ import { CityLedgerBillingService } from './city-ledger-billing.service';
 import { CreateCityLedgerInvoiceDto } from './dto/create-city-ledger-invoice.dto';
 import { ArInvoicesService } from './ar-invoices.service';
 import { CreateArInvoiceDto } from './dto/create-ar-invoice.dto';
+import { CreateCreditNoteDto } from './dto/create-credit-note.dto';
 import { QueryArInvoiceDto } from './dto/query-ar-invoice.dto';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AddonGuard } from '@/common/guards/addon.guard';
@@ -119,6 +120,20 @@ export class ArInvoicesController {
   @ApiOperation({ summary: 'ออก Invoice (DRAFT → ISSUED)' })
   async issue(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     const data = await this.service.issue(id, user.tenantId, user.sub);
+    return { success: true, data };
+  }
+
+  @Post(':id/credit-note')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'ออกใบลดหนี้อ้างใบนี้ (Dr รายได้ + 2103 / Cr 1103|1104) และตัดยอดคงค้างทันที',
+  })
+  async createCreditNote(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: CreateCreditNoteDto,
+  ) {
+    const data = await this.service.createCreditNote(id, dto, user.tenantId, user.sub);
     return { success: true, data };
   }
 

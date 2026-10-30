@@ -12,6 +12,9 @@ import { JournalEntriesService } from '@/modules/accounting/journal-entries/jour
 import { JournalSourceTypeEnum } from '@/modules/accounting/journal-entries/dto/create-journal-entry.dto';
 import { ensureDefaultChartOfAccounts } from '@/modules/accounting/chart-of-accounts/default-chart-of-accounts';
 import { toBangkokDate } from '@/common/utils/bangkok-day.util';
+import { assertPeriodOpen } from '@/modules/accounting/ledger/journal-posting.util';
+import { settleInvoice } from '../ar-invoice-balance.util';
+import { CreateCreditNoteDto } from './dto/create-credit-note.dto';
 
 const roundMoney = (n: number): number => Math.round(n * 100) / 100;
 
@@ -151,10 +154,34 @@ export class ArInvoicesService {
     const fromFolio =
       invoice.lines.length > 0 &&
       invoice.lines.every((line) => line.sourceRef?.startsWith('FOLIO_PAYMENT:'));
-    return { ...invoice, fromFolio, journalEntry: journal };
+    const creditNoteSelect = {
+      id: true,
+      invoiceNo: true,
+      issueDate: true,
+      totalAmount: true,
+      status: true,
+      notes: true,
+    } as const;
+    const [creditNotes, refInvoice] = await Promise.all([
+      this.prisma.arInvoice.findMany({
+        where: { tenantId, refInvoiceId: invoice.id, invoiceType: 'CREDIT_NOTE' },
+        orderBy: { createdAt: 'asc' },
+        select: creditNoteSelect,
+      }),
+      invoice.refInvoiceId
+        ? this.prisma.arInvoice.findFirst({
+            where: { id: invoice.refInvoiceId, tenantId },
+            select: creditNoteSelect,
+          })
+        : Promise.resolve(null),
+    ]);
+    return { ...invoice, fromFolio, journalEntry: journal, creditNotes, refInvoice };
   }
 
   async create(dto: CreateArInvoiceDto, tenantId: string, createdBy: string) {
+    if (dto.invoiceType === 'CREDIT_NOTE') {
+      throw new BadRequestException('ใบลดหนี้ต้องออกจากใบแจ้งหนี้ต้นทาง (POST :id/credit-note)');
+    }
     let subtotal = 0;
     let vatAmount = 0;
 
@@ -229,6 +256,10 @@ export class ArInvoicesService {
     const invoice = await this.loadInvoice(id, tenantId);
     if (invoice.status !== 'DRAFT') {
       throw new BadRequestException(`Cannot issue invoice with status: ${invoice.status}`);
+    }
+    if (invoice.invoiceType === 'CREDIT_NOTE') {
+      // ทางนี้ลง Dr ลูกหนี้ / Cr รายได้ — ใบลดหนี้ต้องกลับด้าน ห้ามออกผ่านที่นี่
+      throw new BadRequestException('ใบลดหนี้ออกผ่าน POST :id/credit-note เท่านั้น');
     }
 
     // LEGAL-03: a Thai full tax invoice (ใบกำกับภาษีเต็มรูป) is invalid without the
@@ -422,8 +453,15 @@ export class ArInvoicesService {
       throw new BadRequestException('Invoice is already void');
     }
 
+    if (invoice.invoiceType === 'CREDIT_NOTE') {
+      return this.voidCreditNote(invoice, tenantId, voidedBy, reason);
+    }
+
     if (Number(invoice.paidAmount) > 0) {
       throw new BadRequestException('ใบแจ้งหนี้มีการรับชำระแล้ว ต้องยกเลิกใบเสร็จก่อน');
+    }
+    if (Number(invoice.creditedAmount) > 0) {
+      throw new BadRequestException('ใบแจ้งหนี้มีใบลดหนี้อ้างอยู่ ต้องยกเลิกใบลดหนี้ก่อน');
     }
 
     // ใบที่ออกแล้วตั้งลูกหนี้ไว้ในสมุดรายวัน — ยกเลิกใบโดยไม่กลับรายการ ลูกหนี้จะค้างในงบตลอดไป
@@ -441,6 +479,264 @@ export class ArInvoicesService {
     });
 
     this.logger.log(`AR Invoice ${invoice.invoiceNo} voided by ${voidedBy}`);
+    return updated;
+  }
+
+  private async generateCreditNoteNo(tenantId: string): Promise<string> {
+    const now = new Date();
+    const yearMonth = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const seq = await this.prisma.documentSequence.upsert({
+      where: { tenantId_docType_yearMonth: { tenantId, docType: 'CN', yearMonth } },
+      update: { lastNumber: { increment: 1 } },
+      create: { tenantId, docType: 'CN', prefix: 'CN', yearMonth, lastNumber: 1 },
+    });
+    return `CN-${yearMonth}-${String(seq.lastNumber).padStart(6, '0')}`;
+  }
+
+  /**
+   * ออกใบลดหนี้อ้างใบแจ้งหนี้ต้นทาง แล้วตัดยอดคงค้างของใบต้นทางทันที
+   *
+   * แบ่งยอดลดหนี้ตามสัดส่วนบรรทัดของใบต้นทาง (บัญชีรายได้/VAT เดียวกัน) แล้วลง
+   *   Dr รายได้ (ตามบรรทัด) + Dr ภาษีขาย 2103 / Cr ลูกหนี้ 1103|1104
+   * ลดได้ไม่เกินยอดคงค้าง — ส่วนที่รับเงินไปแล้วต้องคืนเงิน ไม่ใช่ลดหนี้
+   */
+  async createCreditNote(
+    id: string,
+    dto: CreateCreditNoteDto,
+    tenantId: string,
+    createdBy: string,
+  ) {
+    const original = await this.loadInvoice(id, tenantId);
+    if (original.invoiceType === 'CREDIT_NOTE' || original.invoiceType === 'PROFORMA') {
+      throw new BadRequestException(`ออกใบลดหนี้จากเอกสารชนิด ${original.invoiceType} ไม่ได้`);
+    }
+    if (!['ISSUED', 'PARTIAL', 'OVERDUE'].includes(original.status)) {
+      throw new BadRequestException(
+        `ออกใบลดหนี้ได้เฉพาะใบที่ออกแล้วและยังค้างชำระ (สถานะ ${original.status})`,
+      );
+    }
+    const amount = roundMoney(dto.amount);
+    if (amount - Number(original.balance) > 0.005) {
+      throw new BadRequestException(
+        `ยอดลดหนี้ ${amount.toFixed(2)} เกินยอดคงค้าง ${Number(original.balance).toFixed(2)}`,
+      );
+    }
+    const sourceLines = original.lines.filter((l) => Number(l.totalAmount) > 0);
+    const originalTotal = Number(original.totalAmount);
+    if (sourceLines.length === 0 || originalTotal <= 0) {
+      throw new BadRequestException('ใบแจ้งหนี้ต้นทางไม่มีบรรทัดรายการให้ลดหนี้');
+    }
+
+    const issueDate = new Date(`${dto.issueDate ?? toBangkokDate(new Date())}T00:00:00.000Z`);
+    await assertPeriodOpen(this.prisma, tenantId, original.propertyId, issueDate);
+
+    const arAccountCode = original.invoiceType === 'CITY_LEDGER' ? '1104' : '1103';
+    const [arAccount, outputVatAccount, defaultRevenueAccount] = await Promise.all([
+      this.findDefaultAccountByCode(tenantId, arAccountCode),
+      this.findDefaultAccountByCode(tenantId, '2103'),
+      this.findDefaultAccountByCode(tenantId, '4101'),
+    ]);
+    if (!arAccount || !outputVatAccount || !defaultRevenueAccount) {
+      throw new BadRequestException('ลงบัญชีใบลดหนี้ไม่ได้: ผังบัญชีไม่มี 1103/1104, 2103 หรือ 4101');
+    }
+
+    // แบ่งยอดตามสัดส่วนยอดรวมบรรทัด — บรรทัดสุดท้ายรับเศษสตางค์ ให้รวมแล้วเท่ากับ amount พอดี
+    let remainingTotal = amount;
+    let remainingVat = roundMoney(amount * (Number(original.vatAmount) / originalTotal));
+    const reason = dto.reason.trim();
+    const lineData = sourceLines.map((line, i) => {
+      const last = i === sourceLines.length - 1;
+      const lineTotal = last
+        ? remainingTotal
+        : roundMoney(amount * (Number(line.totalAmount) / originalTotal));
+      const lineVat = last
+        ? remainingVat
+        : roundMoney(lineTotal * (Number(line.vatAmount) / Number(line.totalAmount)));
+      remainingTotal = roundMoney(remainingTotal - lineTotal);
+      remainingVat = roundMoney(remainingVat - lineVat);
+      const net = roundMoney(lineTotal - lineVat);
+      return {
+        lineNo: i + 1,
+        description: `ลดหนี้: ${reason} (${line.description})`.slice(0, 300),
+        chargeType: line.chargeType,
+        quantity: 1,
+        unitPrice: net,
+        discountAmt: 0,
+        netAmount: net,
+        vatRate: line.vatRate,
+        vatAmount: lineVat,
+        totalAmount: lineTotal,
+        accountId: line.accountId,
+        costCenterId: line.costCenterId,
+        sourceRef: `CN:${original.invoiceNo}`,
+      };
+    });
+    const subtotal = roundMoney(lineData.reduce((s, l) => s + l.netAmount, 0));
+    const vatAmount = roundMoney(lineData.reduce((s, l) => s + l.vatAmount, 0));
+
+    const creditNoteNo = await this.generateCreditNoteNo(tenantId);
+    const creditNote = await this.prisma.$transaction(async (tx) => {
+      // อ่านยอดใหม่ใน tx — กันใบเสร็จ/ใบลดหนี้อื่นที่ตัดยอดไประหว่างตรวจ
+      const fresh = await tx.arInvoice.findFirstOrThrow({ where: { id: original.id, tenantId } });
+      if (amount - Number(fresh.balance) > 0.005) {
+        throw new BadRequestException(
+          `ยอดลดหนี้ ${amount.toFixed(2)} เกินยอดคงค้าง ${Number(fresh.balance).toFixed(2)}`,
+        );
+      }
+      const settled = settleInvoice(fresh, { credited: amount });
+      await tx.arInvoice.update({
+        where: { id: fresh.id },
+        data: {
+          creditedAmount: settled.creditedAmount,
+          balance: settled.balance,
+          status: settled.status,
+        },
+      });
+      return tx.arInvoice.create({
+        data: {
+          tenantId,
+          propertyId: original.propertyId,
+          invoiceNo: creditNoteNo,
+          invoiceType: 'CREDIT_NOTE',
+          refInvoiceId: original.id,
+          status: 'ISSUED',
+          guestId: original.guestId,
+          bookingId: original.bookingId,
+          folioId: original.folioId,
+          companyName: original.companyName,
+          companyTaxId: original.companyTaxId,
+          companyAddress: original.companyAddress,
+          issueDate,
+          dueDate: issueDate,
+          currency: original.currency,
+          exchangeRate: original.exchangeRate,
+          subtotal,
+          taxableAmount: subtotal,
+          vatAmount,
+          totalAmount: amount,
+          paidAmount: 0,
+          balance: 0,
+          notes: reason,
+          issuedBy: createdBy,
+          issuedAt: new Date(),
+          createdBy,
+          lines: { create: lineData },
+        },
+        include: { lines: true },
+      });
+    });
+
+    const description = `ใบลดหนี้ ${creditNoteNo} อ้าง ${original.invoiceNo}`;
+    const revenueLines = creditNote.lines
+      .filter((l) => Number(l.netAmount) > 0)
+      .map((l, i) => ({
+        accountId: l.accountId ?? defaultRevenueAccount.id,
+        lineNo: i + 1,
+        description,
+        debit: Number(l.netAmount),
+        credit: 0,
+        costCenterId: l.costCenterId ?? undefined,
+        subRef: creditNoteNo,
+      }));
+    try {
+      if (this.journalEntriesService) {
+        await this.journalEntriesService.createAndPostAutoEntry(tenantId, {
+          propertyId: creditNote.propertyId,
+          entryDate: issueDate,
+          description,
+          reference: creditNoteNo,
+          sourceType: JournalSourceTypeEnum.AR_INVOICE,
+          sourceId: creditNote.id,
+          createdBy,
+          lines: [
+            ...revenueLines,
+            ...(vatAmount > 0
+              ? [
+                  {
+                    accountId: outputVatAccount.id,
+                    lineNo: revenueLines.length + 1,
+                    description: `VAT Output ${creditNoteNo}`,
+                    debit: vatAmount,
+                    credit: 0,
+                    subRef: creditNoteNo,
+                  },
+                ]
+              : []),
+            {
+              accountId: arAccount.id,
+              lineNo: revenueLines.length + 2,
+              description,
+              debit: 0,
+              credit: amount,
+              subRef: creditNoteNo,
+            },
+          ],
+        });
+      }
+    } catch (error) {
+      // ลงบัญชีไม่ผ่าน → คืนยอดใบต้นทาง + ลบใบลดหนี้ ห้ามมียอดลูกหนี้ลดโดยไม่มี JE
+      await this.prisma.$transaction(async (tx) => {
+        const fresh = await tx.arInvoice.findFirstOrThrow({ where: { id: original.id, tenantId } });
+        const settled = settleInvoice(fresh, { credited: -amount });
+        await tx.arInvoice.update({
+          where: { id: fresh.id },
+          data: {
+            creditedAmount: settled.creditedAmount,
+            balance: settled.balance,
+            status: settled.status,
+          },
+        });
+        await tx.arInvoice.deleteMany({ where: { id: creditNote.id, tenantId } });
+      });
+      throw error;
+    }
+
+    await this.prisma.arInvoice.updateMany({
+      where: { id: creditNote.id, tenantId },
+      data: { isPosted: true, postedAt: new Date(), postedBy: createdBy },
+    });
+    this.logger.log(`Credit note ${creditNoteNo} (${amount}) issued against ${original.invoiceNo}`);
+    return this.findOne(creditNote.id, tenantId);
+  }
+
+  /** ยกเลิกใบลดหนี้ → กลับรายการ JE แล้วคืนยอดคงค้างให้ใบต้นทาง */
+  private async voidCreditNote(
+    creditNote: { id: string; invoiceNo: string; refInvoiceId: string | null; totalAmount: unknown },
+    tenantId: string,
+    voidedBy: string,
+    reason?: string,
+  ) {
+    await this.journalEntriesService?.reverseBySource(
+      tenantId,
+      JournalSourceTypeEnum.AR_INVOICE,
+      creditNote.id,
+      voidedBy,
+      `ยกเลิกใบลดหนี้ ${creditNote.invoiceNo}`,
+    );
+    const amount = Number(creditNote.totalAmount);
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (creditNote.refInvoiceId) {
+        const original = await tx.arInvoice.findFirst({
+          where: { id: creditNote.refInvoiceId, tenantId },
+        });
+        if (original) {
+          const settled = settleInvoice(original, { credited: -amount });
+          await tx.arInvoice.update({
+            where: { id: original.id },
+            data: {
+              creditedAmount: settled.creditedAmount,
+              balance: settled.balance,
+              status: settled.status,
+            },
+          });
+        }
+      }
+      return tx.arInvoice.update({
+        where: { id: creditNote.id },
+        data: { status: 'VOID', voidedBy, voidedAt: new Date(), voidReason: reason },
+      });
+    });
+    this.logger.log(`Credit note ${creditNote.invoiceNo} voided by ${voidedBy}`);
     return updated;
   }
 

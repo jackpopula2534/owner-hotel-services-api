@@ -16,6 +16,8 @@ import {
   resolveAccountIds,
   settlementAccountCode,
 } from '@/modules/accounting/ledger/posting-accounts.util';
+import { settleInvoice } from '../ar-invoice-balance.util';
+import { RecordWhtCertificateDto } from './dto/record-wht-certificate.dto';
 
 const roundMoney = (n: number): number => Math.round(n * 100) / 100;
 
@@ -103,7 +105,10 @@ export class ArReceiptsService {
       return {
         ...r,
         allocatedAmount: allocated,
-        unallocatedAmount: r.status === 'VOID' ? 0 : roundMoney(Number(r.totalAmount) - allocated),
+        unallocatedAmount:
+          r.status === 'VOID'
+            ? 0
+            : roundMoney(Number(r.totalAmount) + Number(r.whtAmount) - allocated),
         journalEntryNo: entryOf.get(r.id)?.entryNo ?? null,
       };
     });
@@ -119,9 +124,15 @@ export class ArReceiptsService {
     if (new Set(invoiceIds).size !== invoiceIds.length) {
       throw new BadRequestException('ตัดชำระใบแจ้งหนี้ใบเดียวกันซ้ำในใบเสร็จเดียวไม่ได้');
     }
-    if (allocatedTotal - dto.totalAmount > 0.01) {
+    // ลูกค้าหักภาษี ณ ที่จ่าย → เงินเข้าน้อยกว่ายอดหนี้ที่ตัดได้ (ตัดได้ = รับจริง + ภาษีถูกหัก)
+    const whtAmount = roundMoney(dto.whtAmount ?? 0);
+    if (whtAmount > 0 && whtAmount >= dto.totalAmount) {
+      throw new BadRequestException('ภาษีหัก ณ ที่จ่ายต้องน้อยกว่ายอดเงินที่รับจริง');
+    }
+    if (allocatedTotal - (dto.totalAmount + whtAmount) > 0.01) {
       throw new BadRequestException(
-        `ยอดตัดชำระรวม ${allocatedTotal} เกินยอดรับ ${dto.totalAmount}`,
+        `ยอดตัดชำระรวม ${allocatedTotal} เกินยอดรับ ${dto.totalAmount}` +
+          (whtAmount > 0 ? ` + ภาษีถูกหัก ${whtAmount}` : ''),
       );
     }
 
@@ -133,6 +144,7 @@ export class ArReceiptsService {
       ACCOUNT_CODES.AR_TRADE,
       ACCOUNT_CODES.AR_CITY_LEDGER,
       ACCOUNT_CODES.DEPOSIT_RECEIVED,
+      ...(whtAmount > 0 ? [ACCOUNT_CODES.WHT_RECEIVABLE] : []),
     ]);
 
     const receiptNo = await this.generateReceiptNo(tenantId);
@@ -148,6 +160,9 @@ export class ArReceiptsService {
           companyName: dto.companyName,
           method: dto.method,
           totalAmount: dto.totalAmount,
+          whtAmount,
+          whtCertNo: whtAmount > 0 ? dto.whtCertNo || null : null,
+          whtCertDate: whtAmount > 0 && dto.whtCertDate ? new Date(dto.whtCertDate) : null,
           reference: dto.reference,
           notes: dto.notes,
           status: 'CLEARED',
@@ -183,17 +198,10 @@ export class ArReceiptsService {
             },
           });
 
-          const newPaid = roundMoney(Number(invoice.paidAmount) + alloc.amount);
-          const newBalance = roundMoney(Number(invoice.totalAmount) - newPaid);
-          const newStatus = newBalance <= 0.01 ? 'PAID' : newPaid > 0 ? 'PARTIAL' : invoice.status;
-
+          const settled = settleInvoice(invoice, { paid: alloc.amount });
           await tx.arInvoice.update({
             where: { id: alloc.invoiceId },
-            data: {
-              paidAmount: newPaid,
-              balance: Math.max(0, newBalance),
-              status: newStatus,
-            },
+            data: { paidAmount: settled.paidAmount, balance: settled.balance, status: settled.status },
           });
         }
       }
@@ -220,14 +228,10 @@ export class ArReceiptsService {
       for (const alloc of allocations) {
         const invoice = await tx.arInvoice.findFirst({ where: { id: alloc.invoiceId, tenantId } });
         if (!invoice) continue;
-        const newPaid = Math.max(0, roundMoney(Number(invoice.paidAmount) - Number(alloc.amount)));
+        const settled = settleInvoice(invoice, { paid: -Number(alloc.amount) });
         await tx.arInvoice.update({
           where: { id: invoice.id },
-          data: {
-            paidAmount: newPaid,
-            balance: roundMoney(Number(invoice.totalAmount) - newPaid),
-            status: newPaid <= 0 ? 'ISSUED' : 'PARTIAL',
-          },
+          data: { paidAmount: settled.paidAmount, balance: settled.balance, status: settled.status },
         });
       }
       await tx.arReceiptAllocation.deleteMany({ where: { receiptId, tenantId } });
@@ -238,8 +242,9 @@ export class ArReceiptsService {
 
   /**
    * DR เงินสด/ธนาคาร (ตามวิธีชำระ) = ยอดรับ
+   * DR ภาษีถูกหัก ณ ที่จ่าย 1109 = ภาษีที่ลูกค้าหักไว้ (ถ้ามี)
    * CR ลูกหนี้การค้า 1103 / City Ledger 1104 = ยอดที่ตัดใบแจ้งหนี้ (ตามชนิดใบ)
-   * CR เงินมัดจำรับล่วงหน้า 2105 = ส่วนที่ยังไม่ได้ตัดใบไหน
+   * CR เงินมัดจำรับล่วงหน้า 2105 = (ยอดรับ + ภาษีถูกหัก) ส่วนที่ยังไม่ได้ตัดใบไหน
    */
   private async postReceiptJournal(
     receiptId: string,
@@ -255,6 +260,7 @@ export class ArReceiptsService {
     });
 
     const total = Number(receipt.totalAmount);
+    const wht = Number(receipt.whtAmount);
     const byCode = new Map<string, number>();
     for (const alloc of receipt.allocations) {
       const code =
@@ -264,13 +270,33 @@ export class ArReceiptsService {
       byCode.set(code, (byCode.get(code) ?? 0) + Number(alloc.amount));
     }
     const allocated = [...byCode.values()].reduce((sum, v) => sum + v, 0);
-    const unallocated = Math.round((total - allocated) * 100) / 100;
+    const unallocated = roundMoney(total + wht - allocated);
     if (unallocated > 0) byCode.set(ACCOUNT_CODES.DEPOSIT_RECEIVED, unallocated);
 
     const description = `รับชำระ ${receipt.receiptNo}`;
+    const debitLines = [
+      {
+        accountId: accountIds.get(settlementAccountCode(receipt.method))!,
+        description,
+        debit: total,
+        credit: 0,
+        subRef: receipt.receiptNo,
+      },
+      ...(wht > 0
+        ? [
+            {
+              accountId: accountIds.get(ACCOUNT_CODES.WHT_RECEIVABLE)!,
+              description: `ภาษีถูกหัก ณ ที่จ่าย ${receipt.receiptNo}`,
+              debit: wht,
+              credit: 0,
+              subRef: receipt.receiptNo,
+            },
+          ]
+        : []),
+    ];
     const creditLines = [...byCode.entries()].map(([code, amount], i) => ({
       accountId: accountIds.get(code)!,
-      lineNo: i + 2,
+      lineNo: i + 1 + debitLines.length,
       description,
       debit: 0,
       credit: amount,
@@ -285,17 +311,7 @@ export class ArReceiptsService {
       sourceType: JournalSourceTypeEnum.AR_RECEIPT,
       sourceId: receipt.id,
       createdBy,
-      lines: [
-        {
-          accountId: accountIds.get(settlementAccountCode(receipt.method))!,
-          lineNo: 1,
-          description,
-          debit: total,
-          credit: 0,
-          subRef: receipt.receiptNo,
-        },
-        ...creditLines,
-      ],
+      lines: [...debitLines.map((l, i) => ({ ...l, lineNo: i + 1 })), ...creditLines],
     });
 
     await this.prisma.arReceipt.updateMany({
@@ -340,18 +356,34 @@ export class ArReceiptsService {
         });
         if (!invoice) continue;
 
-        const newPaid = Math.max(0, roundMoney(Number(invoice.paidAmount) - Number(alloc.amount)));
-        const newBalance = roundMoney(Number(invoice.totalAmount) - newPaid);
-        const newStatus = invoice.status === 'VOID' ? 'VOID' : newPaid <= 0 ? 'ISSUED' : 'PARTIAL';
-
+        const settled = settleInvoice(invoice, { paid: -Number(alloc.amount) });
         await tx.arInvoice.update({
           where: { id: alloc.invoiceId },
-          data: { paidAmount: newPaid, balance: newBalance, status: newStatus },
+          data: { paidAmount: settled.paidAmount, balance: settled.balance, status: settled.status },
         });
       }
     });
 
     this.logger.log(`AR Receipt ${receipt.receiptNo} voided by ${voidedBy}`);
     return this.prisma.arReceipt.findFirst({ where: { id, tenantId } });
+  }
+
+  /** บันทึก/แก้ไขเลขหนังสือรับรอง 50 ทวิ ที่ลูกค้าส่งมาทีหลัง (ไม่กระทบรายการบัญชี) */
+  async recordWhtCertificate(id: string, dto: RecordWhtCertificateDto, tenantId: string) {
+    const receipt = await this.prisma.arReceipt.findFirst({ where: { id, tenantId } });
+    if (!receipt) throw new NotFoundException(`Receipt ${id} not found`);
+    if (receipt.status === 'VOID') throw new BadRequestException('ใบเสร็จถูกยกเลิกแล้ว');
+    if (Number(receipt.whtAmount) <= 0) {
+      throw new BadRequestException('ใบเสร็จนี้ไม่มีภาษีหัก ณ ที่จ่าย');
+    }
+    await this.prisma.arReceipt.updateMany({
+      where: { id, tenantId },
+      data: {
+        whtCertNo: dto.whtCertNo.trim(),
+        whtCertDate: dto.whtCertDate ? new Date(dto.whtCertDate) : null,
+      },
+    });
+    this.logger.log(`AR Receipt ${receipt.receiptNo} WHT certificate ${dto.whtCertNo} recorded`);
+    return this.prisma.arReceipt.findFirstOrThrow({ where: { id, tenantId } });
   }
 }

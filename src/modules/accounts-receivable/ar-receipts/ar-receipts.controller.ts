@@ -16,6 +16,7 @@ import { ArReceiptAllocationService } from './ar-receipt-allocation.service';
 import { AllocateArReceiptDto } from './dto/allocate-ar-receipt.dto';
 import { ArReceiptsService } from './ar-receipts.service';
 import { CreateArReceiptDto } from './dto/create-ar-receipt.dto';
+import { RecordWhtCertificateDto } from './dto/record-wht-certificate.dto';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AddonGuard } from '@/common/guards/addon.guard';
 import { RequireAddon } from '@/common/decorators/require-addon.decorator';
@@ -83,7 +84,8 @@ export class ArReceiptsController {
 
   @Get('summary')
   @ApiOperation({
-    summary: 'สรุปหน้ารับชำระ: รับเดือนนี้ / ยังไม่จัดสรร (2105) / ลูกหนี้ค้าง-เกินกำหนด',
+    summary:
+      'สรุปหน้ารับชำระ: รับเดือนนี้ / ยังไม่จัดสรร (2105) / ลูกหนี้ค้าง-เกินกำหนด / WHT รอ 50 ทวิ',
   })
   @ApiQuery({ name: 'propertyId', required: true })
   @ApiQuery({ name: 'month', required: false, description: 'YYYY-MM (ค่าเริ่มต้น = เดือนนี้)' })
@@ -127,6 +129,17 @@ export class ArReceiptsController {
   @ApiOperation({ summary: 'สร้าง AR Receipt และ Allocate กับ Invoice' })
   async create(@CurrentUser() user: JwtPayload, @Body() dto: CreateArReceiptDto) {
     const data = await this.service.create(dto, user.tenantId, user.sub);
+    return { success: true, data };
+  }
+
+  @Patch(':id/wht-certificate')
+  @ApiOperation({ summary: 'บันทึกเลขหนังสือรับรอง 50 ทวิ ของภาษีที่ลูกค้าหัก ณ ที่จ่าย' })
+  async recordWhtCertificate(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: RecordWhtCertificateDto,
+  ) {
+    const data = await this.service.recordWhtCertificate(id, dto, user.tenantId);
     return { success: true, data };
   }
 

@@ -6327,6 +6327,10 @@ model ArInvoice {
   totalAmount    Decimal         @default(0.00) @db.Decimal(12, 2)
   /// ยอดที่ชำระแล้ว
   paidAmount     Decimal         @default(0.00) @db.Decimal(12, 2)
+  /// ยอดที่ลดหนี้แล้ว (ผลรวมใบลดหนี้ที่อ้างใบนี้) — balance = total - paid - credited
+  creditedAmount Decimal         @default(0.00) @db.Decimal(12, 2)
+  /// ใบลดหนี้ → ใบแจ้งหนี้ต้นทาง (ตรวจ tenant ใน service)
+  refInvoiceId   String?
   /// ยอดค้างชำระ
   balance        Decimal         @default(0.00) @db.Decimal(12, 2)
   status         ArInvoiceStatus @default(DRAFT)
@@ -6361,6 +6365,7 @@ model ArInvoice {
   @@index([guestId])
   @@index([bookingId])
   @@index([folioId])
+  @@index([refInvoiceId])
   @@index([status])
   @@index([issueDate])
   @@index([dueDate])
@@ -6538,6 +6543,11 @@ model ArReceipt {
   method       AccPaymentMethod
   /// ยอดรวมที่รับ
   totalAmount  Decimal          @db.Decimal(12, 2)
+  /// ภาษีที่ลูกค้าหัก ณ ที่จ่าย (Dr 1109) — ยอดตัดหนี้ได้ = totalAmount + whtAmount
+  whtAmount    Decimal          @default(0.00) @db.Decimal(12, 2)
+  /// เลขที่หนังสือรับรอง 50 ทวิ (null = ยังไม่ได้รับ)
+  whtCertNo    String?          @db.VarChar(50)
+  whtCertDate  DateTime?        @db.Date
   /// อ้างอิงการชำระ
   reference    String?          @db.VarChar(100)
   /// หมายเหตุ

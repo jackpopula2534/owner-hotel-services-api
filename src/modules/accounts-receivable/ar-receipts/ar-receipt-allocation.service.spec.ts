@@ -15,6 +15,7 @@ describe('ArReceiptAllocationService.allocate', () => {
     receiptNo: 'RCV-1',
     status: 'CLEARED',
     totalAmount: 5000,
+    whtAmount: 0,
     allocations: [],
   };
   const invoice = {
@@ -31,7 +32,11 @@ describe('ArReceiptAllocationService.allocate', () => {
   beforeEach(() => {
     prisma = {
       arReceipt: { findFirst: jest.fn().mockResolvedValue(receipt) },
-      arInvoice: { findMany: jest.fn().mockResolvedValue([invoice]), update: jest.fn() },
+      arInvoice: {
+        findMany: jest.fn().mockResolvedValue([invoice]),
+        findFirstOrThrow: jest.fn().mockResolvedValue(invoice),
+        update: jest.fn(),
+      },
       arReceiptAllocation: {
         create: jest.fn().mockResolvedValue({ id: 'a1' }),
         deleteMany: jest.fn(),
@@ -75,6 +80,24 @@ describe('ArReceiptAllocationService.allocate', () => {
   it('จัดสรรเกินเงินที่เหลือ → 400', async () => {
     await expect(
       service.allocate('r1', { allocations: [{ invoiceId: 'i1', amount: 6000 }] }, TENANT, 'u1'),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('ใบเสร็จที่มีภาษีถูกหัก → จัดสรรได้ถึงยอดรับ + ภาษี', async () => {
+    jest.spyOn(service, 'findOne').mockResolvedValue({} as never);
+    prisma.arReceipt.findFirst.mockResolvedValue({ ...receipt, totalAmount: 4850, whtAmount: 150 });
+    await service.allocate(
+      'r1',
+      { allocations: [{ invoiceId: 'i1', amount: 5000 }] },
+      TENANT,
+      'u1',
+    );
+    expect(journal.createAndPostAutoEntry.mock.calls[0][1].lines[0]).toMatchObject({
+      accountId: 'acc-2105',
+      debit: 5000,
+    });
+    await expect(
+      service.allocate('r1', { allocations: [{ invoiceId: 'i1', amount: 5000.5 }] }, TENANT, 'u1'),
     ).rejects.toThrow(BadRequestException);
   });
 

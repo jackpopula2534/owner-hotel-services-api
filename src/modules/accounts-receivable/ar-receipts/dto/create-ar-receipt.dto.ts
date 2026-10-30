@@ -9,6 +9,7 @@ import {
   IsArray,
   ValidateNested,
   Min,
+  MaxLength,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
@@ -56,6 +57,27 @@ export class CreateArReceiptDto {
   @Min(0.01)
   @Type(() => Number)
   totalAmount: number;
+
+  @ApiPropertyOptional({
+    description: 'ภาษีที่ลูกค้าหัก ณ ที่จ่าย (ยอดตัดหนี้ได้ = ยอดรับ + ภาษีถูกหัก)',
+    example: 30.0,
+  })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Type(() => Number)
+  whtAmount?: number;
+
+  @ApiPropertyOptional({ description: 'เลขที่หนังสือรับรอง 50 ทวิ (ถ้าได้รับแล้ว)' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  whtCertNo?: string;
+
+  @ApiPropertyOptional({ description: 'วันที่ในหนังสือรับรอง 50 ทวิ' })
+  @IsOptional()
+  @IsDateString()
+  whtCertDate?: string;
 
   @ApiPropertyOptional({ description: 'เลขที่อ้างอิง (Transaction ID, cheque no.)' })
   @IsOptional()

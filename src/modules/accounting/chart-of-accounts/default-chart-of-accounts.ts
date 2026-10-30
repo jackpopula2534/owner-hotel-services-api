@@ -98,6 +98,14 @@ export const DEFAULT_ACCOUNTS: readonly DefaultAccount[] = [
     level: 'ACCOUNT',
   },
   {
+    code: '1109',
+    name: 'ภาษีถูกหัก ณ ที่จ่าย',
+    nameEn: 'Withholding Tax Receivable',
+    type: 'ASSET',
+    normalBalance: 'DEBIT',
+    level: 'ACCOUNT',
+  },
+  {
     code: '1200',
     name: 'สินทรัพย์ไม่หมุนเวียน',
     nameEn: 'Non-Current Assets',
