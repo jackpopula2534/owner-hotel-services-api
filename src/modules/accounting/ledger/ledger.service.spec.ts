@@ -16,7 +16,7 @@ describe('LedgerService', () => {
 
   beforeEach(async () => {
     prisma = {
-      ledgerBalance: { findMany: jest.fn().mockResolvedValue([]), upsert: jest.fn() },
+      ledgerBalance: { findMany: jest.fn().mockResolvedValue([]), upsert: jest.fn(), updateMany: jest.fn() },
       journalEntry: { findMany: jest.fn().mockResolvedValue([]) },
     };
 
@@ -180,12 +180,35 @@ describe('LedgerService', () => {
       });
     });
 
-    it('อ่านเฉพาะ JE ที่ POSTED ของ tenant นั้น', async () => {
+    it('นับใบที่ถูกกลับรายการด้วย — คู่ใบเดิม/ใบกลับหักล้างเป็น 0', async () => {
+      prisma.journalEntry.findMany.mockResolvedValue([
+        { propertyId: PROPERTY, fiscalYear: 2026, fiscalPeriod: 7, status: 'REVERSED', lines: [
+          { accountId: 'cash', debit: 500, credit: 0 },
+          { accountId: 'rev', debit: 0, credit: 500 },
+        ] },
+        { propertyId: PROPERTY, fiscalYear: 2026, fiscalPeriod: 7, status: 'POSTED', lines: [
+          { accountId: 'cash', debit: 0, credit: 500 },
+          { accountId: 'rev', debit: 500, credit: 0 },
+        ] },
+      ]);
+
+      await service.rebuildLedgerBalances(TENANT, PROPERTY);
+
+      const cash = prisma.ledgerBalance.upsert.mock.calls[0][0];
+      expect(cash.update.closingBalance).toBe(0);
+      // ล้างแถวเก่าทั้ง property ก่อนเขียนยอดใหม่
+      expect(prisma.ledgerBalance.updateMany).toHaveBeenCalledWith({
+        where: { tenantId: TENANT, propertyId: PROPERTY },
+        data: { periodDebit: 0, periodCredit: 0, closingBalance: 0, txnCount: 0 },
+      });
+    });
+
+    it('อ่าน JE ที่ POSTED และ REVERSED ของ tenant นั้น', async () => {
       await service.rebuildLedgerBalances(TENANT, PROPERTY);
 
       expect(prisma.journalEntry.findMany.mock.calls[0][0].where).toEqual({
         tenantId: TENANT,
-        status: 'POSTED',
+        status: { in: ['POSTED', 'REVERSED'] },
         propertyId: PROPERTY,
       });
     });
@@ -195,7 +218,7 @@ describe('LedgerService', () => {
 
       expect(prisma.journalEntry.findMany.mock.calls[0][0].where).toEqual({
         tenantId: TENANT,
-        status: 'POSTED',
+        status: { in: ['POSTED', 'REVERSED'] },
       });
     });
   });

@@ -24,6 +24,8 @@ interface AutoPostJournalEntryInput {
   lines: CreateJournalEntryDto['lines'];
 }
 
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
 @Injectable()
 export class JournalEntriesService {
   private readonly logger = new Logger(JournalEntriesService.name);
@@ -96,24 +98,36 @@ export class JournalEntriesService {
           },
           orderBy: { lineNo: 'asc' },
         },
+        reversedBy: { select: { id: true, entryNo: true, entryDate: true, status: true } },
       },
     });
-    if (!entry) throw new NotFoundException(`Journal entry ${id} not found`);
+    if (!entry) throw new NotFoundException('ไม่พบรายการสมุดรายวัน');
     return entry;
   }
 
   async create(dto: CreateJournalEntryDto, tenantId: string, createdBy: string) {
-    // Validate double-entry: debit = credit
-    const totalDebit = dto.lines.reduce((s, l) => s + (l.debit ?? 0), 0);
-    const totalCredit = dto.lines.reduce((s, l) => s + (l.credit ?? 0), 0);
-    const diff = Math.abs(totalDebit - totalCredit);
-    if (diff > 0.01) {
+    // ทุกบรรทัดต้องมีด้านเดียว (เดบิตหรือเครดิต) และยอดรวมสองด้านต้องเท่ากัน
+    if (dto.lines.length < 2) {
+      throw new BadRequestException('รายการบัญชีต้องมีอย่างน้อย 2 บรรทัด');
+    }
+    // รายการอัตโนมัติอาจมีบรรทัด 0/0 (เช่นภาษี 0%) ปล่อยไว้ได้ — ห้ามแค่บรรทัดที่มีทั้งสองด้าน
+    const manual = (dto.sourceType ?? 'MANUAL') === 'MANUAL';
+    const badLine = dto.lines.find((l) => {
+      const dr = (l.debit ?? 0) > 0;
+      const cr = (l.credit ?? 0) > 0;
+      return (dr && cr) || (manual && !dr && !cr);
+    });
+    if (badLine) {
       throw new BadRequestException(
-        `Journal entry is not balanced: Debit ${totalDebit.toFixed(2)} ≠ Credit ${totalCredit.toFixed(2)}`,
+        `บรรทัดที่ ${badLine.lineNo} ต้องกรอกเดบิตหรือเครดิตอย่างใดอย่างหนึ่ง`,
       );
     }
-    if (dto.lines.length < 2) {
-      throw new BadRequestException('Journal entry must have at least 2 lines');
+    const totalDebit = round2(dto.lines.reduce((s, l) => s + (l.debit ?? 0), 0));
+    const totalCredit = round2(dto.lines.reduce((s, l) => s + (l.credit ?? 0), 0));
+    if (Math.abs(totalDebit - totalCredit) > 0.01) {
+      throw new BadRequestException(
+        `ยอดเดบิต ${totalDebit.toFixed(2)} ไม่เท่ากับเครดิต ${totalCredit.toFixed(2)}`,
+      );
     }
 
     // Validate all accounts exist
@@ -124,14 +138,14 @@ export class JournalEntriesService {
     if (accounts.length !== accountIds.length) {
       const foundIds = new Set(accounts.map((a) => a.id));
       const missing = accountIds.filter((id) => !foundIds.has(id));
-      throw new BadRequestException(`Account(s) not found or inactive: ${missing.join(', ')}`);
+      throw new BadRequestException(`ไม่พบบัญชีหรือบัญชีถูกปิดใช้งาน (${missing.length} บัญชี)`);
     }
 
     // Check for header-only accounts
     const headerOnlyUsed = accounts.filter((a) => a.isHeaderOnly);
     if (headerOnlyUsed.length > 0) {
       throw new BadRequestException(
-        `Cannot post to header-only account(s): ${headerOnlyUsed.map((a) => a.code).join(', ')}`,
+        `บัญชีหัวข้อลงรายการโดยตรงไม่ได้: ${headerOnlyUsed.map((a) => a.code).join(', ')}`,
       );
     }
 
@@ -226,7 +240,7 @@ export class JournalEntriesService {
   async post(id: string, tenantId: string, postedBy: string) {
     const entry = await this.findOne(id, tenantId);
     if (entry.status !== 'DRAFT') {
-      throw new BadRequestException(`Cannot post entry with status: ${entry.status}`);
+      throw new BadRequestException('ลงบัญชีได้เฉพาะรายการสถานะร่าง');
     }
 
     // ร่างที่ค้างไว้ก่อนปิดปีบัญชี ห้ามโพสต์ทะลุเข้าไปทีหลัง
@@ -253,6 +267,40 @@ export class JournalEntriesService {
     });
 
     return updated;
+  }
+
+  /** จำนวนรายการตามสถานะ + ร่างที่ค้าง (การ์ดสรุปหน้าสมุดรายวัน) */
+  async summary(tenantId: string, propertyId?: string) {
+    const where = { tenantId, ...(propertyId ? { propertyId } : {}) };
+    const [byStatus, draft] = await Promise.all([
+      this.prisma.journalEntry.groupBy({ by: ['status'], where, _count: { _all: true } }),
+      this.prisma.journalEntry.aggregate({
+        where: { ...where, status: 'DRAFT' },
+        _sum: { totalDebit: true },
+        _min: { entryDate: true },
+      }),
+    ]);
+    const counts: Record<string, number> = { DRAFT: 0, POSTED: 0, REVERSED: 0, VOID: 0 };
+    for (const row of byStatus) counts[row.status] = row._count._all;
+    return {
+      total: Object.values(counts).reduce((a, b) => a + b, 0),
+      counts,
+      draftTotal: Number(draft._sum.totalDebit ?? 0),
+      oldestDraftDate: draft._min.entryDate,
+    };
+  }
+
+  /** ลบได้เฉพาะร่างที่บันทึกเอง — รายการจากเอกสารต้นทางต้องยกเลิกที่เอกสาร */
+  async removeDraft(id: string, tenantId: string) {
+    const entry = await this.findOne(id, tenantId);
+    if (entry.status !== 'DRAFT') {
+      throw new BadRequestException('ลบได้เฉพาะรายการสถานะร่าง — รายการที่ลงบัญชีแล้วให้กลับรายการแทน');
+    }
+    if (entry.sourceType !== 'MANUAL') {
+      throw new BadRequestException('รายการนี้สร้างจากเอกสารต้นทาง ให้ยกเลิกที่เอกสารแทน');
+    }
+    await this.prisma.journalEntry.deleteMany({ where: { id, tenantId, status: 'DRAFT' } });
+    return { id };
   }
 
   /**
@@ -290,7 +338,7 @@ export class JournalEntriesService {
   ) {
     const entry = await this.findOne(id, tenantId);
     if (entry.status !== 'POSTED') {
-      throw new BadRequestException('Can only reverse POSTED entries');
+      throw new BadRequestException('กลับรายการได้เฉพาะรายการที่ลงบัญชีแล้ว');
     }
 
     const entryDate = reversalDate ? new Date(reversalDate) : new Date();
@@ -309,7 +357,7 @@ export class JournalEntriesService {
           propertyId: entry.propertyId,
           entryNo,
           entryDate,
-          description: description ?? `Reversal of ${entry.entryNo}`,
+          description: description ?? `กลับรายการ ${entry.entryNo}`,
           reference: entry.entryNo,
           sourceType: 'ADJUSTMENT',
           status: 'POSTED',
@@ -325,7 +373,7 @@ export class JournalEntriesService {
             create: entry.lines.map((l, i) => ({
               accountId: l.accountId,
               lineNo: i + 1,
-              description: `Reversal: ${l.description ?? ''}`,
+              description: `กลับรายการ: ${l.description ?? entry.description}`.slice(0, 300),
               debit: l.credit,
               credit: l.debit,
               costCenterId: l.costCenterId,

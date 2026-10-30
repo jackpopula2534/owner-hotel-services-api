@@ -171,7 +171,8 @@ export class LedgerService {
    */
   async rebuildLedgerBalances(tenantId: string, propertyId?: string) {
     const entries = await this.prisma.journalEntry.findMany({
-      where: { tenantId, status: 'POSTED', ...(propertyId ? { propertyId } : {}) },
+      // ใบที่ถูกกลับรายการต้องนับด้วย ไม่งั้นเหลือแต่ใบกลับ ยอดติดลบเป็นสองเท่า
+      where: { tenantId, status: { in: ['POSTED', 'REVERSED'] }, ...(propertyId ? { propertyId } : {}) },
       include: { lines: { select: { accountId: true, debit: true, credit: true } } },
     });
 
@@ -210,6 +211,12 @@ export class LedgerService {
       }
     }
 
+    // แถวเก่าที่ไม่มีรายการรองรับแล้วต้องเป็น 0 ไม่ใช่ค้างยอดเดิม
+    await this.prisma.ledgerBalance.updateMany({
+      where: { tenantId, ...(propertyId ? { propertyId } : {}) },
+      data: { periodDebit: 0, periodCredit: 0, closingBalance: 0, txnCount: 0 },
+    });
+
     for (const row of totals.values()) {
       const { periodDebit, periodCredit, txnCount, ...key } = row;
       const closingBalance = periodDebit - periodCredit;
@@ -240,7 +247,8 @@ export class LedgerService {
         propertyId,
         fiscalYear,
         fiscalPeriod: { gte: fiscalPeriodFrom, lte: fiscalPeriodTo },
-        status: 'POSTED',
+        // ใบที่ถูกกลับรายการยังอยู่ใน ledger_balances (ใบกลับหักล้างให้) — ตัดออกแล้วยอดไม่ตรงงบทดลอง
+        status: { in: ['POSTED', 'REVERSED'] },
         lines: { some: { accountId } },
       },
       include: {
@@ -257,8 +265,11 @@ export class LedgerService {
       e.lines.map((l) => {
         runningBalance += Number(l.debit) - Number(l.credit);
         return {
+          journalEntryId: e.id,
           entryDate: e.entryDate,
           entryNo: e.entryNo,
+          sourceType: e.sourceType,
+          status: e.status,
           description: e.description,
           reference: e.reference,
           lineDescription: l.description,

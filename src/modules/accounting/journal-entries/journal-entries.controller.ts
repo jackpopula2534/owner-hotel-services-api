@@ -4,6 +4,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Param,
   Body,
   Query,
@@ -19,7 +20,7 @@ import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AddonGuard } from '@/common/guards/addon.guard';
 import { RequireAddon } from '@/common/decorators/require-addon.decorator';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
-import { IsDateString, IsOptional, IsString } from 'class-validator';
+import { IsDateString, IsOptional, IsString, IsUUID } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { RolesGuard } from '@/common/guards/roles.guard';
 import { Roles } from '@/common/decorators/roles.decorator';
@@ -31,6 +32,10 @@ class ReverseJournalDto {
   @IsOptional()
   @IsDateString()
   reversalDate?: string;
+}
+
+class JournalSummaryQueryDto {
+  @ApiPropertyOptional() @IsOptional() @IsUUID() propertyId?: string;
 }
 
 interface JwtPayload {
@@ -54,6 +59,13 @@ export class JournalEntriesController {
   async findAll(@CurrentUser() user: JwtPayload, @Query() query: QueryJournalEntryDto) {
     const data = await this.service.findAll(user.tenantId, query);
     return withPaginationMeta(data);
+  }
+
+  @Get('summary')
+  @ApiOperation({ summary: 'จำนวนรายการตามสถานะ + ยอดร่างค้าง' })
+  async summary(@CurrentUser() user: JwtPayload, @Query() query: JournalSummaryQueryDto) {
+    const data = await this.service.summary(user.tenantId, query.propertyId);
+    return { success: true, data };
   }
 
   @Get(':id')
@@ -93,6 +105,13 @@ export class JournalEntriesController {
       dto.description,
       dto.reversalDate,
     );
+    return { success: true, data };
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'ลบรายการร่างที่บันทึกเอง (MANUAL + DRAFT เท่านั้น)' })
+  async remove(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    const data = await this.service.removeDraft(id, user.tenantId);
     return { success: true, data };
   }
 }
