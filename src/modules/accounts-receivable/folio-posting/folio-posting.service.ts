@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { FolioChargeType, Prisma } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
 import { bangkokDayRange, toBangkokDate } from '@/common/utils/bangkok-day.util';
+import { CHECKOUT_SETTLEMENT_REF } from '@/modules/accounting/ledger/folio-gl.util';
 
 /**
  * Booking statuses that may still sign charges to their room. A checked-out or
@@ -272,7 +273,9 @@ export class FolioPostingService {
       where: { id: folio.id },
       data: { totalCharges: { decrement: amount }, balance: { decrement: amount } },
     });
-    this.logger.log(`Reversed folio charge ${charge.id} (${sourceType}:${sourceId}) within caller tx`);
+    this.logger.log(
+      `Reversed folio charge ${charge.id} (${sourceType}:${sourceId}) within caller tx`,
+    );
     return { chargeId: charge.id, folioId: folio.id, amount };
   }
 
@@ -322,21 +325,23 @@ export class FolioPostingService {
       orderBy: { room: { number: 'asc' } },
     });
 
-    return bookings
-      // การจองที่ยังไม่ได้ผูกห้องชาร์จเข้าห้องไม่ได้ ไม่ต้องเอามาให้เลือก
-      .filter((b) => b.room?.number)
-      .map((b) => ({
-        roomNumber: b.room!.number,
-        guestName:
-          [b.guest?.firstName ?? b.guestFirstName, b.guest?.lastName ?? b.guestLastName]
-            .filter(Boolean)
-            .join(' ')
-            .trim() || '-',
-        bookingId: b.id,
-        status: b.status,
-        roomId: b.room!.id,
-        propertyId: b.room!.propertyId,
-      }));
+    return (
+      bookings
+        // การจองที่ยังไม่ได้ผูกห้องชาร์จเข้าห้องไม่ได้ ไม่ต้องเอามาให้เลือก
+        .filter((b) => b.room?.number)
+        .map((b) => ({
+          roomNumber: b.room!.number,
+          guestName:
+            [b.guest?.firstName ?? b.guestFirstName, b.guest?.lastName ?? b.guestLastName]
+              .filter(Boolean)
+              .join(' ')
+              .trim() || '-',
+          bookingId: b.id,
+          status: b.status,
+          roomId: b.room!.id,
+          propertyId: b.room!.propertyId,
+        }))
+    );
   }
 
   // ─── internals ──────────────────────────────────────────────────────────────
@@ -346,6 +351,119 @@ export class FolioPostingService {
    * bare room number is resolved against in-house bookings and must match
    * exactly one, otherwise the caller has to disambiguate.
    */
+  /**
+   * เปิด folio บัญชีให้การจองที่เข้าพักแล้ว (เรียกตอนเช็คอิน และตอน Night Audit กวาดห้องที่ยังไม่มี folio)
+   *
+   * Night Audit ลงค่าห้องได้เฉพาะห้องที่มี folio OPEN — เดิม folio เกิดเฉพาะตอนมีบิล POS
+   * ชาร์จเข้าห้อง ห้องส่วนใหญ่จึงไม่เคยถูกรับรู้รายได้รายคืน คืน null ถ้าการจองไม่มีแขกผูกไว้
+   */
+  async openFolioForBooking(
+    tenantId: string,
+    bookingId: string,
+    createdBy: string,
+  ): Promise<{ folioId: string; created: boolean } | null> {
+    const booking = await this.prisma.booking.findFirst({
+      where: { id: bookingId, tenantId },
+      select: {
+        id: true,
+        guestId: true,
+        propertyId: true,
+        roomId: true,
+        checkIn: true,
+        status: true,
+      },
+    });
+    if (!booking?.guestId || booking.status !== 'checked_in') return null;
+
+    const existing = await this.prisma.guestFolio.findFirst({
+      where: { tenantId, bookingId },
+      select: { id: true },
+    });
+    if (existing) return { folioId: existing.id, created: false };
+
+    const folio = await this.prisma.$transaction((tx) =>
+      this.findOrCreateFolio(tx, {
+        tenantId,
+        bookingId: booking.id,
+        guestId: booking.guestId as string,
+        propertyId: booking.propertyId,
+        roomId: booking.roomId,
+        checkInDate: new Date(`${toBangkokDate(booking.checkIn)}T00:00:00.000Z`),
+        createdBy,
+      }),
+    );
+    this.logger.log(`Opened folio ${folio.folioNo} for booking ${bookingId}`);
+    return { folioId: folio.id, created: true };
+  }
+
+  /**
+   * เช็คเอาต์ → เคลียร์ค่าห้องบน folio บัญชี (แขกจ่ายค่าห้องผ่านบิลหน้าเคาน์เตอร์แล้ว)
+   * ไม่ลง JE: ส่วนที่ Night Audit ลง GL แล้วถูกตัด 1103 ใน JE เช็คเอาต์ (BOOKING_PAYMENT)
+   * ส่วนที่ยังไม่ลง Night Audit จะถูกตัดออกตอนปิดวันจึงไม่เคยเข้า 1103
+   * ที่เหลือ (POS/มินิบาร์ ชาร์จเข้าห้อง) ยังค้าง → folio เป็น PENDING ให้ไปเก็บเงินที่หน้า Guest Folio
+   */
+  async settleFolioOnCheckout(
+    tenantId: string,
+    bookingId: string,
+    postedBy: string,
+  ): Promise<{ folioId: string; status: string; balance: number } | null> {
+    const folio = await this.prisma.guestFolio.findFirst({
+      where: { tenantId, bookingId, status: 'OPEN' },
+      select: { id: true, propertyId: true },
+    });
+    if (!folio) return null;
+    const reference = CHECKOUT_SETTLEMENT_REF(bookingId);
+
+    return this.prisma.$transaction(async (tx) => {
+      const already = await tx.folioPayment.findFirst({
+        where: { tenantId, folioId: folio.id, reference, isReversed: false },
+        select: { id: true },
+      });
+      const room = await tx.folioCharge.aggregate({
+        where: { tenantId, folioId: folio.id, chargeType: 'ROOM_CHARGE', status: 'POSTED' },
+        _sum: { totalAmount: true },
+      });
+      const roomTotal = Math.round(Number(room._sum.totalAmount ?? 0) * 100) / 100;
+
+      if (!already && roomTotal > 0) {
+        await tx.folioPayment.create({
+          data: {
+            tenantId,
+            propertyId: folio.propertyId,
+            folioId: folio.id,
+            method: 'OTHER',
+            amount: roomTotal,
+            reference,
+            notes: 'ค่าห้องชำระผ่านบิลการจองตอนเช็คเอาต์',
+            postedBy,
+            status: 'CLEARED',
+          },
+        });
+        await tx.guestFolio.update({
+          where: { id: folio.id },
+          data: { totalPayments: { increment: roomTotal }, balance: { decrement: roomTotal } },
+        });
+      }
+
+      // findUnique* ถูก TenantScopeMiddleware ห้ามกับโมเดลที่แยก tenant — ต้องใช้ findFirst + tenantId
+      const current = await tx.guestFolio.findFirstOrThrow({
+        where: { id: folio.id, tenantId },
+        select: { balance: true },
+      });
+      const balance = Number(current.balance);
+      const settled = balance <= 0.01;
+      await tx.guestFolio.update({
+        where: { id: folio.id },
+        data: {
+          status: settled ? 'CLOSED' : 'PENDING',
+          checkOutDate: new Date(`${toBangkokDate(new Date())}T00:00:00.000Z`),
+          ...(settled ? { closedAt: new Date(), closedBy: postedBy } : {}),
+        },
+      });
+      return { folioId: folio.id, status: settled ? 'CLOSED' : 'PENDING', balance };
+    });
+  }
+
   private async resolveBooking(tx: Prisma.TransactionClient, input: PostFolioChargeInput) {
     const select = {
       id: true,
@@ -504,10 +622,7 @@ export class FolioPostingService {
   }
 
   /** Per-tenant, per-month folio number drawn from document_sequences. */
-  private async generateFolioNo(
-    tx: Prisma.TransactionClient,
-    tenantId: string,
-  ): Promise<string> {
+  private async generateFolioNo(tx: Prisma.TransactionClient, tenantId: string): Promise<string> {
     const now = new Date();
     const yearMonth = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
     const seq = await tx.documentSequence.upsert({

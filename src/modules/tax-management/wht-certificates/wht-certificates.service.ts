@@ -70,8 +70,18 @@ export class WhtCertificatesService {
   }
 
   async create(dto: CreateWhtCertDto, tenantId: string, issuedBy: string) {
+    // connect ด้วย id เปล่า ๆ ไม่ผ่านการตรวจ tenant → ยืนยันว่าเป็นของ tenant นี้ก่อน
+    const [supplier, apPayment] = await Promise.all([
+      this.prisma.supplier.findFirst({ where: { id: dto.supplierId, tenantId }, select: { id: true } }),
+      dto.apPaymentId
+        ? this.prisma.apPayment.findFirst({ where: { id: dto.apPaymentId, tenantId }, select: { id: true } })
+        : Promise.resolve(null),
+    ]);
+    if (!supplier) throw new NotFoundException('Supplier not found');
+    if (dto.apPaymentId && !apPayment) throw new NotFoundException('AP payment not found');
+
     const certNo = await this.generateCertNo(tenantId);
-    const whtAmount = (dto.incomeAmount * dto.whtRate) / 100;
+    const whtAmount = Math.round(dto.incomeAmount * dto.whtRate) / 100;
 
     const cert = await this.prisma.whtCertificate.create({
       data: {

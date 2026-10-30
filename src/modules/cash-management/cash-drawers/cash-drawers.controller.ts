@@ -11,24 +11,24 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
-import { IsOptional, IsString, IsNumber, IsInt, Min } from 'class-validator';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsOptional, IsString, IsInt, Min } from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { CashDrawersService } from './cash-drawers.service';
 import { CreateCashDrawerDto } from './dto/create-cash-drawer.dto';
 import { CreateCashTxnDto } from './dto/create-cash-txn.dto';
+import { CloseCashDrawerDto } from './dto/close-cash-drawer.dto';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AddonGuard } from '@/common/guards/addon.guard';
 import { RequireAddon } from '@/common/decorators/require-addon.decorator';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
-
-class CloseDrawerDto {
-  @ApiProperty({ description: 'ยอดเงินที่นับได้จริง', example: 5500 })
-  @IsNumber()
-  @Min(0)
-  @Type(() => Number)
-  countedAmount: number;
-}
+import { RolesGuard } from '@/common/guards/roles.guard';
+import { Roles } from '@/common/decorators/roles.decorator';
+import {
+  ACCOUNTING_CLOSE_ROLES,
+  ACCOUNTING_WRITE_ROLES,
+  AccountingAccess,
+} from '@/modules/accounting/accounting-access.decorator';
 
 class TxnQueryDto {
   @ApiPropertyOptional() @IsOptional() @IsString() dateFrom?: string;
@@ -56,7 +56,8 @@ interface JwtPayload {
 
 @ApiTags('Accounting - Cash Drawers')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, AddonGuard)
+@UseGuards(JwtAuthGuard, AddonGuard, RolesGuard)
+@AccountingAccess(ACCOUNTING_WRITE_ROLES)
 @RequireAddon('ACCOUNTING_MODULE')
 @Controller({ path: 'accounting/cash-drawers', version: '1' })
 export class CashDrawersController {
@@ -98,13 +99,23 @@ export class CashDrawersController {
   }
 
   @Patch(':id/close')
-  @ApiOperation({ summary: 'ปิดลิ้นชักเงินสด (สิ้นกะ)' })
+  @ApiOperation({ summary: 'ปิดกะ (นับเงิน) → PENDING รอหัวหน้าอนุมัติ' })
   async close(
     @CurrentUser() user: JwtPayload,
     @Param('id') id: string,
-    @Body() body: CloseDrawerDto,
+    @Body() body: CloseCashDrawerDto,
   ) {
-    const data = await this.service.close(id, user.tenantId, user.sub, body.countedAmount);
+    const data = await this.service.close(id, user.tenantId, user.sub, body);
+    return { success: true, data };
+  }
+
+  @Roles(...ACCOUNTING_CLOSE_ROLES)
+  @Patch(':id/approve-close')
+  @ApiOperation({
+    summary: 'หัวหน้าอนุมัติปิดกะ (PENDING → CLOSED) และลงบัญชีเงินสดขาด/เกิน (6310)',
+  })
+  async approveClose(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    const data = await this.service.approveClose(id, user.tenantId, user.sub);
     return { success: true, data };
   }
 

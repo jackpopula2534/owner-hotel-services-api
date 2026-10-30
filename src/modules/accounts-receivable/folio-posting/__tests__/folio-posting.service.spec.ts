@@ -199,7 +199,12 @@ describe('FolioPostingService', () => {
       await expect(
         service.listChargeableRooms({ tenantId: TENANT, propertyId: 'prop-1' }),
       ).resolves.toEqual([
-        { roomNumber: '101', guestName: 'Marco Rossi', bookingId: BOOKING.id, status: 'checked_in' },
+        {
+          roomNumber: '101',
+          guestName: 'Marco Rossi',
+          bookingId: BOOKING.id,
+          status: 'checked_in',
+        },
       ]);
 
       const where = prisma.booking.findMany.mock.calls[0][0].where;
@@ -249,7 +254,10 @@ describe('FolioPostingService', () => {
     it('สร้าง folio ใหม่พร้อมเลขจาก document_sequences เมื่อการจองยังไม่มีบิล', async () => {
       const prisma = buildPrisma();
       prisma.guestFolio.findFirst.mockResolvedValue(null);
-      prisma.guestFolio.create.mockImplementation(({ data }: any) => ({ id: 'folio-ใหม่', ...data }));
+      prisma.guestFolio.create.mockImplementation(({ data }: any) => ({
+        id: 'folio-ใหม่',
+        ...data,
+      }));
       const service = await makeService(prisma);
 
       await service.postCharge(input({ bookingId: BOOKING.id }));
@@ -284,7 +292,10 @@ describe('FolioPostingService', () => {
       const prisma = buildPrisma();
       prisma.booking.findFirst.mockResolvedValue({ ...BOOKING, guestId: null });
       prisma.guestFolio.findFirst.mockResolvedValue(null);
-      prisma.guestFolio.create.mockImplementation(({ data }: any) => ({ id: 'folio-ใหม่', ...data }));
+      prisma.guestFolio.create.mockImplementation(({ data }: any) => ({
+        id: 'folio-ใหม่',
+        ...data,
+      }));
       prisma.guest.create.mockResolvedValue({ id: 'guest-ใหม่' });
       const service = await makeService(prisma);
 

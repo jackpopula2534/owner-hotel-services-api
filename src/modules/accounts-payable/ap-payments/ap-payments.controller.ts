@@ -1,3 +1,4 @@
+import { withPaginationMeta } from '@/common/utils/pagination.util';
 import {
   Controller,
   Get,
@@ -17,15 +18,19 @@ import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AddonGuard } from '@/common/guards/addon.guard';
 import { RequireAddon } from '@/common/decorators/require-addon.decorator';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
-import { IsOptional, IsUUID, IsDateString, IsInt, Min } from 'class-validator';
+import { IsOptional, IsUUID, IsDateString, IsInt, IsIn, Min } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
+import { RolesGuard } from '@/common/guards/roles.guard';
+import { Roles } from '@/common/decorators/roles.decorator';
+import { ACCOUNTING_CLOSE_ROLES, AP_WRITE_ROLES, AccountingAccess } from '@/modules/accounting/accounting-access.decorator';
 
 class QueryApPaymentDto {
   @ApiPropertyOptional() @IsOptional() @IsUUID() propertyId?: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() supplierId?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() dateFrom?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() dateTo?: string;
+  @ApiPropertyOptional({ enum: ['PENDING', 'APPROVED', 'VOID'] }) @IsOptional() @IsIn(['PENDING', 'APPROVED', 'VOID']) status?: string;
   @ApiPropertyOptional({ default: 1 })
   @IsOptional()
   @IsInt()
@@ -49,7 +54,8 @@ interface JwtPayload {
 
 @ApiTags('Accounting - AP Payments')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, AddonGuard)
+@UseGuards(JwtAuthGuard, AddonGuard, RolesGuard)
+@AccountingAccess(AP_WRITE_ROLES)
 @RequireAddon('ACCOUNTING_MODULE')
 @Controller({ path: 'accounting/ap-payments', version: '1' })
 export class ApPaymentsController {
@@ -59,7 +65,7 @@ export class ApPaymentsController {
   @ApiOperation({ summary: 'ดูรายการ AP Payment ทั้งหมด' })
   async findAll(@CurrentUser() user: JwtPayload, @Query() query: QueryApPaymentDto) {
     const result = await this.service.findAll(user.tenantId, query);
-    return { success: true, ...result };
+    return withPaginationMeta(result);
   }
 
   @Post()
@@ -70,6 +76,7 @@ export class ApPaymentsController {
     return { success: true, data };
   }
 
+  @Roles(...ACCOUNTING_CLOSE_ROLES)
   @Patch(':id/approve')
   @ApiOperation({ summary: 'อนุมัติ AP Payment' })
   async approve(@CurrentUser() user: JwtPayload, @Param('id') id: string) {

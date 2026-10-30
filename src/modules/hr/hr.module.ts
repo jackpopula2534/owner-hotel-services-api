@@ -50,6 +50,7 @@ import { PrismaModule } from '../../prisma/prisma.module';
 import { AddonModule } from '../addons/addon.module';
 import { IntegrationsModule } from '../integrations/integrations.module';
 import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
+import { AccountingModule } from '../accounting/accounting.module';
 
 // NOTE: EmployeeCodeConfigController has been intentionally merged into HrController
 // to avoid NestJS route conflict where GET /hr/:id would intercept /hr/employee-code-config.
@@ -61,7 +62,7 @@ import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
 // before HrController's @Get(':id') catches them as employee IDs.
 
 @Module({
-  imports: [PrismaModule, AddonModule, IntegrationsModule, StaffModule],
+  imports: [PrismaModule, AddonModule, IntegrationsModule, StaffModule, AccountingModule],
   controllers: [
     HrMasterDataController,
     HrAttendanceController,

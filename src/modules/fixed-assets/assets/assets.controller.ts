@@ -21,6 +21,9 @@ import { CurrentUser } from '@/common/decorators/current-user.decorator';
 import { IsDateString, IsNumber, IsOptional, IsString } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
+import { RolesGuard } from '@/common/guards/roles.guard';
+import { Roles } from '@/common/decorators/roles.decorator';
+import { ACCOUNTING_CLOSE_ROLES, ACCOUNTING_WRITE_ROLES, AccountingAccess } from '@/modules/accounting/accounting-access.decorator';
 
 class DisposeAssetDto {
   @ApiPropertyOptional() @IsDateString() disposalDate: string;
@@ -37,7 +40,8 @@ interface JwtPayload {
 
 @ApiTags('Accounting - Fixed Assets')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, AddonGuard)
+@UseGuards(JwtAuthGuard, AddonGuard, RolesGuard)
+@AccountingAccess(ACCOUNTING_WRITE_ROLES)
 @RequireAddon('ACCOUNTING_MODULE')
 @Controller({ path: 'accounting/fixed-assets', version: '1' })
 export class AssetsController {
@@ -76,6 +80,7 @@ export class AssetsController {
     return { success: true, data };
   }
 
+  @Roles(...ACCOUNTING_CLOSE_ROLES)
   @Patch(':id/dispose')
   @ApiOperation({ summary: 'จำหน่ายสินทรัพย์' })
   async dispose(

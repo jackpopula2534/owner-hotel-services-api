@@ -5,6 +5,13 @@ import {
   JournalSourceTypeEnum,
 } from './dto/create-journal-entry.dto';
 import { QueryJournalEntryDto } from './dto/query-journal-entry.dto';
+import { applyLedgerBalances } from '../ledger/ledger-balance.util';
+import {
+  assertPeriodOpen,
+  businessDayOf,
+  fiscalPeriodOf,
+  nextJournalEntryNo,
+} from '../ledger/journal-posting.util';
 
 interface AutoPostJournalEntryInput {
   propertyId: string;
@@ -22,21 +29,6 @@ export class JournalEntriesService {
   private readonly logger = new Logger(JournalEntriesService.name);
 
   constructor(private readonly prisma: PrismaService) {}
-
-  private async generateEntryNo(tenantId: string): Promise<string> {
-    const now = new Date();
-    const yearMonth = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const seq = await this.prisma.documentSequence.upsert({
-      where: { tenantId_docType_yearMonth: { tenantId, docType: 'JE', yearMonth } },
-      update: { lastNumber: { increment: 1 } },
-      create: { tenantId, docType: 'JE', prefix: 'JE', yearMonth, lastNumber: 1 },
-    });
-    return `JE-${yearMonth}-${String(seq.lastNumber).padStart(6, '0')}`;
-  }
-
-  private getFiscalPeriod(date: Date): { year: number; period: number } {
-    return { year: date.getFullYear(), period: date.getMonth() + 1 };
-  }
 
   async findAll(tenantId: string, query: QueryJournalEntryDto) {
     const {
@@ -144,8 +136,9 @@ export class JournalEntriesService {
     }
 
     const entryDate = new Date(dto.entryDate);
-    const { year, period } = this.getFiscalPeriod(entryDate);
-    const entryNo = await this.generateEntryNo(tenantId);
+    await assertPeriodOpen(this.prisma, tenantId, dto.propertyId, entryDate);
+    const { fiscalYear: year, fiscalPeriod: period } = fiscalPeriodOf(entryDate);
+    const entryNo = await nextJournalEntryNo(this.prisma, tenantId, entryDate);
 
     const entry = await this.prisma.$transaction(async (tx) => {
       const je = await tx.journalEntry.create({
@@ -212,9 +205,10 @@ export class JournalEntriesService {
     const created = await this.create(
       {
         propertyId: input.propertyId,
+        // วันที่ตามปฏิทินไทย — toISOString ตรงๆ ของเวลา 00:00-06:59 น. จะได้วันก่อนหน้า
         entryDate:
           input.entryDate instanceof Date
-            ? input.entryDate.toISOString().split('T')[0]
+            ? businessDayOf(input.entryDate).toISOString().split('T')[0]
             : input.entryDate,
         description: input.description,
         reference: input.reference,
@@ -235,43 +229,25 @@ export class JournalEntriesService {
       throw new BadRequestException(`Cannot post entry with status: ${entry.status}`);
     }
 
+    // ร่างที่ค้างไว้ก่อนปิดปีบัญชี ห้ามโพสต์ทะลุเข้าไปทีหลัง
+    await assertPeriodOpen(this.prisma, tenantId, entry.propertyId, entry.entryDate);
+
     const updated = await this.prisma.$transaction(async (tx) => {
       const je = await tx.journalEntry.update({
         where: { id },
         data: { status: 'POSTED', postedBy, postedAt: new Date() },
       });
 
-      // Update LedgerBalance for each line
-      for (const line of entry.lines) {
-        const { fiscalYear, fiscalPeriod } = entry;
-        const key = {
+      await applyLedgerBalances(
+        tx,
+        {
           tenantId,
           propertyId: entry.propertyId,
-          accountId: line.accountId,
-          fiscalYear,
-          fiscalPeriod,
-        };
-
-        await tx.ledgerBalance.upsert({
-          where: {
-            tenantId_propertyId_accountId_fiscalYear_fiscalPeriod: key,
-          },
-          update: {
-            periodDebit: { increment: Number(line.debit) },
-            periodCredit: { increment: Number(line.credit) },
-            closingBalance: { increment: Number(line.debit) - Number(line.credit) },
-            txnCount: { increment: 1 },
-          },
-          create: {
-            ...key,
-            openingBalance: 0,
-            periodDebit: Number(line.debit),
-            periodCredit: Number(line.credit),
-            closingBalance: Number(line.debit) - Number(line.credit),
-            txnCount: 1,
-          },
-        });
-      }
+          fiscalYear: entry.fiscalYear,
+          fiscalPeriod: entry.fiscalPeriod,
+        },
+        entry.lines,
+      );
 
       return je;
     });
@@ -279,15 +255,51 @@ export class JournalEntriesService {
     return updated;
   }
 
-  async reverse(id: string, tenantId: string, reversedBy: string, description?: string) {
+  /**
+   * กลับรายการที่ระบบลงอัตโนมัติจากเอกสารต้นทาง (ยกเลิกใบแจ้งหนี้/ใบเสร็จ/ใบจ่าย)
+   * ไม่มีรายการที่ POSTED อยู่ = ไม่ต้องทำอะไร (เอกสารยังไม่เคยลงบัญชี)
+   */
+  async reverseBySource(
+    tenantId: string,
+    sourceType: JournalSourceTypeEnum,
+    sourceId: string,
+    reversedBy: string,
+    description: string,
+  ) {
+    const entry = await this.prisma.journalEntry.findFirst({
+      where: { tenantId, sourceType, sourceId, status: 'POSTED' },
+      select: { id: true, entryDate: true },
+    });
+    if (!entry) return null;
+    // เอกสารลงวันที่ล่วงหน้าแล้วถูกยกเลิกวันนี้ → กลับรายการในวันของเอกสาร (ห้ามย้อนก่อนใบเดิม)
+    const now = new Date();
+    const reversalDate = entry.entryDate > now ? entry.entryDate : now;
+    return this.reverse(entry.id, tenantId, reversedBy, description, reversalDate.toISOString());
+  }
+
+  /**
+   * กลับรายการลงวันที่ `reversalDate` (ค่าเริ่มต้น = วันนี้) — ใบเดิมอาจอยู่งวดที่ปิดไปแล้ว
+   * จึงต้องลงใบกลับในงวดที่ยังเปิด ห้ามย้อนวันที่ก่อนใบเดิม
+   */
+  async reverse(
+    id: string,
+    tenantId: string,
+    reversedBy: string,
+    description?: string,
+    reversalDate?: string,
+  ) {
     const entry = await this.findOne(id, tenantId);
     if (entry.status !== 'POSTED') {
       throw new BadRequestException('Can only reverse POSTED entries');
     }
 
-    const entryNo = await this.generateEntryNo(tenantId);
-    const entryDate = new Date();
-    const { year, period } = this.getFiscalPeriod(entryDate);
+    const entryDate = reversalDate ? new Date(reversalDate) : new Date();
+    if (entryDate < entry.entryDate) {
+      throw new BadRequestException('วันที่กลับรายการต้องไม่ก่อนวันที่ของรายการเดิม');
+    }
+    await assertPeriodOpen(this.prisma, tenantId, entry.propertyId, entryDate);
+    const entryNo = await nextJournalEntryNo(this.prisma, tenantId, entryDate);
+    const { fiscalYear: year, fiscalPeriod: period } = fiscalPeriodOf(entryDate);
 
     const reversal = await this.prisma.$transaction(async (tx) => {
       // Create reversal entry (swap debit/credit)
@@ -325,36 +337,14 @@ export class JournalEntriesService {
       // Mark original as reversed
       await tx.journalEntry.update({
         where: { id },
-        data: { status: 'REVERSED', reversedAt: new Date() },
+        data: { status: 'REVERSED', reversedById: rev.id, reversedAt: new Date() },
       });
 
-      // Update LedgerBalance for reversal lines
-      for (const line of entry.lines) {
-        const key = {
-          tenantId,
-          propertyId: entry.propertyId,
-          accountId: line.accountId,
-          fiscalYear: year,
-          fiscalPeriod: period,
-        };
-        await tx.ledgerBalance.upsert({
-          where: { tenantId_propertyId_accountId_fiscalYear_fiscalPeriod: key },
-          update: {
-            periodDebit: { increment: Number(line.credit) },
-            periodCredit: { increment: Number(line.debit) },
-            closingBalance: { increment: Number(line.credit) - Number(line.debit) },
-            txnCount: { increment: 1 },
-          },
-          create: {
-            ...key,
-            openingBalance: 0,
-            periodDebit: Number(line.credit),
-            periodCredit: Number(line.debit),
-            closingBalance: Number(line.credit) - Number(line.debit),
-            txnCount: 1,
-          },
-        });
-      }
+      await applyLedgerBalances(
+        tx,
+        { tenantId, propertyId: entry.propertyId, fiscalYear: year, fiscalPeriod: period },
+        entry.lines.map((l) => ({ accountId: l.accountId, debit: l.credit, credit: l.debit })),
+      );
 
       return rev;
     });

@@ -1,4 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
+import { BookingsService } from '../modules/bookings/bookings.service';
+import { CampAccountingService } from '../modules/camp/camp-accounting.service';
+import { ensureDefaultChartOfAccounts } from '../modules/accounting/chart-of-accounts/default-chart-of-accounts';
 import { PlansService } from '../plans/plans.service';
 import { FeaturesService } from '../features/features.service';
 import { PlanFeaturesService } from '../plan-features/plan-features.service';
@@ -76,7 +80,31 @@ export class SeederService {
     private warehouseGroups: WarehouseGroupsSeeder,
     private campPremium: CampPremiumSeeder,
     private hotel3dDemo: Hotel3dDemoSeeder,
+    private moduleRef: ModuleRef,
   ) {}
+
+  /**
+   * ผังบัญชีมาตรฐานให้ทุก tenant + ลงสมุดรายวันย้อนหลังจากการจองที่เช็คเอาต์แล้ว/การชำระของลาน
+   * ไม่งั้นหลัง db:refresh หน้าระบบบัญชีจะเป็น 0 ทุกช่องทั้งที่มีรายได้เดโมอยู่เต็ม
+   * ใช้ service จริง (ไม่เขียน JE เอง) เพื่อให้เลขที่เอกสาร/ledger_balances ถูกต้องเหมือนใช้งานจริง
+   */
+  private async seedAccounting(): Promise<void> {
+    this.logger.log('📒 Seeding chart of accounts + backfilling journal entries...');
+    const bookings = this.moduleRef.get(BookingsService, { strict: false });
+    const camp = this.moduleRef.get(CampAccountingService, { strict: false });
+    const tenants = await this.prisma.tenants.findMany({ select: { id: true, name: true } });
+
+    for (const tenant of tenants) {
+      const accounts = await ensureDefaultChartOfAccounts(this.prisma, tenant.id);
+      const hotel = await bookings.backfillJournalEntries(tenant.id);
+      const campResult = await camp.backfillJournals(tenant.id);
+      if (accounts || hotel.created || campResult.created) {
+        this.logger.log(
+          `  ${tenant.name}: ผังบัญชี ${accounts} บัญชี, JE การจอง ${hotel.created}, JE ลาน ${campResult.created}`,
+        );
+      }
+    }
+  }
 
   /**
    * รัน seeder ทั้งหมด
@@ -126,6 +154,8 @@ export class SeederService {
       await this.seedDepartmentCostCenterMapping();
       await this.seedOpCostCategories();
       await this.seedRecruitmentPipeline();
+      // ท้ายสุด — ต้องมีการจองที่เช็คเอาต์แล้ว/การจองลานครบก่อนถึงลงบัญชีย้อนหลังได้
+      await this.seedAccounting();
 
       this.logger.log('✅ Database seeding completed successfully!');
     } catch (error) {
@@ -2019,7 +2049,9 @@ export class SeederService {
           // กำหนด status ตามวันที่
           let status = 'confirmed';
           if (daysOffset < -2)
-            status = 'completed'; // อดีตมากกว่า 2 วัน = completed
+            // สถานะหลังเช็คเอาต์ของจริงคือ checked_out — 'completed' ไม่มีในระบบ
+            // หน้าจอ/สถิติ/ลงบัญชีย้อนหลังจึงมองไม่เห็นการจองเดโมพวกนี้
+            status = 'checked_out'; // อดีตมากกว่า 2 วัน = เช็คเอาต์แล้ว
           else if (daysOffset <= 1)
             status = 'checked_in'; // ใน 1 วัน = checked_in
           else status = 'confirmed'; // อนาคต = confirmed
@@ -2093,12 +2125,12 @@ export class SeederService {
     this.logger.log('⭐ Seeding Demo Reviews...');
 
     try {
-      // ดึง booking ที่เป็น completed
+      // ดึง booking ที่เช็คเอาต์แล้ว
       const completedBookings: any[] = await this.prisma.$queryRaw`
         SELECT b.id, b.tenantId
         FROM bookings b
         LEFT JOIN reviews r ON r.bookingId = b.id
-        WHERE b.status = 'completed' AND r.id IS NULL
+        WHERE b.status = 'checked_out' AND r.id IS NULL
           AND NOT EXISTS (SELECT 1 FROM reviews r2 WHERE r2.tenantId = b.tenantId)
         LIMIT 50
       `;
@@ -2257,7 +2289,7 @@ export class SeederService {
             scheduledCheckOut,
             actualCheckIn: scheduledCheckIn,
             actualCheckOut: scheduledCheckOut,
-            status: 'completed',
+            status: 'checked_out',
             totalPrice,
             grandTotal: totalPrice,
             amountPaid: totalPrice,

@@ -5,6 +5,9 @@ import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AddonGuard } from '@/common/guards/addon.guard';
 import { RequireAddon } from '@/common/decorators/require-addon.decorator';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
+import { RolesGuard } from '@/common/guards/roles.guard';
+import { Roles } from '@/common/decorators/roles.decorator';
+import { ACCOUNTING_CLOSE_ROLES, ACCOUNTING_WRITE_ROLES, AccountingAccess } from '@/modules/accounting/accounting-access.decorator';
 
 interface JwtPayload {
   sub: string;
@@ -15,7 +18,8 @@ interface JwtPayload {
 
 @ApiTags('Accounting - Ledger & Reports')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, AddonGuard)
+@UseGuards(JwtAuthGuard, AddonGuard, RolesGuard)
+@AccountingAccess(ACCOUNTING_WRITE_ROLES)
 @RequireAddon('ACCOUNTING_MODULE')
 @Controller({ path: 'accounting/ledger', version: '1' })
 export class LedgerController {
@@ -42,6 +46,7 @@ export class LedgerController {
     return { success: true, data };
   }
 
+  @Roles(...ACCOUNTING_CLOSE_ROLES)
   @Post('rebuild-balances')
   @ApiOperation({
     summary: 'สร้างยอดคงเหลือรายบัญชีใหม่จาก JE ที่ POSTED (ซ่อมข้อมูลเก่าที่ยอดไม่เข้างบทดลอง)',

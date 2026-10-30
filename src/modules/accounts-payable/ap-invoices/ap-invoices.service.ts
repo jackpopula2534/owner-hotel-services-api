@@ -10,6 +10,9 @@ import { CreateApInvoiceDto } from './dto/create-ap-invoice.dto';
 import { QueryApInvoiceDto } from './dto/query-ap-invoice.dto';
 import { JournalEntriesService } from '@/modules/accounting/journal-entries/journal-entries.service';
 import { JournalSourceTypeEnum } from '@/modules/accounting/journal-entries/dto/create-journal-entry.dto';
+import { ensureDefaultChartOfAccounts } from '@/modules/accounting/chart-of-accounts/default-chart-of-accounts';
+
+const roundMoney = (n: number): number => Math.round(n * 100) / 100;
 
 @Injectable()
 export class ApInvoicesService {
@@ -21,6 +24,7 @@ export class ApInvoicesService {
   ) {}
 
   private async findDefaultAccountByCode(tenantId: string, code: string) {
+    await ensureDefaultChartOfAccounts(this.prisma, tenantId);
     return this.prisma.accountChart.findFirst({
       where: { tenantId, code, isActive: true },
       select: { id: true, code: true, name: true },
@@ -104,12 +108,14 @@ export class ApInvoicesService {
       const discount = line.discountAmt ?? 0;
       const vatRate = line.vatRate ?? 7;
       const whtRate = line.whtRate ?? 0;
-      const lineSubtotal = line.quantity * line.unitPrice - discount;
-      const lineVat = lineSubtotal * (vatRate / 100);
-      const lineWht = lineSubtotal * (whtRate / 100);
-      subtotal += lineSubtotal;
-      vatAmount += lineVat;
-      whtAmount += lineWht;
+      // ปัดเป็นสตางค์ต่อบรรทัดแล้วค่อยรวม — หัวใบต้องเท่ากับผลรวมบรรทัดที่บันทึกจริง
+      // ไม่งั้นรายการบัญชีตอนอนุมัติ (อ่านจากบรรทัด) ต่างจากยอดเจ้าหนี้ 0.01 แล้วไม่บาลานซ์
+      const lineSubtotal = roundMoney(line.quantity * line.unitPrice - discount);
+      const lineVat = roundMoney(lineSubtotal * (vatRate / 100));
+      const lineWht = roundMoney(lineSubtotal * (whtRate / 100));
+      subtotal = roundMoney(subtotal + lineSubtotal);
+      vatAmount = roundMoney(vatAmount + lineVat);
+      whtAmount = roundMoney(whtAmount + lineWht);
 
       return {
         lineNo: i + 1,
@@ -118,19 +124,20 @@ export class ApInvoicesService {
         quantity: line.quantity,
         unitPrice: line.unitPrice,
         discountAmt: discount,
-        subtotal: lineSubtotal,
+        // คอลัมน์ของบรรทัดชื่อ netAmount (เดิมส่ง subtotal → Prisma ปฏิเสธ สร้างใบไม่ได้เลย)
+        netAmount: lineSubtotal,
         vatRate,
         vatAmount: lineVat,
         whtRate,
         whtAmount: lineWht,
-        totalAmount: lineSubtotal + lineVat,
+        totalAmount: roundMoney(lineSubtotal + lineVat),
         accountId: line.accountId,
         costCenterId: line.costCenterId,
       };
     });
 
-    const totalAmount = subtotal + vatAmount;
-    const netPayable = totalAmount - whtAmount;
+    const totalAmount = roundMoney(subtotal + vatAmount);
+    const netPayable = roundMoney(totalAmount - whtAmount);
     const invoiceNo = await this.generateInvoiceNo(tenantId);
 
     const invoice = await this.prisma.$transaction(async (tx) => {
@@ -150,6 +157,7 @@ export class ApInvoicesService {
           currency: dto.currency ?? 'THB',
           paymentTerms: dto.paymentTerms,
           subtotal,
+          taxableAmount: subtotal,
           vatAmount,
           whtAmount,
           totalAmount,
@@ -174,11 +182,6 @@ export class ApInvoicesService {
       throw new BadRequestException(`Cannot approve invoice with status: ${invoice.status}`);
     }
 
-    const updated = await this.prisma.apInvoice.update({
-      where: { id },
-      data: { status: 'APPROVED', approvedBy, approvedAt: new Date(), isPosted: true, postedAt: new Date() },
-    });
-
     const [apAccount, inputVatAccount, defaultExpenseAccount, whtPayableAccount] = await Promise.all([
       this.findDefaultAccountByCode(tenantId, '2101'),
       this.findDefaultAccountByCode(tenantId, '1106'),
@@ -186,7 +189,8 @@ export class ApInvoicesService {
       this.findDefaultAccountByCode(tenantId, '2104'),
     ]);
 
-    if (!apAccount || !inputVatAccount || !defaultExpenseAccount) {
+    // ไม่มีบัญชี 2104 แต่ใบมี WHT → JE ไม่สมดุล (เครดิตเจ้าหนี้แค่ยอดสุทธิ) ต้องล้มพร้อมข้อความชัด ๆ
+    if (!apAccount || !inputVatAccount || !defaultExpenseAccount || (Number(invoice.whtAmount) > 0 && !whtPayableAccount)) {
       throw new BadRequestException(
         'ไม่สามารถลงบัญชี AP อัตโนมัติได้: กรุณา seed ผังบัญชีมาตรฐานให้ครบก่อน',
       );
@@ -219,10 +223,10 @@ export class ApInvoicesService {
             },
           ]
         : []),
-      ...(Number(invoice.whtAmount) > 0 && whtPayableAccount
+      ...(Number(invoice.whtAmount) > 0
         ? [
             {
-              accountId: whtPayableAccount.id,
+              accountId: whtPayableAccount!.id,
               lineNo: nextLineNo++,
               description: `WHT Payable ${invoice.invoiceNo}`,
               debit: 0,
@@ -247,12 +251,18 @@ export class ApInvoicesService {
         entryDate: invoice.invoiceDate,
         description: `อนุมัติ AP Invoice ${invoice.invoiceNo}`,
         reference: invoice.invoiceNo,
-        sourceType: JournalSourceTypeEnum.AP_PAYMENT,
+        sourceType: JournalSourceTypeEnum.AP_INVOICE,
         sourceId: invoice.id,
         createdBy: approvedBy,
         lines: journalLines,
       });
     }
+
+    // อนุมัติหลังลงบัญชีสำเร็จ — งวดปิด/ผังบัญชีไม่ครบต้องไม่ทิ้งใบ APPROVED ที่ไม่มีรายการบัญชี
+    const updated = await this.prisma.apInvoice.update({
+      where: { id },
+      data: { status: 'APPROVED', approvedBy, approvedAt: new Date(), isPosted: true, postedAt: new Date() },
+    });
 
     this.logger.log(`AP Invoice ${invoice.invoiceNo} approved by ${approvedBy}`);
     return updated;
@@ -266,6 +276,26 @@ export class ApInvoicesService {
     if (invoice.status === 'VOID') {
       throw new BadRequestException('Invoice is already void');
     }
+
+    if (Number(invoice.paidAmount) > 0) {
+      throw new BadRequestException('ใบแจ้งหนี้มีการจ่ายชำระแล้ว ต้องยกเลิกใบสำคัญจ่ายก่อน');
+    }
+
+    const pendingPayments = await this.prisma.apPaymentAllocation.count({
+      where: { tenantId, invoiceId: invoice.id, payment: { status: 'PENDING' } },
+    });
+    if (pendingPayments > 0) {
+      throw new BadRequestException('ใบแจ้งหนี้มีใบสำคัญจ่ายรออนุมัติอยู่ ต้องยกเลิกใบสำคัญจ่ายก่อน');
+    }
+
+    // ใบที่อนุมัติแล้วตั้งเจ้าหนี้ไว้ในสมุดรายวัน — ต้องกลับรายการด้วย
+    await this.journalEntriesService?.reverseBySource(
+      tenantId,
+      JournalSourceTypeEnum.AP_INVOICE,
+      invoice.id,
+      voidedBy,
+      `ยกเลิก AP Invoice ${invoice.invoiceNo}`,
+    );
 
     const updated = await this.prisma.apInvoice.update({
       where: { id },

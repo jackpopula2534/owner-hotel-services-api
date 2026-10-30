@@ -5856,8 +5856,11 @@ enum JournalSourceType {
   BOOKING_PAYMENT // รับชำระจากการจอง
   CAMP_PAYMENT // รับชำระจากการจองลานกางเต็นท์ (camp_reservations)
   FOLIO_CHARGE // charge ลง folio แขก
+  AR_INVOICE // ออกใบแจ้งหนี้ AR (ตั้งลูกหนี้)
   AR_RECEIPT // รับชำระ AR
+  AP_INVOICE // อนุมัติใบแจ้งหนี้ AP (ตั้งเจ้าหนี้)
   AP_PAYMENT // จ่ายชำระ AP
+  POS_SALE // ยอดขายร้านอาหาร/POS
   NIGHT_AUDIT // Night Audit auto-post
   DEPRECIATION // ตัดค่าเสื่อมราคา
   PAYROLL // จ่ายเงินเดือน (จาก HR)

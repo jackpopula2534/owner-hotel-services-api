@@ -1,3 +1,4 @@
+import { withPaginationMeta } from '@/common/utils/pagination.util';
 import {
   Controller,
   Get,
@@ -18,11 +19,18 @@ import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AddonGuard } from '@/common/guards/addon.guard';
 import { RequireAddon } from '@/common/decorators/require-addon.decorator';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
-import { IsOptional, IsString } from 'class-validator';
+import { IsDateString, IsOptional, IsString } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { RolesGuard } from '@/common/guards/roles.guard';
+import { Roles } from '@/common/decorators/roles.decorator';
+import { ACCOUNTING_CLOSE_ROLES, ACCOUNTING_WRITE_ROLES, AccountingAccess } from '@/modules/accounting/accounting-access.decorator';
 
 class ReverseJournalDto {
   @ApiPropertyOptional() @IsOptional() @IsString() description?: string;
+  @ApiPropertyOptional({ description: 'วันที่กลับรายการ (ค่าเริ่มต้น = วันนี้)' })
+  @IsOptional()
+  @IsDateString()
+  reversalDate?: string;
 }
 
 interface JwtPayload {
@@ -34,7 +42,8 @@ interface JwtPayload {
 
 @ApiTags('Accounting - Journal Entries')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, AddonGuard)
+@UseGuards(JwtAuthGuard, AddonGuard, RolesGuard)
+@AccountingAccess(ACCOUNTING_WRITE_ROLES)
 @RequireAddon('ACCOUNTING_MODULE')
 @Controller({ path: 'accounting/journal-entries', version: '1' })
 export class JournalEntriesController {
@@ -44,7 +53,7 @@ export class JournalEntriesController {
   @ApiOperation({ summary: 'ดูรายการสมุดรายวันทั้งหมด' })
   async findAll(@CurrentUser() user: JwtPayload, @Query() query: QueryJournalEntryDto) {
     const data = await this.service.findAll(user.tenantId, query);
-    return { success: true, ...data };
+    return withPaginationMeta(data);
   }
 
   @Get(':id')
@@ -69,6 +78,7 @@ export class JournalEntriesController {
     return { success: true, data };
   }
 
+  @Roles(...ACCOUNTING_CLOSE_ROLES)
   @Patch(':id/reverse')
   @ApiOperation({ summary: 'กลับรายการ (สร้าง reversal entry อัตโนมัติ)' })
   async reverse(
@@ -76,7 +86,13 @@ export class JournalEntriesController {
     @Param('id') id: string,
     @Body() dto: ReverseJournalDto,
   ) {
-    const data = await this.service.reverse(id, user.tenantId, user.sub, dto.description);
+    const data = await this.service.reverse(
+      id,
+      user.tenantId,
+      user.sub,
+      dto.description,
+      dto.reversalDate,
+    );
     return { success: true, data };
   }
 }

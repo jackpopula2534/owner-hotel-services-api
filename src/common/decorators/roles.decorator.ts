@@ -42,6 +42,12 @@ export type UserRole =
   // Hotel Terminal front desk (tenant-users terminal-registry) — exact match only.
   | 'front_desk'
   | 'accounting_manager'
+  // Accounting Terminal roles (accounting-users ACCOUNTING_ROLES) — exact match only.
+  // ห้ามใส่ใน ROLE_LEVELS: ดู modules/accounting/accounting-access.decorator.ts
+  | 'chief_accountant'
+  | 'ap_clerk'
+  | 'ar_clerk'
+  | 'auditor'
   | 'crm_manager'
   | 'crm_agent'
   | 'sales_rep'

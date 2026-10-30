@@ -28,6 +28,16 @@ export interface TrialBalance {
   isBalanced: boolean;
 }
 
+interface AggregatedBalance {
+  accountId: string;
+  code: string;
+  name: string;
+  type: string;
+  opening: number;
+  periodDebit: number;
+  periodCredit: number;
+}
+
 @Injectable()
 export class LedgerService {
   private readonly logger = new Logger(LedgerService.name);
@@ -40,14 +50,6 @@ export class LedgerService {
     fiscalYear: number,
     fiscalPeriod: number,
   ): Promise<TrialBalance> {
-    const balances = await this.prisma.ledgerBalance.findMany({
-      where: { tenantId, propertyId, fiscalYear, fiscalPeriod },
-      include: {
-        account: { select: { code: true, name: true, type: true, normalBalance: true } },
-      },
-      orderBy: { account: { code: 'asc' } },
-    });
-
     /**
      * ยอดที่เก็บใน ledger_balances เป็นค่ามีเครื่องหมาย (debit − credit) เสมอ
      * บวก = ยอดอยู่ด้านเดบิต, ลบ = ยอดอยู่ด้านเครดิต — ไม่ขึ้นกับ normalBalance
@@ -61,18 +63,23 @@ export class LedgerService {
       credit: value < 0 ? -value : 0,
     });
 
-    const lines: TrialBalanceLine[] = balances.map((b) => {
-      const opening = split(Number(b.openingBalance));
-      const closing = split(Number(b.closingBalance));
+    // ระบบยังไม่มีขั้นตอนยกยอดข้ามงวด (openingBalance ใน ledger_balances เป็น 0 เสมอ)
+    // ยอดยกมาจึงต้องคำนวณเองจากทุกงวดก่อนหน้า ไม่งั้นงบทดลองเดือนที่ 2 เป็นต้นไป
+    // จะเห็นแค่ความเคลื่อนไหวของเดือนนั้น ไม่ใช่ยอดคงเหลือจริง
+    const rows = await this.aggregateBalances(tenantId, propertyId, fiscalYear, fiscalPeriod);
+
+    const lines: TrialBalanceLine[] = rows.map((r) => {
+      const opening = split(r.opening);
+      const closing = split(r.opening + r.periodDebit - r.periodCredit);
       return {
-        accountId: b.accountId,
-        accountCode: b.account.code,
-        accountName: b.account.name,
-        accountType: b.account.type,
+        accountId: r.accountId,
+        accountCode: r.code,
+        accountName: r.name,
+        accountType: r.type,
         openingDebit: opening.debit,
         openingCredit: opening.credit,
-        periodDebit: Number(b.periodDebit),
-        periodCredit: Number(b.periodCredit),
+        periodDebit: r.periodDebit,
+        periodCredit: r.periodCredit,
         closingDebit: closing.debit,
         closingCredit: closing.credit,
       };
@@ -98,6 +105,57 @@ export class LedgerService {
       totalClosingCredit,
       isBalanced: Math.abs(totalClosingDebit - totalClosingCredit) < 0.01,
     };
+  }
+
+  /**
+   * รวม ledger_balances ต่อบัญชีจนถึงงวด (fiscalYear, fiscalPeriod)
+   * - opening = ผลรวม (debit − credit) ของทุกงวดก่อน `periodFrom` ในปีนั้น และทุกปีก่อนหน้า
+   * - periodDebit/periodCredit = ความเคลื่อนไหวตั้งแต่ `periodFrom` ถึง `fiscalPeriod` ของปีนั้น
+   * หนึ่งบัญชีได้หนึ่งแถวเสมอ (ของเดิมคืนหนึ่งแถวต่องวด บัญชีเดียวจึงโผล่ซ้ำหลายบรรทัดในงบ)
+   */
+  private async aggregateBalances(
+    tenantId: string,
+    propertyId: string,
+    fiscalYear: number,
+    fiscalPeriod: number,
+    periodFrom: number = fiscalPeriod,
+  ): Promise<AggregatedBalance[]> {
+    const balances = await this.prisma.ledgerBalance.findMany({
+      where: {
+        tenantId,
+        propertyId,
+        OR: [
+          { fiscalYear: { lt: fiscalYear } },
+          { fiscalYear, fiscalPeriod: { lte: fiscalPeriod } },
+        ],
+      },
+      include: {
+        account: { select: { code: true, name: true, type: true, normalBalance: true } },
+      },
+    });
+
+    const byAccount = new Map<string, AggregatedBalance>();
+    for (const b of balances) {
+      const row = byAccount.get(b.accountId) ?? {
+        accountId: b.accountId,
+        code: b.account.code,
+        name: b.account.name,
+        type: b.account.type,
+        opening: 0,
+        periodDebit: 0,
+        periodCredit: 0,
+      };
+      const inRange = b.fiscalYear === fiscalYear && b.fiscalPeriod >= periodFrom;
+      if (inRange) {
+        row.periodDebit += Number(b.periodDebit);
+        row.periodCredit += Number(b.periodCredit);
+      } else {
+        row.opening += Number(b.periodDebit) - Number(b.periodCredit);
+      }
+      byAccount.set(b.accountId, row);
+    }
+
+    return [...byAccount.values()].sort((x, y) => x.code.localeCompare(y.code));
   }
 
   /**
@@ -229,46 +287,29 @@ export class LedgerService {
     fiscalYear: number,
     fiscalPeriod?: number,
   ) {
-    const where: Record<string, unknown> = { tenantId, propertyId, fiscalYear };
-    if (fiscalPeriod) where.fiscalPeriod = { lte: fiscalPeriod };
+    // งบกำไรขาดทุน = ความเคลื่อนไหวสะสมตั้งแต่ต้นปีถึงงวดที่เลือก (YTD) ไม่รวมปีก่อน
+    const period = fiscalPeriod ?? 12;
+    const rows = await this.aggregateBalances(tenantId, propertyId, fiscalYear, period, 1);
 
-    const balances = await this.prisma.ledgerBalance.findMany({
-      where,
-      include: {
-        account: { select: { code: true, name: true, type: true, normalBalance: true } },
-      },
-    });
+    const revenue = rows
+      .filter((r) => r.type === 'REVENUE')
+      .map((r) => ({ code: r.code, name: r.name, amount: r.periodCredit - r.periodDebit }));
+    const expenses = rows
+      .filter((r) => r.type === 'EXPENSE')
+      .map((r) => ({ code: r.code, name: r.name, amount: r.periodDebit - r.periodCredit }));
 
-    const revenue = balances.filter((b) => b.account.type === 'REVENUE');
-    const expenses = balances.filter((b) => b.account.type === 'EXPENSE');
-
-    const totalRevenue = revenue.reduce(
-      (s, b) => s + Number(b.periodCredit) - Number(b.periodDebit),
-      0,
-    );
-    const totalExpenses = expenses.reduce(
-      (s, b) => s + Number(b.periodDebit) - Number(b.periodCredit),
-      0,
-    );
-    const netIncome = totalRevenue - totalExpenses;
+    const totalRevenue = revenue.reduce((s, r) => s + r.amount, 0);
+    const totalExpenses = expenses.reduce((s, r) => s + r.amount, 0);
 
     return {
       propertyId,
       fiscalYear,
-      fiscalPeriod: fiscalPeriod ?? 12,
-      revenue: revenue.map((b) => ({
-        code: b.account.code,
-        name: b.account.name,
-        amount: Number(b.periodCredit) - Number(b.periodDebit),
-      })),
-      expenses: expenses.map((b) => ({
-        code: b.account.code,
-        name: b.account.name,
-        amount: Number(b.periodDebit) - Number(b.periodCredit),
-      })),
+      fiscalPeriod: period,
+      revenue,
+      expenses,
       totalRevenue,
       totalExpenses,
-      netIncome,
+      netIncome: totalRevenue - totalExpenses,
     };
   }
 
@@ -278,45 +319,43 @@ export class LedgerService {
     fiscalYear: number,
     fiscalPeriod?: number,
   ) {
-    const where: Record<string, unknown> = { tenantId, propertyId, fiscalYear };
-    if (fiscalPeriod) where.fiscalPeriod = { lte: fiscalPeriod };
+    // งบดุล = ยอดคงเหลือสะสมทั้งหมดจนถึงสิ้นงวด (รวมทุกปีก่อนหน้า)
+    const period = fiscalPeriod ?? 12;
+    const rows = await this.aggregateBalances(tenantId, propertyId, fiscalYear, period, 13);
+    const balanceOf = (r: AggregatedBalance) => r.opening + r.periodDebit - r.periodCredit;
 
-    const balances = await this.prisma.ledgerBalance.findMany({
-      where,
-      include: {
-        account: { select: { code: true, name: true, type: true, normalBalance: true } },
-      },
-    });
+    // สินทรัพย์ปกติฝั่งเดบิต (บวก = debit − credit); หนี้สิน/ทุนปกติฝั่งเครดิต
+    // บัญชีที่ยอดกลับข้าง (เช่นเจ้าหนี้จ่ายเกิน) ต้องแสดงติดลบ ไม่ใช่ Math.abs ให้เป็นบวก
+    const pick = (type: string, sign: 1 | -1) =>
+      rows
+        .filter((r) => r.type === type)
+        .map((r) => ({ code: r.code, name: r.name, amount: sign * balanceOf(r) }))
+        .filter((r) => Math.abs(r.amount) >= 0.005);
 
-    const assets = balances.filter((b) => b.account.type === 'ASSET');
-    const liabilities = balances.filter((b) => b.account.type === 'LIABILITY');
-    const equity = balances.filter((b) => b.account.type === 'EQUITY');
+    const assets = pick('ASSET', 1);
+    const liabilities = pick('LIABILITY', -1);
+    const equity = pick('EQUITY', -1);
 
-    const totalAssets = assets.reduce((s, b) => s + Number(b.closingBalance), 0);
-    const totalLiabilities = liabilities.reduce(
-      (s, b) => s + Math.abs(Number(b.closingBalance)),
-      0,
-    );
-    const totalEquity = equity.reduce((s, b) => s + Math.abs(Number(b.closingBalance)), 0);
+    // ยังไม่มี JE ปิดบัญชีรายได้/ค่าใช้จ่ายเข้ากำไรสะสม — กำไร(ขาดทุน)ที่ยังไม่ปิดต้องแสดง
+    // เป็นส่วนของเจ้าของ ไม่งั้นงบดุลไม่มีทางสมดุล
+    const unclosedEarnings = -rows
+      .filter((r) => r.type === 'REVENUE' || r.type === 'EXPENSE')
+      .reduce((s, r) => s + balanceOf(r), 0);
+    if (Math.abs(unclosedEarnings) >= 0.005) {
+      equity.push({ code: '-', name: 'กำไร(ขาดทุน)สะสมที่ยังไม่ปิดบัญชี', amount: unclosedEarnings });
+    }
+
+    const totalAssets = assets.reduce((s, r) => s + r.amount, 0);
+    const totalLiabilities = liabilities.reduce((s, r) => s + r.amount, 0);
+    const totalEquity = equity.reduce((s, r) => s + r.amount, 0);
 
     return {
       propertyId,
       fiscalYear,
-      assets: assets.map((b) => ({
-        code: b.account.code,
-        name: b.account.name,
-        amount: Number(b.closingBalance),
-      })),
-      liabilities: liabilities.map((b) => ({
-        code: b.account.code,
-        name: b.account.name,
-        amount: Math.abs(Number(b.closingBalance)),
-      })),
-      equity: equity.map((b) => ({
-        code: b.account.code,
-        name: b.account.name,
-        amount: Math.abs(Number(b.closingBalance)),
-      })),
+      fiscalPeriod: period,
+      assets,
+      liabilities,
+      equity,
       totalAssets,
       totalLiabilities,
       totalEquity,

@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '@/prisma/prisma.service';
 import { CreateTaxFilingDto, TaxFilingType } from './dto/create-tax-filing.dto';
 
@@ -127,15 +127,22 @@ export class TaxFilingsService {
     const year = parseInt(yearStr, 10);
     const month = parseInt(monthStr, 10);
 
-    const startDate = new Date(year, month - 1, 1);
-    const endDate = new Date(year, month, 0, 23, 59, 59);
+    const existing = await this.prisma.taxFiling.findFirst({
+      where: { tenantId, propertyId, filingType: 'VAT_PP30', period },
+      select: { id: true },
+    });
+    if (existing) throw new ConflictException(`ภ.พ.30 งวด ${period} จัดทำไว้แล้ว`);
+
+    // issueDate/invoiceDate/dueDate เป็น @db.Date (UTC midnight) → ขอบงวดต้องเป็น UTC
+    const startDate = new Date(Date.UTC(year, month - 1, 1));
+    const nextMonthStart = new Date(Date.UTC(year, month, 1));
 
     // Aggregate Output VAT from AR Invoices in this period
     const arInvoices = await this.prisma.arInvoice.findMany({
       where: {
         tenantId,
         propertyId,
-        issueDate: { gte: startDate, lte: endDate },
+        issueDate: { gte: startDate, lt: nextMonthStart },
         status: { notIn: ['VOID', 'DRAFT'] },
       },
       select: { invoiceNo: true, subtotal: true, vatAmount: true, totalAmount: true },
@@ -149,7 +156,7 @@ export class TaxFilingsService {
       where: {
         tenantId,
         propertyId,
-        invoiceDate: { gte: startDate, lte: endDate },
+        invoiceDate: { gte: startDate, lt: nextMonthStart },
         status: { notIn: ['VOID', 'PENDING'] },
       },
       select: { invoiceNo: true, subtotal: true, vatAmount: true },
@@ -161,7 +168,7 @@ export class TaxFilingsService {
     const vatPayable = outputVat - inputVat;
 
     // Due date: 15th of following month (or 23rd if filed online)
-    const dueDate = new Date(year, month, 15);
+    const dueDate = new Date(Date.UTC(year, month, 15));
 
     const lines = [
       {

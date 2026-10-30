@@ -7,6 +7,9 @@ import { RequireAddon } from '@/common/decorators/require-addon.decorator';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
 import { IsNotEmpty, IsString, IsUUID } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { RolesGuard } from '@/common/guards/roles.guard';
+import { Roles } from '@/common/decorators/roles.decorator';
+import { ACCOUNTING_CLOSE_ROLES, ACCOUNTING_WRITE_ROLES, AccountingAccess } from '@/modules/accounting/accounting-access.decorator';
 
 class RunDepreciationDto {
   @ApiProperty() @IsNotEmpty() @IsUUID() propertyId: string;
@@ -29,7 +32,8 @@ interface JwtPayload {
 
 @ApiTags('Accounting - Depreciation')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, AddonGuard)
+@UseGuards(JwtAuthGuard, AddonGuard, RolesGuard)
+@AccountingAccess(ACCOUNTING_WRITE_ROLES)
 @RequireAddon('ACCOUNTING_MODULE')
 @Controller({ path: 'accounting/depreciation', version: '1' })
 export class DepreciationController {
@@ -47,6 +51,7 @@ export class DepreciationController {
     return { success: true, data };
   }
 
+  @Roles(...ACCOUNTING_CLOSE_ROLES)
   @Post('post')
   @ApiOperation({ summary: 'Post ค่าเสื่อมราคา (mark isPosted = true)' })
   async post(@CurrentUser() user: JwtPayload, @Body() dto: PostDepreciationDto) {

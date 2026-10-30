@@ -30,6 +30,8 @@ describe('LedgerService', () => {
   describe('getTrialBalance', () => {
     const balance = (over: Record<string, unknown>) => ({
       accountId: 'a1',
+      fiscalYear: 2026,
+      fiscalPeriod: 7,
       openingBalance: 0,
       periodDebit: 0,
       periodCredit: 0,
@@ -64,11 +66,71 @@ describe('LedgerService', () => {
     });
 
     it('บัญชีสินทรัพย์ที่ยอดติดลบต้องไปอยู่ฝั่งเครดิต ไม่ใช่โผล่ทั้งสองฝั่ง', async () => {
-      prisma.ledgerBalance.findMany.mockResolvedValue([balance({ closingBalance: -500 })]);
+      prisma.ledgerBalance.findMany.mockResolvedValue([
+        balance({ periodCredit: 500, closingBalance: -500 }),
+      ]);
 
       const tb = await service.getTrialBalance(TENANT, PROPERTY, 2026, 7);
 
       expect(tb.lines[0]).toMatchObject({ closingDebit: 0, closingCredit: 500 });
+    });
+
+    it('ยอดยกมาคิดจากทุกงวดก่อนหน้า และบัญชีเดียวได้บรรทัดเดียว', async () => {
+      prisma.ledgerBalance.findMany.mockResolvedValue([
+        balance({ fiscalYear: 2025, fiscalPeriod: 12, periodDebit: 100, closingBalance: 100 }),
+        balance({ fiscalPeriod: 6, periodDebit: 200, closingBalance: 200 }),
+        balance({ periodDebit: 50, periodCredit: 30, closingBalance: 20 }),
+      ]);
+
+      const tb = await service.getTrialBalance(TENANT, PROPERTY, 2026, 7);
+
+      expect(tb.lines).toHaveLength(1);
+      expect(tb.lines[0]).toMatchObject({
+        openingDebit: 300,
+        periodDebit: 50,
+        periodCredit: 30,
+        closingDebit: 320,
+      });
+    });
+  });
+
+  describe('reports', () => {
+    const row = (accountId: string, type: string, fiscalPeriod: number, debit: number, credit: number) => ({
+      accountId,
+      fiscalYear: 2026,
+      fiscalPeriod,
+      periodDebit: debit,
+      periodCredit: credit,
+      account: { code: accountId, name: accountId, type, normalBalance: 'DEBIT' },
+    });
+
+    it('งบกำไรขาดทุนรวมหลายงวดของบัญชีเดียวเป็นบรรทัดเดียว (YTD)', async () => {
+      prisma.ledgerBalance.findMany.mockResolvedValue([
+        row('4101', 'REVENUE', 1, 0, 1000),
+        row('4101', 'REVENUE', 2, 0, 500),
+        row('5101', 'EXPENSE', 2, 300, 0),
+      ]);
+
+      const pl = await service.getProfitAndLoss(TENANT, PROPERTY, 2026, 2);
+
+      expect(pl.revenue).toEqual([{ code: '4101', name: '4101', amount: 1500 }]);
+      expect(pl.netIncome).toBe(1200);
+    });
+
+    it('งบดุลต้องสมดุลโดยรวมกำไรที่ยังไม่ปิดบัญชีไว้ในส่วนของเจ้าของ', async () => {
+      prisma.ledgerBalance.findMany.mockResolvedValue([
+        row('1101', 'ASSET', 1, 1500, 0),
+        row('2101', 'LIABILITY', 1, 0, 300),
+        row('4101', 'REVENUE', 1, 0, 1500),
+        row('5101', 'EXPENSE', 1, 300, 0),
+      ]);
+
+      const bs = await service.getBalanceSheet(TENANT, PROPERTY, 2026, 1);
+
+      expect(bs.totalAssets).toBe(1500);
+      expect(bs.totalLiabilities).toBe(300);
+      expect(bs.totalEquity).toBe(1200);
+      expect(bs.isBalanced).toBe(true);
     });
   });
 

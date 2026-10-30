@@ -4,10 +4,38 @@ import {
   NotFoundException,
   BadRequestException,
   ConflictException,
+  ForbiddenException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
 import { CreateCashDrawerDto } from './dto/create-cash-drawer.dto';
 import { CreateCashTxnDto, CashTxnType } from './dto/create-cash-txn.dto';
+import { CloseCashDrawerDto } from './dto/close-cash-drawer.dto';
+import { JournalEntriesService } from '@/modules/accounting/journal-entries/journal-entries.service';
+import { JournalSourceTypeEnum } from '@/modules/accounting/journal-entries/dto/create-journal-entry.dto';
+import { assertPeriodOpen } from '@/modules/accounting/ledger/journal-posting.util';
+import {
+  ACCOUNT_CODES,
+  resolveAccountIds,
+} from '@/modules/accounting/ledger/posting-accounts.util';
+import { ensureCashOverShortAccount } from '@/modules/accounting/ledger/folio-gl.util';
+
+/** cash txn ที่มาจากโมดูลอื่นซึ่งลงบัญชีเองแล้ว — ห้ามลง JE ซ้ำจากฝั่งลิ้นชัก */
+export const CASH_SOURCE_FOLIO_PAYMENT = 'FOLIO_PAYMENT';
+const SELF_POSTED_SOURCES = new Set([CASH_SOURCE_FOLIO_PAYMENT, 'TRANSFER']);
+
+const round2 = (v: number): number => Math.round(v * 100) / 100;
+
+export interface FolioCashReceiptInput {
+  tenantId: string;
+  propertyId: string;
+  drawerId?: string;
+  amount: number;
+  description: string;
+  folioPaymentId: string;
+  reference?: string;
+  createdBy: string;
+}
 
 interface TxnQuery {
   dateFrom?: string;
@@ -20,7 +48,10 @@ interface TxnQuery {
 export class CashDrawersService {
   private readonly logger = new Logger(CashDrawersService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly journalEntries: JournalEntriesService,
+  ) {}
 
   async findAll(tenantId: string, propertyId?: string, status?: string) {
     const where: Record<string, unknown> = { tenantId };
@@ -95,6 +126,11 @@ export class CashDrawersService {
     if (drawer.status === 'OPEN') {
       throw new BadRequestException('Cash drawer is already open');
     }
+    if (drawer.status === 'PENDING') {
+      throw new BadRequestException(
+        'กะก่อนหน้ายังรอหัวหน้าอนุมัติปิดกะ — อนุมัติก่อนจึงเปิดกะใหม่ได้',
+      );
+    }
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const d = await tx.cashDrawer.update({
@@ -131,46 +167,204 @@ export class CashDrawersService {
     return updated;
   }
 
-  async close(id: string, tenantId: string, closedBy: string, countedAmount: number) {
+  /**
+   * ปิดกะ (blind count) → PENDING รอหัวหน้ากะอนุมัติ ยังไม่ลงบัญชีผลต่างจนกว่าจะอนุมัติ
+   * ยอดไม่ตรงต้องมีหมายเหตุเสมอ
+   */
+  async close(id: string, tenantId: string, closedBy: string, dto: CloseCashDrawerDto) {
     const drawer = await this.findOne(id, tenantId);
 
     if (drawer.status !== 'OPEN') {
       throw new BadRequestException(`Cash drawer is not open (status: ${drawer.status})`);
     }
 
-    const variance = countedAmount - Number(drawer.currentBalance);
+    const countedAmount = round2(dto.countedAmount);
+    const variance = round2(countedAmount - Number(drawer.currentBalance));
+    if (variance !== 0 && !dto.notes?.trim()) {
+      throw new BadRequestException('ยอดนับไม่ตรงระบบ — กรุณาระบุหมายเหตุสาเหตุของผลต่าง');
+    }
+    const notes = [
+      dto.notes?.trim(),
+      dto.denominations?.trim() ? `นับเงิน: ${dto.denominations.trim()}` : undefined,
+    ]
+      .filter(Boolean)
+      .join('\n');
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      // Create CLOSING transaction
       await tx.cashTransaction.create({
         data: {
           drawerId: id,
           tenantId,
           propertyId: drawer.propertyId,
           txnType: 'CLOSING',
-          description: 'ปิดลิ้นชักเงินสด',
+          description: `ปิดกะ — นับได้ ${countedAmount.toFixed(2)} (ผลต่าง ${variance.toFixed(2)})`,
           amount: Number(drawer.currentBalance),
           balance: Number(drawer.currentBalance),
           createdBy: closedBy,
         },
       });
 
-      const d = await tx.cashDrawer.update({
+      return tx.cashDrawer.update({
         where: { id },
         data: {
-          status: 'CLOSED',
+          status: 'PENDING',
           closedBy,
           closedAt: new Date(),
           countedAmount,
           variance,
+          notes: notes || null,
         },
       });
-
-      return d;
     });
 
-    this.logger.log(`Cash drawer ${id} closed by ${closedBy}, variance: ${variance}`);
+    this.logger.log(
+      `Cash drawer ${id} closed by ${closedBy}, variance: ${variance} — pending approval`,
+    );
     return updated;
+  }
+
+  /**
+   * หัวหน้ากะอนุมัติปิดกะ → CLOSED และลงบัญชีผลต่างเงินสด
+   *   ขาด: Dr 6310 เงินสดขาด/เกิน / Cr 1101 เงินสด
+   *   เกิน: Dr 1101 / Cr 6310
+   * มีผลต่าง → คนปิดกะอนุมัติเองไม่ได้
+   */
+  async approveClose(id: string, tenantId: string, approvedBy: string) {
+    const drawer = await this.findOne(id, tenantId);
+    if (drawer.status !== 'PENDING') {
+      throw new BadRequestException(`ลิ้นชักไม่ได้อยู่ในสถานะรออนุมัติ (status: ${drawer.status})`);
+    }
+    const variance = round2(Number(drawer.variance ?? 0));
+    const counted = round2(Number(drawer.countedAmount ?? drawer.currentBalance));
+    if (variance !== 0 && drawer.closedBy === approvedBy) {
+      throw new ForbiddenException('ยอดเงินมีผลต่าง — ต้องให้ผู้อื่น (หัวหน้ากะ) เป็นผู้อนุมัติ');
+    }
+
+    let accountIds: Map<string, string> | null = null;
+    if (variance !== 0) {
+      await assertPeriodOpen(this.prisma, tenantId, drawer.propertyId, new Date());
+      await ensureCashOverShortAccount(this.prisma, tenantId);
+      accountIds = await resolveAccountIds(this.prisma, tenantId, [
+        ACCOUNT_CODES.CASH,
+        ACCOUNT_CODES.CASH_OVER_SHORT,
+      ]);
+    }
+
+    const { drawer: updated, txn } = await this.prisma.$transaction(async (tx) => {
+      const adj =
+        variance !== 0
+          ? await tx.cashTransaction.create({
+              data: {
+                drawerId: id,
+                tenantId,
+                propertyId: drawer.propertyId,
+                txnType: 'ADJUSTMENT',
+                description: variance < 0 ? 'ปรับปรุงเงินสดขาดบัญชี' : 'ปรับปรุงเงินสดเกินบัญชี',
+                amount: variance,
+                balance: counted,
+                sourceType: 'CASH_OVER_SHORT',
+                sourceId: id,
+                createdBy: approvedBy,
+              },
+            })
+          : null;
+      const d = await tx.cashDrawer.update({
+        where: { id },
+        data: { status: 'CLOSED', currentBalance: counted },
+      });
+      return { drawer: d, txn: adj };
+    });
+
+    let journalEntryNo: string | null = null;
+    if (txn && accountIds) {
+      const amount = Math.abs(variance);
+      const cashId = accountIds.get(ACCOUNT_CODES.CASH) as string;
+      const overShortId = accountIds.get(ACCOUNT_CODES.CASH_OVER_SHORT) as string;
+      const description = `${drawer.code} เงินสด${variance < 0 ? 'ขาด' : 'เกิน'}บัญชี`;
+      try {
+        const entry = await this.journalEntries.createAndPostAutoEntry(tenantId, {
+          propertyId: drawer.propertyId,
+          entryDate: new Date(),
+          description,
+          reference: drawer.code,
+          sourceType: JournalSourceTypeEnum.ADJUSTMENT,
+          sourceId: txn.id,
+          createdBy: approvedBy,
+          lines: [
+            {
+              accountId: variance < 0 ? overShortId : cashId,
+              lineNo: 1,
+              description,
+              debit: amount,
+              credit: 0,
+            },
+            {
+              accountId: variance < 0 ? cashId : overShortId,
+              lineNo: 2,
+              description,
+              debit: 0,
+              credit: amount,
+            },
+          ],
+        });
+        journalEntryNo = entry.entryNo;
+      } catch (error) {
+        this.logger.error(
+          `Cash over/short journal failed for drawer ${id}: ${(error as Error).message}`,
+          (error as Error).stack,
+        );
+      }
+    }
+
+    this.logger.log(`Cash drawer ${id} close approved by ${approvedBy} (variance ${variance})`);
+    return { ...updated, journalEntryNo };
+  }
+
+  /**
+   * รับเงินสดจากการชำระ folio เข้าลิ้นชักภายใน transaction เดียวกับการชำระ
+   * - ระบุ drawerId ได้ ไม่ระบุ → ใช้ลิ้นชักที่เปิดอยู่ลิ้นชักเดียวของ property
+   * - property ที่ไม่ได้ใช้ลิ้นชักเลย → คืน null (ไม่บังคับ)
+   * JE ของเงินก้อนนี้ลงจากฝั่ง folio แล้ว (Dr 1101 / Cr 1103) ฝั่งลิ้นชักจึงไม่ลงซ้ำ
+   */
+  async recordFolioCashReceiptWithin(tx: Prisma.TransactionClient, input: FolioCashReceiptInput) {
+    const drawers = await tx.cashDrawer.findMany({
+      where: {
+        tenantId: input.tenantId,
+        propertyId: input.propertyId,
+        ...(input.drawerId ? { id: input.drawerId } : {}),
+      },
+      select: { id: true, code: true, status: true, currentBalance: true },
+    });
+    if (drawers.length === 0) {
+      if (input.drawerId) throw new NotFoundException(`Cash drawer ${input.drawerId} not found`);
+      return null;
+    }
+    const open = drawers.filter((d) => d.status === 'OPEN');
+    if (open.length === 0) {
+      throw new BadRequestException('ไม่มีลิ้นชักเงินสดที่เปิดกะอยู่ — เปิดกะก่อนรับเงินสด');
+    }
+    if (open.length > 1) {
+      throw new BadRequestException('มีลิ้นชักเปิดอยู่หลายลิ้นชัก — กรุณาเลือกลิ้นชักที่รับเงิน');
+    }
+    const drawer = open[0];
+    const balance = round2(Number(drawer.currentBalance) + input.amount);
+    const txn = await tx.cashTransaction.create({
+      data: {
+        drawerId: drawer.id,
+        tenantId: input.tenantId,
+        propertyId: input.propertyId,
+        txnType: 'RECEIPT',
+        description: input.description,
+        amount: input.amount,
+        balance,
+        sourceType: CASH_SOURCE_FOLIO_PAYMENT,
+        sourceId: input.folioPaymentId,
+        reference: input.reference ?? null,
+        createdBy: input.createdBy,
+      },
+    });
+    await tx.cashDrawer.update({ where: { id: drawer.id }, data: { currentBalance: balance } });
+    return { txn, drawerCode: drawer.code };
   }
 
   async addTransaction(dto: CreateCashTxnDto, tenantId: string, createdBy: string) {
@@ -178,6 +372,14 @@ export class CashDrawersService {
 
     if (drawer.status !== 'OPEN') {
       throw new BadRequestException('Cash drawer must be OPEN to add transactions');
+    }
+
+    // RECEIPT/PAYMENT ที่คีย์จากหน้าลิ้นชักต้องลงบัญชีคู่ — ตรวจบัญชี/งวดก่อนขยับเงิน
+    const glPlan = this.cashGlPlan(dto);
+    let glAccounts: Map<string, string> | null = null;
+    if (glPlan) {
+      await assertPeriodOpen(this.prisma, tenantId, drawer.propertyId, new Date());
+      glAccounts = await resolveAccountIds(this.prisma, tenantId, [glPlan.debit, glPlan.credit]);
     }
 
     // For TRANSFER: validate destination drawer
@@ -264,10 +466,60 @@ export class CashDrawersService {
       return txn;
     });
 
+    let journalEntryNo: string | null = null;
+    if (glPlan && glAccounts) {
+      const description = `${drawer.code}: ${dto.description}`;
+      try {
+        const entry = await this.journalEntries.createAndPostAutoEntry(tenantId, {
+          propertyId: drawer.propertyId,
+          entryDate: new Date(),
+          description,
+          reference: dto.reference ?? drawer.code,
+          sourceType: JournalSourceTypeEnum.ADJUSTMENT,
+          sourceId: result.id,
+          createdBy,
+          lines: [
+            {
+              accountId: glAccounts.get(glPlan.debit) as string,
+              lineNo: 1,
+              description,
+              debit: dto.amount,
+              credit: 0,
+            },
+            {
+              accountId: glAccounts.get(glPlan.credit) as string,
+              lineNo: 2,
+              description,
+              debit: 0,
+              credit: dto.amount,
+            },
+          ],
+        });
+        journalEntryNo = entry.entryNo;
+      } catch (error) {
+        this.logger.error(
+          `Cash journal failed for txn ${result.id}: ${(error as Error).message}`,
+          (error as Error).stack,
+        );
+      }
+    }
+
     this.logger.log(
       `Cash transaction created: ${result.id} type=${dto.txnType} amount=${dto.amount}`,
     );
-    return result;
+    return { ...result, journalEntryNo };
+  }
+
+  /** บัญชีคู่ของรายการเงินสดที่คีย์จากลิ้นชัก — null = ไม่ต้องลงบัญชี (ย้ายเงินภายใน/ลงจากต้นทางแล้ว) */
+  private cashGlPlan(dto: CreateCashTxnDto): { debit: string; credit: string } | null {
+    if (dto.sourceType && SELF_POSTED_SOURCES.has(dto.sourceType)) return null;
+    if (dto.txnType === CashTxnType.RECEIPT) {
+      return { debit: ACCOUNT_CODES.CASH, credit: dto.accountCode ?? ACCOUNT_CODES.OTHER_REVENUE };
+    }
+    if (dto.txnType === CashTxnType.PAYMENT) {
+      return { debit: dto.accountCode ?? ACCOUNT_CODES.OTHER_EXPENSE, credit: ACCOUNT_CODES.CASH };
+    }
+    return null;
   }
 
   async getTransactions(drawerId: string, tenantId: string, query: TxnQuery) {
@@ -285,7 +537,7 @@ export class CashDrawersService {
       };
     }
 
-    const [total, data] = await Promise.all([
+    const [total, rows] = await Promise.all([
       this.prisma.cashTransaction.count({ where }),
       this.prisma.cashTransaction.findMany({
         where,
@@ -294,6 +546,30 @@ export class CashDrawersService {
         take: limit,
       }),
     ]);
+
+    // เลข JE ของแต่ละรายการ — ลงจากลิ้นชักเอง (sourceId = txn.id) หรือจาก folio (sourceId = payment id)
+    const keys = [
+      ...rows.map((r) => r.id),
+      ...rows
+        .filter((r) => r.sourceType === CASH_SOURCE_FOLIO_PAYMENT && r.sourceId)
+        .map((r) => r.sourceId as string),
+    ];
+    const entries = keys.length
+      ? await this.prisma.journalEntry.findMany({
+          where: { tenantId, sourceId: { in: keys }, status: { in: ['POSTED', 'DRAFT'] } },
+          select: { sourceId: true, entryNo: true },
+        })
+      : [];
+    const entryOf = new Map(entries.map((e) => [e.sourceId, e.entryNo]));
+    const data = rows.map((r) => ({
+      ...r,
+      journalEntryNo:
+        entryOf.get(r.id) ??
+        (r.sourceType === CASH_SOURCE_FOLIO_PAYMENT && r.sourceId
+          ? entryOf.get(r.sourceId)
+          : undefined) ??
+        null,
+    }));
 
     return { data, total, page, limit };
   }

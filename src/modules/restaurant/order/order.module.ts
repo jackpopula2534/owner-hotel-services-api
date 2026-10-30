@@ -9,6 +9,7 @@ import { TableModule } from '../table/table.module';
 import { AddonModule } from '../../addons/addon.module';
 import { FolioPostingModule } from '../../accounts-receivable/folio-posting/folio-posting.module';
 import { RevenueModule } from '../../revenue/revenue.module';
+import { AccountingModule } from '../../accounting/accounting.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { RevenueModule } from '../../revenue/revenue.module';
     AddonModule,
     FolioPostingModule,
     RevenueModule,
+    AccountingModule,
   ],
   controllers: [OrderController, OrderPublicController],
   providers: [OrderService],

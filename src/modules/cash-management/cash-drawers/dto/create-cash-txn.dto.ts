@@ -1,4 +1,13 @@
-import { IsNotEmpty, IsOptional, IsString, IsUUID, IsNumber, IsEnum, Min } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+  IsNumber,
+  IsEnum,
+  Min,
+  Matches,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 
@@ -53,4 +62,15 @@ export class CreateCashTxnDto {
   @IsOptional()
   @IsString()
   reference?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'รหัสบัญชีคู่ (ผังบัญชี) — RECEIPT: บัญชีเครดิต (ค่าเริ่มต้น 4300 รายได้อื่น), ' +
+      'PAYMENT: บัญชีเดบิต (ค่าเริ่มต้น 6309 ค่าใช้จ่ายอื่น, นำฝากธนาคารใช้ 1102)',
+    example: '6309',
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4,6}$/, { message: 'accountCode must be 4-6 digits' })
+  accountCode?: string;
 }

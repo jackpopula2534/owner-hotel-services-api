@@ -16,12 +16,23 @@ describe('ArInvoicesService - issue() tax-ID enforcement', () => {
         update: jest.fn().mockResolvedValue({ ...overrides.invoice, status: 'ISSUED' }),
       },
       documentSettings: {
-        findUnique: jest
+        // service อ่านด้วย findFirst({ tenantId, propertyId }) — mock เดิมเป็น findUnique
+        // จึงล้มด้วย TypeError แล้ว "ผ่าน" เคส rejects แบบผิดเหตุผล
+        findFirst: jest
           .fn()
           .mockResolvedValue(overrides.taxId === undefined ? null : { taxId: overrides.taxId }),
       },
+      accountChart: {
+        count: jest.fn().mockResolvedValue(69),
+        findFirst: jest.fn(({ where }) => Promise.resolve({ id: `acc-${where.code}`, code: where.code })),
+      },
     };
-    return { service: new ArInvoicesService(prismaMock), prisma: prismaMock };
+    const journalEntries: any = { createAndPostAutoEntry: jest.fn().mockResolvedValue({}) };
+    return {
+      service: new ArInvoicesService(prismaMock, journalEntries),
+      prisma: prismaMock,
+      journalEntries,
+    };
   };
 
   const baseInvoice = {
@@ -32,6 +43,10 @@ describe('ArInvoicesService - issue() tax-ID enforcement', () => {
     invoiceType: 'GUEST_BILL',
     status: 'DRAFT',
     companyTaxId: null,
+    issueDate: new Date('2026-05-10'),
+    totalAmount: 1070,
+    vatAmount: 70,
+    lines: [{ description: 'ค่าห้อง', netAmount: 1000, accountId: null }],
   };
 
   it('blocks issuing when the seller has no Tax ID in Document Settings', async () => {
@@ -44,7 +59,10 @@ describe('ArInvoicesService - issue() tax-ID enforcement', () => {
   });
 
   it('issues a guest-bill invoice once the seller Tax ID is set', async () => {
-    const { service, prisma } = makeService({ invoice: baseInvoice, taxId: '0105556000000' });
+    const { service, prisma, journalEntries } = makeService({
+      invoice: baseInvoice,
+      taxId: '0105556000000',
+    });
 
     const result = await service.issue('inv-1', 'tenant-1', 'user-1');
 
@@ -52,6 +70,24 @@ describe('ArInvoicesService - issue() tax-ID enforcement', () => {
     expect(prisma.arInvoice.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'ISSUED' }) }),
     );
+    // ตั้งลูกหนี้ต้องติดป้าย AR_INVOICE (เดิมใช้ AR_RECEIPT ปนกับใบเสร็จ)
+    expect(journalEntries.createAndPostAutoEntry).toHaveBeenCalledWith(
+      'tenant-1',
+      expect.objectContaining({ sourceType: 'AR_INVOICE', sourceId: 'inv-1' }),
+    );
+  });
+
+  it('keeps the invoice DRAFT when the journal cannot be posted (period closed)', async () => {
+    const { service, prisma, journalEntries } = makeService({
+      invoice: baseInvoice,
+      taxId: '0105556000000',
+    });
+    journalEntries.createAndPostAutoEntry.mockRejectedValue(new BadRequestException('งวดปิดแล้ว'));
+
+    await expect(service.issue('inv-1', 'tenant-1', 'user-1')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(prisma.arInvoice.update).not.toHaveBeenCalled();
   });
 
   it('blocks a CITY_LEDGER invoice that has no buyer companyTaxId', async () => {

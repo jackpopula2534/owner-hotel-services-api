@@ -33,7 +33,11 @@ describe('CampAccountingService', () => {
         count: jest.fn().mockResolvedValue(0),
       },
       property: { findFirst: jest.fn().mockResolvedValue({ id: 'prop-1' }) },
-      accountChart: { findMany: jest.fn().mockResolvedValue(ACCOUNTS) },
+      accountChart: {
+        findMany: jest.fn().mockResolvedValue(ACCOUNTS),
+        count: jest.fn().mockResolvedValue(ACCOUNTS.length),
+      },
+      fiscalYear: { findFirst: jest.fn().mockResolvedValue(null) },
       documentSequence: { upsert: jest.fn().mockResolvedValue({ lastNumber: 7 }) },
       campReservation: { findMany: jest.fn().mockResolvedValue([]) },
       // JE กับ ledger_balances ต้องเขียนใน transaction เดียวกัน — mock ให้รัน callback

@@ -17,6 +17,9 @@ import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AddonGuard } from '@/common/guards/addon.guard';
 import { RequireAddon } from '@/common/decorators/require-addon.decorator';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
+import { RolesGuard } from '@/common/guards/roles.guard';
+import { Roles } from '@/common/decorators/roles.decorator';
+import { ACCOUNTING_CLOSE_ROLES, ACCOUNTING_WRITE_ROLES, AccountingAccess } from '@/modules/accounting/accounting-access.decorator';
 
 interface JwtPayload {
   sub: string;
@@ -27,7 +30,8 @@ interface JwtPayload {
 
 @ApiTags('Accounting - Fiscal Years')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, AddonGuard)
+@UseGuards(JwtAuthGuard, AddonGuard, RolesGuard)
+@AccountingAccess(ACCOUNTING_WRITE_ROLES)
 @RequireAddon('ACCOUNTING_MODULE')
 @Controller({ path: 'accounting/fiscal-years', version: '1' })
 export class FiscalYearsController {
@@ -56,6 +60,7 @@ export class FiscalYearsController {
     return { success: true, data };
   }
 
+  @Roles(...ACCOUNTING_CLOSE_ROLES)
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'สร้างปีบัญชีใหม่' })
@@ -64,6 +69,7 @@ export class FiscalYearsController {
     return { success: true, data };
   }
 
+  @Roles(...ACCOUNTING_CLOSE_ROLES)
   @Patch(':id/close')
   @ApiOperation({ summary: 'ปิดปีบัญชี' })
   async close(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
@@ -71,6 +77,7 @@ export class FiscalYearsController {
     return { success: true, data };
   }
 
+  @Roles(...ACCOUNTING_CLOSE_ROLES)
   @Patch(':id/lock')
   @ApiOperation({ summary: 'ล็อคปีบัญชี (ห้ามแก้ไขอีก)' })
   async lock(@CurrentUser() user: JwtPayload, @Param('id') id: string) {

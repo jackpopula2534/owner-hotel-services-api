@@ -1,6 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { applyLedgerBalances } from '../accounting/ledger/ledger-balance.util';
+import {
+  assertPeriodOpen,
+  fiscalPeriodOf,
+  nextJournalEntryNo,
+} from '../accounting/ledger/journal-posting.util';
+import { ensureDefaultChartOfAccounts } from '@/modules/accounting/chart-of-accounts/default-chart-of-accounts';
 
 /**
  * CampAccountingService — ลงบัญชีรายได้ลานกางเต็นท์
@@ -73,6 +79,8 @@ export class CampAccountingService {
       return;
     }
 
+    await ensureDefaultChartOfAccounts(this.prisma, tenantId);
+
     const accounts = await this.prisma.accountChart.findMany({
       where: {
         tenantId,
@@ -101,18 +109,12 @@ export class CampAccountingService {
     }
 
     const entryDate = params.paidAt ?? new Date();
-    const yearMonth = `${entryDate.getFullYear()}${String(entryDate.getMonth() + 1).padStart(2, '0')}`;
-    const seq = await this.prisma.documentSequence.upsert({
-      where: { tenantId_docType_yearMonth: { tenantId, docType: 'JE', yearMonth } },
-      update: { lastNumber: { increment: 1 } },
-      create: { tenantId, docType: 'JE', prefix: 'JE', yearMonth, lastNumber: 1 },
-    });
-    const entryNo = `JE-${yearMonth}-${String(seq.lastNumber).padStart(6, '0')}`;
+    await assertPeriodOpen(this.prisma, tenantId, property.id, entryDate);
+    const entryNo = await nextJournalEntryNo(this.prisma, tenantId, entryDate);
 
     const description = `รับชำระลานกางเต็นท์ ${label}`;
 
-    const fiscalPeriod = entryDate.getMonth() + 1;
-    const fiscalYear = entryDate.getFullYear();
+    const { fiscalYear, fiscalPeriod } = fiscalPeriodOf(entryDate);
     const lines = [
       { accountId: cashId, lineNo: 1, description, debit: amount, credit: 0 },
       { accountId: revenueId, lineNo: 2, description, debit: 0, credit: amount },

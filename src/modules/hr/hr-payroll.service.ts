@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogService } from '../../audit-log/audit-log.service';
@@ -13,6 +14,10 @@ import {
 } from '../../audit-log/dto/audit-log.dto';
 import { HrPayrollPolicyService } from './hr-payroll-policy.service';
 import { RunPayrollDto, ApprovePayrollDto, UpdatePayrollDto } from './dto/run-payroll.dto';
+import { JournalEntriesService } from '../accounting/journal-entries/journal-entries.service';
+import { JournalSourceTypeEnum } from '../accounting/journal-entries/dto/create-journal-entry.dto';
+import { assertPeriodOpen } from '../accounting/ledger/journal-posting.util';
+import { ACCOUNT_CODES, resolveAccountIds } from '../accounting/ledger/posting-accounts.util';
 
 interface PayrollItemInput {
   type: string;
@@ -29,6 +34,7 @@ export class HrPayrollService {
     private readonly prisma: PrismaService,
     private readonly policyService: HrPayrollPolicyService,
     private readonly auditLog: AuditLogService,
+    @Optional() private readonly journalEntriesService?: JournalEntriesService,
   ) {}
 
   /** Normalize a date to a YYYY-MM-DD key for matching OT requests to attendance. */
@@ -688,12 +694,113 @@ export class HrPayrollService {
     if (payroll.status !== 'approved') {
       throw new BadRequestException('Only approved payrolls can be marked as paid');
     }
+    const paidAt = new Date();
+    // ลงบัญชีก่อนเปลี่ยนสถานะ — งวดปิด/ผังบัญชีไม่ครบต้องจ่ายไม่ผ่าน ไม่ใช่ "จ่ายแล้ว" แต่สมุดว่าง
+    await this.postPayrollJournal(payroll, tenantId, paidAt, userId ?? 'system');
     const updated = await (this.prisma as any).hrPayroll.update({
       where: { id },
-      data: { status: 'paid', paidAt: new Date() },
+      data: { status: 'paid', paidAt },
     });
     await this.audit(AuditAction.PAYROLL_PAID, id, tenantId, userId, 'approved', 'paid');
     return updated;
+  }
+
+  /**
+   * DR เงินเดือน 6301      = ค่าจ้างรวม หลังหักลา/ขาด/สาย (ส่วนนี้ลดค่าใช้จ่าย ไม่ใช่หนี้)
+   * CR ธนาคาร 1102          = netSalary
+   * CR ภาษีหัก ณ ที่จ่าย 2104 = รายการหักชื่อ "ภาษีหัก ณ ที่จ่าย"
+   * CR ค่าใช้จ่ายค้างจ่าย 2102 = ประกันสังคมส่วนลูกจ้าง (ต้องนำส่ง สปส.)
+   */
+  private async postPayrollJournal(
+    payroll: {
+      id: string;
+      employeeId: string;
+      month: number;
+      year: number;
+      netSalary: unknown;
+      items?: Array<{ type: string; name: string; amount: unknown }>;
+    },
+    tenantId: string,
+    paidAt: Date,
+    createdBy: string,
+  ): Promise<void> {
+    if (!this.journalEntriesService) return;
+
+    const round = (n: number) => Math.round(n * 100) / 100;
+    const deductions = (payroll.items ?? []).filter((i) => i.type === 'deduction');
+    const sumOf = (pred: (name: string) => boolean) =>
+      round(deductions.filter((i) => pred(i.name)).reduce((s, i) => s + Number(i.amount), 0));
+    const tax = sumOf((n) => n === 'ภาษีหัก ณ ที่จ่าย');
+    const socialSecurity = sumOf((n) => n === 'ประกันสังคม');
+    const net = round(Number(payroll.netSalary));
+    const expense = round(net + tax + socialSecurity);
+    if (expense <= 0) return;
+
+    const employee = await this.prisma.employee.findFirst({
+      where: { id: payroll.employeeId, tenantId },
+      select: { propertyId: true, employeeCode: true, firstName: true, lastName: true },
+    });
+    const propertyId =
+      employee?.propertyId ??
+      (
+        await this.prisma.property.findFirst({
+          where: { tenantId },
+          orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+          select: { id: true },
+        })
+      )?.id;
+    if (!propertyId) {
+      throw new BadRequestException('ลงบัญชีเงินเดือนไม่ได้: tenant ยังไม่มี property');
+    }
+
+    await assertPeriodOpen(this.prisma, tenantId, propertyId, paidAt);
+    const accountIds = await resolveAccountIds(this.prisma, tenantId, [
+      ACCOUNT_CODES.SALARY_EXPENSE,
+      ACCOUNT_CODES.BANK,
+      ACCOUNT_CODES.WHT_PAYABLE,
+      ACCOUNT_CODES.ACCRUED_EXPENSES,
+    ]);
+
+    const period = `${payroll.year}-${String(payroll.month).padStart(2, '0')}`;
+    const who = employee
+      ? `${employee.firstName ?? ''} ${employee.lastName ?? ''}`.trim() ||
+        employee.employeeCode ||
+        payroll.employeeId.slice(0, 8)
+      : payroll.employeeId.slice(0, 8);
+    const description = `จ่ายเงินเดือน ${period} ${who}`;
+    const credits: Array<[string, number]> = [
+      [ACCOUNT_CODES.BANK, net],
+      [ACCOUNT_CODES.WHT_PAYABLE, tax],
+      [ACCOUNT_CODES.ACCRUED_EXPENSES, socialSecurity],
+    ];
+
+    await this.journalEntriesService.createAndPostAutoEntry(tenantId, {
+      propertyId,
+      entryDate: paidAt,
+      description,
+      reference: `PAYROLL-${period}`,
+      sourceType: JournalSourceTypeEnum.PAYROLL,
+      sourceId: payroll.id,
+      createdBy,
+      lines: [
+        {
+          accountId: accountIds.get(ACCOUNT_CODES.SALARY_EXPENSE)!,
+          lineNo: 1,
+          description,
+          debit: expense,
+          credit: 0,
+        },
+        ...credits
+          .filter(([, amount]) => amount > 0)
+          .map(([code, amount], i) => ({
+            accountId: accountIds.get(code)!,
+            lineNo: i + 2,
+            description,
+            debit: 0,
+            credit: amount,
+          })),
+      ],
+    });
   }
 
   async cancel(id: string, tenantId: string, userId?: string) {

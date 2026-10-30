@@ -20,6 +20,8 @@ import { CurrentUser } from '@/common/decorators/current-user.decorator';
 import { IsOptional, IsUUID, IsDateString, IsInt, Min } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
+import { RolesGuard } from '@/common/guards/roles.guard';
+import { ACCOUNTING_WRITE_ROLES, AccountingAccess } from '@/modules/accounting/accounting-access.decorator';
 
 class QueryWhtCertDto {
   @ApiPropertyOptional() @IsOptional() @IsUUID() propertyId?: string;
@@ -49,7 +51,8 @@ interface JwtPayload {
 
 @ApiTags('Accounting - WHT Certificates')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, AddonGuard)
+@UseGuards(JwtAuthGuard, AddonGuard, RolesGuard)
+@AccountingAccess(ACCOUNTING_WRITE_ROLES)
 @RequireAddon('ACCOUNTING_MODULE')
 @Controller({ path: 'accounting/wht-certificates', version: '1' })
 export class WhtCertificatesController {

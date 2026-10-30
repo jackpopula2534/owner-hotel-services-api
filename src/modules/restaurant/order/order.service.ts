@@ -36,6 +36,17 @@ import {
   ORDER_REVENUE_SELECT,
   type OrderRevenueOutlet,
 } from '../../revenue/sources/order-revenue.source';
+import { JournalEntriesService } from '../../accounting/journal-entries/journal-entries.service';
+import { JournalSourceTypeEnum } from '../../accounting/journal-entries/dto/create-journal-entry.dto';
+import { ACCOUNT_CODES, resolveAccountIds } from '../../accounting/ledger/posting-accounts.util';
+
+/** ชนิดรายได้ของบรรทัดบิล (สมุดรายได้) → รหัสบัญชีรายได้ในผังมาตรฐาน */
+const POS_REVENUE_ACCOUNT: Partial<Record<string, string>> = {
+  FOOD: ACCOUNT_CODES.FOOD_REVENUE,
+  BEVERAGE: ACCOUNT_CODES.BEVERAGE_REVENUE,
+  OTHER: ACCOUNT_CODES.OTHER_REVENUE,
+  SERVICE_CHARGE: ACCOUNT_CODES.SERVICE_CHARGE_REVENUE,
+};
 
 /** `document_sequences.docType` for restaurant bill numbers. */
 const ORDER_DOC_TYPE = 'ORD';
@@ -123,6 +134,7 @@ export class OrderService {
     private readonly revenuePosting: RevenuePostingService,
     @Optional() private readonly kitchenGateway?: KitchenGateway,
     @Optional() private readonly eventEmitter?: EventEmitter2,
+    @Optional() private readonly journalEntriesService?: JournalEntriesService,
   ) {}
 
   // ─── Booked Rooms (for Room Service lookup) ────────────────────────────
@@ -934,6 +946,11 @@ export class OrderService {
     // เหตุผลเดียวกันกับ event ตัดสต๊อกคลังกลาง: เส้นทางจ่ายเงิน→ปิดบิล (ซึ่งเป็นเส้นทาง
     // จริงของ POS) ไม่เคยยิง restaurant.order.completed เลย วัตถุดิบจึงไม่เคยถูกตัด
     // ถ้าร้านไม่ได้เดินสถานะผ่าน SERVED→COMPLETED ด้วยมือ
+    // บิลที่ชาร์จเข้าห้องไม่ลงที่นี่ — ยอดไปอยู่ใน folio แล้วเข้าบัญชีตอนเช็คเอาต์ (4300)
+    if (!isRoomCharge) {
+      await this.postOrderJournal(orderId, tenantId, restaurant, userId ?? 'system');
+    }
+
     if (becomesCompleted) {
       await this.closeOutTable(order, 'CLEANING');
       await this.emitOrderCompleted(
@@ -980,6 +997,97 @@ export class OrderService {
     if (!hasPostableRevenue(input)) return;
 
     await this.revenuePosting.postWithin(tx, input);
+  }
+
+  /**
+   * ลงสมุดรายวันของบิลที่รับเงินที่หน้าร้าน (POS_SALE) — แตกยอดชุดเดียวกับสมุดรายได้
+   * DR เงินสด 1101 / ธนาคาร 1102 / มัดจำรับล่วงหน้า 2105 (voucher) = order.total
+   * CR รายได้อาหาร 4201 · เครื่องดื่ม 4202 · อื่น ๆ 4300 · ค่าบริการ 4305 = ยอดหลังส่วนลด
+   * CR ภาษีขาย 2103
+   *
+   * ล้มแล้วไม่ล้มการปิดบิล — เงินเข้าลิ้นชักไปแล้ว ถ้าโยน error ลูกค้าจ่ายซ้ำได้ แต่ต้อง
+   * log ระดับ error ให้ตามลงย้อนหลัง (createAndPostAutoEntry กันซ้ำด้วย sourceId)
+   */
+  private async postOrderJournal(
+    orderId: string,
+    tenantId: string,
+    restaurant: { name: string; propertyId: string | null } | null,
+    createdBy: string,
+  ): Promise<void> {
+    if (!this.journalEntriesService || !restaurant?.propertyId) return;
+
+    try {
+      const row = await this.prisma.order.findFirst({
+        where: { id: orderId, tenantId },
+        select: ORDER_REVENUE_SELECT,
+      });
+      if (!row || Number(row.total) <= 0) return;
+
+      const input = buildOrderRevenueInput(row, {
+        restaurantId: row.restaurantId,
+        restaurantName: restaurant.name,
+        propertyId: restaurant.propertyId,
+      });
+
+      const round2 = (value: number) => Math.round(value * 100) / 100;
+      const credits = new Map<string, number>();
+      const add = (code: string, amount: number) =>
+        credits.set(code, round2((credits.get(code) ?? 0) + amount));
+      let vat = 0;
+      for (const line of input.lines) {
+        add(
+          POS_REVENUE_ACCOUNT[line.revenueType] ?? ACCOUNT_CODES.OTHER_REVENUE,
+          Number(line.grossAmount) - Number(line.discount ?? 0),
+        );
+        vat += Number(line.taxAmount ?? 0);
+      }
+      add(ACCOUNT_CODES.VAT_OUTPUT, vat); // บรรทัดภาษีอยู่ท้ายสุด อ่านง่ายกว่าแทรกกลางรายได้
+
+      const total = round2(Number(row.total));
+      const debitCode =
+        row.paymentMethod === 'CASH'
+          ? ACCOUNT_CODES.CASH
+          : row.paymentMethod === 'VOUCHER'
+            ? ACCOUNT_CODES.DEPOSIT_RECEIVED
+            : ACCOUNT_CODES.BANK;
+      const creditLines = [...credits.entries()].filter(([, amount]) => amount > 0);
+      const accountIds = await resolveAccountIds(this.prisma, tenantId, [
+        debitCode,
+        ...creditLines.map(([code]) => code),
+      ]);
+
+      const description = `ขาย ${restaurant.name} บิล ${row.orderNumber}`;
+      await this.journalEntriesService.createAndPostAutoEntry(tenantId, {
+        propertyId: restaurant.propertyId,
+        entryDate: row.completedAt ?? new Date(),
+        description,
+        reference: row.orderNumber,
+        sourceType: JournalSourceTypeEnum.POS_SALE,
+        sourceId: row.id,
+        createdBy,
+        lines: [
+          {
+            accountId: accountIds.get(debitCode)!,
+            lineNo: 1,
+            description,
+            debit: total,
+            credit: 0,
+          },
+          ...creditLines.map(([code, amount], i) => ({
+            accountId: accountIds.get(code)!,
+            lineNo: i + 2,
+            description,
+            debit: 0,
+            credit: amount,
+          })),
+        ],
+      });
+    } catch (error) {
+      this.logger.error(
+        `POS journal failed for order ${orderId}: ${(error as Error).message}`,
+        (error as Error).stack,
+      );
+    }
   }
 
   async getReceipt(restaurantId: string, orderId: string, tenantId: string) {

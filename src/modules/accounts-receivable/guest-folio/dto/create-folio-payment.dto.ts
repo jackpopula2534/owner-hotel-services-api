@@ -47,4 +47,11 @@ export class CreateFolioPaymentDto {
   @IsOptional()
   @IsString()
   notes?: string;
+  @ApiPropertyOptional({
+    description:
+      'ลิ้นชักที่รับเงินสด (CASH) — ไม่ระบุใช้ลิ้นชักที่เปิดอยู่ลิ้นชักเดียวของ property',
+  })
+  @IsOptional()
+  @IsUUID()
+  drawerId?: string;
 }

@@ -4,6 +4,7 @@ import {
   BadRequestException,
   NotFoundException,
   ConflictException,
+  Optional,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ConfigService } from '@nestjs/config';
@@ -20,6 +21,9 @@ import {
   GoodsReceiveAttachmentKind,
 } from '@prisma/client';
 import { StorageService } from '@/common/storage/storage.service';
+import { JournalEntriesService } from '@/modules/accounting/journal-entries/journal-entries.service';
+import { JournalSourceTypeEnum } from '@/modules/accounting/journal-entries/dto/create-journal-entry.dto';
+import { ACCOUNT_CODES, resolveAccountIds } from '@/modules/accounting/ledger/posting-accounts.util';
 import {
   INVENTORY_EVENTS,
   GoodsReceiveCompletedEvent,
@@ -200,6 +204,7 @@ export class GoodsReceivesService {
     private readonly eventEmitter: EventEmitter2,
     private readonly config: ConfigService,
     private readonly storage: StorageService,
+    @Optional() private readonly journalEntriesService?: JournalEntriesService,
   ) {}
 
   /**
@@ -854,12 +859,87 @@ export class GoodsReceivesService {
       }
     }
 
+    await this.postCashPurchaseJournal(detail.id, tenantId, dto.paymentMethod, userId);
+
     this.logger.log(
       `Cash purchase ${detail.grNumber} recorded for tenant ${tenantId} — ` +
         `${vendorName}, ${total} THB, paid via ${dto.paymentMethod}`,
     );
 
     return detail;
+  }
+
+  /**
+   * ซื้อสดไม่มีใบแจ้งหนี้ AP ตามมา (ต่างจาก GR ที่อิง PO ซึ่งลงบัญชีตอนอนุมัติ AP invoice)
+   * จึงต้องลงสมุดรายวันที่นี่ ไม่งั้นเงินออกจากกระเป๋าแต่บัญชีไม่รู้เรื่อง
+   * DR สินค้าคงเหลือ 1107 / CR เงินสดย่อย 1101 · ธนาคาร 1102 (โอน/บัตร)
+   *                       · ค่าใช้จ่ายค้างจ่าย 2102 (พนักงานสำรองจ่าย ต้องคืนเงิน)
+   *
+   * ไม่ล้มทั้งคำขอเมื่อลงบัญชีไม่ได้ — ของขึ้นชั้นแล้ว เหตุผลเดียวกับการปิดใบขอซื้อ
+   */
+  private async postCashPurchaseJournal(
+    goodsReceiveId: string,
+    tenantId: string,
+    paymentMethod: string,
+    createdBy: string,
+  ): Promise<void> {
+    if (!this.journalEntriesService) return;
+    try {
+      const gr = await this.prisma.goodsReceive.findFirst({
+        where: { id: goodsReceiveId, tenantId },
+        select: {
+          id: true,
+          grNumber: true,
+          receiveDate: true,
+          totalAmount: true,
+          vendorName: true,
+          warehouse: { select: { propertyId: true } },
+        },
+      });
+      const amount = Math.round(Number(gr?.totalAmount ?? 0) * 100) / 100;
+      if (!gr || amount <= 0) return;
+
+      const creditCode =
+        paymentMethod === 'PETTY_CASH'
+          ? ACCOUNT_CODES.CASH
+          : paymentMethod === 'OWN_MONEY'
+            ? ACCOUNT_CODES.ACCRUED_EXPENSES
+            : ACCOUNT_CODES.BANK;
+      const accountIds = await resolveAccountIds(this.prisma, tenantId, [
+        ACCOUNT_CODES.INVENTORY,
+        creditCode,
+      ]);
+      const description = `ซื้อสด ${gr.grNumber}${gr.vendorName ? ` — ${gr.vendorName}` : ''}`;
+      await this.journalEntriesService.createAndPostAutoEntry(tenantId, {
+        propertyId: gr.warehouse.propertyId,
+        entryDate: gr.receiveDate,
+        description,
+        reference: gr.grNumber,
+        sourceType: JournalSourceTypeEnum.PURCHASE_RECEIPT,
+        sourceId: gr.id,
+        createdBy,
+        lines: [
+          {
+            accountId: accountIds.get(ACCOUNT_CODES.INVENTORY)!,
+            lineNo: 1,
+            description,
+            debit: amount,
+            credit: 0,
+          },
+          {
+            accountId: accountIds.get(creditCode)!,
+            lineNo: 2,
+            description,
+            debit: 0,
+            credit: amount,
+          },
+        ],
+      });
+    } catch (err) {
+      this.logger.error(
+        `Cash purchase ${goodsReceiveId} landed but journal posting failed: ${(err as Error).message}`,
+      );
+    }
   }
 
   /**

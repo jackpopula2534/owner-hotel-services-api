@@ -11,7 +11,12 @@ import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
  * role ที่ไม่อยู่ที่นี่ = ไม่สืบทอดอะไรเลย เข้าได้เฉพาะ endpoint ที่ **เอ่ยชื่อมันตรงๆ**
  * ใน `@Roles(...)` (ดู `inheritanceFloor` ว่าทำไมต้องเป็นแบบนั้น)
  * ปัจจุบัน: crm_manager, crm_agent, sales_rep, hotel_manager, warehouse_manager,
- * accounting_manager, owner, cashier, bartender, restaurant_manager, system
+ * accounting_manager, owner, cashier, bartender, restaurant_manager, system,
+ * accountant (+ chief_accountant / ap_clerk / ar_clerk / auditor)
+ *
+ * accountant เคยมี level 40 — ลิสต์ไหนเอ่ยชื่อ accountant พื้นการสืบทอดจึงตกเป็น 40
+ * แม่บ้าน/ช่าง/รปภ. (level 40) เลยเข้า endpoint การเงินได้ทั้งหมด (analytics ร้านอาหาร,
+ * promptpay, ระบบบัญชี) จึงถอดออกให้เป็น exact match เหมือน role เฉพาะทางตัวอื่น
  *
  * การ "เติมให้ครบ" คือกับดัก — ให้ level กับ role หนึ่ง = เปิด endpoint **ทุกอัน**
  * ที่พื้นต่ำกว่านั้นทั้งระบบให้มันทันที ไม่ใช่แค่ endpoint ของโดเมนตัวเอง
@@ -31,7 +36,6 @@ const ROLE_LEVELS: Record<string, number> = {
   receiver: 45,
   housekeeper: 40,
   maintenance: 40,
-  accountant: 40,
   security: 40,
   staff: 30,
   user: 10,

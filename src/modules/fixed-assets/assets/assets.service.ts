@@ -4,8 +4,22 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
+  Optional,
 } from '@nestjs/common';
 import { PrismaService } from '@/prisma/prisma.service';
+import { JournalEntriesService } from '@/modules/accounting/journal-entries/journal-entries.service';
+import { JournalSourceTypeEnum } from '@/modules/accounting/journal-entries/dto/create-journal-entry.dto';
+import { assertPeriodOpen } from '@/modules/accounting/ledger/journal-posting.util';
+import {
+  ACCOUNT_CODES,
+  resolveAccountIds,
+} from '@/modules/accounting/ledger/posting-accounts.util';
+import {
+  ACCUM_DEPRECIATION_CODE,
+  ASSET_COST_CODE,
+  DISPOSAL_GAIN_CODE,
+  DISPOSAL_LOSS_CODE,
+} from '../fixed-asset-accounts.util';
 import { CreateAssetDto, DepreciationMethodEnum } from './dto/create-asset.dto';
 import { QueryAssetDto } from './dto/query-asset.dto';
 
@@ -13,7 +27,10 @@ import { QueryAssetDto } from './dto/query-asset.dto';
 export class AssetsService {
   private readonly logger = new Logger(AssetsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly journalEntriesService?: JournalEntriesService,
+  ) {}
 
   async findAll(tenantId: string, query: QueryAssetDto) {
     const { propertyId, category, status, search, page = 1, limit = 20 } = query;
@@ -129,6 +146,9 @@ export class AssetsService {
     const asset = await this.findOne(id, tenantId);
     if (asset.status === 'DISPOSED') throw new BadRequestException('Asset is already disposed');
 
+    // ลงบัญชีก่อนเปลี่ยนสถานะ — งวดปิด/ค่าเสื่อมค้าง post ต้องจำหน่ายไม่ผ่าน
+    await this.postDisposalJournal(asset, tenantId, disposedBy, new Date(disposalDate), disposalAmount);
+
     return this.prisma.fixedAsset.update({
       where: { id },
       data: {
@@ -138,6 +158,88 @@ export class AssetsService {
         disposedBy,
         disposalReason: reason,
       },
+    });
+  }
+
+  /**
+   * ตัดสินทรัพย์ออกจากบัญชี
+   * DR ค่าเสื่อมราคาสะสม = ยอดที่ post เข้าสมุดแล้วเท่านั้น (ต้องตรงกับยอดในบัญชี)
+   * DR ธนาคาร 1102       = เงินที่ได้จากการขาย
+   * DR ขาดทุน 6309 / CR กำไร 4300 = ส่วนต่าง
+   * CR ราคาทุนสินทรัพย์   = purchaseCost + acquisitionCost
+   */
+  private async postDisposalJournal(
+    asset: {
+      id: string;
+      assetCode: string;
+      name: string;
+      propertyId: string;
+      category: keyof typeof ASSET_COST_CODE;
+      purchaseCost: unknown;
+      acquisitionCost: unknown;
+      assetAccountId: string | null;
+      accumDeprecAccountId: string | null;
+    },
+    tenantId: string,
+    createdBy: string,
+    disposalDate: Date,
+    disposalAmount: number,
+  ): Promise<void> {
+    if (!this.journalEntriesService) return;
+
+    // ค่าเสื่อมที่คำนวณแล้วแต่ยังไม่ post จะไม่มีวัน post ได้อีกหลังจำหน่าย → ยอดสะสมเพี้ยน
+    const unposted = await this.prisma.assetDepreciation.count({
+      where: { tenantId, assetId: asset.id, isPosted: false },
+    });
+    if (unposted > 0) {
+      throw new BadRequestException(
+        `สินทรัพย์ ${asset.assetCode} มีค่าเสื่อมราคาที่ยังไม่ลงบัญชี ${unposted} งวด — ลงบัญชีค่าเสื่อมก่อนจำหน่าย`,
+      );
+    }
+
+    const round = (n: number) => Math.round(n * 100) / 100;
+    const posted = await this.prisma.assetDepreciation.aggregate({
+      where: { tenantId, assetId: asset.id, isPosted: true },
+      _sum: { depreciationAmount: true },
+    });
+    const accumulated = round(Number(posted._sum.depreciationAmount ?? 0));
+    const cost = round(Number(asset.purchaseCost) + Number(asset.acquisitionCost));
+    const proceeds = round(Number(disposalAmount ?? 0));
+    const gainOrLoss = round(proceeds + accumulated - cost); // + กำไร, - ขาดทุน
+    if (cost <= 0) return;
+
+    await assertPeriodOpen(this.prisma, tenantId, asset.propertyId, disposalDate);
+    const accountIds = await resolveAccountIds(this.prisma, tenantId, [
+      ASSET_COST_CODE[asset.category],
+      ACCUM_DEPRECIATION_CODE[asset.category],
+      ACCOUNT_CODES.BANK,
+      DISPOSAL_GAIN_CODE,
+      DISPOSAL_LOSS_CODE,
+    ]);
+    const costId = asset.assetAccountId ?? accountIds.get(ASSET_COST_CODE[asset.category])!;
+    const accumId =
+      asset.accumDeprecAccountId ?? accountIds.get(ACCUM_DEPRECIATION_CODE[asset.category])!;
+
+    const description = `จำหน่ายสินทรัพย์ ${asset.assetCode} ${asset.name}`;
+    const lines = [
+      { accountId: accumId, debit: accumulated, credit: 0 },
+      { accountId: accountIds.get(ACCOUNT_CODES.BANK)!, debit: proceeds, credit: 0 },
+      { accountId: accountIds.get(DISPOSAL_LOSS_CODE)!, debit: Math.max(0, -gainOrLoss), credit: 0 },
+      { accountId: accountIds.get(DISPOSAL_GAIN_CODE)!, debit: 0, credit: Math.max(0, gainOrLoss) },
+      { accountId: costId, debit: 0, credit: cost },
+    ]
+      .filter((line) => line.debit > 0 || line.credit > 0)
+      .map((line, i) => ({ ...line, lineNo: i + 1, description }));
+
+    await this.journalEntriesService.createAndPostAutoEntry(tenantId, {
+      propertyId: asset.propertyId,
+      entryDate: disposalDate,
+      description,
+      reference: asset.assetCode,
+      sourceType: JournalSourceTypeEnum.ADJUSTMENT,
+      sourceId: asset.id,
+      createdBy,
+      lines,
     });
   }
 

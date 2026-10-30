@@ -69,25 +69,43 @@ export class BankReconciliationService {
     });
     if (existing) throw new ConflictException(`Reconciliation for ${dto.period} already exists`);
 
-    // ลองดึง bookBalance จาก ledger (account 1102 - เงินฝากธนาคาร)
+    // bankAccountId = บัญชีแยกประเภทเงินฝากธนาคาร (ผังบัญชีรหัส 1102*) ของ tenant นี้
+    // (ตาราง bank_accounts เป็นบัญชีรับเงินของแพลตฟอร์ม ไม่ใช่ของโรงแรม และไม่มี tenantId)
+    const bankAccount = await this.prisma.accountChart.findFirst({
+      where: { id: dto.bankAccountId, tenantId, code: { startsWith: '1102' } },
+      select: { id: true, code: true },
+    });
+    if (!bankAccount) {
+      throw new BadRequestException('bankAccountId ต้องเป็นบัญชีเงินฝากธนาคาร (รหัส 1102) ของกิจการนี้');
+    }
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(dto.period)) {
+      throw new BadRequestException('period ต้องอยู่ในรูปแบบ YYYY-MM');
+    }
+
+    // ยอดตามบัญชี = ยอดยกไปล่าสุด ณ สิ้นงวด ของบัญชีที่เลือก (รวมบัญชีย่อยใต้รหัสนั้น)
+    // งวดที่ไม่มีรายการจะไม่มีแถว ledger_balances จึงใช้แถวล่าสุดที่ไม่เกินงวดที่กระทบยอด
+    const [fiscalYear, fiscalMonth] = dto.period.split('-').map(Number);
+    const accounts = await this.prisma.accountChart.findMany({
+      where: { tenantId, code: { startsWith: bankAccount.code } },
+      select: { id: true },
+    });
     let bookBalance = 0;
-    try {
-      const [fiscalYear, fiscalMonth] = dto.period.split('-').map(Number);
+    for (const acc of accounts) {
       const ledger = await this.prisma.ledgerBalance.findFirst({
         where: {
           tenantId,
           propertyId: dto.propertyId,
-          fiscalYear,
-          fiscalPeriod: fiscalMonth,
-          account: { code: { startsWith: '1102' } },
+          accountId: acc.id,
+          OR: [{ fiscalYear: { lt: fiscalYear } }, { fiscalYear, fiscalPeriod: { lte: fiscalMonth } }],
         },
+        orderBy: [{ fiscalYear: 'desc' }, { fiscalPeriod: 'desc' }],
+        select: { closingBalance: true },
       });
-      if (ledger) bookBalance = Number(ledger.closingBalance);
-    } catch {
-      this.logger.warn('Could not fetch book balance from ledger, defaulting to 0');
+      if (ledger) bookBalance += Number(ledger.closingBalance);
     }
+    bookBalance = Math.round(bookBalance * 100) / 100;
 
-    const variance = dto.statementBalance - bookBalance;
+    const variance = Math.round((dto.statementBalance - bookBalance) * 100) / 100;
 
     return this.prisma.bankReconciliation.create({
       data: {
@@ -95,7 +113,7 @@ export class BankReconciliationService {
         propertyId: dto.propertyId,
         bankAccountId: dto.bankAccountId,
         period: dto.period,
-        statementDate: new Date(dto.statementDate),
+        statementDate: new Date(`${dto.statementDate.slice(0, 10)}T00:00:00.000Z`),
         statementBalance: dto.statementBalance,
         bookBalance,
         variance,

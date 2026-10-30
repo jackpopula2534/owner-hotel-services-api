@@ -1,3 +1,4 @@
+import { withPaginationMeta } from '@/common/utils/pagination.util';
 import {
   Controller,
   Get,
@@ -20,6 +21,9 @@ import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AddonGuard } from '@/common/guards/addon.guard';
 import { RequireAddon } from '@/common/decorators/require-addon.decorator';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
+import { RolesGuard } from '@/common/guards/roles.guard';
+import { Roles } from '@/common/decorators/roles.decorator';
+import { ACCOUNTING_CLOSE_ROLES, AP_WRITE_ROLES, AccountingAccess } from '@/modules/accounting/accounting-access.decorator';
 
 class VoidApInvoiceDto {
   @ApiPropertyOptional() @IsOptional() @IsString() reason?: string;
@@ -34,7 +38,8 @@ interface JwtPayload {
 
 @ApiTags('Accounting - AP Invoices')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, AddonGuard)
+@UseGuards(JwtAuthGuard, AddonGuard, RolesGuard)
+@AccountingAccess(AP_WRITE_ROLES)
 @RequireAddon('ACCOUNTING_MODULE')
 @Controller({ path: 'accounting/ap-invoices', version: '1' })
 export class ApInvoicesController {
@@ -57,7 +62,7 @@ export class ApInvoicesController {
   @ApiOperation({ summary: 'ดูรายการ AP Invoice ทั้งหมด' })
   async findAll(@CurrentUser() user: JwtPayload, @Query() query: QueryApInvoiceDto) {
     const result = await this.service.findAll(user.tenantId, query);
-    return { success: true, ...result };
+    return withPaginationMeta(result);
   }
 
   @Get(':id')
@@ -75,6 +80,7 @@ export class ApInvoicesController {
     return { success: true, data };
   }
 
+  @Roles(...ACCOUNTING_CLOSE_ROLES)
   @Patch(':id/approve')
   @ApiOperation({ summary: 'อนุมัติ AP Invoice (PENDING → APPROVED)' })
   async approve(@CurrentUser() user: JwtPayload, @Param('id') id: string) {

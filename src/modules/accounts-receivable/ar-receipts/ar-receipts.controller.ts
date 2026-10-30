@@ -1,3 +1,4 @@
+import { withPaginationMeta } from '@/common/utils/pagination.util';
 import {
   Controller,
   Get,
@@ -17,14 +18,17 @@ import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AddonGuard } from '@/common/guards/addon.guard';
 import { RequireAddon } from '@/common/decorators/require-addon.decorator';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
-import { IsOptional, IsUUID, IsDateString, IsInt, Min } from 'class-validator';
+import { IsOptional, IsUUID, IsDateString, IsInt, IsIn, Min } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
+import { RolesGuard } from '@/common/guards/roles.guard';
+import { AR_WRITE_ROLES, AccountingAccess } from '@/modules/accounting/accounting-access.decorator';
 
 class QueryArReceiptDto {
   @ApiPropertyOptional() @IsOptional() @IsUUID() propertyId?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() dateFrom?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() dateTo?: string;
+  @ApiPropertyOptional({ enum: ['DRAFT', 'CLEARED', 'VOID'] }) @IsOptional() @IsIn(['DRAFT', 'CLEARED', 'VOID']) status?: string;
   @ApiPropertyOptional({ default: 1 })
   @IsOptional()
   @IsInt()
@@ -48,7 +52,8 @@ interface JwtPayload {
 
 @ApiTags('Accounting - AR Receipts')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, AddonGuard)
+@UseGuards(JwtAuthGuard, AddonGuard, RolesGuard)
+@AccountingAccess(AR_WRITE_ROLES)
 @RequireAddon('ACCOUNTING_MODULE')
 @Controller({ path: 'accounting/ar-receipts', version: '1' })
 export class ArReceiptsController {
@@ -58,7 +63,7 @@ export class ArReceiptsController {
   @ApiOperation({ summary: 'ดูรายการ AR Receipt ทั้งหมด' })
   async findAll(@CurrentUser() user: JwtPayload, @Query() query: QueryArReceiptDto) {
     const result = await this.service.findAll(user.tenantId, query);
-    return { success: true, ...result };
+    return withPaginationMeta(result);
   }
 
   @Post()

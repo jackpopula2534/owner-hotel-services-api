@@ -1,3 +1,4 @@
+import { withPaginationMeta } from '@/common/utils/pagination.util';
 import {
   Controller,
   Get,
@@ -18,6 +19,9 @@ import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AddonGuard } from '@/common/guards/addon.guard';
 import { RequireAddon } from '@/common/decorators/require-addon.decorator';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
+import { RolesGuard } from '@/common/guards/roles.guard';
+import { Roles } from '@/common/decorators/roles.decorator';
+import { ACCOUNTING_CLOSE_ROLES, ACCOUNTING_WRITE_ROLES, AccountingAccess } from '@/modules/accounting/accounting-access.decorator';
 
 interface JwtPayload {
   sub: string;
@@ -28,7 +32,8 @@ interface JwtPayload {
 
 @ApiTags('Accounting - Bank Reconciliation')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, AddonGuard)
+@UseGuards(JwtAuthGuard, AddonGuard, RolesGuard)
+@AccountingAccess(ACCOUNTING_WRITE_ROLES)
 @RequireAddon('ACCOUNTING_MODULE')
 @Controller({ path: 'accounting/bank-reconciliation', version: '1' })
 export class BankReconciliationController {
@@ -59,7 +64,8 @@ export class BankReconciliationController {
       page: page ? parseInt(page, 10) : 1,
       limit: limit ? parseInt(limit, 10) : 20,
     });
-    return { success: true, ...data };
+    // ต้องมี meta ไม่งั้น apiClient ฝั่งเว็บแกะเหลือแค่ array แล้ว total หาย
+    return withPaginationMeta(data);
   }
 
   @Get(':id')
@@ -92,6 +98,7 @@ export class BankReconciliationController {
     return { success: true, data };
   }
 
+  @Roles(...ACCOUNTING_CLOSE_ROLES)
   @Patch(':id/approve')
   @ApiOperation({ summary: 'อนุมัติการกระทบยอด' })
   async approve(@CurrentUser() user: JwtPayload, @Param('id') id: string) {

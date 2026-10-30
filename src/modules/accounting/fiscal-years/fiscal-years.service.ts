@@ -27,6 +27,10 @@ export class FiscalYearsService {
     return fy;
   }
 
+  /**
+   * ปีบัญชีที่เปิดอยู่ของวันนี้ — ยังไม่ได้ตั้งปีบัญชีเป็นเรื่องปกติของ tenant ใหม่ คืน null (ไม่ใช่ 404)
+   * หัวหน้าเพจบัญชีเรียกทุกหน้า ถ้าโยน 404 จะมี error แดงทุกครั้งที่เปิดเพจ
+   */
   async findCurrent(tenantId: string, propertyId: string) {
     const now = new Date();
     const fy = await this.prisma.fiscalYear.findFirst({
@@ -38,8 +42,7 @@ export class FiscalYearsService {
         endDate: { gte: now },
       },
     });
-    if (!fy) throw new NotFoundException('No open fiscal year for this period');
-    return fy;
+    return fy ?? null;
   }
 
   async create(dto: CreateFiscalYearDto, tenantId: string) {

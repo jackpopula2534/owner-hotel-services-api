@@ -1,3 +1,8 @@
+import {
+  assertPeriodOpen,
+  fiscalPeriodOf,
+  nextJournalEntryNo,
+} from '@/modules/accounting/ledger/journal-posting.util';
 import type { CheckInDto } from './dto/check-in.dto';
 import {
   Injectable,
@@ -35,15 +40,17 @@ import {
 } from '../../common/availability/availability.util';
 import { CRM_EVENTS } from '../crm/crm.events';
 import { applyLedgerBalances } from '../accounting/ledger/ledger-balance.util';
+import { CHECKOUT_SETTLEMENT_REF } from '../accounting/ledger/folio-gl.util';
 import {
   RevenuePostingService,
   hasPostableRevenue,
 } from '../revenue/revenue-posting.service';
 import { buildBookingRevenueInput } from '../revenue/sources/booking-revenue.source';
-import { businessDateOf, toBangkokDate, DAY_MS } from '../../common/utils/bangkok-day.util';
+import { businessDateOf, toBangkokDate, DAY_MS, round2 } from '../../common/utils/bangkok-day.util';
 import { expandHolidayDates } from '../properties/property-holidays.service';
 import { computeTimeFees, timeFeeAmount, type TimeFees } from './time-fees';
 import { applyPromo, type AppliedPromo, type PromoRule } from './promo-discount';
+import { ensureDefaultChartOfAccounts } from '@/modules/accounting/chart-of-accounts/default-chart-of-accounts';
 
 // ─── Activity Types ───────────────────────────────────────────────────────────
 
@@ -2105,6 +2112,8 @@ export class BookingsService {
         roomSubtotal: true,
         serviceChargeAmount: true,
         vatAmount: true,
+        actualCheckOut: true,
+        checkOut: true,
       },
     });
 
@@ -2142,6 +2151,7 @@ export class BookingsService {
           grandTotal,
           additionalCharges: 0,
           totalAmount: grandTotal,
+          entryDate: booking.actualCheckOut ?? booking.checkOut ?? undefined,
         });
 
         created++;
@@ -2182,6 +2192,7 @@ export class BookingsService {
     grandTotal: number;
     additionalCharges: number;
     totalAmount: number;
+    entryDate?: Date;
   }): Promise<void> {
     const {
       tenantId,
@@ -2217,7 +2228,10 @@ export class BookingsService {
       return;
     }
 
-    // Look up required accounts — skip if tenant hasn't seeded Chart of Accounts
+    // tenant ที่ยังไม่มีผังบัญชีเลยได้ผังมาตรฐานอัตโนมัติ — เดิมข้ามเงียบ ๆ สมุดรายวันจึงว่าง
+    await ensureDefaultChartOfAccounts(this.prisma, tenantId);
+
+    // Look up required accounts — skip if tenant's own chart lacks them
     const REQUIRED_CODES = ['1101', '4101'];
     const OPTIONAL_CODES = ['2103', '4305', '4300'];
     const allCodes = [...REQUIRED_CODES, ...OPTIONAL_CODES];
@@ -2239,15 +2253,11 @@ export class BookingsService {
       }
     }
 
-    // Generate JE number
-    const now = new Date();
-    const yearMonth = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const seq = await this.prisma.documentSequence.upsert({
-      where: { tenantId_docType_yearMonth: { tenantId, docType: 'JE', yearMonth } },
-      update: { lastNumber: { increment: 1 } },
-      create: { tenantId, docType: 'JE', prefix: 'JE', yearMonth, lastNumber: 1 },
-    });
-    const entryNo = `JE-${yearMonth}-${String(seq.lastNumber).padStart(6, '0')}`;
+    // ลงวันที่ตามเวลาเช็คเอาต์จริง (backfill ส่งมา) — เดิมใช้วันที่รัน backfill
+    // รายได้ย้อนหลังทั้งปีจึงไปกองอยู่เดือนเดียว
+    const now = params.entryDate ?? new Date();
+    await assertPeriodOpen(this.prisma, tenantId, propertyId, now);
+    const entryNo = await nextJournalEntryNo(this.prisma, tenantId, now);
 
     // Build journal lines
     const lines: Array<{
@@ -2313,6 +2323,48 @@ export class BookingsService {
       });
     }
 
+    // ส่งต่อจาก Night Audit (accrual handoff) — ค่าห้องคืนที่ Night Audit ปิดวันและลง GL แล้ว
+    // ถูกรับรู้เป็นรายได้ไปแล้ว (Dr 1103 / Cr 4101 + 2103) เช็คเอาต์จึงกลับส่วนนั้นออกจากรายได้
+    // แล้วตัดลูกหนี้แขกแทน ไม่งั้นรายได้ห้องคืนเดียวกันขึ้นสองครั้ง
+    const handoff = await this.nightAuditRecognizedRoomRevenue(tenantId, bookingId);
+    if (handoff.total > 0) {
+      const ar = await this.prisma.accountChart.findFirst({
+        where: { tenantId, code: '1103', isActive: true },
+        select: { id: true },
+      });
+      if (ar) {
+        const label = `ค่าห้องที่รับรู้แล้วโดย Night Audit ${bookingNo ?? bookingId.slice(0, 8)}`;
+        const vatAccount = accountMap.get('2103');
+        lines.push({
+          accountId: accountMap.get('4101')!,
+          lineNo: lineNo++,
+          description: label,
+          debit: vatAccount ? handoff.net : handoff.total,
+          credit: 0,
+        });
+        if (vatAccount && handoff.vat > 0) {
+          lines.push({
+            accountId: vatAccount,
+            lineNo: lineNo++,
+            description: label,
+            debit: handoff.vat,
+            credit: 0,
+          });
+        }
+        lines.push({
+          accountId: ar.id,
+          lineNo: lineNo++,
+          description: label,
+          debit: 0,
+          credit: handoff.total,
+        });
+      } else {
+        this.logger.warn(
+          `Booking ${bookingId}: account 1103 missing — Night Audit handoff skipped`,
+        );
+      }
+    }
+
     // Verify double-entry balances before persisting
     const totalDebit = lines.reduce((s, l) => s + l.debit, 0);
     const totalCredit = lines.reduce((s, l) => s + l.credit, 0);
@@ -2323,8 +2375,7 @@ export class BookingsService {
       return;
     }
 
-    const fiscalPeriod = now.getMonth() + 1;
-    const fiscalYear = now.getFullYear();
+    const { fiscalYear, fiscalPeriod } = fiscalPeriodOf(now);
 
     // JE + ledger_balances ต้องอยู่ transaction เดียวกัน — งบทดลอง/งบกำไรขาดทุนอ่านจาก
     // ledger_balances ไม่ใช่ journal_entries ถ้าไม่บวกยอดตรงนี้ หน้าบัญชีจะขึ้น 0
@@ -2376,11 +2427,73 @@ export class BookingsService {
    * `ledger_balances` ต้องขยับในทรานแซกชันเดียวกัน เพราะงบทดลอง/งบกำไรขาดทุน
    * อ่านจากตารางนั้น ไม่ได้อ่านจาก journal_entries
    */
+  /**
+   * ค่าห้องของการจองนี้ที่ Night Audit ปิดวันและลง GL ไปแล้ว (ยอดก่อน VAT / VAT / รวม)
+   * นับเฉพาะ audit ที่มี journalEntryId — audit ที่ยังไม่ปิดจะไม่ลงค่าห้องของการจองที่เช็คเอาต์แล้วซ้ำอีก
+   */
+  private async nightAuditRecognizedRoomRevenue(
+    tenantId: string,
+    bookingId: string,
+  ): Promise<{ net: number; vat: number; total: number }> {
+    const charges = await this.prisma.folioCharge.findMany({
+      where: {
+        tenantId,
+        chargeType: 'ROOM_CHARGE',
+        status: 'POSTED',
+        nightAuditId: { not: null },
+        folio: { bookingId },
+      },
+      select: { nightAuditId: true, netAmount: true, vatAmount: true, totalAmount: true },
+    });
+    if (charges.length === 0) return { net: 0, vat: 0, total: 0 };
+    const posted = await this.prisma.nightAudit.findMany({
+      where: {
+        tenantId,
+        id: { in: [...new Set(charges.map((c) => c.nightAuditId as string))] },
+        journalEntryId: { not: null },
+      },
+      select: { id: true },
+    });
+    const postedIds = new Set(posted.map((a) => a.id));
+    const recognized = charges.filter((c) => postedIds.has(c.nightAuditId as string));
+    const sum = (pick: (c: (typeof recognized)[number]) => unknown): number =>
+      round2(recognized.reduce((acc, c) => acc + Number(pick(c)), 0));
+    return {
+      net: sum((c) => c.netAmount),
+      vat: sum((c) => c.vatAmount),
+      total: sum((c) => c.totalAmount),
+    };
+  }
+
+  /** ย้อนเช็คเอาต์ → ยกเลิกรายการเคลียร์ค่าห้องบน folio บัญชี แล้วเปิด folio กลับ */
+  private async reopenGuestFolioAfterUndo(bookingId: string, tenantId: string): Promise<void> {
+    const settlements = await this.prisma.folioPayment.findMany({
+      where: { tenantId, reference: CHECKOUT_SETTLEMENT_REF(bookingId), isReversed: false },
+      select: { id: true, folioId: true, amount: true },
+    });
+    await this.prisma.$transaction(async (tx) => {
+      for (const p of settlements) {
+        await tx.folioPayment.update({ where: { id: p.id }, data: { isReversed: true } });
+        await tx.guestFolio.update({
+          where: { id: p.folioId },
+          data: { totalPayments: { decrement: p.amount }, balance: { increment: p.amount } },
+        });
+      }
+      await tx.guestFolio.updateMany({
+        where: { tenantId, bookingId, status: { in: ['PENDING', 'CLOSED'] } },
+        data: { status: 'OPEN', closedAt: null, closedBy: null, checkOutDate: null },
+      });
+    });
+  }
+
   private async reverseBookingRevenueJournal(
     bookingId: string,
     tenantId: string,
     reversedBy: string,
   ): Promise<void> {
+    await this.reopenGuestFolioAfterUndo(bookingId, tenantId).catch((err: Error) =>
+      this.logger.error(`Reopen guest folio failed for booking ${bookingId}: ${err.message}`),
+    );
     const entry = await this.prisma.journalEntry.findFirst({
       where: {
         tenantId,
@@ -2393,13 +2506,8 @@ export class BookingsService {
     if (!entry) return;
 
     const now = new Date();
-    const yearMonth = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const seq = await this.prisma.documentSequence.upsert({
-      where: { tenantId_docType_yearMonth: { tenantId, docType: 'JE', yearMonth } },
-      update: { lastNumber: { increment: 1 } },
-      create: { tenantId, docType: 'JE', prefix: 'JE', yearMonth, lastNumber: 1 },
-    });
-    const entryNo = `JE-${yearMonth}-${String(seq.lastNumber).padStart(6, '0')}`;
+    await assertPeriodOpen(this.prisma, tenantId, entry.propertyId, now);
+    const entryNo = await nextJournalEntryNo(this.prisma, tenantId, now);
 
     const reversalLines = entry.lines
       .sort((a, b) => a.lineNo - b.lineNo)
@@ -2411,8 +2519,7 @@ export class BookingsService {
         credit: Number(line.debit),
       }));
 
-    const fiscalPeriod = now.getMonth() + 1;
-    const fiscalYear = now.getFullYear();
+    const { fiscalYear, fiscalPeriod } = fiscalPeriodOf(now);
 
     await this.prisma.$transaction(async (tx) => {
       const reversal = await tx.journalEntry.create({

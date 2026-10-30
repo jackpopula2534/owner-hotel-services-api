@@ -1,3 +1,4 @@
+import { withPaginationMeta } from '@/common/utils/pagination.util';
 import {
   Controller,
   Get,
@@ -20,6 +21,8 @@ import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AddonGuard } from '@/common/guards/addon.guard';
 import { RequireAddon } from '@/common/decorators/require-addon.decorator';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
+import { RolesGuard } from '@/common/guards/roles.guard';
+import { AR_WRITE_ROLES, AccountingAccess } from '@/modules/accounting/accounting-access.decorator';
 
 class VoidInvoiceDto {
   @ApiPropertyOptional() @IsOptional() @IsString() reason?: string;
@@ -34,7 +37,8 @@ interface JwtPayload {
 
 @ApiTags('Accounting - AR Invoices')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, AddonGuard)
+@UseGuards(JwtAuthGuard, AddonGuard, RolesGuard)
+@AccountingAccess(AR_WRITE_ROLES)
 @RequireAddon('ACCOUNTING_MODULE')
 @Controller({ path: 'accounting/ar-invoices', version: '1' })
 export class ArInvoicesController {
@@ -65,7 +69,7 @@ export class ArInvoicesController {
   @ApiOperation({ summary: 'ดูรายการ AR Invoice ทั้งหมด' })
   async findAll(@CurrentUser() user: JwtPayload, @Query() query: QueryArInvoiceDto) {
     const result = await this.service.findAll(user.tenantId, query);
-    return { success: true, ...result };
+    return withPaginationMeta(result);
   }
 
   @Get(':id')

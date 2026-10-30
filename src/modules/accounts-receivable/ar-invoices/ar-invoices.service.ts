@@ -10,6 +10,9 @@ import { CreateArInvoiceDto } from './dto/create-ar-invoice.dto';
 import { QueryArInvoiceDto } from './dto/query-ar-invoice.dto';
 import { JournalEntriesService } from '@/modules/accounting/journal-entries/journal-entries.service';
 import { JournalSourceTypeEnum } from '@/modules/accounting/journal-entries/dto/create-journal-entry.dto';
+import { ensureDefaultChartOfAccounts } from '@/modules/accounting/chart-of-accounts/default-chart-of-accounts';
+
+const roundMoney = (n: number): number => Math.round(n * 100) / 100;
 
 @Injectable()
 export class ArInvoicesService {
@@ -21,6 +24,7 @@ export class ArInvoicesService {
   ) {}
 
   private async findDefaultAccountByCode(tenantId: string, code: string) {
+    await ensureDefaultChartOfAccounts(this.prisma, tenantId);
     return this.prisma.accountChart.findFirst({
       where: { tenantId, code, isActive: true },
       select: { id: true, code: true, name: true },
@@ -93,10 +97,12 @@ export class ArInvoicesService {
     const lineData = dto.lines.map((line, i) => {
       const discount = line.discountAmt ?? 0;
       const vatRate = line.vatRate ?? 7;
-      const lineSubtotal = line.quantity * line.unitPrice - discount;
-      const lineVat = lineSubtotal * (vatRate / 100);
-      subtotal += lineSubtotal;
-      vatAmount += lineVat;
+      // ปัดเป็นสตางค์ต่อบรรทัดแล้วค่อยรวม — หัวใบต้องเท่ากับผลรวมบรรทัดที่บันทึกจริง
+      // ไม่งั้นรายการบัญชีตอนออกใบ (อ่านจากบรรทัด) ต่างจากยอดลูกหนี้ 0.01 แล้วไม่บาลานซ์
+      const lineSubtotal = roundMoney(line.quantity * line.unitPrice - discount);
+      const lineVat = roundMoney(lineSubtotal * (vatRate / 100));
+      subtotal = roundMoney(subtotal + lineSubtotal);
+      vatAmount = roundMoney(vatAmount + lineVat);
 
       return {
         lineNo: i + 1,
@@ -105,17 +111,18 @@ export class ArInvoicesService {
         quantity: line.quantity,
         unitPrice: line.unitPrice,
         discountAmt: discount,
-        subtotal: lineSubtotal,
+        // คอลัมน์ของบรรทัดชื่อ netAmount (เดิมส่ง subtotal → Prisma ปฏิเสธ สร้างใบไม่ได้เลย)
+        netAmount: lineSubtotal,
         vatRate,
         vatAmount: lineVat,
-        totalAmount: lineSubtotal + lineVat,
+        totalAmount: roundMoney(lineSubtotal + lineVat),
         accountId: line.accountId,
         costCenterId: line.costCenterId,
         sourceRef: line.sourceRef,
       };
     });
 
-    const totalAmount = subtotal + vatAmount;
+    const totalAmount = roundMoney(subtotal + vatAmount);
     const invoiceNo = await this.generateInvoiceNo(tenantId);
 
     const invoice = await this.prisma.$transaction(async (tx) => {
@@ -137,6 +144,7 @@ export class ArInvoicesService {
           currency: dto.currency ?? 'THB',
           exchangeRate: dto.exchangeRate ?? 1,
           subtotal,
+          taxableAmount: subtotal,
           vatAmount,
           totalAmount,
           paidAmount: 0,
@@ -182,11 +190,6 @@ export class ArInvoicesService {
         );
       }
     }
-
-    const updated = await this.prisma.arInvoice.update({
-      where: { id },
-      data: { status: 'ISSUED', issuedBy, issuedAt: new Date(), isPosted: true, postedAt: new Date() },
-    });
 
     const arAccountCode = invoice.invoiceType === 'CITY_LEDGER' ? '1104' : '1103';
     const [arAccount, outputVatAccount, defaultRevenueAccount] = await Promise.all([
@@ -243,12 +246,19 @@ export class ArInvoicesService {
         entryDate: invoice.issueDate,
         description: `ออก AR Invoice ${invoice.invoiceNo}`,
         reference: invoice.invoiceNo,
-        sourceType: JournalSourceTypeEnum.AR_RECEIPT,
+        sourceType: JournalSourceTypeEnum.AR_INVOICE,
         sourceId: invoice.id,
         createdBy: issuedBy,
         lines: journalLines,
       });
     }
+
+    // เปลี่ยนสถานะหลังลงบัญชีสำเร็จ — ถ้างวดปิดแล้ว/ผังบัญชีไม่ครบ ใบต้องยังเป็น DRAFT
+    // ไม่ใช่ ISSUED ที่ไม่มีรายการบัญชีรองรับ (ลงซ้ำได้: createAndPostAutoEntry กันซ้ำตาม source)
+    const updated = await this.prisma.arInvoice.update({
+      where: { id },
+      data: { status: 'ISSUED', issuedBy, issuedAt: new Date(), isPosted: true, postedAt: new Date() },
+    });
 
     this.logger.log(`AR Invoice ${invoice.invoiceNo} issued by ${issuedBy}`);
     return updated;
@@ -325,6 +335,19 @@ export class ArInvoicesService {
     if (invoice.status === 'VOID') {
       throw new BadRequestException('Invoice is already void');
     }
+
+    if (Number(invoice.paidAmount) > 0) {
+      throw new BadRequestException('ใบแจ้งหนี้มีการรับชำระแล้ว ต้องยกเลิกใบเสร็จก่อน');
+    }
+
+    // ใบที่ออกแล้วตั้งลูกหนี้ไว้ในสมุดรายวัน — ยกเลิกใบโดยไม่กลับรายการ ลูกหนี้จะค้างในงบตลอดไป
+    await this.journalEntriesService?.reverseBySource(
+      tenantId,
+      JournalSourceTypeEnum.AR_INVOICE,
+      invoice.id,
+      voidedBy,
+      `ยกเลิก AR Invoice ${invoice.invoiceNo}`,
+    );
 
     const updated = await this.prisma.arInvoice.update({
       where: { id },

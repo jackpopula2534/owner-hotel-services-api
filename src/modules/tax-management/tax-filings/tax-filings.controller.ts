@@ -20,6 +20,9 @@ import { CurrentUser } from '@/common/decorators/current-user.decorator';
 import { IsOptional, IsEnum, IsString, IsUUID, IsInt, Min } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
+import { RolesGuard } from '@/common/guards/roles.guard';
+import { Roles } from '@/common/decorators/roles.decorator';
+import { ACCOUNTING_CLOSE_ROLES, ACCOUNTING_WRITE_ROLES, AccountingAccess } from '@/modules/accounting/accounting-access.decorator';
 
 class QueryTaxFilingDto {
   @ApiPropertyOptional() @IsOptional() @IsUUID() propertyId?: string;
@@ -57,7 +60,8 @@ interface JwtPayload {
 
 @ApiTags('Accounting - Tax Filings')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, AddonGuard)
+@UseGuards(JwtAuthGuard, AddonGuard, RolesGuard)
+@AccountingAccess(ACCOUNTING_WRITE_ROLES)
 @RequireAddon('ACCOUNTING_MODULE')
 @Controller({ path: 'accounting/tax-filings', version: '1' })
 export class TaxFilingsController {
@@ -99,6 +103,7 @@ export class TaxFilingsController {
     return { success: true, data };
   }
 
+  @Roles(...ACCOUNTING_CLOSE_ROLES)
   @Patch(':id/submit')
   @ApiOperation({ summary: 'ยื่นแบบภาษี (DRAFT/READY → FILED)' })
   async submit(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
@@ -106,6 +111,7 @@ export class TaxFilingsController {
     return { success: true, data };
   }
 
+  @Roles(...ACCOUNTING_CLOSE_ROLES)
   @Patch(':id/mark-paid')
   @ApiOperation({ summary: 'บันทึกการชำระภาษี (FILED → PAID)' })
   async markPaid(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
