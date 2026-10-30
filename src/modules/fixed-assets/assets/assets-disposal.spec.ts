@@ -7,7 +7,7 @@ import { AssetsService } from './assets.service';
  */
 describe('AssetsService.dispose — journal posting', () => {
   const TENANT = 'tenant-1';
-  const codes = ['1206', '1207', '1102', '4300', '6309'];
+  const codes = ['1206', '1207', '1102', '4309', '6309'];
   let prisma: any;
   let journal: { createAndPostAutoEntry: jest.Mock };
   let service: AssetsService;
@@ -60,11 +60,11 @@ describe('AssetsService.dispose — journal posting', () => {
     expect(prisma.fixedAsset.update).toHaveBeenCalled();
   });
 
-  it('ขายกำไรลง 4300', async () => {
+  it('ขายกำไรลง 4309', async () => {
     await service.dispose('asset-1', TENANT, 'user-1', '2026-10-29', 11500);
 
     const lines = journal.createAndPostAutoEntry.mock.calls[0][1].lines;
-    expect(lines.find((l: any) => l.accountId === 'acc-4300')).toMatchObject({ credit: 500 });
+    expect(lines.find((l: any) => l.accountId === 'acc-4309')).toMatchObject({ credit: 500 });
     expect(lines.find((l: any) => l.accountId === 'acc-6309')).toBeUndefined();
   });
 

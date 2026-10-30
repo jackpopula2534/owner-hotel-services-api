@@ -165,7 +165,7 @@ export class AssetsService {
    * ตัดสินทรัพย์ออกจากบัญชี
    * DR ค่าเสื่อมราคาสะสม = ยอดที่ post เข้าสมุดแล้วเท่านั้น (ต้องตรงกับยอดในบัญชี)
    * DR ธนาคาร 1102       = เงินที่ได้จากการขาย
-   * DR ขาดทุน 6309 / CR กำไร 4300 = ส่วนต่าง
+   * DR ขาดทุน 6309 / CR กำไร 4309 = ส่วนต่าง
    * CR ราคาทุนสินทรัพย์   = purchaseCost + acquisitionCost
    */
   private async postDisposalJournal(

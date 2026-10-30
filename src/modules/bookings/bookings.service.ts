@@ -50,7 +50,11 @@ import { businessDateOf, toBangkokDate, DAY_MS, round2 } from '../../common/util
 import { expandHolidayDates } from '../properties/property-holidays.service';
 import { computeTimeFees, timeFeeAmount, type TimeFees } from './time-fees';
 import { applyPromo, type AppliedPromo, type PromoRule } from './promo-discount';
-import { ensureDefaultChartOfAccounts } from '@/modules/accounting/chart-of-accounts/default-chart-of-accounts';
+import {
+  ensureDefaultAccounts,
+  ensureDefaultChartOfAccounts,
+} from '@/modules/accounting/chart-of-accounts/default-chart-of-accounts';
+import { ACCOUNT_CODES } from '@/modules/accounting/ledger/posting-accounts.util';
 
 // ─── Activity Types ───────────────────────────────────────────────────────────
 
@@ -2176,10 +2180,10 @@ export class BookingsService {
    * - CR: รายได้ค่าห้องพัก 4101 = roomSubtotal
    * - CR: รายได้ค่าธรรมเนียมบริการ 4305 = serviceChargeAmount (ถ้ามี)
    * - CR: ภาษีขาย VAT Output 2103 = vatAmount (ถ้ามี)
-   * - CR: รายได้อื่นๆ 4300 = additionalCharges / add-ons (ถ้ามี)
+   * - CR: รายได้อื่นๆ 4309 = additionalCharges / add-ons (ถ้ามี)
    *
    * ถ้า Chart of Accounts ยังไม่ได้ seed → skip อย่าง graceful ไม่กระทบระบบโรงแรม
-   * ถ้าไม่มี add-ons → ไม่มีบรรทัด 4300 ในนั้น ปกติ
+   * ถ้าไม่มี add-ons → ไม่มีบรรทัด 4309 ในนั้น ปกติ
    */
   private async createBookingRevenueJournal(params: {
     tenantId: string;
@@ -2233,8 +2237,10 @@ export class BookingsService {
 
     // Look up required accounts — skip if tenant's own chart lacks them
     const REQUIRED_CODES = ['1101', '4101'];
-    const OPTIONAL_CODES = ['2103', '4305', '4300'];
+    const OPTIONAL_CODES = ['2103', '4305', ACCOUNT_CODES.OTHER_REVENUE];
     const allCodes = [...REQUIRED_CODES, ...OPTIONAL_CODES];
+    // ผังเก่าไม่มี 4309 — เติมให้ ไม่งั้นค่าบริการเสริมหายจากสมุดรายวันเงียบ ๆ
+    await ensureDefaultAccounts(this.prisma, tenantId, allCodes);
 
     const accounts = await this.prisma.accountChart.findMany({
       where: { tenantId, code: { in: allCodes } },
@@ -2312,10 +2318,10 @@ export class BookingsService {
       });
     }
 
-    // CR: Other Revenue (4300) — add-ons / extra charges only if > 0
-    if (additionalCharges > 0 && accountMap.has('4300')) {
+    // CR: Other Revenue (4309) — add-ons / extra charges only if > 0
+    if (additionalCharges > 0 && accountMap.has(ACCOUNT_CODES.OTHER_REVENUE)) {
       lines.push({
-        accountId: accountMap.get('4300')!,
+        accountId: accountMap.get(ACCOUNT_CODES.OTHER_REVENUE)!,
         lineNo: lineNo++,
         description: `รายได้บริการเพิ่มเติม (add-ons) ${bookingNo ?? bookingId.slice(0, 8)}`,
         debit: 0,

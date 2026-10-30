@@ -422,6 +422,15 @@ export const DEFAULT_ACCOUNTS: readonly DefaultAccount[] = [
     normalBalance: 'CREDIT',
     level: 'ACCOUNT',
   },
+  {
+    // 4300 เป็นหัวข้อ (ลงรายการตรงไม่ได้) — รายได้อื่นที่ระบบลงอัตโนมัติต้องมีบัญชีย่อยให้ลง
+    code: '4309',
+    name: 'รายได้อื่นๆ ทั่วไป',
+    nameEn: 'Miscellaneous Revenue',
+    type: 'REVENUE',
+    normalBalance: 'CREDIT',
+    level: 'ACCOUNT',
+  },
   // ── ต้นทุนขาย ──────────────────────────────────────────────
   {
     code: '5000',
@@ -626,20 +635,43 @@ export async function ensureDefaultChartOfAccounts(
   if (existing > 0) return 0;
 
   const result = await prisma.accountChart.createMany({
-    data: DEFAULT_ACCOUNTS.map((a, i) => ({
-      tenantId,
-      code: a.code,
-      name: a.name,
-      nameEn: a.nameEn ?? null,
-      type: a.type as Prisma.AccountChartCreateManyInput['type'],
-      normalBalance: a.normalBalance as Prisma.AccountChartCreateManyInput['normalBalance'],
-      level: (a.level ?? 'ACCOUNT') as Prisma.AccountChartCreateManyInput['level'],
-      isControl: a.isControl ?? false,
-      isHeaderOnly: a.isHeaderOnly ?? false,
-      isActive: true,
-      sortOrder: i,
-    })),
+    data: DEFAULT_ACCOUNTS.map((a) => toCreateInput(tenantId, a)),
     skipDuplicates: true,
   });
   return result.count;
+}
+
+/**
+ * เติมบัญชีมาตรฐานที่ขาดเฉพาะรหัสที่ขอ — tenant ที่มีผังอยู่แล้วก่อนเพิ่มบัญชีมาตรฐานใหม่
+ * (เช่น 4309) จะไม่ได้จาก ensureDefaultChartOfAccounts ลงบัญชีอัตโนมัติจึงล้ม
+ * ไม่แตะบัญชีที่มีอยู่ (รวมที่ถูกปิดใช้งาน) — @@unique([tenantId, code]) + skipDuplicates
+ */
+export async function ensureDefaultAccounts(
+  prisma: AccountChartClient,
+  tenantId: string,
+  codes: readonly string[],
+): Promise<number> {
+  const wanted = DEFAULT_ACCOUNTS.filter((a) => codes.includes(a.code));
+  if (wanted.length === 0) return 0;
+  const result = await prisma.accountChart.createMany({
+    data: wanted.map((a) => toCreateInput(tenantId, a)),
+    skipDuplicates: true,
+  });
+  return result.count;
+}
+
+function toCreateInput(tenantId: string, a: DefaultAccount): Prisma.AccountChartCreateManyInput {
+  return {
+    tenantId,
+    code: a.code,
+    name: a.name,
+    nameEn: a.nameEn ?? null,
+    type: a.type as Prisma.AccountChartCreateManyInput['type'],
+    normalBalance: a.normalBalance as Prisma.AccountChartCreateManyInput['normalBalance'],
+    level: (a.level ?? 'ACCOUNT') as Prisma.AccountChartCreateManyInput['level'],
+    isControl: a.isControl ?? false,
+    isHeaderOnly: a.isHeaderOnly ?? false,
+    isActive: true,
+    sortOrder: DEFAULT_ACCOUNTS.indexOf(a),
+  };
 }

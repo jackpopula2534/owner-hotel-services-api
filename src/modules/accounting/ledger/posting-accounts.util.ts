@@ -1,6 +1,9 @@
 import { BadRequestException } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
-import { ensureDefaultChartOfAccounts } from '@/modules/accounting/chart-of-accounts/default-chart-of-accounts';
+import {
+  ensureDefaultAccounts,
+  ensureDefaultChartOfAccounts,
+} from '@/modules/accounting/chart-of-accounts/default-chart-of-accounts';
 
 /** รหัสบัญชีมาตรฐาน (default-chart-of-accounts) ที่ระบบลงบัญชีอัตโนมัติอ้างถึง */
 export const ACCOUNT_CODES = {
@@ -19,7 +22,7 @@ export const ACCOUNT_CODES = {
   ROOM_REVENUE: '4101',
   FOOD_REVENUE: '4201',
   BEVERAGE_REVENUE: '4202',
-  OTHER_REVENUE: '4300',
+  OTHER_REVENUE: '4309', // 4300 เป็นหัวข้อ ลงตรงไม่ได้
   SERVICE_CHARGE_REVENUE: '4305',
   SALARY_EXPENSE: '6301',
   DEPRECIATION_EXPENSE: '6305',
@@ -56,10 +59,18 @@ export async function resolveAccountIds(
 ): Promise<Map<string, string>> {
   await ensureDefaultChartOfAccounts(prisma, tenantId);
   const unique = [...new Set(codes)];
-  const accounts = await prisma.accountChart.findMany({
-    where: { tenantId, code: { in: unique }, isActive: true },
-    select: { id: true, code: true },
-  });
+  const find = () =>
+    prisma.accountChart.findMany({
+      where: { tenantId, code: { in: unique }, isActive: true },
+      select: { id: true, code: true },
+    });
+  let accounts = await find();
+  if (accounts.length < unique.length) {
+    // ผังเก่าที่ยังไม่มีบัญชีมาตรฐานรุ่นใหม่ — เติมให้แล้วหาซ้ำ
+    const have = new Set(accounts.map((a) => a.code));
+    const added = await ensureDefaultAccounts(prisma, tenantId, unique.filter((c) => !have.has(c)));
+    if (added > 0) accounts = await find();
+  }
   const map = new Map(accounts.map((a) => [a.code, a.id]));
   const missing = unique.filter((c) => !map.has(c));
   if (missing.length > 0) {

@@ -29,5 +29,5 @@ export const ACCUM_DEPRECIATION_CODE: Record<FixedAssetCategory, string> = {
 };
 
 /** กำไรจากการจำหน่ายสินทรัพย์ → รายได้อื่น, ขาดทุน → ค่าใช้จ่ายอื่น */
-export const DISPOSAL_GAIN_CODE = '4300';
+export const DISPOSAL_GAIN_CODE = '4309'; // 4300 เป็นหัวข้อ ลงตรงไม่ได้
 export const DISPOSAL_LOSS_CODE = '6309';
