@@ -6,6 +6,7 @@ import {
   BadRequestException,
   Optional,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
 import { JournalEntriesService } from '@/modules/accounting/journal-entries/journal-entries.service';
 import { JournalSourceTypeEnum } from '@/modules/accounting/journal-entries/dto/create-journal-entry.dto';
@@ -22,6 +23,7 @@ import {
 } from '../fixed-asset-accounts.util';
 import { CreateAssetDto, DepreciationMethodEnum } from './dto/create-asset.dto';
 import { QueryAssetDto } from './dto/query-asset.dto';
+import { UpdateAssetDto } from './dto/update-asset.dto';
 
 @Injectable()
 export class AssetsService {
@@ -33,31 +35,51 @@ export class AssetsService {
   ) {}
 
   async findAll(tenantId: string, query: QueryAssetDto) {
-    const { propertyId, category, status, search, page = 1, limit = 20 } = query;
+    const { propertyId, category, status, depreciationMethod, search, sort = 'code', page = 1, limit = 20 } = query;
     const skip = (page - 1) * limit;
-    const where: Record<string, unknown> = { tenantId };
-    if (propertyId) where.propertyId = propertyId;
-    if (category) where.category = category;
-    if (status) where.status = status;
+    // ขอบเขตทะเบียน (ไม่รวมตัวกรองสถานะ) — ใช้นับจำนวนต่อสถานะให้แท็บ/การ์ดสรุป
+    const scope: Prisma.FixedAssetWhereInput = { tenantId };
+    if (propertyId) scope.propertyId = propertyId;
+    if (category) scope.category = category;
+    if (depreciationMethod) scope.depreciationMethod = depreciationMethod;
     if (search) {
-      where.OR = [
+      scope.OR = [
         { assetCode: { contains: search } },
         { name: { contains: search } },
         { serialNo: { contains: search } },
         { location: { contains: search } },
       ];
     }
+    const where: Prisma.FixedAssetWhereInput = status ? { ...scope, status } : scope;
 
-    const [total, data] = await Promise.all([
+    const orderBy: Prisma.FixedAssetOrderByWithRelationInput[] =
+      sort === 'name'
+        ? [{ name: 'asc' }]
+        : sort === 'purchaseDate'
+          ? [{ purchaseDate: 'desc' }, { assetCode: 'asc' }]
+          : sort === 'cost'
+            ? [{ purchaseCost: 'desc' }, { assetCode: 'asc' }]
+            : sort === 'bookValue'
+              ? [{ bookValue: 'desc' }, { assetCode: 'asc' }]
+              : [{ assetCode: 'asc' }];
+
+    const [total, data, sums, byStatus] = await Promise.all([
       this.prisma.fixedAsset.count({ where }),
-      this.prisma.fixedAsset.findMany({
+      this.prisma.fixedAsset.findMany({ where, orderBy, skip, take: limit }),
+      this.prisma.fixedAsset.aggregate({
         where,
-        orderBy: [{ category: 'asc' }, { assetCode: 'asc' }],
-        skip,
-        take: limit,
+        _sum: { purchaseCost: true, acquisitionCost: true, accumulatedDepreciation: true, bookValue: true },
       }),
+      this.prisma.fixedAsset.groupBy({ by: ['status'], where: scope, _count: { _all: true } }),
     ]);
-    return { data, total, page, limit };
+
+    const summary = {
+      cost: Number(sums._sum.purchaseCost ?? 0) + Number(sums._sum.acquisitionCost ?? 0),
+      accumulatedDepreciation: Number(sums._sum.accumulatedDepreciation ?? 0),
+      bookValue: Number(sums._sum.bookValue ?? 0),
+      statusCounts: Object.fromEntries(byStatus.map((r) => [r.status, r._count._all])) as Record<string, number>,
+    };
+    return { data, total, page, limit, summary };
   }
 
   async findOne(id: string, tenantId: string) {
@@ -116,21 +138,24 @@ export class AssetsService {
     });
   }
 
-  async update(id: string, dto: Partial<CreateAssetDto>, tenantId: string) {
-    await this.findOne(id, tenantId);
-    const { purchaseCost: _, acquisitionCost: __, ...updateFields } = dto;
+  async update(id: string, dto: UpdateAssetDto, tenantId: string) {
+    const asset = await this.findOne(id, tenantId);
+    if (dto.status && dto.status !== asset.status && (asset.status === 'DISPOSED' || asset.status === 'WRITTEN_OFF')) {
+      throw new BadRequestException('สินทรัพย์ที่จำหน่าย/ตัดบัญชีแล้วเปลี่ยนสถานะไม่ได้');
+    }
     return this.prisma.fixedAsset.update({
       where: { id },
       data: {
-        ...(updateFields.name && { name: updateFields.name }),
-        ...(updateFields.description !== undefined && { description: updateFields.description }),
-        ...(updateFields.location !== undefined && { location: updateFields.location }),
-        ...(updateFields.serialNo !== undefined && { serialNo: updateFields.serialNo }),
-        ...(updateFields.responsiblePerson !== undefined && {
-          responsiblePerson: updateFields.responsiblePerson,
+        ...(dto.name && { name: dto.name }),
+        ...(dto.description !== undefined && { description: dto.description }),
+        ...(dto.location !== undefined && { location: dto.location }),
+        ...(dto.serialNo !== undefined && { serialNo: dto.serialNo }),
+        ...(dto.responsiblePerson !== undefined && {
+          responsiblePerson: dto.responsiblePerson,
         }),
-        ...(updateFields.notes !== undefined && { notes: updateFields.notes }),
-        ...(updateFields.costCenterId !== undefined && { costCenterId: updateFields.costCenterId }),
+        ...(dto.notes !== undefined && { notes: dto.notes }),
+        ...(dto.costCenterId !== undefined && { costCenterId: dto.costCenterId }),
+        ...(dto.status !== undefined && { status: dto.status }),
       },
     });
   }

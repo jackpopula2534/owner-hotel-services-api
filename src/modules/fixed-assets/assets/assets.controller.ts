@@ -14,6 +14,7 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { AssetsService } from './assets.service';
 import { CreateAssetDto } from './dto/create-asset.dto';
 import { QueryAssetDto } from './dto/query-asset.dto';
+import { UpdateAssetDto } from './dto/update-asset.dto';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AddonGuard } from '@/common/guards/addon.guard';
 import { RequireAddon } from '@/common/decorators/require-addon.decorator';
@@ -50,8 +51,9 @@ export class AssetsController {
   @Get()
   @ApiOperation({ summary: 'ดูสินทรัพย์ถาวรทั้งหมด' })
   async findAll(@CurrentUser() user: JwtPayload, @Query() query: QueryAssetDto) {
-    const data = await this.service.findAll(user.tenantId, query);
-    return { success: true, ...data };
+    const { data, total, page, limit, summary } = await this.service.findAll(user.tenantId, query);
+    // ต้องมี meta — ไม่งั้น api client ฝั่งหน้าเว็บแกะเหลือแค่ data แล้วจำนวนรวม/หน้าหาย
+    return { success: true, data, meta: { total, page, limit, summary } };
   }
 
   @Get(':id')
@@ -74,7 +76,7 @@ export class AssetsController {
   async update(
     @CurrentUser() user: JwtPayload,
     @Param('id') id: string,
-    @Body() dto: Partial<CreateAssetDto>,
+    @Body() dto: UpdateAssetDto,
   ) {
     const data = await this.service.update(id, dto, user.tenantId);
     return { success: true, data };
