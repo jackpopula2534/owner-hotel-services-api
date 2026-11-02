@@ -51,6 +51,11 @@ export interface HrDashboardOverview {
   asOf: string;
   date: string;
   propertyId: string | null;
+  /**
+   * พนักงานปัจจุบันที่ยังไม่ผูกสาขา (เฉพาะเมื่อกรองตามสาขา) — ไม่ถูกนับในตัวเลขอื่น
+   * null เมื่อดูทั้ง tenant
+   */
+  unassignedEmployees: number | null;
   /** true = ใช้ตารางเวร (Roster) เป็นฐาน, false = ยังไม่มีตารางเวรวันนี้ → ใช้พนักงานทั้งหมด */
   rosterMode: boolean;
   headcount: {
@@ -223,7 +228,8 @@ const deptOf = (e: EmployeeLite): { key: string; name: string } => {
  *    (เหมือน HrAttendanceService.checkIn) — ไม่ใช้ setHours() ที่ขึ้นกับ TZ ของ server
  *  - นับเฉพาะพนักงานที่ยังไม่พ้นสภาพ (ไม่ใช่ RESIGNED/TERMINATED/INACTIVE)
  *  - ฐานของอัตราเข้างาน = คนที่มีกะและถึงเวลาเข้ากะแล้ว (ไม่ใช่พนักงานทั้งหมด)
- *  - กรองสาขา: พนักงานของสาขานั้น + พนักงานที่ไม่ได้ผูกสาขา (ใช้ร่วมทั้ง tenant)
+ *  - กรองสาขา: นับเฉพาะพนักงานที่ผูกกับสาขานั้น — คนที่ยังไม่ผูกสาขาจะไม่ถูกนับ
+ *    แต่แจ้งจำนวนไว้ใน `unassignedEmployees` ให้ HR ไปผูกสาขาให้ครบ
  */
 @Injectable()
 export class HrDashboardService {
@@ -248,7 +254,7 @@ export class HrDashboardService {
       where: {
         tenantId,
         anonymizedAt: null,
-        ...(propertyId ? { OR: [{ propertyId }, { propertyId: null }] } : {}),
+        ...(propertyId ? { propertyId } : {}),
       },
       select: {
         id: true,
@@ -281,6 +287,7 @@ export class HrDashboardService {
       probations,
       missingDocuments,
       interviews,
+      unassignedEmployees,
     ] = await Promise.all([
       this.prisma.hrAttendance.findMany({
         where: { tenantId, employeeId: inIds, date: { gte: trendStartDate, lte: todayDate } },
@@ -322,14 +329,18 @@ export class HrDashboardService {
         take: PENDING_PREVIEW,
         include: { employee: employeeSelect, leaveType: { select: { name: true } } },
       }),
-      this.prisma.hrLeaveRequest.count({ where: { tenantId, employeeId: inIds, status: 'pending' } }),
+      this.prisma.hrLeaveRequest.count({
+        where: { tenantId, employeeId: inIds, status: 'pending' },
+      }),
       this.prisma.hrOvertimeRequest.findMany({
         where: { tenantId, employeeId: inIds, status: 'pending' },
         orderBy: { createdAt: 'desc' },
         take: PENDING_PREVIEW,
         include: { employee: employeeSelect },
       }),
-      this.prisma.hrOvertimeRequest.count({ where: { tenantId, employeeId: inIds, status: 'pending' } }),
+      this.prisma.hrOvertimeRequest.count({
+        where: { tenantId, employeeId: inIds, status: 'pending' },
+      }),
       this.prisma.hrAttendanceException.findMany({
         where: { tenantId, employeeId: inIds, status: 'pending' },
         orderBy: { createdAt: 'desc' },
@@ -362,6 +373,16 @@ export class HrDashboardService {
         take: 5,
         include: { candidate: { select: { firstName: true, lastName: true } } },
       }),
+      propertyId
+        ? this.prisma.employee.count({
+            where: {
+              tenantId,
+              anonymizedAt: null,
+              propertyId: null,
+              status: { notIn: [...SEPARATED_STATUSES] },
+            },
+          })
+        : Promise.resolve(null),
     ]);
 
     // ── Index raw rows by day ──────────────────────────────────────────────────
@@ -419,7 +440,12 @@ export class HrDashboardService {
     const trend = days.map((day) => {
       const r = day === today ? todayResult : classifyDay(day);
       const c = summarize([...r.statuses.values()]);
-      return { date: day, expected: c.expected, present: c.present, attendanceRate: c.attendanceRate };
+      return {
+        date: day,
+        expected: c.expected,
+        present: c.present,
+        attendanceRate: c.attendanceRate,
+      };
     });
 
     // ── Today ──────────────────────────────────────────────────────────────────
@@ -430,14 +456,19 @@ export class HrDashboardService {
       const checkIn = attIdx.get(`${today}|${id}`)?.checkIn;
       if (!checkIn) continue;
       const start = shiftIdx.get(`${today}|${id}`)?.startTime ?? DEFAULT_SHIFT_START;
-      lateMinutes.push(Math.max(0, (checkIn.getTime() - bangkokInstant(today, start).getTime()) / 60_000));
+      lateMinutes.push(
+        Math.max(0, (checkIn.getTime() - bangkokInstant(today, start).getTime()) / 60_000),
+      );
     }
     const lateAvgMinutes = lateMinutes.length
       ? Math.round(lateMinutes.reduce((a, b) => a + b, 0) / lateMinutes.length)
       : null;
 
     // ── Departments ────────────────────────────────────────────────────────────
-    const deptMap = new Map<string, { key: string; name: string; headcount: number; statuses: TodayStatus[] }>();
+    const deptMap = new Map<
+      string,
+      { key: string; name: string; headcount: number; statuses: TodayStatus[] }
+    >();
     for (const e of current) {
       const d = deptOf(e);
       const row = deptMap.get(d.key) ?? { ...d, headcount: 0, statuses: [] };
@@ -472,10 +503,11 @@ export class HrDashboardService {
         name: fullName(e),
         department: deptOf(e).name,
         status: st,
-        leaveType: st === 'on_leave' ? leaveIdx.get(`${today}|${id}`) ?? null : null,
-        shiftStart: st === 'not_checked_in'
-          ? shiftIdx.get(`${today}|${id}`)?.startTime ?? DEFAULT_SHIFT_START
-          : null,
+        leaveType: st === 'on_leave' ? (leaveIdx.get(`${today}|${id}`) ?? null) : null,
+        shiftStart:
+          st === 'not_checked_in'
+            ? (shiftIdx.get(`${today}|${id}`)?.startTime ?? DEFAULT_SHIFT_START)
+            : null,
       });
     }
     away.sort((a, b) => a.status.localeCompare(b.status) || a.name.localeCompare(b.name, 'th'));
@@ -493,7 +525,9 @@ export class HrDashboardService {
         totalDays: l.totalDays,
         minutes: null,
         approvalStep:
-          (l.requiredLevels ?? 1) > 1 ? { current: l.currentLevel, required: l.requiredLevels } : null,
+          (l.requiredLevels ?? 1) > 1
+            ? { current: l.currentLevel, required: l.requiredLevels }
+            : null,
         createdAt: l.createdAt.toISOString(),
       })),
       ...pendingOt.map((o) => ({
@@ -557,6 +591,7 @@ export class HrDashboardService {
       asOf: now.toISOString(),
       date: today,
       propertyId: propertyId ?? null,
+      unassignedEmployees,
       rosterMode: todayResult.rosterMode,
       headcount: {
         total: employees.length,

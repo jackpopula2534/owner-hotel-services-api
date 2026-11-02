@@ -171,8 +171,7 @@ export class HrAttendanceService {
     const scheduledStart = shift?.startTime ?? HrAttendanceService.DEFAULT_START;
     const graceMs = HrAttendanceService.LATE_GRACE_MINUTES * 60_000;
     const startBoundary = this.atTime(dateOnly, scheduledStart).getTime() + graceMs;
-    const status =
-      shift?.isDayOff || checkIn.getTime() <= startBoundary ? 'present' : 'late';
+    const status = shift?.isDayOff || checkIn.getTime() <= startBoundary ? 'present' : 'late';
 
     const record = await (this.prisma as any).hrAttendance.create({
       data: {
