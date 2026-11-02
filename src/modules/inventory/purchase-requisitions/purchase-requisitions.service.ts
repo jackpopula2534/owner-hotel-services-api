@@ -18,6 +18,7 @@ import {
   mapLinkedReceives,
   summariseFulfillment,
 } from './pr-fulfillment.util';
+import { createdAtRange } from '../common/created-at-range';
 
 /** An RFQ this PR was sent out in — just what the progress tracker needs. */
 interface RfqLinkRow {
@@ -82,11 +83,8 @@ export class PurchaseRequisitionsService {
       ...(query.status && { status: query.status }),
       ...(query.priority && { priority: query.priority }),
       ...(query.requestedBy && { requestedBy: query.requestedBy }),
-      ...(query.startDate && {
-        createdAt: { gte: new Date(query.startDate) },
-      }),
-      ...(query.endDate && {
-        createdAt: { lte: new Date(query.endDate) },
+      ...((query.startDate || query.endDate) && {
+        createdAt: createdAtRange(query.startDate, query.endDate),
       }),
       ...(query.search && {
         prNumber: { contains: query.search },

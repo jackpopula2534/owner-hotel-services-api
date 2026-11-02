@@ -33,6 +33,7 @@ import {
   QueryPurchaseOrderTrackingDto,
   PurchaseOrderTrackingStatus,
 } from './dto/query-purchase-order-tracking.dto';
+import { createdAtRange } from '../common/created-at-range';
 
 /**
  * Shape of a single row in the procurement Receiving Pipeline view.
@@ -316,11 +317,8 @@ export class PurchaseOrdersService {
       ...(query.propertyId && { propertyId: query.propertyId }),
       ...(query.supplierId && { supplierId: query.supplierId }),
       ...(query.status && { status: query.status }),
-      ...(query.startDate && {
-        createdAt: { gte: new Date(query.startDate) },
-      }),
-      ...(query.endDate && {
-        createdAt: { lte: new Date(query.endDate) },
+      ...((query.startDate || query.endDate) && {
+        createdAt: createdAtRange(query.startDate, query.endDate),
       }),
       ...(query.search && {
         poNumber: { contains: query.search },
