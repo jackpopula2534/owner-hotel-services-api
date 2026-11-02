@@ -201,7 +201,11 @@ export class ArReceiptsService {
           const settled = settleInvoice(invoice, { paid: alloc.amount });
           await tx.arInvoice.update({
             where: { id: alloc.invoiceId },
-            data: { paidAmount: settled.paidAmount, balance: settled.balance, status: settled.status },
+            data: {
+              paidAmount: settled.paidAmount,
+              balance: settled.balance,
+              status: settled.status,
+            },
           });
         }
       }
@@ -231,7 +235,11 @@ export class ArReceiptsService {
         const settled = settleInvoice(invoice, { paid: -Number(alloc.amount) });
         await tx.arInvoice.update({
           where: { id: invoice.id },
-          data: { paidAmount: settled.paidAmount, balance: settled.balance, status: settled.status },
+          data: {
+            paidAmount: settled.paidAmount,
+            balance: settled.balance,
+            status: settled.status,
+          },
         });
       }
       await tx.arReceiptAllocation.deleteMany({ where: { receiptId, tenantId } });
@@ -345,6 +353,11 @@ export class ArReceiptsService {
     );
 
     await this.prisma.$transaction(async (tx) => {
+      // รายการ Statement ธนาคารที่สร้างใบเสร็จนี้ กลับไปรอจับคู่ (หน้ากระทบยอด/รับชำระเห็นตรงกัน)
+      await tx.bankStatementLine.updateMany({
+        where: { tenantId, arReceiptId: id },
+        data: { status: 'UNMATCHED', arReceiptId: null, journalLineId: null },
+      });
       await tx.arReceipt.update({
         where: { id },
         data: { status: 'VOID', voidedBy, voidedAt: new Date() },
@@ -359,7 +372,11 @@ export class ArReceiptsService {
         const settled = settleInvoice(invoice, { paid: -Number(alloc.amount) });
         await tx.arInvoice.update({
           where: { id: alloc.invoiceId },
-          data: { paidAmount: settled.paidAmount, balance: settled.balance, status: settled.status },
+          data: {
+            paidAmount: settled.paidAmount,
+            balance: settled.balance,
+            status: settled.status,
+          },
         });
       }
     });

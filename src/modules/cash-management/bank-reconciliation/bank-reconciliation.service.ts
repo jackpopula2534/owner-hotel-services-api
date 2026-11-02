@@ -4,16 +4,21 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
+  Optional,
 } from '@nestjs/common';
 import { PrismaService } from '@/prisma/prisma.service';
 import { CreateBankReconDto } from './dto/create-bank-recon.dto';
 import { CreateReconLineDto } from './dto/create-recon-line.dto';
+import { BankStatementsService } from '../bank-statements/bank-statements.service';
 
 @Injectable()
 export class BankReconciliationService {
   private readonly logger = new Logger(BankReconciliationService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly statements?: BankStatementsService,
+  ) {}
 
   async findAll(
     tenantId: string,
@@ -76,13 +81,20 @@ export class BankReconciliationService {
       select: { id: true, code: true },
     });
     if (!bankAccount) {
-      throw new BadRequestException('bankAccountId ต้องเป็นบัญชีเงินฝากธนาคาร (รหัส 1102) ของกิจการนี้');
+      throw new BadRequestException(
+        'bankAccountId ต้องเป็นบัญชีเงินฝากธนาคาร (รหัส 1102) ของกิจการนี้',
+      );
     }
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(dto.period)) {
       throw new BadRequestException('period ต้องอยู่ในรูปแบบ YYYY-MM');
     }
 
-    const bookBalance = await this.computeBookBalance(tenantId, dto.propertyId, bankAccount.code, dto.period);
+    const bookBalance = await this.computeBookBalance(
+      tenantId,
+      dto.propertyId,
+      bankAccount.code,
+      dto.period,
+    );
 
     const variance = Math.round((dto.statementBalance - bookBalance) * 100) / 100;
 
@@ -211,7 +223,12 @@ export class BankReconciliationService {
    * ยอดตามบัญชี = ยอดยกไปล่าสุด ณ สิ้นงวด ของบัญชีที่เลือก (รวมบัญชีย่อยใต้รหัสนั้น)
    * งวดที่ไม่มีรายการจะไม่มีแถว ledger_balances จึงใช้แถวล่าสุดที่ไม่เกินงวดที่กระทบยอด
    */
-  async computeBookBalance(tenantId: string, propertyId: string, bankCode: string, period?: string) {
+  async computeBookBalance(
+    tenantId: string,
+    propertyId: string,
+    bankCode: string,
+    period?: string,
+  ) {
     const accounts = await this.prisma.accountChart.findMany({
       where: { tenantId, code: { startsWith: bankCode } },
       select: { id: true },
@@ -225,7 +242,12 @@ export class BankReconciliationService {
           propertyId,
           accountId: acc.id,
           ...(period
-            ? { OR: [{ fiscalYear: { lt: fiscalYear } }, { fiscalYear, fiscalPeriod: { lte: fiscalMonth } }] }
+            ? {
+                OR: [
+                  { fiscalYear: { lt: fiscalYear } },
+                  { fiscalYear, fiscalPeriod: { lte: fiscalMonth } },
+                ],
+              }
             : {}),
         },
         orderBy: [{ fiscalYear: 'desc' }, { fiscalPeriod: 'desc' }],
@@ -275,7 +297,15 @@ export class BankReconciliationService {
         debit: true,
         credit: true,
         journalEntry: {
-          select: { id: true, entryNo: true, entryDate: true, description: true, status: true, reversedById: true, sourceType: true },
+          select: {
+            id: true,
+            entryNo: true,
+            entryDate: true,
+            description: true,
+            status: true,
+            reversedById: true,
+            sourceType: true,
+          },
         },
       },
       orderBy: [{ journalEntry: { entryDate: 'asc' } }, { journalEntry: { entryNo: 'asc' } }],
@@ -288,8 +318,12 @@ export class BankReconciliationService {
         .map((l) => l.journalEntry.reversedById as string),
     );
     const effective = lines.filter(
-      (l) => !(l.journalEntry.status === 'REVERSED' && l.journalEntry.reversedById && reversalIds.has(l.journalEntry.reversedById)) &&
-        !reversalIds.has(l.journalEntry.id),
+      (l) =>
+        !(
+          l.journalEntry.status === 'REVERSED' &&
+          l.journalEntry.reversedById &&
+          reversalIds.has(l.journalEntry.reversedById)
+        ) && !reversalIds.has(l.journalEntry.id),
     );
 
     // กระทบไปแล้วในงวด "อื่น" ของบัญชีเดียวกัน → ไม่ต้องแสดงอีก
@@ -298,9 +332,18 @@ export class BankReconciliationService {
       ? await this.prisma.bankReconLine.findMany({
           where: {
             bookRef: { in: refs },
-            reconciliation: { tenantId, bankAccountId: recon.bankAccountId, propertyId: recon.propertyId },
+            reconciliation: {
+              tenantId,
+              bankAccountId: recon.bankAccountId,
+              propertyId: recon.propertyId,
+            },
           },
-          select: { id: true, reconId: true, bookRef: true, reconciliation: { select: { period: true } } },
+          select: {
+            id: true,
+            reconId: true,
+            bookRef: true,
+            reconciliation: { select: { period: true } },
+          },
         })
       : [];
     const clearedMap = new Map(clearedLines.map((c) => [c.bookRef as string, c]));
@@ -319,7 +362,8 @@ export class BankReconciliationService {
           credit: Number(l.credit),
           amount: round2(Number(l.debit) - Number(l.credit)),
           cleared: cleared?.reconId === recon.id,
-          clearedPeriod: cleared && cleared.reconId !== recon.id ? cleared.reconciliation.period : null,
+          clearedPeriod:
+            cleared && cleared.reconId !== recon.id ? cleared.reconciliation.period : null,
           reconLineId: cleared?.reconId === recon.id ? cleared.id : null,
         };
       })
@@ -339,20 +383,30 @@ export class BankReconciliationService {
     const manualLines = recon.lines.filter((l) => !l.bookRef?.startsWith(JL_PREFIX));
 
     const uncleared = book.filter((b) => !b.cleared);
-    const depositsInTransit = round2(uncleared.filter((b) => b.amount > 0).reduce((s, b) => s + b.amount, 0));
-    const outstandingPayments = round2(uncleared.filter((b) => b.amount < 0).reduce((s, b) => s - b.amount, 0));
+    const depositsInTransit = round2(
+      uncleared.filter((b) => b.amount > 0).reduce((s, b) => s + b.amount, 0),
+    );
+    const outstandingPayments = round2(
+      uncleared.filter((b) => b.amount < 0).reduce((s, b) => s - b.amount, 0),
+    );
     const statementOnly = round2(
       manualLines.reduce((s, l) => s + Number(l.statementAmount) - Number(l.bookAmount), 0),
     );
     const statementBalance = Number(recon.statementBalance);
     // ยอดธนาคารที่ควรเป็น = ยอดบัญชี − เงินฝากระหว่างทาง + เช็ค/โอนจ่ายที่ธนาคารยังไม่ตัด + รายการที่มีเฉพาะใน Statement
-    const expectedStatement = round2(bookBalance - depositsInTransit + outstandingPayments + statementOnly);
+    const expectedStatement = round2(
+      bookBalance - depositsInTransit + outstandingPayments + statementOnly,
+    );
+    const statement = this.statements
+      ? await this.statements.forReconciliation(tenantId, recon, book)
+      : null;
 
     return {
       recon: { ...recon, lines: undefined },
       account,
       bookLines: book,
       manualLines,
+      statement,
       reconciliation: {
         statementBalance,
         bookBalance,
@@ -372,7 +426,8 @@ export class BankReconciliationService {
   /** ทำเครื่องหมาย/ยกเลิก "รายการสมุดบัญชีที่ปรากฏใน Statement แล้ว" ทีละหลายรายการ */
   async clearBookLines(id: string, tenantId: string, journalLineIds: string[], cleared: boolean) {
     const recon = await this.findOne(id, tenantId);
-    if (recon.status === 'APPROVED') throw new BadRequestException('การกระทบยอดอนุมัติแล้ว แก้ไขไม่ได้');
+    if (recon.status === 'APPROVED')
+      throw new BadRequestException('การกระทบยอดอนุมัติแล้ว แก้ไขไม่ได้');
     const account = await this.bankAccountOf(tenantId, recon.bankAccountId);
     const book = await this.bookTransactions(tenantId, recon, account.code);
     const byId = new Map(book.map((b) => [b.journalLineId, b]));
@@ -401,13 +456,45 @@ export class BankReconciliationService {
           });
         }
       } else {
+        await this.statements?.releaseJournalLines(tenantId, journalLineIds);
         await tx.bankReconLine.deleteMany({
-          where: { reconId: id, bookRef: { in: journalLineIds.map((jid) => `${JL_PREFIX}${jid}`) } },
+          where: {
+            reconId: id,
+            bookRef: { in: journalLineIds.map((jid) => `${JL_PREFIX}${jid}`) },
+          },
         });
       }
       await tx.bankReconciliation.update({ where: { id }, data: { status: 'IN_PROGRESS' } });
     });
     await this.refreshBook(id, tenantId);
+    return this.getWorkspace(id, tenantId);
+  }
+
+  /**
+   * จับคู่รายการ Statement ที่นำเข้ากับรายการสมุดบัญชี แล้วติ๊กว่ารายการสมุดบัญชีปรากฏใน Statement
+   * (ใช้กับปุ่ม "จับคู่ตามที่แนะนำ" — ส่งเฉพาะคู่ที่ผู้ใช้ยืนยัน)
+   */
+  async matchStatementLines(
+    id: string,
+    tenantId: string,
+    pairs: { statementLineId: string; journalLineId: string }[],
+  ) {
+    if (!this.statements) throw new BadRequestException('ยังไม่เปิดใช้การนำเข้า Statement');
+    const recon = await this.findOne(id, tenantId);
+    if (recon.status === 'APPROVED')
+      throw new BadRequestException('การกระทบยอดอนุมัติแล้ว แก้ไขไม่ได้');
+    const jl = pairs.map((p) => p.journalLineId);
+    if (new Set(jl).size !== jl.length)
+      throw new BadRequestException('รายการสมุดบัญชีหนึ่งรายการจับคู่ได้ครั้งเดียว');
+    const account = await this.bankAccountOf(tenantId, recon.bankAccountId);
+    const book = await this.bookTransactions(tenantId, recon, account.code);
+    const byId = new Map(book.map((b) => [b.journalLineId, b]));
+    if (jl.some((j) => !byId.has(j))) {
+      throw new BadRequestException('มีรายการสมุดบัญชีที่ไม่อยู่ในงวดนี้');
+    }
+    await this.statements.applyMatches(tenantId, recon.bankAccountId, pairs);
+    const toClear = jl.filter((j) => !byId.get(j)!.cleared);
+    if (toClear.length) return this.clearBookLines(id, tenantId, toClear, true);
     return this.getWorkspace(id, tenantId);
   }
 
@@ -429,7 +516,12 @@ export class BankReconciliationService {
     const recon = await this.findOne(id, tenantId);
     if (recon.status === 'APPROVED') throw new BadRequestException('การกระทบยอดอนุมัติแล้ว');
     const account = await this.bankAccountOf(tenantId, recon.bankAccountId);
-    const bookBalance = await this.computeBookBalance(tenantId, recon.propertyId, account.code, recon.period);
+    const bookBalance = await this.computeBookBalance(
+      tenantId,
+      recon.propertyId,
+      account.code,
+      recon.period,
+    );
     return this.prisma.bankReconciliation.update({
       where: { id },
       data: { bookBalance, variance: round2(Number(recon.statementBalance) - bookBalance) },
@@ -445,7 +537,14 @@ export class BankReconciliationService {
     });
     const recons = await this.prisma.bankReconciliation.findMany({
       where: { tenantId, propertyId, bankAccountId: { in: accounts.map((a) => a.id) } },
-      select: { id: true, bankAccountId: true, period: true, status: true, variance: true, approvedAt: true },
+      select: {
+        id: true,
+        bankAccountId: true,
+        period: true,
+        status: true,
+        variance: true,
+        approvedAt: true,
+      },
       orderBy: { period: 'desc' },
     });
 
@@ -458,9 +557,18 @@ export class BankReconciliationService {
           ...a,
           glBalance: await this.computeBookBalance(tenantId, propertyId, a.code),
           lastApproved: lastApproved
-            ? { id: lastApproved.id, period: lastApproved.period, approvedAt: lastApproved.approvedAt }
+            ? {
+                id: lastApproved.id,
+                period: lastApproved.period,
+                approvedAt: lastApproved.approvedAt,
+              }
             : null,
-          openRecons: open.map((r) => ({ id: r.id, period: r.period, status: r.status, variance: Number(r.variance) })),
+          openRecons: open.map((r) => ({
+            id: r.id,
+            period: r.period,
+            status: r.status,
+            variance: Number(r.variance),
+          })),
           nextPeriod: lastApproved ? nextPeriod(lastApproved.period) : null,
         };
       }),

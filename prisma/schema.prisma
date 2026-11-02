@@ -7105,6 +7105,48 @@ model BankReconciliation {
   @@map("bank_reconciliations")
 }
 
+/// รายการจาก Statement ธนาคารที่นำเข้า — ใช้ร่วมกันระหว่างหน้ารับชำระ (AR) และหน้ากระทบยอดธนาคาร
+model BankStatementLine {
+  id            String                  @id @default(uuid())
+  tenantId      String
+  propertyId    String
+  /// บัญชีเงินฝากธนาคารในผังบัญชี (รหัส 1102*)
+  bankAccountId String
+  txnDate       DateTime                @db.Date
+  txnTime       String?                 @db.VarChar(8)
+  description   String                  @db.VarChar(300)
+  /// + เงินเข้า / − เงินออก
+  amount        Decimal                 @db.Decimal(14, 2)
+  /// ยอดคงเหลือตาม Statement (ถ้าไฟล์มี)
+  balance       Decimal?                @db.Decimal(14, 2)
+  reference     String?                 @db.VarChar(100)
+  /// hash ของวันที่/ยอด/อ้างอิง/รายละเอียด — กันนำเข้าซ้ำ
+  fingerprint   String                  @db.VarChar(64)
+  status        BankStatementLineStatus @default(UNMATCHED)
+  /// รายการสมุดบัญชี (journal line) ที่จับคู่แล้ว
+  journalLineId String?
+  /// ใบเสร็จรับชำระที่สร้างจากรายการนี้
+  arReceiptId   String?
+  importBatchId String                  @db.VarChar(40)
+  sourceFile    String?                 @db.VarChar(200)
+  importedBy    String
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+
+  @@unique([tenantId, bankAccountId, fingerprint])
+  @@index([tenantId, propertyId, bankAccountId, txnDate])
+  @@index([status])
+  @@index([journalLineId])
+  @@index([arReceiptId])
+  @@map("bank_statement_lines")
+}
+
+enum BankStatementLineStatus {
+  UNMATCHED // ยังไม่จับคู่
+  MATCHED // จับคู่กับรายการสมุดบัญชี/ใบเสร็จแล้ว
+  IGNORED // ข้าม (ไม่เกี่ยวกับการกระทบยอด)
+}
+
 /// รายการกระทบยอดธนาคาร
 model BankReconLine {
   id              String    @id @default(uuid())

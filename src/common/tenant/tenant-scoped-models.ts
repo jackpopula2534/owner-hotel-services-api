@@ -34,6 +34,7 @@ export const TENANT_SCOPED_MODELS: Readonly<Record<string, TenantScopeField>> = 
   AuditLog: 'tenantId',
   AutoReplyTemplate: 'tenantId',
   BankReconciliation: 'tenantId',
+  BankStatementLine: 'tenantId',
   Booking: 'tenantId',
   BookingAddOn: 'tenantId',
   CampAddon: 'tenantId',

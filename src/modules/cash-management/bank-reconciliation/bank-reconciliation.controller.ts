@@ -18,13 +18,18 @@ import { BankReconciliationService } from './bank-reconciliation.service';
 import { CreateBankReconDto } from './dto/create-bank-recon.dto';
 import { CreateReconLineDto } from './dto/create-recon-line.dto';
 import { ClearBookLinesDto } from './dto/clear-book-lines.dto';
+import { MatchStatementLinesDto } from './dto/match-statement-lines.dto';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AddonGuard } from '@/common/guards/addon.guard';
 import { RequireAddon } from '@/common/decorators/require-addon.decorator';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
 import { RolesGuard } from '@/common/guards/roles.guard';
 import { Roles } from '@/common/decorators/roles.decorator';
-import { ACCOUNTING_CLOSE_ROLES, ACCOUNTING_WRITE_ROLES, AccountingAccess } from '@/modules/accounting/accounting-access.decorator';
+import {
+  ACCOUNTING_CLOSE_ROLES,
+  ACCOUNTING_WRITE_ROLES,
+  AccountingAccess,
+} from '@/modules/accounting/accounting-access.decorator';
 
 interface JwtPayload {
   sub: string;
@@ -81,7 +86,9 @@ export class BankReconciliationController {
   }
 
   @Get(':id/workspace')
-  @ApiOperation({ summary: 'พื้นที่ทำงานกระทบยอด: รายการสมุดบัญชี + รายการเฉพาะ Statement + สูตรกระทบยอด' })
+  @ApiOperation({
+    summary: 'พื้นที่ทำงานกระทบยอด: รายการสมุดบัญชี + รายการเฉพาะ Statement + สูตรกระทบยอด',
+  })
   async workspace(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     const data = await this.service.getWorkspace(id, user.tenantId);
     return { success: true, data };
@@ -89,8 +96,30 @@ export class BankReconciliationController {
 
   @Post(':id/clear')
   @ApiOperation({ summary: 'ทำเครื่องหมายรายการสมุดบัญชีว่าปรากฏใน Statement แล้ว (หรือยกเลิก)' })
-  async clear(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() dto: ClearBookLinesDto) {
-    const data = await this.service.clearBookLines(id, user.tenantId, dto.journalLineIds, dto.cleared);
+  async clear(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: ClearBookLinesDto,
+  ) {
+    const data = await this.service.clearBookLines(
+      id,
+      user.tenantId,
+      dto.journalLineIds,
+      dto.cleared,
+    );
+    return { success: true, data };
+  }
+
+  @Post(':id/match-statement')
+  @ApiOperation({
+    summary: 'จับคู่รายการ Statement ที่นำเข้ากับรายการสมุดบัญชี และติ๊กว่าปรากฏใน Statement',
+  })
+  async matchStatement(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: MatchStatementLinesDto,
+  ) {
+    const data = await this.service.matchStatementLines(id, user.tenantId, dto.pairs);
     return { success: true, data };
   }
 
