@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>นัดสัมภาษณ์งาน {{positionTitle}}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #f4f4f4;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f4f4f4; padding: 20px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 8px; overflow: hidden;">
+          <tr>
+            <td style="background-color: #0f766e; padding: 28px; text-align: center;">
+              <h1 style="color: #ffffff; margin: 0; font-size: 22px;">{{hotelName}}</h1>
+              <p style="color: rgba(255,255,255,0.9); margin: 8px 0 0 0; font-size: 14px;">นัดสัมภาษณ์งาน</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 32px 28px;">
+              <h2 style="color: #333; margin: 0 0 14px 0; font-size: 18px;">เรียน คุณ{{candidateName}}</h2>
+              <p style="color: #555; line-height: 1.7; margin: 0 0 16px 0;">
+                ขอเชิญท่านเข้าสัมภาษณ์งานตำแหน่ง <strong>{{positionTitle}}</strong> (รอบที่ {{round}})
+              </p>
+              <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8f9fa; border-radius: 8px; margin: 16px 0;">
+                <tr>
+                  <td style="padding: 18px;">
+                    <p style="margin: 0 0 6px 0; color: #333;"><strong>วัน-เวลา:</strong> {{when}}</p>
+                    <p style="margin: 0 0 6px 0; color: #333;"><strong>ระยะเวลา:</strong> {{durationMinutes}} นาที</p>
+                    <p style="margin: 0 0 6px 0; color: #333;"><strong>รูปแบบ:</strong> {{formatLabel}}</p>
+                    {{#if location}}<p style="margin: 0; color: #333;"><strong>สถานที่/ลิงก์:</strong> {{location}}</p>{{/if}}
+                  </td>
+                </tr>
+              </table>
+              <p style="color: #555; line-height: 1.7; margin: 0;">หากไม่สะดวกตามวันเวลาดังกล่าว กรุณาติดต่อกลับเพื่อเลื่อนนัด</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

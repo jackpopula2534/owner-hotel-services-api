@@ -94,8 +94,8 @@ export class ApprovalFlowService {
    * ([] / null = ไม่กรอง = ดึงทุกหมวด).
    */
   async getEquipmentCategories(tenantId: string): Promise<string[]> {
-    const row = await this.db.hrApprovalFlow.findUnique({
-      where: { tenantId_flowType: { tenantId, flowType: 'equipment' } },
+    const row = await this.db.hrApprovalFlow.findFirst({
+      where: { tenantId, flowType: 'equipment' },
     });
     return this.normalizeCategoryIds(row?.equipmentCategoryIds);
   }
@@ -130,8 +130,8 @@ export class ApprovalFlowService {
    */
   async resolveRoles(tenantId: string, flowType: FlowType): Promise<ApproverRole[]> {
     try {
-      const row = await this.db.hrApprovalFlow.findUnique({
-        where: { tenantId_flowType: { tenantId, flowType } },
+      const row = await this.db.hrApprovalFlow.findFirst({
+        where: { tenantId, flowType },
       });
       if (row?.isActive && Array.isArray(row.steps) && row.steps.length > 0) {
         return (row.steps as FlowStep[])

@@ -13,7 +13,12 @@ function createMockPrisma() {
     employee: { create: jest.fn().mockResolvedValue({ id: 'emp1' }), update: jest.fn() },
     hrHireRecord: { update: jest.fn().mockResolvedValue({ id: 'h1', employeeId: 'emp1' }) },
     hrEquipmentIssuance: { create: jest.fn() },
-    hrCandidate: { update: jest.fn(), count: jest.fn().mockResolvedValue(1) },
+    hrCandidate: {
+      update: jest.fn(),
+      count: jest.fn().mockResolvedValue(1),
+      // ผู้ถูกจ้างทุกคนของคำขอ — ค่าเริ่มต้น: คนเดียวที่เพิ่งยืนยันเริ่มงาน (PROBATION)
+      findMany: jest.fn().mockResolvedValue([{ hireRecord: { employee: { status: 'PROBATION' } } }]),
+    },
     hrManpowerRequest: { update: jest.fn(), updateMany: jest.fn() },
     hrProbationRound: { create: jest.fn().mockResolvedValue({ id: 'round1' }) },
     hrProbationCheckpoint: { create: jest.fn() },
@@ -166,6 +171,20 @@ describe('HireService', () => {
         where: { id: 'mpr1', status: { in: ['onboarding', 'hired'] } },
         data: { status: 'probation' },
       });
+    });
+
+    it('keeps the request in its stage while another hire has not reported for work yet', async () => {
+      prisma.hrHireRecord.findFirst.mockResolvedValue(acceptedHire);
+      prisma.hrProbationRound.findFirst.mockResolvedValue(null);
+      prisma.tx.hrCandidate.findMany.mockResolvedValue([
+        { hireRecord: { employee: { status: 'PROBATION' } } },
+        { hireRecord: { employee: { status: 'PENDING_START' } } },
+      ]);
+      await service.confirmStart('h1', 't1', 'u1');
+      expect(prisma.tx.hrCandidate.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { tenantId: 't1', manpowerRequestId: 'mpr1', status: 'hired' } }),
+      );
+      expect(prisma.tx.hrManpowerRequest.updateMany).not.toHaveBeenCalled();
     });
 
     it('rejects when offer is not accepted yet', async () => {

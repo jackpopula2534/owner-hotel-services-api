@@ -74,7 +74,7 @@ export class JobPostingService {
       throw new BadRequestException('เวลาเปิดรับต้องอยู่ก่อนเวลาปิดรับ');
     }
 
-    const existing = await (this.prisma as any).hrJobPosting.findUnique({ where: { manpowerRequestId } });
+    const existing = await (this.prisma as any).hrJobPosting.findFirst({ where: { manpowerRequestId, tenantId } });
     const data = {
       title: dto.title,
       description: dto.description ?? null,

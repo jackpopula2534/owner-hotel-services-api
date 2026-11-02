@@ -6,6 +6,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { BANGKOK_OFFSET_MS, toBusinessDate } from '../../common/utils/bangkok-day.util';
 import { CheckInDto, CheckOutDto, CreateHrAttendanceDto } from './dto/create-hr-attendance.dto';
 
 @Injectable()
@@ -95,8 +96,8 @@ export class HrAttendanceService {
 
   /** Resolve the planned shift for an employee on a date (roster + override). */
   private async resolveShift(employeeId: string, date: Date, tenantId: string) {
-    const assignment = await (this.prisma as any).hrShiftAssignment.findUnique({
-      where: { employeeId_date: { employeeId, date } },
+    const assignment = await (this.prisma as any).hrShiftAssignment.findFirst({
+      where: { employeeId, date, tenantId },
       include: { shiftType: true },
     });
     if (!assignment) return null;
@@ -119,12 +120,13 @@ export class HrAttendanceService {
     return Boolean(entry);
   }
 
-  /** Combine a date (UTC midnight) with an HH:mm string into a Date. */
+  /**
+   * Combine a business date (UTC midnight of a Bangkok day) with a Bangkok-clock
+   * HH:mm into the real instant — e.g. 09:00 on 2026-11-02 → 2026-11-02T02:00Z.
+   */
   private atTime(date: Date, hhmm: string): Date {
     const [h, m] = hhmm.split(':').map((n) => parseInt(n, 10));
-    const d = new Date(date);
-    d.setUTCHours(h, m, 0, 0);
-    return d;
+    return new Date(date.getTime() + ((h || 0) * 60 + (m || 0)) * 60_000 - BANGKOK_OFFSET_MS);
   }
 
   /** Planned working minutes for a shift (end − start − break), default 480. */
@@ -151,8 +153,8 @@ export class HrAttendanceService {
 
     const now = new Date();
     const checkIn = dto.checkIn ? new Date(dto.checkIn) : now;
-    const dateOnly = new Date(checkIn);
-    dateOnly.setUTCHours(0, 0, 0, 0);
+    // วันทำงานตามเวลาไทย — เข้างาน 06:30 น. (= 23:30 UTC เมื่อวาน) ต้องลงเป็นวันนี้
+    const dateOnly = toBusinessDate(checkIn);
 
     // Guard: prevent duplicate check-in for the same day
     const existing = await (this.prisma as any).hrAttendance.findFirst({

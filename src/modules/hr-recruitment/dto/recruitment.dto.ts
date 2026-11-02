@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsDateString,
@@ -20,6 +21,12 @@ import {
 } from 'class-validator';
 
 // ─── Stage 1: Manpower request ────────────────────────────────────────────────
+
+export const MANPOWER_REASON_TYPES = ['replacement', 'expansion', 'new_role'] as const;
+export type ManpowerReasonType = (typeof MANPOWER_REASON_TYPES)[number];
+
+export const INTERVIEW_FORMATS = ['onsite', 'video', 'phone'] as const;
+export type InterviewFormat = (typeof INTERVIEW_FORMATS)[number];
 
 export class CreateManpowerRequestDto {
   @ApiPropertyOptional() @IsOptional() @IsString() propertyId?: string;
@@ -52,11 +59,56 @@ export class CreateManpowerRequestDto {
 
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(5000) jobDescription?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() expectedStartDate?: string;
+
+  @ApiPropertyOptional({ enum: MANPOWER_REASON_TYPES, description: 'ประเภทเหตุผล: แทนคนออก | ขยายงาน | ตำแหน่งใหม่' })
+  @IsOptional()
+  @IsIn(MANPOWER_REASON_TYPES)
+  reasonType?: ManpowerReasonType;
+
+  @ApiPropertyOptional({ type: [String], description: 'Employee ids ที่ลาออก/ถูกแทน (reasonType=replacement)' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsUUID('all', { each: true })
+  replacementEmployeeIds?: string[];
 }
 
 export class UpdateManpowerRequestDto extends CreateManpowerRequestDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(191) declare positionTitle: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(2000) declare reason: string;
+}
+
+/** ส่งกลับให้แก้ / ไม่อนุมัติงบ — ต้องระบุเหตุผลเสมอ */
+/** metadata ของไฟล์ที่อัปโหลดผ่าน POST /hr/manpower-requests/:id/attachments แล้ว */
+export class ApprovalAttachmentDto {
+  @ApiProperty() @IsString() @IsNotEmpty() @MaxLength(255) name: string;
+  @ApiProperty() @IsString() @IsNotEmpty() @MaxLength(1000) url: string;
+  @ApiProperty({ description: 'storage key — ต้องเป็นไฟล์ของคำขอนี้เท่านั้น (ตรวจใน service)' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(500)
+  key: string;
+  @ApiProperty() @IsInt() @Min(0) size: number;
+  @ApiProperty() @IsString() @MaxLength(120) mimeType: string;
+}
+
+/** ไฟล์แนบได้สูงสุด 5 ไฟล์ต่อการตัดสินใจ */
+export const MAX_APPROVAL_ATTACHMENTS = 5;
+
+export class RequiredNoteDto {
+  @ApiProperty({ description: 'เหตุผล (บังคับ)' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(1000)
+  note: string;
+
+  @ApiPropertyOptional({ type: [ApprovalAttachmentDto] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_APPROVAL_ATTACHMENTS)
+  @ValidateNested({ each: true })
+  @Type(() => ApprovalAttachmentDto)
+  attachments?: ApprovalAttachmentDto[];
 }
 
 export class ApprovalDecisionDto {
@@ -65,7 +117,18 @@ export class ApprovalDecisionDto {
   @IsString()
   @MaxLength(1000)
   note?: string;
+
+  @ApiPropertyOptional({ type: [ApprovalAttachmentDto] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_APPROVAL_ATTACHMENTS)
+  @ValidateNested({ each: true })
+  @Type(() => ApprovalAttachmentDto)
+  attachments?: ApprovalAttachmentDto[];
 }
+
+/** ส่งขออนุมัติ / ยื่นใหม่หลังถูกส่งกลับหรือไม่อนุมัติ — note = คำชี้แจงสิ่งที่แก้ */
+export class SubmitManpowerRequestDto extends ApprovalDecisionDto {}
 
 // ─── Stage 2: Budget ─────────────────────────────────────────────────────────
 
@@ -79,6 +142,14 @@ export class SubmitBudgetDto {
   budgetTotal: number;
 
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(2000) budgetNote?: string;
+
+  @ApiPropertyOptional({ type: [ApprovalAttachmentDto], description: 'ไฟล์ประกอบงบ เช่น ใบเสนอราคา/ตารางเงินเดือน' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_APPROVAL_ATTACHMENTS)
+  @ValidateNested({ each: true })
+  @Type(() => ApprovalAttachmentDto)
+  attachments?: ApprovalAttachmentDto[];
 }
 
 // ─── Stage 3: Equipment request ──────────────────────────────────────────────
@@ -166,6 +237,28 @@ export class ScheduleInterviewDto {
   interviewerIds: string[];
 
   @ApiPropertyOptional({ default: 1 }) @IsOptional() @IsInt() @Min(1) @Max(10) round?: number;
+
+  @ApiPropertyOptional({ default: 45, description: 'ระยะเวลาสัมภาษณ์ (นาที)' })
+  @IsOptional()
+  @IsInt()
+  @Min(15)
+  @Max(240)
+  durationMinutes?: number;
+
+  @ApiPropertyOptional({ enum: INTERVIEW_FORMATS })
+  @IsOptional()
+  @IsIn(INTERVIEW_FORMATS)
+  format?: InterviewFormat;
+
+  @ApiPropertyOptional({ description: 'แจ้งผู้สมัครทางอีเมล/SMS' })
+  @IsOptional()
+  @IsBoolean()
+  notifyCandidate?: boolean;
+
+  @ApiPropertyOptional({ description: 'ยืนยันนัดแม้กรรมการมีนัดชนเวลา (ไม่ส่ง = 409 เมื่อชน)' })
+  @IsOptional()
+  @IsBoolean()
+  allowConflict?: boolean;
 }
 
 export class RescheduleInterviewDto {
@@ -182,6 +275,57 @@ export class RescheduleInterviewDto {
   @IsOptional()
   @IsIn(['cancelled', 'no_show'])
   status?: string;
+
+  @ApiPropertyOptional({ description: 'ระยะเวลาสัมภาษณ์ (นาที)' })
+  @IsOptional()
+  @IsInt()
+  @Min(15)
+  @Max(240)
+  durationMinutes?: number;
+
+  @ApiPropertyOptional({ enum: INTERVIEW_FORMATS })
+  @IsOptional()
+  @IsIn(INTERVIEW_FORMATS)
+  format?: InterviewFormat;
+
+  @ApiPropertyOptional({ description: 'แจ้งผู้สมัครทางอีเมล/SMS (เมื่อเลื่อนวันเวลา)' })
+  @IsOptional()
+  @IsBoolean()
+  notifyCandidate?: boolean;
+}
+
+export class InterviewConflictQueryDto {
+  @ApiProperty({ description: 'comma-separated interviewer user ids' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(2000)
+  interviewerIds: string;
+
+  @ApiProperty() @IsDateString() scheduledAt: string;
+
+  @ApiPropertyOptional({ default: 45 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(15)
+  @Max(240)
+  durationMinutes?: number;
+
+  @ApiPropertyOptional() @IsOptional() @IsString() excludeId?: string;
+}
+
+export class InterviewRatingDto {
+  @ApiProperty({ description: 'หัวข้อประเมิน เช่น ทักษะสื่อสาร' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  criterion: string;
+
+  @ApiProperty({ minimum: 1, maximum: 5 })
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  score: number;
 }
 
 export class InterviewResultDto {
@@ -191,6 +335,36 @@ export class InterviewResultDto {
 
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Min(0) @Max(100) score?: number;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(2000) feedback?: string;
+
+  @ApiPropertyOptional({ type: [InterviewRatingDto], description: 'คะแนนรายหัวข้อ 1-5 (ไม่ส่ง score → score = ค่าเฉลี่ย × 20)' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @ValidateNested({ each: true })
+  @Type(() => InterviewRatingDto)
+  ratings?: InterviewRatingDto[];
+}
+
+// ─── Position equipment kit (ชุดอุปกรณ์มาตรฐานตามตำแหน่ง) ─────────────────────
+
+export class PositionKitItemDto {
+  @ApiPropertyOptional({ description: 'InventoryItem id (ไม่ระบุ = รายการอิสระ)' })
+  @IsOptional()
+  @IsUUID()
+  itemId?: string;
+
+  @ApiProperty() @IsString() @IsNotEmpty() @MaxLength(191) name: string;
+  @ApiProperty() @IsInt() @Min(1) @Max(999) qty: number;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(500) note?: string;
+}
+
+export class UpdatePositionKitDto {
+  @ApiProperty({ type: [PositionKitItemDto] })
+  @IsArray()
+  @ArrayMaxSize(100)
+  @ValidateNested({ each: true })
+  @Type(() => PositionKitItemDto)
+  items: PositionKitItemDto[];
 }
 
 // ─── Stage 5: Offer + hire ───────────────────────────────────────────────────

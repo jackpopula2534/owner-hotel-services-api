@@ -7,7 +7,7 @@ function createMockPrisma() {
   return {
     hrApprovalFlow: {
       findMany: jest.fn().mockResolvedValue([]),
-      findUnique: jest.fn(),
+      findFirst: jest.fn(),
       create: jest.fn((args: any) => Promise.resolve({ id: 'f1', ...args.data })),
       upsert: jest.fn((args: any) => Promise.resolve({ id: 'f1', isActive: true, ...args.create, ...args.update })),
     },
@@ -35,7 +35,7 @@ describe('ApprovalFlowService', () => {
   });
 
   it('resolveRoles returns configured roles when present', async () => {
-    prisma.hrApprovalFlow.findUnique.mockResolvedValue({
+    prisma.hrApprovalFlow.findFirst.mockResolvedValue({
       isActive: true,
       steps: [{ role: 'hr' }, { role: 'owner' }],
     });
@@ -44,7 +44,7 @@ describe('ApprovalFlowService', () => {
   });
 
   it('resolveRoles falls back to defaults on error/empty', async () => {
-    prisma.hrApprovalFlow.findUnique.mockResolvedValue(null);
+    prisma.hrApprovalFlow.findFirst.mockResolvedValue(null);
     const roles = await service.resolveRoles('t1', 'budget');
     expect(roles).toEqual(DEFAULT_FLOW_ROLES.budget);
   });

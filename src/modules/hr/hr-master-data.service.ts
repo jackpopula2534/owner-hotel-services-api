@@ -18,6 +18,17 @@ export class HrMasterDataService {
 
   // ─── DEPARTMENTS ─────────────────────────────────────────────────────────────
 
+  /** annualPersonnelBudget เป็น Decimal → ส่งออกเป็น number (null คงเดิม) ให้หน้าบ้านคำนวณได้ตรง ๆ */
+  private serializeDepartment<T extends { annualPersonnelBudget?: unknown }>(
+    department: T,
+  ): Omit<T, 'annualPersonnelBudget'> & { annualPersonnelBudget: number | null } {
+    const raw = department.annualPersonnelBudget;
+    return {
+      ...department,
+      annualPersonnelBudget: raw === null || raw === undefined ? null : Number(raw),
+    };
+  }
+
   async findAllDepartments(tenantId: string) {
     const departments = await this.prisma.hrDepartment.findMany({
       where: { tenantId },
@@ -34,7 +45,7 @@ export class HrMasterDataService {
 
     return {
       success: true,
-      data: departments,
+      data: departments.map((d) => this.serializeDepartment(d)),
       meta: { total: departments.length },
     };
   }
@@ -52,7 +63,7 @@ export class HrMasterDataService {
       throw new NotFoundException(`Department with ID ${id} not found`);
     }
 
-    return { success: true, data: department };
+    return { success: true, data: this.serializeDepartment(department) };
   }
 
   async createDepartment(tenantId: string, dto: CreateHrDepartmentDto) {
@@ -75,7 +86,7 @@ export class HrMasterDataService {
     this.logger.log(
       `Created department: ${department.name} (${department.code}) for tenant ${tenantId}`,
     );
-    return { success: true, data: department };
+    return { success: true, data: this.serializeDepartment(department) };
   }
 
   async updateDepartment(tenantId: string, id: string, dto: UpdateHrDepartmentDto) {
@@ -101,7 +112,7 @@ export class HrMasterDataService {
       data: { ...dto, ...(dto.code && { code: dto.code.toUpperCase() }) },
     });
 
-    return { success: true, data: updated };
+    return { success: true, data: this.serializeDepartment(updated) };
   }
 
   async removeDepartment(tenantId: string, id: string) {

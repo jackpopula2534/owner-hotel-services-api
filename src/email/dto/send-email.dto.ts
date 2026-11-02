@@ -33,6 +33,7 @@ export enum EmailTemplate {
   PRICE_COMPARISON_PENDING_APPROVAL = 'price-comparison-pending-approval',
   PRICE_COMPARISON_APPROVED = 'price-comparison-approved',
   PRICE_COMPARISON_REJECTED = 'price-comparison-rejected',
+  INTERVIEW_INVITATION = 'interview-invitation',
 }
 
 export class SendEmailDto {

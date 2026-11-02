@@ -8,9 +8,11 @@ function createMockPrisma() {
   const tx = {
     employee: { update: jest.fn() },
     hrProbationRound: { create: jest.fn().mockResolvedValue({ id: 'round-new' }), update: jest.fn() },
-    hrProbationCheckpoint: { create: jest.fn(), updateMany: jest.fn() },
-    hrHireRecord: { findUnique: jest.fn() },
-    hrManpowerRequest: { update: jest.fn() },
+    hrProbationCheckpoint: { create: jest.fn(), updateMany: jest.fn(), update: jest.fn() },
+    hrProbationCheckpointRating: { deleteMany: jest.fn(), create: jest.fn() },
+    hrHireRecord: { findFirst: jest.fn() },
+    hrCandidate: { findMany: jest.fn().mockResolvedValue([]) },
+    hrManpowerRequest: { update: jest.fn(), updateMany: jest.fn() },
   };
   return {
     tx,
@@ -87,7 +89,7 @@ describe('HrProbationService (rounds redesign)', () => {
       });
       prisma.hrProbationCheckpoint.update.mockResolvedValue({ id: 'cp1', status: 'done' });
       await service.reviewCheckpoint('r1', 'cp1', { score: 85 }, 'reviewer1', 't1');
-      expect(prisma.hrProbationCheckpoint.update).toHaveBeenCalledWith(
+      expect(prisma.tx.hrProbationCheckpoint.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: 'cp1' },
           data: expect.objectContaining({ status: 'done', score: '85.00', reviewerId: 'reviewer1' }),
@@ -165,13 +167,15 @@ describe('HrProbationService (rounds redesign)', () => {
     it('passed on a pipeline round → closes the manpower request', async () => {
       prisma.hrProbationRound.findFirst.mockResolvedValue({ ...activeRound, hireRecordId: 'h1' });
       prisma.tx.hrProbationRound.update.mockResolvedValue({ id: 'r1', status: 'passed' });
-      prisma.tx.hrHireRecord.findUnique.mockResolvedValue({
+      prisma.tx.hrHireRecord.findFirst.mockResolvedValue({
         id: 'h1',
         candidate: { manpowerRequestId: 'mpr1' },
       });
+      // ทุกอัตราที่จ้างจบทดลองงานแล้ว → ปิดคำขอ
+      prisma.tx.hrCandidate.findMany.mockResolvedValue([{ hireRecord: { employee: { status: 'ACTIVE' } } }]);
       await service.decide('r1', { decision: 'passed' }, 'boss1', 't1');
-      expect(prisma.tx.hrManpowerRequest.update).toHaveBeenCalledWith({
-        where: { id: 'mpr1' },
+      expect(prisma.tx.hrManpowerRequest.updateMany).toHaveBeenCalledWith({
+        where: { id: 'mpr1', status: 'probation' },
         data: { status: 'completed' },
       });
     });

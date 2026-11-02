@@ -3,6 +3,13 @@ import { BullModule } from '@nestjs/bull';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { AddonModule } from '../addons/addon.module';
 import { HrModule } from '../hr/hr.module';
+import { NotificationsModule } from '../../notifications/notifications.module';
+import { EmailModule } from '../../email/email.module';
+import { SmsChannelAdapter } from '../crm/automation/channels/sms.adapter';
+import { ManpowerInsightsService } from './manpower-insights.service';
+import { RecruitmentNotifierService } from './recruitment-notifier.service';
+import { PositionKitService } from './position-kit.service';
+import { PositionKitController } from './position-kit.controller';
 import { ManpowerRequestService } from './manpower-request.service';
 import { EquipmentRequestService } from './equipment-request.service';
 import { CandidateService } from './candidate.service';
@@ -23,7 +30,7 @@ import { RecruitmentQueueScheduler } from './queue/recruitment.queue.scheduler';
  * → first-day issuance → probation round (hr module).
  */
 @Module({
-  imports: [PrismaModule, AddonModule, HrModule, BullModule.registerQueue({ name: RECRUITMENT_QUEUE })],
+  imports: [PrismaModule, AddonModule, HrModule, NotificationsModule, EmailModule, BullModule.registerQueue({ name: RECRUITMENT_QUEUE })],
   controllers: [
     ManpowerRequestController,
     EquipmentRequestController,
@@ -33,6 +40,7 @@ import { RecruitmentQueueScheduler } from './queue/recruitment.queue.scheduler';
     JobPostingController,
     PublicJobController,
     ApprovalFlowController,
+    PositionKitController,
   ],
   providers: [
     ManpowerRequestService,
@@ -44,6 +52,11 @@ import { RecruitmentQueueScheduler } from './queue/recruitment.queue.scheduler';
     ApprovalFlowService,
     RecruitmentQueueProcessor,
     RecruitmentQueueScheduler,
+    ManpowerInsightsService,
+    RecruitmentNotifierService,
+    PositionKitService,
+    // stub SMS adapter (CRM) — ใช้ตรง ๆ ไม่ลากทั้ง CRM module
+    SmsChannelAdapter,
   ],
   exports: [ManpowerRequestService, CandidateService, HireService, ApprovalFlowService],
 })

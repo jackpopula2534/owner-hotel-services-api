@@ -24,6 +24,7 @@ import {
   MakeOfferDto,
   HireCandidateDto,
   CancelHireDto,
+  InterviewConflictQueryDto,
 } from './dto/recruitment.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
@@ -125,6 +126,25 @@ export class InterviewController {
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
   async list(@Query() query: Record<string, string>, @CurrentUser() user: AuthUser) {
     return this.service.findAll(query, user.tenantId!);
+  }
+
+  @Get('conflicts')
+  @ApiOperation({ summary: 'Overlapping + same-day interviews of the given interviewers' })
+  @ApiQuery({ name: 'interviewerIds', required: true, description: 'comma-separated user ids' })
+  @ApiQuery({ name: 'scheduledAt', required: true, description: 'ISO datetime' })
+  @ApiQuery({ name: 'durationMinutes', required: false, description: 'default 45' })
+  @ApiQuery({ name: 'excludeId', required: false, description: 'interview id to ignore (when rescheduling)' })
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
+  async conflicts(@Query() query: InterviewConflictQueryDto, @CurrentUser() user: AuthUser) {
+    return this.service.findConflicts(
+      {
+        interviewerIds: query.interviewerIds.split(',').map((s) => s.trim()).filter(Boolean),
+        scheduledAt: new Date(query.scheduledAt),
+        durationMinutes: query.durationMinutes ?? 45,
+        excludeId: query.excludeId,
+      },
+      user.tenantId!,
+    );
   }
 
   @Get(':id')

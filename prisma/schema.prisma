@@ -937,6 +937,8 @@ model HrDepartment {
   description     String?                     @db.Text
   color           String?
   costCenterId    String? // mapping แผนก ↔ cost center (ใช้โดย cost-accounting integration)
+  plannedHeadcount      Int? // อัตรากำลังตามแผน
+  annualPersonnelBudget Decimal? @db.Decimal(14, 2) // งบบุคลากรต่อปี
   isActive        Boolean                     @default(true)
   sortOrder       Int                         @default(0)
   createdAt       DateTime                    @default(now())
@@ -984,6 +986,7 @@ model HrPosition {
   code            String?
   level           Int                         @default(1)
   description     String?                     @db.Text
+  equipmentKit    Json? // ชุดอุปกรณ์มาตรฐานของตำแหน่ง [{ itemId?, name, qty, note? }]
   isActive        Boolean                     @default(true)
   sortOrder       Int                         @default(0)
   createdAt       DateTime                    @default(now())
@@ -1720,6 +1723,11 @@ model HrManpowerRequest {
   approvalChain        Json?
   currentApprovalLevel Int      @default(0)
   requestedBy          String
+  // เหตุผลการขอแบบมีโครงสร้าง: replacement | expansion | new_role
+  reasonType             String?
+  replacementEmployeeIds Json? // [employeeId, ...] — คนที่ลาออก/ถูกแทน (reasonType=replacement)
+  lastRemindedAt         DateTime? // throttle ปุ่ม "เตือนผู้อนุมัติ"
+  approvalHistory        Json? // [{ stage, action, round, role, level, userId, note, attachments, at }] — ไม่ถูก reset ตอนยื่นใหม่
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
@@ -1833,6 +1841,10 @@ model HrInterview {
   score          Decimal? @db.Decimal(5, 2)
   feedback       String?  @db.Text
   result         String? // pass | fail | next_round
+  durationMinutes     Int       @default(45)
+  format              String? // onsite | video | phone
+  ratings             Json? // [{ criterion, score: 1-5 }]
+  candidateNotifiedAt DateTime?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 

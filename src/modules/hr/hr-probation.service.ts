@@ -219,8 +219,8 @@ export class HrProbationService {
       // Close out the source manpower request only when EVERY hired employee's probation
       // has been resolved (passed/failed) — รับหลายอัตราต้องจบทดลองงานครบทุกคนก่อนถือว่าเสร็จ
       if (round.hireRecordId && (dto.decision === 'passed' || dto.decision === 'failed')) {
-        const hire = await tx.hrHireRecord.findUnique({
-          where: { id: round.hireRecordId },
+        const hire = await tx.hrHireRecord.findFirst({
+          where: { id: round.hireRecordId, tenantId },
           include: { candidate: { select: { manpowerRequestId: true } } },
         });
         if (hire?.candidate?.manpowerRequestId) {

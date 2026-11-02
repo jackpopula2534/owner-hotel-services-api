@@ -11,7 +11,7 @@ function createMockPrisma() {
       create: jest.fn(),
       update: jest.fn(),
     },
-    hrShiftAssignment: { findUnique: jest.fn().mockResolvedValue(null) },
+    hrShiftAssignment: { findFirst: jest.fn().mockResolvedValue(null) },
     hrWorkCalendar: { findFirst: jest.fn().mockResolvedValue(null) },
   };
 }
@@ -36,27 +36,46 @@ describe('HrAttendanceService (shift-aware, P1-04)', () => {
     });
 
     it('marks late when check-in is past the rostered start + grace', async () => {
-      prisma.hrShiftAssignment.findUnique.mockResolvedValue({
+      prisma.hrShiftAssignment.findFirst.mockResolvedValue({
         startTime: '08:00',
         isDayOff: false,
         shiftType: null,
       });
-      await service.checkIn({ employeeId: 'e1', checkIn: '2026-06-09T08:30:00.000Z' }, 't1');
+      await service.checkIn({ employeeId: 'e1', checkIn: '2026-06-09T08:30:00+07:00' }, 't1');
       expect(prisma.hrAttendance.create.mock.calls[0][0].data.status).toBe('late');
     });
 
     it('marks present within the grace window', async () => {
-      prisma.hrShiftAssignment.findUnique.mockResolvedValue({
+      prisma.hrShiftAssignment.findFirst.mockResolvedValue({
         startTime: '08:00',
         isDayOff: false,
         shiftType: null,
       });
-      await service.checkIn({ employeeId: 'e1', checkIn: '2026-06-09T08:10:00.000Z' }, 't1');
+      await service.checkIn({ employeeId: 'e1', checkIn: '2026-06-09T08:10:00+07:00' }, 't1');
       expect(prisma.hrAttendance.create.mock.calls[0][0].data.status).toBe('present');
     });
 
+    it('reads the shift start on the Bangkok clock, not UTC', async () => {
+      prisma.hrShiftAssignment.findFirst.mockResolvedValue({
+        startTime: '08:00',
+        isDayOff: false,
+        shiftType: null,
+      });
+      // 08:10Z = 15:10 เวลาไทย → สายแน่นอนสำหรับกะ 08:00
+      await service.checkIn({ employeeId: 'e1', checkIn: '2026-06-09T08:10:00.000Z' }, 't1');
+      expect(prisma.hrAttendance.create.mock.calls[0][0].data.status).toBe('late');
+    });
+
+    it('stores an early-morning check-in on the Bangkok business day', async () => {
+      // 06:30 เวลาไทย 10 มิ.ย. = 23:30Z 9 มิ.ย.
+      await service.checkIn({ employeeId: 'e1', checkIn: '2026-06-09T23:30:00.000Z' }, 't1');
+      expect(prisma.hrAttendance.create.mock.calls[0][0].data.date.toISOString()).toBe(
+        '2026-06-10T00:00:00.000Z',
+      );
+    });
+
     it('treats a day-off check-in as present (not late)', async () => {
-      prisma.hrShiftAssignment.findUnique.mockResolvedValue({ isDayOff: true, shiftType: null });
+      prisma.hrShiftAssignment.findFirst.mockResolvedValue({ isDayOff: true, shiftType: null });
       await service.checkIn({ employeeId: 'e1', checkIn: '2026-06-09T23:00:00.000Z' }, 't1');
       expect(prisma.hrAttendance.create.mock.calls[0][0].data.status).toBe('present');
     });
@@ -72,7 +91,7 @@ describe('HrAttendanceService (shift-aware, P1-04)', () => {
         checkOut: null,
         employee: { propertyId: null },
       });
-      prisma.hrShiftAssignment.findUnique.mockResolvedValue({
+      prisma.hrShiftAssignment.findFirst.mockResolvedValue({
         startTime: '08:00',
         endTime: '17:00',
         isDayOff: false,
@@ -97,7 +116,7 @@ describe('HrAttendanceService (shift-aware, P1-04)', () => {
         checkOut: null,
         employee: { propertyId: null },
       });
-      prisma.hrShiftAssignment.findUnique.mockResolvedValue(null);
+      prisma.hrShiftAssignment.findFirst.mockResolvedValue(null);
       prisma.hrWorkCalendar.findFirst.mockResolvedValue({ id: 'h1', isWorkingDay: false });
       prisma.hrAttendance.update.mockImplementation(({ data }: any) => ({ id: 'a1', ...data }));
 

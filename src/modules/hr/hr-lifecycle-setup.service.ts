@@ -200,8 +200,8 @@ export class HrLifecycleSetupService {
         });
       }
 
-      return (tx as any).hrLifecyclePackage.findUnique({
-        where: { id: created.id },
+      return (tx as any).hrLifecyclePackage.findFirst({
+        where: { id: created.id, tenantId },
         include: {
           documents: { include: { documentType: true }, orderBy: { sortOrder: 'asc' } },
           tasks: { orderBy: { sortOrder: 'asc' } },

@@ -8,6 +8,15 @@ import { BadRequestException } from '@nestjs/common';
  */
 export type ApproverRole = 'dept_head' | 'hr' | 'owner';
 
+/** ไฟล์ประกอบการตัดสินใจ (อัปโหลดผ่าน endpoint ของแต่ละโมดูลก่อน แล้วส่ง metadata มา) */
+export interface ApprovalAttachment {
+  name: string;
+  url: string;
+  key: string;
+  size: number;
+  mimeType: string;
+}
+
 export interface ApprovalStep {
   level: number;
   role: ApproverRole;
@@ -15,6 +24,7 @@ export interface ApprovalStep {
   status: 'pending' | 'approved' | 'rejected';
   decidedAt: string | null;
   note: string | null;
+  attachments?: ApprovalAttachment[];
 }
 
 export type ApprovalChain = ApprovalStep[];
@@ -50,25 +60,25 @@ export function isChainRejected(chain: ApprovalChain): boolean {
  * Approve the current pending step (immutable — returns a new chain).
  * Throws when the chain is already fully decided or rejected.
  */
-export function approveStep(chain: ApprovalChain, approverId: string, note?: string): ApprovalChain {
+export function approveStep(chain: ApprovalChain, approverId: string, note?: string, attachments?: ApprovalAttachment[]): ApprovalChain {
   if (isChainRejected(chain)) throw new BadRequestException('Approval chain has been rejected');
   const step = currentStep(chain);
   if (!step) throw new BadRequestException('Approval chain is already fully approved');
   return chain.map((s) =>
     s.level === step.level
-      ? { ...s, status: 'approved' as const, approverId, decidedAt: new Date().toISOString(), note: note ?? null }
+      ? { ...s, status: 'approved' as const, approverId, decidedAt: new Date().toISOString(), note: note ?? null, ...(attachments?.length && { attachments }) }
       : s,
   );
 }
 
 /** Reject at the current pending step (immutable — returns a new chain). */
-export function rejectStep(chain: ApprovalChain, approverId: string, note?: string): ApprovalChain {
+export function rejectStep(chain: ApprovalChain, approverId: string, note?: string, attachments?: ApprovalAttachment[]): ApprovalChain {
   if (isChainRejected(chain)) throw new BadRequestException('Approval chain has already been rejected');
   const step = currentStep(chain);
   if (!step) throw new BadRequestException('Approval chain is already fully approved');
   return chain.map((s) =>
     s.level === step.level
-      ? { ...s, status: 'rejected' as const, approverId, decidedAt: new Date().toISOString(), note: note ?? null }
+      ? { ...s, status: 'rejected' as const, approverId, decidedAt: new Date().toISOString(), note: note ?? null, ...(attachments?.length && { attachments }) }
       : s,
   );
 }

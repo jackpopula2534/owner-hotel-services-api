@@ -291,65 +291,6 @@ export class HrService {
     return updated;
   }
 
-  /**
-   * Dashboard stats: total employees, today's attendance, on-leave, pending leave requests.
-   * All counts are scoped to tenantId and optionally filtered by propertyId (hotelId).
-   * Uses Promise.all for parallel queries — optimized for dashboard rendering.
-   */
-  async getDashboardStats(tenantId?: string, hotelId?: string) {
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID is required');
-    }
-
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const todayEnd = new Date(todayStart);
-    todayEnd.setDate(todayEnd.getDate() + 1);
-
-    const employeeWhere: { tenantId: string; propertyId?: string } = { tenantId };
-    if (hotelId) employeeWhere.propertyId = hotelId;
-
-    const [totalEmployees, todayAttendance, onLeave, pendingLeaveRequests] = await Promise.all([
-      // Total active employees
-      this.prisma.employee.count({ where: employeeWhere }),
-
-      // Today's check-ins (present or late)
-      (this.prisma.hrAttendance as any).count({
-        where: {
-          tenantId,
-          date: { gte: todayStart, lt: todayEnd },
-          status: { in: ['present', 'late'] },
-        },
-      }),
-
-      // Currently on approved leave (today is within leave date range)
-      (this.prisma.hrLeaveRequest as any).count({
-        where: {
-          tenantId,
-          status: 'approved',
-          startDate: { lte: todayStart },
-          endDate: { gte: todayStart },
-        },
-      }),
-
-      // Pending leave requests (awaiting approval)
-      (this.prisma.hrLeaveRequest as any).count({
-        where: { tenantId, status: 'pending' },
-      }),
-    ]);
-
-    const attendanceRate =
-      totalEmployees > 0 ? Math.round((todayAttendance / totalEmployees) * 100) : 0;
-
-    return {
-      totalEmployees,
-      todayAttendance,
-      onLeave,
-      pendingLeaveRequests,
-      attendanceRate,
-    };
-  }
-
   async remove(id: string, tenantId?: string) {
     await this.findOne(id, tenantId);
 

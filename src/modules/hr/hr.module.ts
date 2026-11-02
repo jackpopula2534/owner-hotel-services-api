@@ -43,6 +43,7 @@ import { HrSelfServiceService } from './hr-self-service.service';
 import { HrAnalyticsService } from './hr-analytics.service';
 import { EmployeeCodeConfigService } from './employee-code-config.service';
 import { HrCompletenessService } from './hr-completeness.service';
+import { HrDashboardService } from './hr-dashboard.service';
 import { HrEquipmentIssuanceController } from './hr-equipment-issuance.controller';
 import { HrEquipmentIssuanceService } from './hr-equipment-issuance.service';
 import { RecruitmentInventoryService } from './recruitment-inventory.service';
@@ -114,6 +115,7 @@ import { AccountingModule } from '../accounting/accounting.module';
     RecruitmentInventoryService,
     EmployeeCodeConfigService,
     HrCompletenessService,
+    HrDashboardService,
     HrAddonGuard,
   ],
   exports: [

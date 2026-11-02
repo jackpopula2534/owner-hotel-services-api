@@ -171,6 +171,11 @@ export enum AuditAction {
   EQUIPMENT_ACKNOWLEDGE = 'equipment_acknowledge',
   PROBATION_OPEN = 'probation_open',
   PROBATION_CHECKPOINT_REVIEW = 'probation_checkpoint_review',
+  // HR — Recruitment redesign (2026-11-02)
+  MANPOWER_RETURN = 'manpower_return',
+  MANPOWER_REMIND = 'manpower_remind',
+  BUDGET_DECLINE = 'budget_decline',
+  POSITION_KIT_UPDATE = 'position_kit_update',
 }
 
 export enum AuditResource {

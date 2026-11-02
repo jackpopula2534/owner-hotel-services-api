@@ -19,9 +19,11 @@ import {
   ApiResponse,
   ApiParam,
   ApiBody,
+  ApiQuery,
 } from '@nestjs/swagger';
 import { HrService } from './hr.service';
 import { HrCompletenessService } from './hr-completeness.service';
+import { HrDashboardService } from './hr-dashboard.service';
 import { EmployeeCodeConfigService } from './employee-code-config.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
@@ -47,6 +49,7 @@ export class HrController {
     private readonly hrService: HrService,
     private readonly hrCompletenessService: HrCompletenessService,
     private readonly employeeCodeConfigService: EmployeeCodeConfigService,
+    private readonly hrDashboardService: HrDashboardService,
   ) {}
 
   // ─── Employee Code Config routes ─────────────────────────────────────────
@@ -108,28 +111,55 @@ export class HrController {
   @ApiOperation({
     summary: 'Get HR dashboard statistics (requires HR add-on)',
     description:
-      'Returns totalEmployees, todayAttendance, onLeave, pendingLeaveRequests, and attendanceRate. ' +
-      'Pass hotelId query param to filter by specific property.',
+      'Legacy summary kept for the hotel dashboard. Values come from the same calculation as ' +
+      '/hr/dashboard-overview (Bangkok day, current employees only, rostered denominator).',
   })
+  @ApiQuery({ name: 'hotelId', required: false, description: 'Property ID filter' })
   @ApiResponse({
     status: 200,
     description: 'Dashboard statistics',
     schema: {
       example: {
-        totalEmployees: 12,
-        todayAttendance: 8,
-        onLeave: 2,
+        totalEmployees: 52,
+        todayAttendance: 36,
+        onLeave: 3,
         pendingLeaveRequests: 1,
-        attendanceRate: 67,
+        attendanceRate: 95,
       },
     },
   })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
   async getDashboardStats(
-    @Query('hotelId') hotelId: string,
+    @Query('hotelId') hotelId: string | undefined,
     @CurrentUser() user: { tenantId?: string },
   ) {
-    return this.hrService.getDashboardStats(user?.tenantId, hotelId);
+    const o = await this.hrDashboardService.getOverview(user?.tenantId, hotelId || undefined);
+    return {
+      totalEmployees: o.headcount.current,
+      todayAttendance: o.today.present,
+      onLeave: o.today.onLeave,
+      pendingLeaveRequests: o.pending.leave,
+      attendanceRate: o.today.attendanceRate ?? 0,
+    };
+  }
+
+  @Get('dashboard-overview')
+  @ApiOperation({
+    summary: 'Full HR dashboard overview for today (Bangkok time)',
+    description:
+      'Headcount, today attendance breakdown, per-department attendance, pending approvals, ' +
+      'who is away, 14-day attendance trend and upcoming HR events. ' +
+      'propertyId limits to that property plus employees not tied to any property.',
+  })
+  @ApiQuery({ name: 'propertyId', required: false, description: 'Property ID filter' })
+  @ApiResponse({ status: 200, description: 'HR dashboard overview' })
+  @ApiResponse({ status: 403, description: 'HR add-on not active' })
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
+  async getDashboardOverview(
+    @Query('propertyId') propertyId: string | undefined,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    return this.hrDashboardService.getOverview(user?.tenantId, propertyId || undefined);
   }
 
   @Get()

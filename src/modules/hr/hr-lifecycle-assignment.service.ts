@@ -117,8 +117,8 @@ export class HrLifecycleAssignmentService {
 
     for (const assignment of assignmentsToUse) {
       const pkg = matchedRules.find((rule: any) => rule.packageId === assignment.packageId)?.package
-        ?? await (this.prisma as any).hrLifecyclePackage.findUnique({
-          where: { id: assignment.packageId },
+        ?? await (this.prisma as any).hrLifecyclePackage.findFirst({
+          where: { id: assignment.packageId, tenantId },
           include: {
             documents: { include: { documentType: true }, orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] },
             tasks: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] },

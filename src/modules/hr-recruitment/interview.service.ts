@@ -1,8 +1,37 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogService } from '../../audit-log/audit-log.service';
 import { AuditAction, AuditResource, AuditCategory } from '../../audit-log/dto/audit-log.dto';
 import { ScheduleInterviewDto, RescheduleInterviewDto, InterviewResultDto } from './dto/recruitment.dto';
+import { RecruitmentNotifierService } from './recruitment-notifier.service';
+
+const BKK_OFFSET_MS = 7 * 60 * 60_000;
+const DAY_MS = 24 * 60 * 60_000;
+const DEFAULT_DURATION = 45;
+/** นัดที่ยังต้องไปสัมภาษณ์จริง (rescheduled ถูกคืนเป็น scheduled ทันที แต่กันไว้เผื่อค้าง) */
+const OPEN_INTERVIEW_STATUSES = ['scheduled', 'rescheduled'];
+
+export interface InterviewConflict {
+  interviewId: string;
+  interviewerId: string;
+  candidateName: string;
+  scheduledAt: Date;
+  durationMinutes: number;
+}
+
+export interface InterviewSameDay {
+  interviewerId: string;
+  scheduledAt: Date;
+  durationMinutes: number;
+  candidateName: string;
+}
+
+export interface ConflictQuery {
+  interviewerIds: string[];
+  scheduledAt: Date;
+  durationMinutes: number;
+  excludeId?: string;
+}
 
 /** Stage 4: interview scheduling and results. */
 @Injectable()
@@ -12,7 +41,90 @@ export class InterviewService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLog: AuditLogService,
+    private readonly notifier: RecruitmentNotifierService,
   ) {}
+
+  /**
+   * นัดของกรรมการที่ชนเวลา + นัดอื่นในวันเดียวกัน (วันตามเวลาไทย)
+   * interviewerIds เก็บเป็น JSON → ดึงนัดทั้งวันของ tenant แล้วกรองกรรมการใน memory
+   */
+  async findConflicts(q: ConflictQuery, tenantId: string): Promise<{ conflicts: InterviewConflict[]; sameDay: InterviewSameDay[] }> {
+    const wanted = new Set(q.interviewerIds.filter(Boolean));
+    if (!wanted.size || Number.isNaN(q.scheduledAt.getTime())) return { conflicts: [], sameDay: [] };
+
+    const start = q.scheduledAt.getTime();
+    const end = start + q.durationMinutes * 60_000;
+    // วันไทยของนัดนี้ + เผื่อนัดที่เริ่มก่อนเที่ยงคืนแต่ยาวข้ามมา (สูงสุด 240 นาที)
+    const dayStart = Math.floor((start + BKK_OFFSET_MS) / DAY_MS) * DAY_MS - BKK_OFFSET_MS;
+    const dayEnd = dayStart + DAY_MS;
+    const rows: Array<Record<string, any>> = await (this.prisma as any).hrInterview.findMany({
+      where: {
+        tenantId,
+        status: { in: OPEN_INTERVIEW_STATUSES },
+        scheduledAt: { gte: new Date(Math.min(dayStart, start - 240 * 60_000)), lt: new Date(Math.max(dayEnd, end)) },
+        ...(q.excludeId && { id: { not: q.excludeId } }),
+      },
+      orderBy: { scheduledAt: 'asc' },
+      select: {
+        id: true,
+        scheduledAt: true,
+        durationMinutes: true,
+        interviewerIds: true,
+        candidate: { select: { firstName: true, lastName: true } },
+      },
+    });
+
+    const conflicts: InterviewConflict[] = [];
+    const sameDay: InterviewSameDay[] = [];
+    for (const iv of rows ?? []) {
+      const ivStart = new Date(iv.scheduledAt).getTime();
+      const duration = Number(iv.durationMinutes ?? DEFAULT_DURATION);
+      const ivEnd = ivStart + duration * 60_000;
+      const candidateName = iv.candidate ? `${iv.candidate.firstName} ${iv.candidate.lastName}`.trim() : '';
+      const ids = Array.isArray(iv.interviewerIds) ? (iv.interviewerIds as string[]) : [];
+      const overlaps = ivStart < end && start < ivEnd;
+      const onSameDay = ivStart >= dayStart && ivStart < dayEnd;
+      for (const interviewerId of ids) {
+        if (!wanted.has(interviewerId)) continue;
+        if (overlaps) {
+          conflicts.push({ interviewId: iv.id, interviewerId, candidateName, scheduledAt: iv.scheduledAt, durationMinutes: duration });
+        }
+        if (onSameDay) {
+          sameDay.push({ interviewerId, scheduledAt: iv.scheduledAt, durationMinutes: duration, candidateName });
+        }
+      }
+    }
+    return { conflicts, sameDay };
+  }
+
+  /** แจ้งผู้สมัคร (อีเมล/SMS) — ไม่ทำให้การนัดล้ม; สำเร็จ → stamp candidateNotifiedAt */
+  private async notifyCandidate(interview: Record<string, any>, tenantId: string): Promise<Record<string, any>> {
+    try {
+      const candidate = await (this.prisma as any).hrCandidate.findFirst({
+        where: { id: interview.candidateId, tenantId },
+        select: { firstName: true, lastName: true, email: true, phone: true, manpowerRequest: { select: { positionTitle: true } } },
+      });
+      if (!candidate) return interview;
+      const ok = await this.notifier.notifyCandidateInterview({
+        tenantId,
+        candidate,
+        positionTitle: candidate.manpowerRequest?.positionTitle ?? '',
+        round: interview.round,
+        scheduledAt: new Date(interview.scheduledAt),
+        durationMinutes: interview.durationMinutes ?? DEFAULT_DURATION,
+        format: interview.format,
+        location: interview.location,
+      });
+      if (!ok) return interview;
+      return await (this.prisma as any).hrInterview.update({
+        where: { id: interview.id },
+        data: { candidateNotifiedAt: new Date() },
+      });
+    } catch (e) {
+      this.logger.warn(`notify candidate for interview ${interview.id} failed: ${e instanceof Error ? e.message : String(e)}`);
+      return interview;
+    }
+  }
 
   private audit(action: AuditAction, resourceId: string, tenantId: string, userId: string, description: string): void {
     this.auditLog
@@ -82,6 +194,20 @@ export class InterviewService {
     if (new Date(dto.scheduledAt).getTime() < Date.now()) {
       throw new BadRequestException('scheduledAt must be in the future');
     }
+    const durationMinutes = dto.durationMinutes ?? DEFAULT_DURATION;
+    if (!dto.allowConflict) {
+      const { conflicts } = await this.findConflicts(
+        { interviewerIds: dto.interviewerIds, scheduledAt: new Date(dto.scheduledAt), durationMinutes },
+        tenantId,
+      );
+      if (conflicts.length) {
+        throw new ConflictException({
+          message: 'Interviewer already has an interview at this time (send allowConflict: true to override)',
+          // AllExceptionsFilter ส่งต่อให้ client เฉพาะ `details` → error.details.conflicts
+          details: { conflicts },
+        });
+      }
+    }
 
     const [interview] = await this.prisma.$transaction([
       (this.prisma as any).hrInterview.create({
@@ -92,6 +218,8 @@ export class InterviewService {
           scheduledAt: new Date(dto.scheduledAt),
           location: dto.location ?? null,
           interviewerIds: dto.interviewerIds,
+          durationMinutes,
+          format: dto.format ?? null,
           status: 'scheduled',
         },
       }),
@@ -105,6 +233,7 @@ export class InterviewService {
       }),
     ]);
     this.audit(AuditAction.INTERVIEW_SCHEDULE, interview.id, tenantId, userId, `Interview round ${dto.round ?? 1} scheduled at ${dto.scheduledAt}`);
+    if (dto.notifyCandidate) return this.notifyCandidate(interview, tenantId);
     return interview;
   }
 
@@ -119,6 +248,8 @@ export class InterviewService {
         ...(dto.scheduledAt && { scheduledAt: new Date(dto.scheduledAt), status: 'rescheduled' }),
         ...(dto.location !== undefined && { location: dto.location }),
         ...(dto.interviewerIds && { interviewerIds: dto.interviewerIds }),
+        ...(dto.durationMinutes !== undefined && { durationMinutes: dto.durationMinutes }),
+        ...(dto.format !== undefined && { format: dto.format }),
         ...(dto.status && { status: dto.status }), // cancelled | no_show
       },
     });
@@ -135,7 +266,12 @@ export class InterviewService {
       await this.reopenRequestIfNoActiveCandidates(existing.candidate.manpowerRequestId, tenantId);
     }
     this.audit(AuditAction.UPDATE, id, tenantId, userId, `Interview updated (${dto.status ?? 'rescheduled'})`);
-    return this.findOne(id, tenantId);
+    const result = await this.findOne(id, tenantId);
+    if (dto.notifyCandidate && !dto.status && result.status === 'scheduled') {
+      const notified = await this.notifyCandidate(result, tenantId);
+      return { ...result, candidateNotifiedAt: notified.candidateNotifiedAt ?? result.candidateNotifiedAt };
+    }
+    return result;
   }
 
   async recordResult(id: string, dto: InterviewResultDto, tenantId: string, userId: string) {
@@ -144,14 +280,23 @@ export class InterviewService {
       throw new BadRequestException(`Interview is not awaiting a result (current: "${existing.status}")`);
     }
     const candidateStatus = dto.result === 'fail' ? 'rejected' : 'interviewed';
+    // คะแนนรายหัวข้อ 1-5 → ไม่ส่ง score มา ให้คิดเป็นเต็ม 100 จากค่าเฉลี่ย
+    const ratings = dto.ratings?.length ? dto.ratings.map((r) => ({ criterion: r.criterion.trim(), score: r.score })) : null;
+    const score =
+      dto.score !== undefined
+        ? dto.score
+        : ratings
+          ? Math.round((ratings.reduce((a, r) => a + r.score, 0) / ratings.length) * 20)
+          : undefined;
     const [updated] = await this.prisma.$transaction([
       (this.prisma as any).hrInterview.update({
         where: { id },
         data: {
           status: 'completed',
           result: dto.result,
-          score: dto.score !== undefined ? dto.score.toFixed(2) : null,
+          score: score !== undefined ? score.toFixed(2) : null,
           feedback: dto.feedback ?? null,
+          ...(ratings && { ratings }),
         },
       }),
       (this.prisma as any).hrCandidate.update({
@@ -163,7 +308,7 @@ export class InterviewService {
     if (dto.result === 'fail') {
       await this.reopenRequestIfNoActiveCandidates(existing.candidate.manpowerRequestId, tenantId);
     }
-    this.audit(AuditAction.INTERVIEW_RESULT, id, tenantId, userId, `Interview result: ${dto.result} (score: ${dto.score ?? '-'})`);
+    this.audit(AuditAction.INTERVIEW_RESULT, id, tenantId, userId, `Interview result: ${dto.result} (score: ${score ?? '-'})`);
     return updated;
   }
 }
