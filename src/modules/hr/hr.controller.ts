@@ -236,9 +236,9 @@ export class HrController {
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
   async create(
     @Body() createEmployeeDto: CreateEmployeeDto,
-    @CurrentUser() user: { tenantId?: string },
+    @CurrentUser() user: { tenantId?: string; id?: string },
   ) {
-    return this.hrService.create(createEmployeeDto, user?.tenantId);
+    return this.hrService.create(createEmployeeDto, user?.tenantId, user?.id);
   }
 
   @Patch(':id([0-9a-fA-F-]{36})')
@@ -249,9 +249,9 @@ export class HrController {
   async update(
     @Param('id') id: string,
     @Body() updateEmployeeDto: UpdateEmployeeDto,
-    @CurrentUser() user: { tenantId?: string },
+    @CurrentUser() user: { tenantId?: string; id?: string },
   ) {
-    return this.hrService.update(id, updateEmployeeDto, user?.tenantId);
+    return this.hrService.update(id, updateEmployeeDto, user?.tenantId, user?.id);
   }
 
   @Delete(':id([0-9a-fA-F-]{36})')

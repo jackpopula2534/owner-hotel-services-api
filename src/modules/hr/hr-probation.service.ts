@@ -1,3 +1,7 @@
+import {
+  cancelPendingProbationPass,
+  scheduleProbationPass,
+} from './compensation/compensation.core';
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogService } from '../../audit-log/audit-log.service';
@@ -26,9 +30,25 @@ export class HrProbationService {
     private readonly auditLog: AuditLogService,
   ) {}
 
-  private audit(action: AuditAction, resourceId: string, tenantId: string, userId: string | undefined, description: string, newValues?: Record<string, unknown>): void {
+  private audit(
+    action: AuditAction,
+    resourceId: string,
+    tenantId: string,
+    userId: string | undefined,
+    description: string,
+    newValues?: Record<string, unknown>,
+  ): void {
     this.auditLog
-      .log({ action, resource: AuditResource.PROBATION, resourceId, category: AuditCategory.HR, tenantId, userId, description, newValues })
+      .log({
+        action,
+        resource: AuditResource.PROBATION,
+        resourceId,
+        category: AuditCategory.HR,
+        tenantId,
+        userId,
+        description,
+        newValues,
+      })
       .catch((err: Error) => this.logger.error(`Audit log failed: ${err.message}`));
   }
 
@@ -40,7 +60,9 @@ export class HrProbationService {
       where,
       orderBy: [{ status: 'asc' }, { dueDate: 'asc' }],
       include: {
-        employee: { select: { id: true, firstName: true, lastName: true, employeeCode: true, status: true } },
+        employee: {
+          select: { id: true, firstName: true, lastName: true, employeeCode: true, status: true },
+        },
         checkpoints: { orderBy: { dueDate: 'asc' }, include: { ratings: true } },
       },
     });
@@ -51,7 +73,9 @@ export class HrProbationService {
     const round = await (this.prisma as any).hrProbationRound.findFirst({
       where: { id, tenantId },
       include: {
-        employee: { select: { id: true, firstName: true, lastName: true, employeeCode: true, status: true } },
+        employee: {
+          select: { id: true, firstName: true, lastName: true, employeeCode: true, status: true },
+        },
         checkpoints: { orderBy: { dueDate: 'asc' }, include: { ratings: true } },
       },
     });
@@ -98,18 +122,31 @@ export class HrProbationService {
       return created;
     });
 
-    this.audit(AuditAction.PROBATION_OPEN, round.id, tenantId, userId, `Probation round opened (due ${dto.dueDate})`);
+    this.audit(
+      AuditAction.PROBATION_OPEN,
+      round.id,
+      tenantId,
+      userId,
+      `Probation round opened (due ${dto.dueDate})`,
+    );
     return this.findOne(round.id, tenantId);
   }
 
   /** Record a checkpoint review (30/60/90-day evaluation). */
-  async reviewCheckpoint(roundId: string, checkpointId: string, dto: ReviewProbationCheckpointDto, reviewerId: string, tenantId: string) {
+  async reviewCheckpoint(
+    roundId: string,
+    checkpointId: string,
+    dto: ReviewProbationCheckpointDto,
+    reviewerId: string,
+    tenantId: string,
+  ) {
     const round = await this.findOne(roundId, tenantId);
     if (round.status !== 'active') {
       throw new BadRequestException(`Round is not active (current: "${round.status}")`);
     }
     const checkpoint = round.checkpoints.find((c: { id: string }) => c.id === checkpointId);
-    if (!checkpoint) throw new NotFoundException(`Checkpoint ${checkpointId} not found in round ${roundId}`);
+    if (!checkpoint)
+      throw new NotFoundException(`Checkpoint ${checkpointId} not found in round ${roundId}`);
     if (checkpoint.status === 'done') throw new BadRequestException('Checkpoint already reviewed');
 
     // คะแนนรวม: ถ้าส่ง ratings รายมิติมา ใช้ค่าเฉลี่ยเป็น overall, ไม่งั้นใช้ score ที่ส่งมาตรง ๆ
@@ -190,6 +227,28 @@ export class HrProbationService {
         data: { status: employeeStatusMap[dto.decision] },
       });
 
+      // ค่าตอบแทน: ผ่าน → ตั้งวันที่มีผลต้นรอบเงินเดือนถัดไป (แก้ตัวเลขได้), ไม่ผ่าน → ยกเลิกรายการที่รอ
+      let compensationChange = null;
+      if (dto.decision === 'passed') {
+        compensationChange = await scheduleProbationPass(tx, {
+          tenantId,
+          employeeId: round.employeeId,
+          decidedAt: new Date(),
+          actorUserId: deciderId,
+          refId: id,
+          override: dto.compensation
+            ? {
+                baseSalary: dto.compensation.baseSalary,
+                positionBonus: dto.compensation.positionBonus ?? 0,
+                allowance: dto.compensation.allowance ?? 0,
+                reason: dto.compensation.reason,
+              }
+            : null,
+        });
+      } else if (dto.decision === 'failed') {
+        await cancelPendingProbationPass(tx, tenantId, round.employeeId, deciderId);
+      }
+
       let nextRound = null;
       if (dto.decision === 'extended') {
         const startDate = new Date();
@@ -224,10 +283,14 @@ export class HrProbationService {
           include: { candidate: { select: { manpowerRequestId: true } } },
         });
         if (hire?.candidate?.manpowerRequestId) {
-          await this.completeRequestIfAllProbationResolved(tx, hire.candidate.manpowerRequestId, tenantId);
+          await this.completeRequestIfAllProbationResolved(
+            tx,
+            hire.candidate.manpowerRequestId,
+            tenantId,
+          );
         }
       }
-      return { round: updated, nextRound };
+      return { round: updated, nextRound, compensationChange };
     });
 
     this.audit(
@@ -246,7 +309,11 @@ export class HrProbationService {
    * (รับหลายคน: ตราบใดยังมีพนักงานที่ยังไม่รายงานตัว (PENDING_START) หรือยังทดลองงานอยู่ (PROBATION)
    * คำขอจะยังไม่ถือว่าเสร็จ) เรียกภายใน transaction ของ decide หลังอัปเดตสถานะพนักงานคนปัจจุบันแล้ว
    */
-  private async completeRequestIfAllProbationResolved(tx: any, manpowerRequestId: string, tenantId: string): Promise<void> {
+  private async completeRequestIfAllProbationResolved(
+    tx: any,
+    manpowerRequestId: string,
+    tenantId: string,
+  ): Promise<void> {
     const hiredCandidates = await tx.hrCandidate.findMany({
       where: { tenantId, manpowerRequestId, status: 'hired' },
       select: { hireRecord: { select: { employee: { select: { status: true } } } } },

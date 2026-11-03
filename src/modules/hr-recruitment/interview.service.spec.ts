@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { InterviewService } from './interview.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogService } from '../../audit-log/audit-log.service';
@@ -30,13 +30,15 @@ describe('InterviewService', () => {
   let prisma: ReturnType<typeof createMockPrisma>;
   let notifier: { notifyCandidateInterview: jest.Mock };
   let service: InterviewService;
+  let audit: { log: jest.Mock };
 
   beforeEach(() => {
     prisma = createMockPrisma();
     notifier = { notifyCandidateInterview: jest.fn().mockResolvedValue(true) };
+    audit = { log: jest.fn().mockResolvedValue(undefined) };
     service = new InterviewService(
       prisma as unknown as PrismaService,
-      { log: jest.fn().mockResolvedValue(undefined) } as unknown as AuditLogService,
+      audit as unknown as AuditLogService,
       notifier as unknown as RecruitmentNotifierService,
     );
   });
@@ -57,9 +59,16 @@ describe('InterviewService', () => {
         existing({ id: 'b', scheduledAt: new Date(FUTURE.getTime() + 3 * 3_600_000) }), // 13:00 same day
         existing({ id: 'c', interviewerIds: ['u9'] }), // other interviewer
       ]);
-      const res = await service.findConflicts({ interviewerIds: ['u1', 'u2'], scheduledAt: FUTURE, durationMinutes: 45 }, 't1');
+      const res = await service.findConflicts(
+        { interviewerIds: ['u1', 'u2'], scheduledAt: FUTURE, durationMinutes: 45 },
+        't1',
+      );
       expect(res.conflicts.map((c) => c.interviewId)).toEqual(['a']);
-      expect(res.conflicts[0]).toMatchObject({ interviewerId: 'u1', candidateName: 'Old Cand', durationMinutes: 45 });
+      expect(res.conflicts[0]).toMatchObject({
+        interviewerId: 'u1',
+        candidateName: 'Old Cand',
+        durationMinutes: 45,
+      });
       expect(res.sameDay.map((s) => s.scheduledAt)).toHaveLength(2);
       const where = prisma.hrInterview.findMany.mock.calls[0][0].where;
       expect(where.tenantId).toBe('t1');
@@ -67,7 +76,9 @@ describe('InterviewService', () => {
     });
 
     it('back-to-back interviews do not conflict; excludeId is passed through', async () => {
-      prisma.hrInterview.findMany.mockResolvedValue([existing({ scheduledAt: new Date(FUTURE.getTime() + 45 * 60_000) })]);
+      prisma.hrInterview.findMany.mockResolvedValue([
+        existing({ scheduledAt: new Date(FUTURE.getTime() + 45 * 60_000) }),
+      ]);
       const res = await service.findConflicts(
         { interviewerIds: ['u1'], scheduledAt: FUTURE, durationMinutes: 45, excludeId: 'iv-x' },
         't1',
@@ -94,7 +105,12 @@ describe('InterviewService', () => {
     it('409 when an interviewer is double-booked', async () => {
       prisma.hrInterview.findMany.mockResolvedValue([existing({})]);
       await expect(
-        service.schedule('c1', { scheduledAt: FUTURE.toISOString(), interviewerIds: ['u1'] }, 't1', 'u-hr'),
+        service.schedule(
+          'c1',
+          { scheduledAt: FUTURE.toISOString(), interviewerIds: ['u1'] },
+          't1',
+          'u-hr',
+        ),
       ).rejects.toBeInstanceOf(ConflictException);
       const err = await service
         .schedule('c1', { scheduledAt: FUTURE.toISOString(), interviewerIds: ['u1'] }, 't1', 'u-hr')
@@ -118,9 +134,17 @@ describe('InterviewService', () => {
         't1',
         'u-hr',
       );
-      expect(prisma.hrInterview.create.mock.calls[0][0].data).toMatchObject({ durationMinutes: 60, format: 'video' });
+      expect(prisma.hrInterview.create.mock.calls[0][0].data).toMatchObject({
+        durationMinutes: 60,
+        format: 'video',
+      });
       expect(notifier.notifyCandidateInterview).toHaveBeenCalledWith(
-        expect.objectContaining({ tenantId: 't1', positionTitle: 'Chef', durationMinutes: 60, format: 'video' }),
+        expect.objectContaining({
+          tenantId: 't1',
+          positionTitle: 'Chef',
+          durationMinutes: 60,
+          format: 'video',
+        }),
       );
       expect(res.candidateNotifiedAt).toBeInstanceOf(Date);
     });
@@ -151,12 +175,21 @@ describe('InterviewService', () => {
     it('derives score from ratings average × 20 when score is omitted', async () => {
       const res = await service.recordResult(
         'iv1',
-        { result: 'pass', ratings: [{ criterion: 'สื่อสาร', score: 4 }, { criterion: 'ทักษะ', score: 5 }] },
+        {
+          result: 'pass',
+          ratings: [
+            { criterion: 'สื่อสาร', score: 4 },
+            { criterion: 'ทักษะ', score: 5 },
+          ],
+        },
         't1',
         'u1',
       );
       expect(res.score).toBe('90.00');
-      expect(res.ratings).toEqual([{ criterion: 'สื่อสาร', score: 4 }, { criterion: 'ทักษะ', score: 5 }]);
+      expect(res.ratings).toEqual([
+        { criterion: 'สื่อสาร', score: 4 },
+        { criterion: 'ทักษะ', score: 5 },
+      ]);
     });
 
     it('explicit score wins over ratings', async () => {
@@ -167,6 +200,100 @@ describe('InterviewService', () => {
         'u1',
       );
       expect(res.score).toBe('70.00');
+    });
+  });
+
+  describe('reasons + history', () => {
+    const scheduled = {
+      id: 'iv1',
+      round: 1,
+      status: 'scheduled',
+      scheduledAt: FUTURE,
+      location: 'ห้องประชุม A',
+      durationMinutes: 45,
+      interviewerIds: ['u1'],
+      format: 'onsite',
+      candidateId: 'c1',
+      candidate: { manpowerRequestId: 'm1' },
+    };
+    beforeEach(() => prisma.hrInterview.findFirst.mockResolvedValue(scheduled));
+
+    it('fail without a reason → 400', async () => {
+      await expect(
+        service.recordResult('iv1', { result: 'fail' }, 't1', 'u1'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('fail stores the reason on the interview + candidate and logs it', async () => {
+      await service.recordResult(
+        'iv1',
+        { result: 'fail', reason: 'ประสบการณ์ไม่ตรงงาน' },
+        't1',
+        'u1',
+      );
+      expect(prisma.hrInterview.update.mock.calls[0][0].data).toMatchObject({
+        result: 'fail',
+        resultReason: 'ประสบการณ์ไม่ตรงงาน',
+      });
+      expect(prisma.hrCandidate.update.mock.calls[0][0].data).toMatchObject({
+        status: 'rejected',
+        statusReason: 'ไม่ผ่านสัมภาษณ์รอบ 1: ประสบการณ์ไม่ตรงงาน',
+      });
+      expect(audit.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          resourceId: 'iv1',
+          description: 'ผลสัมภาษณ์รอบ 1: ไม่ผ่าน — ประสบการณ์ไม่ตรงงาน',
+          newValues: expect.objectContaining({ result: 'fail', reason: 'ประสบการณ์ไม่ตรงงาน' }),
+        }),
+      );
+    });
+
+    it('moving the time without a reason → 400', async () => {
+      const later = new Date(FUTURE.getTime() + 86_400_000).toISOString();
+      await expect(
+        service.reschedule('iv1', { scheduledAt: later }, 't1', 'u1'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('reschedule logs old → new time with the reason', async () => {
+      const later = new Date(FUTURE.getTime() + 86_400_000);
+      await service.reschedule(
+        'iv1',
+        { scheduledAt: later.toISOString(), reason: 'ผู้สมัครติดธุระ' },
+        't1',
+        'u1',
+      );
+      expect(prisma.hrInterview.update.mock.calls[0][0].data).toMatchObject({
+        statusReason: 'ผู้สมัครติดธุระ',
+      });
+      expect(audit.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          description: 'เลื่อนนัดสัมภาษณ์ รอบ 1: ผู้สมัครติดธุระ',
+          oldValues: { scheduledAt: FUTURE },
+          newValues: { scheduledAt: later, reason: 'ผู้สมัครติดธุระ' },
+        }),
+      );
+    });
+
+    it('changing only the room needs no reason', async () => {
+      await service.reschedule('iv1', { location: 'ห้อง B' }, 't1', 'u1');
+      expect(audit.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          oldValues: { location: 'ห้องประชุม A' },
+          newValues: { location: 'ห้อง B' },
+        }),
+      );
+    });
+
+    it('no-show requires a reason and closes the candidate with it', async () => {
+      await expect(
+        service.reschedule('iv1', { status: 'no_show' }, 't1', 'u1'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await service.reschedule('iv1', { status: 'no_show', reason: 'โทรไม่รับ' }, 't1', 'u1');
+      expect(prisma.hrCandidate.update).toHaveBeenCalledWith({
+        where: { id: 'c1' },
+        data: { status: 'rejected', statusReason: 'ไม่มาสัมภาษณ์: โทรไม่รับ' },
+      });
     });
   });
 });

@@ -44,6 +44,8 @@ import { HrAnalyticsService } from './hr-analytics.service';
 import { EmployeeCodeConfigService } from './employee-code-config.service';
 import { HrCompletenessService } from './hr-completeness.service';
 import { HrDashboardService } from './hr-dashboard.service';
+import { HrCompensationService } from './compensation/hr-compensation.service';
+import { HrCompensationController } from './compensation/hr-compensation.controller';
 import { HrEquipmentIssuanceController } from './hr-equipment-issuance.controller';
 import { HrEquipmentIssuanceService } from './hr-equipment-issuance.service';
 import { RecruitmentInventoryService } from './recruitment-inventory.service';
@@ -65,6 +67,7 @@ import { AccountingModule } from '../accounting/accounting.module';
 @Module({
   imports: [PrismaModule, AddonModule, IntegrationsModule, StaffModule, AccountingModule],
   controllers: [
+    HrCompensationController,
     HrMasterDataController,
     HrAttendanceController,
     HrShiftController, // P1-02: shift roster + work calendar
@@ -116,6 +119,7 @@ import { AccountingModule } from '../accounting/accounting.module';
     EmployeeCodeConfigService,
     HrCompletenessService,
     HrDashboardService,
+    HrCompensationService,
     HrAddonGuard,
   ],
   exports: [

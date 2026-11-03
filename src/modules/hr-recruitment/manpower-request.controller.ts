@@ -15,13 +15,22 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
-import { ApiTags, ApiOperation, ApiBearerAuth, ApiParam, ApiQuery, ApiResponse, ApiConsumes } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiBearerAuth,
+  ApiParam,
+  ApiQuery,
+  ApiResponse,
+  ApiConsumes,
+} from '@nestjs/swagger';
 import { StorageService } from '../../common/storage/storage.service';
 import { attachmentFolder } from './manpower-approval-history';
 import { Throttle } from '@nestjs/throttler';
 import { ManpowerRequestService } from './manpower-request.service';
 import { EquipmentRequestService } from './equipment-request.service';
 import { ManpowerInsightsService } from './manpower-insights.service';
+import { RecruitmentOverviewService } from './recruitment-overview.service';
 import {
   CreateManpowerRequestDto,
   UpdateManpowerRequestDto,
@@ -54,6 +63,7 @@ export class ManpowerRequestController {
     private readonly service: ManpowerRequestService,
     private readonly equipmentService: EquipmentRequestService,
     private readonly insights: ManpowerInsightsService,
+    private readonly overview: RecruitmentOverviewService,
     private readonly storage: StorageService,
   ) {}
 
@@ -73,14 +83,32 @@ export class ManpowerRequestController {
 
   @Get('summary')
   @ApiOperation({ summary: 'Dashboard counters for the manpower request list' })
-  @ApiResponse({ status: 200, description: '{ pendingApproval, budgetPending, recruiting, startingThisMonth, avgTimeToHireDays, active, closed }' })
+  @ApiResponse({
+    status: 200,
+    description:
+      '{ pendingApproval, budgetPending, recruiting, startingThisMonth, avgTimeToHireDays, active, closed }',
+  })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
   async summary(@CurrentUser() user: AuthUser) {
     return this.insights.summary(user.tenantId!);
   }
 
+  @Get('recruitment-overview')
+  @ApiOperation({
+    summary:
+      'Recruitment overview: open requests (budget approved → offer made) with all their candidates',
+  })
+  @ApiResponse({ status: 200, description: '{ asOf, requests: [...], candidates: [...] }' })
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
+  async recruitmentOverview(@CurrentUser() user: AuthUser) {
+    return this.overview.getOverview(user.tenantId);
+  }
+
   @Get('insights')
-  @ApiOperation({ summary: 'Decision support while drafting: time-to-hire, dept headcount/OT/budget, salary band, recent leavers' })
+  @ApiOperation({
+    summary:
+      'Decision support while drafting: time-to-hire, dept headcount/OT/budget, salary band, recent leavers',
+  })
   @ApiQuery({ name: 'departmentId', required: false })
   @ApiQuery({ name: 'positionId', required: false })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
@@ -89,11 +117,16 @@ export class ManpowerRequestController {
     @Query('positionId') positionId: string | undefined,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.insights.insights(user.tenantId!, { departmentId: departmentId || undefined, positionId: positionId || undefined });
+    return this.insights.insights(user.tenantId!, {
+      departmentId: departmentId || undefined,
+      positionId: positionId || undefined,
+    });
   }
 
   @Get(':id/probation')
-  @ApiOperation({ summary: 'Probation progress (latest round) of every hired candidate of the request' })
+  @ApiOperation({
+    summary: 'Probation progress (latest round) of every hired candidate of the request',
+  })
   @ApiParam({ name: 'id' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
   async probation(@Param('id') id: string, @CurrentUser() user: AuthUser) {
@@ -121,7 +154,11 @@ export class ManpowerRequestController {
   @ApiOperation({ summary: 'Update a draft/rejected manpower request' })
   @ApiParam({ name: 'id' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
-  async update(@Param('id') id: string, @Body() dto: UpdateManpowerRequestDto, @CurrentUser() user: AuthUser) {
+  async update(
+    @Param('id') id: string,
+    @Body() dto: UpdateManpowerRequestDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.update(id, dto, user.tenantId!, user.id!);
   }
 
@@ -131,12 +168,18 @@ export class ManpowerRequestController {
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 20, ttl: 60 } })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
-  async submit(@Param('id') id: string, @Body() dto: SubmitManpowerRequestDto, @CurrentUser() user: AuthUser) {
+  async submit(
+    @Param('id') id: string,
+    @Body() dto: SubmitManpowerRequestDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.submit(id, dto ?? {}, user.tenantId!, user.id!);
   }
 
   @Post(':id/attachments')
-  @ApiOperation({ summary: 'อัปโหลดไฟล์ประกอบการขอ/อนุมัติ (แล้วส่ง metadata ไปกับ submit/approve/return/reject)' })
+  @ApiOperation({
+    summary: 'อัปโหลดไฟล์ประกอบการขอ/อนุมัติ (แล้วส่ง metadata ไปกับ submit/approve/return/reject)',
+  })
   @ApiConsumes('multipart/form-data')
   @ApiParam({ name: 'id' })
   @HttpCode(HttpStatus.OK)
@@ -154,12 +197,17 @@ export class ManpowerRequestController {
   )
   async uploadAttachment(
     @Param('id') id: string,
-    @UploadedFile() file: { originalname: string; mimetype: string; size: number; buffer: Buffer } | undefined,
+    @UploadedFile()
+    file: { originalname: string; mimetype: string; size: number; buffer: Buffer } | undefined,
     @CurrentUser() user: AuthUser,
   ) {
     if (!file) throw new BadRequestException('กรุณาเลือกไฟล์');
     await this.service.findOne(id, user.tenantId!); // 404 ถ้าไม่ใช่คำขอของ tenant นี้
-    const saved = await this.storage.save({ folder: attachmentFolder(user.tenantId!, id), file, prefix: 'att' });
+    const saved = await this.storage.save({
+      folder: attachmentFolder(user.tenantId!, id),
+      file,
+      prefix: 'att',
+    });
     // multer อ่านชื่อไฟล์เป็น latin1 — แปลงกลับเป็น utf8 ให้ชื่อไทยไม่เพี้ยน
     const name = Buffer.from(file.originalname, 'latin1').toString('utf8').slice(0, 255);
     return { name, url: saved.path, key: saved.key, size: file.size, mimeType: file.mimetype };
@@ -171,7 +219,11 @@ export class ManpowerRequestController {
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 20, ttl: 60 } })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
-  async approve(@Param('id') id: string, @Body() dto: ApprovalDecisionDto, @CurrentUser() user: AuthUser) {
+  async approve(
+    @Param('id') id: string,
+    @Body() dto: ApprovalDecisionDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.approve(id, dto, user.tenantId!, user.id!);
   }
 
@@ -180,22 +232,34 @@ export class ManpowerRequestController {
   @ApiParam({ name: 'id' })
   @HttpCode(HttpStatus.OK)
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
-  async reject(@Param('id') id: string, @Body() dto: ApprovalDecisionDto, @CurrentUser() user: AuthUser) {
+  async reject(
+    @Param('id') id: string,
+    @Body() dto: ApprovalDecisionDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.reject(id, dto, user.tenantId!, user.id!);
   }
 
   @Post(':id/return')
-  @ApiOperation({ summary: 'Send back for revision (pending_approval → draft, current step rejected with note)' })
+  @ApiOperation({
+    summary: 'Send back for revision (pending_approval → draft, current step rejected with note)',
+  })
   @ApiParam({ name: 'id' })
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 20, ttl: 60 } })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
-  async returnForRevision(@Param('id') id: string, @Body() dto: RequiredNoteDto, @CurrentUser() user: AuthUser) {
+  async returnForRevision(
+    @Param('id') id: string,
+    @Body() dto: RequiredNoteDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.returnForRevision(id, dto, user.tenantId!, user.id!);
   }
 
   @Post(':id/remind')
-  @ApiOperation({ summary: 'Remind approvers of the current pending step (in-app, max once per 10 minutes)' })
+  @ApiOperation({
+    summary: 'Remind approvers of the current pending step (in-app, max once per 10 minutes)',
+  })
   @ApiParam({ name: 'id' })
   @ApiResponse({ status: 200, description: '{ remindedAt, role, recipients }' })
   @ApiResponse({ status: 429, description: 'Reminded less than 10 minutes ago' })
@@ -223,7 +287,11 @@ export class ManpowerRequestController {
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 20, ttl: 60 } })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
-  async submitBudget(@Param('id') id: string, @Body() dto: SubmitBudgetDto, @CurrentUser() user: AuthUser) {
+  async submitBudget(
+    @Param('id') id: string,
+    @Body() dto: SubmitBudgetDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.submitBudget(id, dto, user.tenantId!, user.id!);
   }
 
@@ -232,7 +300,11 @@ export class ManpowerRequestController {
   @ApiParam({ name: 'id' })
   @HttpCode(HttpStatus.OK)
   @Roles('platform_admin', 'tenant_admin', 'admin', 'hr')
-  async approveBudget(@Param('id') id: string, @Body() dto: ApprovalDecisionDto, @CurrentUser() user: AuthUser) {
+  async approveBudget(
+    @Param('id') id: string,
+    @Body() dto: ApprovalDecisionDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.approveBudget(id, dto, user.tenantId!, user.id!);
   }
 
@@ -241,7 +313,11 @@ export class ManpowerRequestController {
   @ApiParam({ name: 'id' })
   @HttpCode(HttpStatus.OK)
   @Roles('platform_admin', 'tenant_admin', 'admin', 'hr')
-  async rejectBudget(@Param('id') id: string, @Body() dto: ApprovalDecisionDto, @CurrentUser() user: AuthUser) {
+  async rejectBudget(
+    @Param('id') id: string,
+    @Body() dto: ApprovalDecisionDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.rejectBudget(id, dto, user.tenantId!, user.id!);
   }
 
@@ -250,7 +326,11 @@ export class ManpowerRequestController {
   @ApiParam({ name: 'id' })
   @HttpCode(HttpStatus.OK)
   @Roles('platform_admin', 'tenant_admin', 'admin', 'hr')
-  async declineBudget(@Param('id') id: string, @Body() dto: RequiredNoteDto, @CurrentUser() user: AuthUser) {
+  async declineBudget(
+    @Param('id') id: string,
+    @Body() dto: RequiredNoteDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.declineBudget(id, dto, user.tenantId!, user.id!);
   }
 
@@ -262,7 +342,11 @@ export class ManpowerRequestController {
   @HttpCode(HttpStatus.CREATED)
   @Throttle({ default: { limit: 20, ttl: 60 } })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
-  async createEquipment(@Param('id') id: string, @Body() dto: CreateEquipmentRequestDto, @CurrentUser() user: AuthUser) {
+  async createEquipment(
+    @Param('id') id: string,
+    @Body() dto: CreateEquipmentRequestDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.equipmentService.create(id, dto, user.tenantId!, user.id!);
   }
 }
@@ -275,7 +359,10 @@ export class EquipmentRequestController {
   constructor(private readonly service: EquipmentRequestService) {}
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get an equipment request (+stock availability & linked PR when inventory addon active)' })
+  @ApiOperation({
+    summary:
+      'Get an equipment request (+stock availability & linked PR when inventory addon active)',
+  })
   @ApiParam({ name: 'id' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
   async findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
@@ -283,12 +370,18 @@ export class EquipmentRequestController {
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Edit a pending equipment request (prevents duplicate requests before approval)' })
+  @ApiOperation({
+    summary: 'Edit a pending equipment request (prevents duplicate requests before approval)',
+  })
   @ApiParam({ name: 'id' })
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 20, ttl: 60 } })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
-  async update(@Param('id') id: string, @Body() dto: UpdateEquipmentRequestDto, @CurrentUser() user: AuthUser) {
+  async update(
+    @Param('id') id: string,
+    @Body() dto: UpdateEquipmentRequestDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.update(id, dto, user.tenantId!, user.id!);
   }
 
@@ -297,7 +390,11 @@ export class EquipmentRequestController {
   @ApiParam({ name: 'id' })
   @HttpCode(HttpStatus.OK)
   @Roles('platform_admin', 'tenant_admin', 'admin', 'hr')
-  async approve(@Param('id') id: string, @Body() dto: ApprovalDecisionDto, @CurrentUser() user: { tenantId?: string; id?: string }) {
+  async approve(
+    @Param('id') id: string,
+    @Body() dto: ApprovalDecisionDto,
+    @CurrentUser() user: { tenantId?: string; id?: string },
+  ) {
     return this.service.approve(id, dto, user.tenantId!, user.id!);
   }
 
@@ -306,7 +403,11 @@ export class EquipmentRequestController {
   @ApiParam({ name: 'id' })
   @HttpCode(HttpStatus.OK)
   @Roles('platform_admin', 'tenant_admin', 'admin', 'hr')
-  async reject(@Param('id') id: string, @Body() dto: ApprovalDecisionDto, @CurrentUser() user: { tenantId?: string; id?: string }) {
+  async reject(
+    @Param('id') id: string,
+    @Body() dto: ApprovalDecisionDto,
+    @CurrentUser() user: { tenantId?: string; id?: string },
+  ) {
     return this.service.reject(id, dto, user.tenantId!, user.id!);
   }
 }

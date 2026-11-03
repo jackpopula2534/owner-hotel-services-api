@@ -1,3 +1,4 @@
+import { ProbationCompensationOverrideDto } from '../compensation/compensation.dto';
 import {
   IsString,
   IsNotEmpty,
@@ -163,6 +164,15 @@ export class DecideProbationRoundDto {
   @ApiProperty({ enum: ['passed', 'extended', 'failed'] })
   @IsIn(['passed', 'extended', 'failed'])
   decision: 'passed' | 'extended' | 'failed';
+
+  @ApiPropertyOptional({
+    type: () => ProbationCompensationOverrideDto,
+    description: 'เฉพาะ passed: แก้ค่าตอบแทนหลังผ่าน (ไม่ส่ง = ใช้ตามข้อเสนอจ้าง)',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ProbationCompensationOverrideDto)
+  compensation?: ProbationCompensationOverrideDto;
 
   @ApiPropertyOptional({ description: 'New due date when decision = extended (YYYY-MM-DD)' })
   @IsOptional()

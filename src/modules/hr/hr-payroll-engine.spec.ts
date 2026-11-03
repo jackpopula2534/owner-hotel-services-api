@@ -13,6 +13,7 @@ function createMockPrisma() {
     hrLeaveRequest: { findMany: jest.fn().mockResolvedValue([]) },
     hrShiftAssignment: { findMany: jest.fn().mockResolvedValue([]) },
     hrWorkCalendar: { findMany: jest.fn().mockResolvedValue([]) },
+    hrCompensationChange: { findFirst: jest.fn().mockResolvedValue(null) },
   };
 }
 
@@ -64,9 +65,7 @@ describe('HrPayrollService.computeForEmployee (engine)', () => {
     prisma.hrOvertimeRequest.findMany.mockResolvedValue([
       { minutes: 120, multiplier: 1.5, date: otDate },
     ]);
-    prisma.hrAttendance.findMany.mockResolvedValue([
-      { date: otDate, overtimeMinutes: 120 },
-    ]);
+    prisma.hrAttendance.findMany.mockResolvedValue([{ date: otDate, overtimeMinutes: 120 }]);
     prisma.hrLeaveRequest.findMany.mockResolvedValue([
       { totalDays: 2, leaveType: { isPaid: false, name: 'ลากิจ' } },
     ]);
@@ -96,9 +95,7 @@ describe('HrPayrollService.computeForEmployee (engine)', () => {
     prisma.hrOvertimeRequest.findMany.mockResolvedValue([
       { minutes: 120, multiplier: 1.5, date: otDate },
     ]);
-    prisma.hrAttendance.findMany.mockResolvedValue([
-      { date: otDate, overtimeMinutes: 90 },
-    ]);
+    prisma.hrAttendance.findMany.mockResolvedValue([{ date: otDate, overtimeMinutes: 90 }]);
     const policy = { ...BASE_POLICY, socialSecurityEnabled: false };
 
     const r = await service.computeForEmployee(
@@ -152,12 +149,8 @@ describe('HrPayrollService.computeForEmployee (engine)', () => {
 
   it('applies holidayOtMultiplier to OT clocked on a day-off', async () => {
     const holiday = new Date(Date.UTC(2026, 5, 7));
-    prisma.hrAttendance.findMany.mockResolvedValue([
-      { date: holiday, overtimeMinutes: 120 },
-    ]);
-    prisma.hrShiftAssignment.findMany.mockResolvedValue([
-      { date: holiday, isDayOff: true },
-    ]);
+    prisma.hrAttendance.findMany.mockResolvedValue([{ date: holiday, overtimeMinutes: 120 }]);
+    prisma.hrShiftAssignment.findMany.mockResolvedValue([{ date: holiday, isDayOff: true }]);
     const policy = { ...BASE_POLICY, otRequiresApproval: false, socialSecurityEnabled: false };
     const r = await service.computeForEmployee(
       { id: 'e1', baseSalary: 24000, propertyId: null },
@@ -226,7 +219,9 @@ describe('HrPayrollService.computeForEmployee (engine)', () => {
     // annual 360k − expense 100k(cap) − personal 60k = 200k taxable
     // tax: 150k@0% + 50k@5% = 2500/ปี → 208.33/เดือน
     expect(r.tax).toBeCloseTo(208.33, 1);
-    expect(r.items.some((i) => i.type === 'deduction' && i.name === 'ภาษีหัก ณ ที่จ่าย')).toBe(true);
+    expect(r.items.some((i) => i.type === 'deduction' && i.name === 'ภาษีหัก ณ ที่จ่าย')).toBe(
+      true,
+    );
   });
 
   it('charges no tax when annual net income is below the 150k threshold', async () => {
@@ -273,5 +268,64 @@ describe('HrPayrollService.computeForEmployee (engine)', () => {
     expect(r.totalAllowance).toBe(2000);
     expect(r.bonusPay).toBe(1000);
     expect(r.netSalary).toBeCloseTo(23000);
+  });
+
+  describe('compensation history', () => {
+    const policy = { ...BASE_POLICY, socialSecurityEnabled: false };
+
+    it('uses the pay effective at period end (e.g. after passing probation)', async () => {
+      prisma.hrCompensationChange.findFirst.mockResolvedValue({
+        id: 'cc2',
+        baseSalary: 22000,
+        positionBonus: 1500,
+        allowance: 500,
+      });
+      const r = await service.computeForEmployee(
+        { id: 'e1', baseSalary: 18000, positionBonus: 0, allowance: 0, propertyId: null },
+        policy,
+        period,
+        't1',
+        [],
+      );
+      expect(prisma.hrCompensationChange.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            employeeId: 'e1',
+            effectiveDate: { not: null, lte: period.monthEnd },
+          }),
+        }),
+      );
+      expect(r.baseSalary).toBe(22000);
+      expect(r.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: 'allowance', name: 'ค่าตำแหน่ง', amount: 1500 }),
+          expect.objectContaining({ type: 'allowance', name: 'เบี้ยเลี้ยง', amount: 500 }),
+        ]),
+      );
+      expect(r.netSalary).toBeCloseTo(24000);
+    });
+
+    it('falls back to the employee record when there is no history yet', async () => {
+      const r = await service.computeForEmployee(
+        { id: 'e1', baseSalary: 18000, positionBonus: 1000, allowance: 0, propertyId: null },
+        policy,
+        period,
+        't1',
+        [],
+      );
+      expect(r.baseSalary).toBe(18000);
+      expect(r.totalAllowance).toBe(1000);
+    });
+
+    it('a caller-supplied item with the same name replaces the automatic one', async () => {
+      const r = await service.computeForEmployee(
+        { id: 'e1', baseSalary: 18000, positionBonus: 1000, allowance: 0, propertyId: null },
+        policy,
+        period,
+        't1',
+        [{ type: 'allowance', name: 'ค่าตำแหน่ง', amount: 1200 }],
+      );
+      expect(r.totalAllowance).toBe(1200);
+    });
   });
 });

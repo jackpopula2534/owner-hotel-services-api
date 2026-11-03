@@ -17,11 +17,17 @@ function createMockPrisma() {
       update: jest.fn(),
       count: jest.fn().mockResolvedValue(1),
       // ผู้ถูกจ้างทุกคนของคำขอ — ค่าเริ่มต้น: คนเดียวที่เพิ่งยืนยันเริ่มงาน (PROBATION)
-      findMany: jest.fn().mockResolvedValue([{ hireRecord: { employee: { status: 'PROBATION' } } }]),
+      findMany: jest
+        .fn()
+        .mockResolvedValue([{ hireRecord: { employee: { status: 'PROBATION' } } }]),
     },
     hrManpowerRequest: { update: jest.fn(), updateMany: jest.fn() },
     hrProbationRound: { create: jest.fn().mockResolvedValue({ id: 'round1' }) },
     hrProbationCheckpoint: { create: jest.fn() },
+    hrCompensationChange: {
+      create: jest.fn().mockResolvedValue({ id: 'cc1' }),
+      findFirst: jest.fn(),
+    },
   };
   return {
     tx,
@@ -55,7 +61,13 @@ const baseCandidate = {
     positionTitle: 'พนักงานต้อนรับ',
     employmentType: 'FULLTIME',
     equipmentRequests: [
-      { id: 'eq1', items: [{ name: 'Uniform', qty: 2 }, { name: 'Name tag', qty: 1 }] },
+      {
+        id: 'eq1',
+        items: [
+          { name: 'Uniform', qty: 2 },
+          { name: 'Name tag', qty: 1 },
+        ],
+      },
     ],
   },
 };
@@ -129,6 +141,50 @@ describe('HireService', () => {
       });
     });
 
+    it('records HIRE at probation pay + pending PROBATION_PASS when post-probation pay differs', async () => {
+      prisma.hrCandidate.findFirst.mockResolvedValue({
+        ...baseCandidate,
+        hireRecord: {
+          ...baseCandidate.hireRecord,
+          probationPositionBonus: 0,
+          probationAllowance: 500,
+          postProbationSalary: 20000,
+          postProbationPositionBonus: 1500,
+          postProbationAllowance: 500,
+        },
+      });
+      await service.hire('c1', {}, 't1', 'u1');
+
+      expect(prisma.tx.employee.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ baseSalary: 18000, positionBonus: 0, allowance: 500 }),
+        }),
+      );
+      const rows = prisma.tx.hrCompensationChange.create.mock.calls.map((c: any[]) => c[0].data);
+      expect(rows).toHaveLength(2);
+      expect(rows[0]).toMatchObject({
+        changeType: 'HIRE',
+        source: 'system',
+        baseSalary: 18000,
+        previous: null,
+      });
+      expect(rows[1]).toMatchObject({
+        changeType: 'PROBATION_PASS',
+        status: 'pending',
+        effectiveDate: null,
+        baseSalary: 20000,
+        positionBonus: 1500,
+        previous: { baseSalary: 18000, positionBonus: 0, allowance: 500 },
+      });
+    });
+
+    it('no post-probation terms → only the HIRE row', async () => {
+      prisma.hrCandidate.findFirst.mockResolvedValue(baseCandidate);
+      await service.hire('c1', {}, 't1', 'u1');
+      const rows = prisma.tx.hrCompensationChange.create.mock.calls.map((c: any[]) => c[0].data);
+      expect(rows.map((r: any) => r.changeType)).toEqual(['HIRE']);
+    });
+
     it('rejects when there is no pending offer', async () => {
       prisma.hrCandidate.findFirst.mockResolvedValue({
         ...baseCandidate,
@@ -182,14 +238,22 @@ describe('HireService', () => {
       ]);
       await service.confirmStart('h1', 't1', 'u1');
       expect(prisma.tx.hrCandidate.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { tenantId: 't1', manpowerRequestId: 'mpr1', status: 'hired' } }),
+        expect.objectContaining({
+          where: { tenantId: 't1', manpowerRequestId: 'mpr1', status: 'hired' },
+        }),
       );
       expect(prisma.tx.hrManpowerRequest.updateMany).not.toHaveBeenCalled();
     });
 
     it('rejects when offer is not accepted yet', async () => {
-      prisma.hrHireRecord.findFirst.mockResolvedValue({ ...acceptedHire, offerStatus: 'offered', employeeId: null });
-      await expect(service.confirmStart('h1', 't1', 'u1')).rejects.toBeInstanceOf(BadRequestException);
+      prisma.hrHireRecord.findFirst.mockResolvedValue({
+        ...acceptedHire,
+        offerStatus: 'offered',
+        employeeId: null,
+      });
+      await expect(service.confirmStart('h1', 't1', 'u1')).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
     });
 
     it('allows confirming start even when no equipment issuance exists yet (equipment is parallel, not blocking)', async () => {
@@ -208,7 +272,9 @@ describe('HireService', () => {
     it('rejects when an active round already exists', async () => {
       prisma.hrHireRecord.findFirst.mockResolvedValue(acceptedHire);
       prisma.hrProbationRound.findFirst.mockResolvedValue({ id: 'round-active' });
-      await expect(service.confirmStart('h1', 't1', 'u1')).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.confirmStart('h1', 't1', 'u1')).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
     });
   });
 });

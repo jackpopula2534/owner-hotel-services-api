@@ -9,14 +9,26 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  UseInterceptors,
+  UploadedFiles,
+  BadRequestException,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth, ApiParam, ApiQuery } from '@nestjs/swagger';
+import { FilesInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
+import { StorageService } from '../../common/storage/storage.service';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiBearerAuth,
+  ApiParam,
+  ApiQuery,
+  ApiConsumes,
+} from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { CandidateService } from './candidate.service';
 import { InterviewService } from './interview.service';
 import { HireService } from './hire.service';
 import {
-  CreateCandidateDto,
   UpdateCandidateDto,
   ScheduleInterviewDto,
   RescheduleInterviewDto,
@@ -34,6 +46,17 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 type AuthUser = { tenantId?: string; id?: string };
 
+interface MulterFile {
+  originalname: string;
+  mimetype: string;
+  size: number;
+  buffer: Buffer;
+}
+
+const CANDIDATE_UPLOAD_KINDS = ['resume', 'photo', 'document'] as const;
+const CANDIDATE_UPLOAD_MIME =
+  /^(image\/(jpeg|jpg|png|webp)|application\/(pdf|msword|vnd\.openxmlformats-officedocument\.wordprocessingml\.document))$/;
+
 @ApiTags('hr / recruitment — candidates')
 @ApiBearerAuth('JWT-auth')
 @Controller({ path: 'hr/candidates', version: '1' })
@@ -43,6 +66,7 @@ export class CandidateController {
     private readonly service: CandidateService,
     private readonly interviewService: InterviewService,
     private readonly hireService: HireService,
+    private readonly storage: StorageService,
   ) {}
 
   @Get()
@@ -62,11 +86,68 @@ export class CandidateController {
     return this.service.findOne(id, user.tenantId!);
   }
 
+  @Get(':id/history')
+  @ApiOperation({
+    summary: 'Change history of a candidate (field-level, from the audit log), newest first',
+  })
+  @ApiParam({ name: 'id' })
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
+  async history(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.getHistory(id, user.tenantId!);
+  }
+
+  @Post(':id/uploads')
+  @ApiOperation({
+    summary:
+      'Upload candidate files (photo / resume / document) — returns URLs; save them with PATCH attachments',
+  })
+  @ApiParam({ name: 'id' })
+  @ApiQuery({ name: 'kind', enum: CANDIDATE_UPLOAD_KINDS })
+  @ApiConsumes('multipart/form-data')
+  @HttpCode(HttpStatus.CREATED)
+  @Throttle({ default: { limit: 20, ttl: 60 } })
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
+  @UseInterceptors(
+    FilesInterceptor('files', 5, {
+      storage: memoryStorage(),
+      fileFilter: (_req, file, cb) => {
+        if (!CANDIDATE_UPLOAD_MIME.test(file.mimetype)) {
+          return cb(new BadRequestException('รองรับเฉพาะไฟล์ PDF, DOC/DOCX, รูปภาพ'), false);
+        }
+        cb(null, true);
+      },
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  async upload(
+    @Param('id') id: string,
+    @Query('kind') kind: string,
+    @UploadedFiles() files: MulterFile[],
+    @CurrentUser() user: AuthUser,
+  ) {
+    await this.service.findOne(id, user.tenantId!);
+    if (!files || files.length === 0) throw new BadRequestException('ไม่พบไฟล์ที่อัปโหลด');
+    const safeKind = (CANDIDATE_UPLOAD_KINDS as readonly string[]).includes(kind)
+      ? kind
+      : 'document';
+    const saved = await this.storage.saveMany(files, {
+      folder: 'applications',
+      prefix: `cand-${id}`,
+    });
+    return {
+      urls: saved.map((s, i) => ({ kind: safeKind, url: s.url, name: files[i].originalname })),
+    };
+  }
+
   @Patch(':id')
   @ApiOperation({ summary: 'Update a candidate' })
   @ApiParam({ name: 'id' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
-  async update(@Param('id') id: string, @Body() dto: UpdateCandidateDto, @CurrentUser() user: AuthUser) {
+  async update(
+    @Param('id') id: string,
+    @Body() dto: UpdateCandidateDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.update(id, dto, user.tenantId!, user.id!);
   }
 
@@ -76,7 +157,11 @@ export class CandidateController {
   @HttpCode(HttpStatus.CREATED)
   @Throttle({ default: { limit: 20, ttl: 60 } })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
-  async scheduleInterview(@Param('id') id: string, @Body() dto: ScheduleInterviewDto, @CurrentUser() user: AuthUser) {
+  async scheduleInterview(
+    @Param('id') id: string,
+    @Body() dto: ScheduleInterviewDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.interviewService.schedule(id, dto, user.tenantId!, user.id!);
   }
 
@@ -86,7 +171,11 @@ export class CandidateController {
   @HttpCode(HttpStatus.CREATED)
   @Throttle({ default: { limit: 10, ttl: 60 } })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'hr')
-  async makeOffer(@Param('id') id: string, @Body() dto: MakeOfferDto, @CurrentUser() user: AuthUser) {
+  async makeOffer(
+    @Param('id') id: string,
+    @Body() dto: MakeOfferDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.makeOffer(id, dto, user.tenantId!, user.id!);
   }
 
@@ -105,7 +194,11 @@ export class CandidateController {
   @HttpCode(HttpStatus.CREATED)
   @Throttle({ default: { limit: 10, ttl: 60 } })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'hr')
-  async hire(@Param('id') id: string, @Body() dto: HireCandidateDto, @CurrentUser() user: AuthUser) {
+  async hire(
+    @Param('id') id: string,
+    @Body() dto: HireCandidateDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.hireService.hire(id, dto, user.tenantId!, user.id!);
   }
 }
@@ -133,12 +226,19 @@ export class InterviewController {
   @ApiQuery({ name: 'interviewerIds', required: true, description: 'comma-separated user ids' })
   @ApiQuery({ name: 'scheduledAt', required: true, description: 'ISO datetime' })
   @ApiQuery({ name: 'durationMinutes', required: false, description: 'default 45' })
-  @ApiQuery({ name: 'excludeId', required: false, description: 'interview id to ignore (when rescheduling)' })
+  @ApiQuery({
+    name: 'excludeId',
+    required: false,
+    description: 'interview id to ignore (when rescheduling)',
+  })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
   async conflicts(@Query() query: InterviewConflictQueryDto, @CurrentUser() user: AuthUser) {
     return this.service.findConflicts(
       {
-        interviewerIds: query.interviewerIds.split(',').map((s) => s.trim()).filter(Boolean),
+        interviewerIds: query.interviewerIds
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
         scheduledAt: new Date(query.scheduledAt),
         durationMinutes: query.durationMinutes ?? 45,
         excludeId: query.excludeId,
@@ -159,7 +259,11 @@ export class InterviewController {
   @ApiOperation({ summary: 'Reschedule / cancel / mark no-show' })
   @ApiParam({ name: 'id' })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
-  async reschedule(@Param('id') id: string, @Body() dto: RescheduleInterviewDto, @CurrentUser() user: AuthUser) {
+  async reschedule(
+    @Param('id') id: string,
+    @Body() dto: RescheduleInterviewDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.reschedule(id, dto, user.tenantId!, user.id!);
   }
 
@@ -169,7 +273,11 @@ export class InterviewController {
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 20, ttl: 60 } })
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
-  async recordResult(@Param('id') id: string, @Body() dto: InterviewResultDto, @CurrentUser() user: AuthUser) {
+  async recordResult(
+    @Param('id') id: string,
+    @Body() dto: InterviewResultDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.service.recordResult(id, dto, user.tenantId!, user.id!);
   }
 }
@@ -192,7 +300,9 @@ export class HireRecordController {
   }
 
   @Post(':id/cancel')
-  @ApiOperation({ summary: 'No-show: cancel an accepted hire → release reservations + reopen recruiting' })
+  @ApiOperation({
+    summary: 'No-show: cancel an accepted hire → release reservations + reopen recruiting',
+  })
   @ApiParam({ name: 'id' })
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60 } })

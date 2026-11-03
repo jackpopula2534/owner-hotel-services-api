@@ -7,17 +7,19 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogService } from '../../audit-log/audit-log.service';
-import {
-  AuditAction,
-  AuditResource,
-  AuditCategory,
-} from '../../audit-log/dto/audit-log.dto';
+import { AuditAction, AuditResource, AuditCategory } from '../../audit-log/dto/audit-log.dto';
 import { HrPayrollPolicyService } from './hr-payroll-policy.service';
 import { RunPayrollDto, ApprovePayrollDto, UpdatePayrollDto } from './dto/run-payroll.dto';
 import { JournalEntriesService } from '../accounting/journal-entries/journal-entries.service';
 import { JournalSourceTypeEnum } from '../accounting/journal-entries/dto/create-journal-entry.dto';
 import { assertPeriodOpen } from '../accounting/ledger/journal-posting.util';
 import { ACCOUNT_CODES, resolveAccountIds } from '../accounting/ledger/posting-accounts.util';
+
+import {
+  Compensation,
+  resolveCompensationAsOf,
+  toCompensation,
+} from './compensation/compensation.core';
 
 interface PayrollItemInput {
   type: string;
@@ -122,12 +124,7 @@ export class HrPayrollService {
    * (เบี้ยเลี้ยง/หัก/OT/โบนัส) ได้ จากนั้นคำนวณยอดรวมทุกคอลัมน์ + ยอดสุทธิใหม่จาก
    * รายการที่ส่งมา เพื่อให้ตัวเลขที่แสดงตรงกับ breakdown เสมอ แก้ได้เฉพาะสถานะ draft
    */
-  async updateDraft(
-    id: string,
-    dto: UpdatePayrollDto,
-    tenantId: string,
-    userId?: string,
-  ) {
+  async updateDraft(id: string, dto: UpdatePayrollDto, tenantId: string, userId?: string) {
     const payroll = await this.findOne(id, tenantId);
     if (payroll.status !== 'draft') {
       throw new BadRequestException(
@@ -177,7 +174,13 @@ export class HrPayrollService {
       },
       include: {
         employee: {
-          select: { id: true, firstName: true, lastName: true, employeeCode: true, department: true },
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            employeeCode: true,
+            department: true,
+          },
         },
         items: { orderBy: { type: 'asc' } },
       },
@@ -264,12 +267,14 @@ export class HrPayrollService {
             bonusPay: breakdown.bonusPay.toFixed(2),
             netSalary: breakdown.netSalary.toFixed(2),
             status: 'draft',
-            items: { create: breakdown.items.map((i) => ({
-              type: i.type,
-              name: i.name,
-              amount: i.amount.toFixed(2),
-              note: i.note ?? null,
-            })) },
+            items: {
+              create: breakdown.items.map((i) => ({
+                type: i.type,
+                name: i.name,
+                amount: i.amount.toFixed(2),
+                note: i.note ?? null,
+              })),
+            },
           },
           include: {
             employee: { select: { id: true, firstName: true, lastName: true, employeeCode: true } },
@@ -312,11 +317,26 @@ export class HrPayrollService {
     tenantId: string,
     extraItems: PayrollItemInput[],
   ) {
-    const baseSalary = Number(emp.baseSalary ?? 0);
+    // ค่าตอบแทนตามประวัติ ณ สิ้นงวด — รองรับการปรับเงินเดือนที่มีผลรอบถัดไป (เช่น ผ่านทดลองงาน)
+    const pay = await this.resolvePayForPeriod(emp, tenantId, period.monthEnd);
+    const baseSalary = pay.baseSalary;
     const dailyRate = baseSalary / (policy.workingDaysPerMonth || 30);
     const hourlyRate = dailyRate / (policy.workingHoursPerDay || 8);
 
     const items: PayrollItemInput[] = [];
+
+    // ── ค่าตำแหน่ง / เบี้ยเลี้ยงประจำ (อัตโนมัติจากประวัติค่าตอบแทน) ─────────────
+    // ถ้าผู้รันส่งรายการชื่อเดียวกันมาเอง ให้ใช้ของผู้รันแทน
+    const manualNames = new Set(extraItems.map((i) => i.name));
+    const recurring: Array<[string, number]> = [
+      ['ค่าตำแหน่ง', pay.positionBonus],
+      ['เบี้ยเลี้ยง', pay.allowance],
+    ];
+    for (const [name, amount] of recurring) {
+      if (amount > 0 && !manualNames.has(name)) {
+        items.push({ type: 'allowance', name, amount, note: 'อัตโนมัติจากข้อมูลค่าตอบแทน' });
+      }
+    }
 
     // ── Roster + holiday context ───────────────────────────────────────────
     // ใช้ร่วมกันสำหรับ OT วันหยุด (holidayOtMultiplier), หักขาดงาน และมาสาย
@@ -472,18 +492,14 @@ export class HrPayrollService {
         },
         select: { date: true },
       });
-      const accountedDates = new Set<string>(
-        attendedRecords.map((r: any) => this.dateKey(r.date)),
-      );
+      const accountedDates = new Set<string>(attendedRecords.map((r: any) => this.dateKey(r.date)));
       // ใบลาที่อนุมัติ (ทั้งแบบรับเงิน/ไม่รับเงิน) ถือว่า "ไม่ขาด" — กระจายช่วงวันที่
       const dayMs = 24 * 60 * 60 * 1000;
       for (const lr of leaveRequests) {
         let cursor = new Date(
           Math.max(new Date(lr.startDate).getTime(), period.monthStart.getTime()),
         );
-        const end = new Date(
-          Math.min(new Date(lr.endDate).getTime(), period.monthEnd.getTime()),
-        );
+        const end = new Date(Math.min(new Date(lr.endDate).getTime(), period.monthEnd.getTime()));
         while (cursor.getTime() <= end.getTime()) {
           accountedDates.add(this.dateKey(cursor));
           cursor = new Date(cursor.getTime() + dayMs);
@@ -570,6 +586,17 @@ export class HrPayrollService {
     };
   }
 
+  /** ค่าตอบแทนที่มีผล ณ วันสิ้นงวด — ถ้าอ่านประวัติไม่ได้ ใช้ค่าปัจจุบันของพนักงาน */
+  private async resolvePayForPeriod(emp: any, tenantId: string, asOf: Date): Promise<Compensation> {
+    try {
+      return await resolveCompensationAsOf(this.prisma, tenantId, emp.id, asOf, emp);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Compensation history unavailable for ${emp.id}: ${msg}`);
+      return toCompensation(emp);
+    }
+  }
+
   /** Thai personal income tax brackets (ขั้นบันได) — upper bound + marginal rate. */
   private static readonly TAX_BRACKETS: ReadonlyArray<{ upTo: number; rate: number }> = [
     { upTo: 150_000, rate: 0 },
@@ -602,7 +629,11 @@ export class HrPayrollService {
    * social security, then run progressive brackets and divide by 12 months.
    * Variable income (OT/bonus) is intentionally excluded from the projection.
    */
-  private computeWithholdingTax(baseSalary: number, monthlySocialSecurity: number, policy: any): number {
+  private computeWithholdingTax(
+    baseSalary: number,
+    monthlySocialSecurity: number,
+    policy: any,
+  ): number {
     const annualIncome = baseSalary * 12;
     if (annualIncome <= 0) return 0;
     // กัน NaN/undefined (เช่น policy row เก่าก่อน migration) → ใช้ค่ามาตรฐาน
@@ -657,9 +688,7 @@ export class HrPayrollService {
       const [h, m] = start.split(':').map((n: string) => parseInt(n, 10));
       const scheduled = new Date(rec.date);
       scheduled.setUTCHours(h, m, 0, 0);
-      const diff = Math.floor(
-        (new Date(rec.checkIn).getTime() - scheduled.getTime()) / 60_000,
-      );
+      const diff = Math.floor((new Date(rec.checkIn).getTime() - scheduled.getTime()) / 60_000);
       if (diff > 0) total += diff;
     }
     return total;

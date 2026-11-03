@@ -18,6 +18,7 @@ import {
   MaxLength,
   Min,
   ValidateNested,
+  ValidateIf,
 } from 'class-validator';
 
 // ─── Stage 1: Manpower request ────────────────────────────────────────────────
@@ -60,12 +61,18 @@ export class CreateManpowerRequestDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(5000) jobDescription?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() expectedStartDate?: string;
 
-  @ApiPropertyOptional({ enum: MANPOWER_REASON_TYPES, description: 'ประเภทเหตุผล: แทนคนออก | ขยายงาน | ตำแหน่งใหม่' })
+  @ApiPropertyOptional({
+    enum: MANPOWER_REASON_TYPES,
+    description: 'ประเภทเหตุผล: แทนคนออก | ขยายงาน | ตำแหน่งใหม่',
+  })
   @IsOptional()
   @IsIn(MANPOWER_REASON_TYPES)
   reasonType?: ManpowerReasonType;
 
-  @ApiPropertyOptional({ type: [String], description: 'Employee ids ที่ลาออก/ถูกแทน (reasonType=replacement)' })
+  @ApiPropertyOptional({
+    type: [String],
+    description: 'Employee ids ที่ลาออก/ถูกแทน (reasonType=replacement)',
+  })
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(50)
@@ -143,7 +150,10 @@ export class SubmitBudgetDto {
 
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(2000) budgetNote?: string;
 
-  @ApiPropertyOptional({ type: [ApprovalAttachmentDto], description: 'ไฟล์ประกอบงบ เช่น ใบเสนอราคา/ตารางเงินเดือน' })
+  @ApiPropertyOptional({
+    type: [ApprovalAttachmentDto],
+    description: 'ไฟล์ประกอบงบ เช่น ใบเสนอราคา/ตารางเงินเดือน',
+  })
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(MAX_APPROVAL_ATTACHMENTS)
@@ -160,12 +170,17 @@ export class EquipmentItemDto {
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Min(0) estimatedCost?: number;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(500) note?: string;
 
-  @ApiPropertyOptional({ description: 'InventoryItem id — ผูกกับคลังเมื่อมี INVENTORY_MODULE (ไม่ระบุ = checklist อิสระ)' })
+  @ApiPropertyOptional({
+    description:
+      'InventoryItem id — ผูกกับคลังเมื่อมี INVENTORY_MODULE (ไม่ระบุ = checklist อิสระ)',
+  })
   @IsOptional()
   @IsUUID()
   itemId?: string;
 
-  @ApiPropertyOptional({ description: 'Warehouse id ที่จะเบิก/จองของ (default: คลังหลักของ property)' })
+  @ApiPropertyOptional({
+    description: 'Warehouse id ที่จะเบิก/จองของ (default: คลังหลักของ property)',
+  })
   @IsOptional()
   @IsUUID()
   warehouseId?: string;
@@ -214,14 +229,93 @@ export class CreateCandidateDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(2000) note?: string;
 }
 
+/**
+ * ข้อมูลใบสมัครฉบับเต็มที่ HR แก้ไขได้ (เก็บใน HrCandidate.applicationData)
+ * ส่งเฉพาะ field ที่ต้องการแก้ — field ที่ไม่ส่งจะคงค่าเดิม, ส่ง null = ล้างค่า,
+ * array (การศึกษา/ประสบการณ์/ผู้ติดต่อฉุกเฉิน) ที่ส่งมาจะแทนที่ชุดเดิมทั้งชุด
+ */
+export class CandidateApplicationDataDto {
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(100) nickname?: string | null;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(20) nationalId?: string | null;
+  @ApiPropertyOptional({ description: 'วันเกิด (YYYY-MM-DD)' })
+  @IsOptional()
+  @IsDateString()
+  dateOfBirth?: string | null;
+  @ApiPropertyOptional({ enum: ['male', 'female', 'other'] })
+  @IsOptional()
+  @IsIn(['male', 'female', 'other'])
+  gender?: string | null;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(1000) address?: string | null;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(191) bankName?: string | null;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(50) bankAccount?: string | null;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(20) taxId?: string | null;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(20) socialSecurity?: string | null;
+
+  // lazy type: ApplicantEducationDto is declared further down this file
+  @ApiPropertyOptional({ type: () => [ApplicantEducationDto] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ApplicantEducationDto)
+  educations?: ApplicantEducationDto[];
+
+  // lazy type: ApplicantExperienceDto is declared further down this file
+  @ApiPropertyOptional({ type: () => [ApplicantExperienceDto] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ApplicantExperienceDto)
+  workExperiences?: ApplicantExperienceDto[];
+
+  // lazy type: ApplicantEmergencyContactDto is declared further down this file
+  @ApiPropertyOptional({ type: () => [ApplicantEmergencyContactDto] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ApplicantEmergencyContactDto)
+  emergencyContacts?: ApplicantEmergencyContactDto[];
+}
+
 export class UpdateCandidateDto extends CreateCandidateDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(191) declare firstName: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(191) declare lastName: string;
+
+  @ApiPropertyOptional({
+    type: CandidateApplicationDataDto,
+    description: 'แก้ข้อมูลใบสมัครฉบับเต็ม (merge กับของเดิม)',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CandidateApplicationDataDto)
+  applicationData?: CandidateApplicationDataDto;
 
   @ApiPropertyOptional({ enum: ['screening', 'rejected', 'withdrawn'] })
   @IsOptional()
   @IsIn(['screening', 'rejected', 'withdrawn'])
   status?: string;
+
+  @ApiPropertyOptional({ description: 'เหตุผล — บังคับเมื่อเปลี่ยนสถานะเป็น rejected / withdrawn' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  statusReason?: string;
+
+  // HR แก้แหล่งที่มาได้ รวมถึงผู้สมัครจากฟอร์มออนไลน์ (public_form)
+  @ApiPropertyOptional({ enum: ['walk_in', 'referral', 'job_board', 'agency', 'public_form'] })
+  @IsOptional()
+  @IsIn(['walk_in', 'referral', 'job_board', 'agency', 'public_form'])
+  declare source?: string;
+
+  @ApiPropertyOptional({
+    type: () => [ApplicationAttachmentDto],
+    description: 'ไฟล์แนบทั้งชุด (รูปโปรไฟล์/เรซูเม่/เอกสาร) — แทนที่ของเดิม',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => ApplicationAttachmentDto)
+  attachments?: ApplicationAttachmentDto[];
 }
 
 export class ScheduleInterviewDto {
@@ -292,6 +386,14 @@ export class RescheduleInterviewDto {
   @IsOptional()
   @IsBoolean()
   notifyCandidate?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'เหตุผล — บังคับเมื่อเลื่อนวันเวลา ยกเลิก หรือบันทึกว่าไม่มา',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  reason?: string;
 }
 
 export class InterviewConflictQueryDto {
@@ -336,7 +438,17 @@ export class InterviewResultDto {
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Min(0) @Max(100) score?: number;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(2000) feedback?: string;
 
-  @ApiPropertyOptional({ type: [InterviewRatingDto], description: 'คะแนนรายหัวข้อ 1-5 (ไม่ส่ง score → score = ค่าเฉลี่ย × 20)' })
+  @ApiPropertyOptional({ description: 'เหตุผลที่ไม่ผ่าน — บังคับเมื่อ result = fail' })
+  @ValidateIf((o: InterviewResultDto) => o.result === 'fail')
+  @IsString()
+  @IsNotEmpty({ message: 'ต้องระบุเหตุผลที่ไม่ผ่าน' })
+  @MaxLength(1000)
+  reason?: string;
+
+  @ApiPropertyOptional({
+    type: [InterviewRatingDto],
+    description: 'คะแนนรายหัวข้อ 1-5 (ไม่ส่ง score → score = ค่าเฉลี่ย × 20)',
+  })
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(10)
@@ -370,7 +482,38 @@ export class UpdatePositionKitDto {
 // ─── Stage 5: Offer + hire ───────────────────────────────────────────────────
 
 export class MakeOfferDto {
-  @ApiProperty() @IsNumber() @Min(0) offeredSalary: number;
+  @ApiProperty({ description: 'เงินเดือนช่วงทดลองงาน (บาท/เดือน)' })
+  @IsNumber()
+  @Min(0)
+  offeredSalary: number;
+
+  @ApiPropertyOptional({ description: 'ค่าตำแหน่งช่วงทดลองงาน' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  probationPositionBonus?: number;
+  @ApiPropertyOptional({ description: 'เบี้ยเลี้ยงประจำช่วงทดลองงาน' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  probationAllowance?: number;
+
+  // หลังผ่านทดลองงาน — ไม่ส่ง = เท่ากับช่วงทดลองงาน (มีผลต้นรอบเงินเดือนถัดไปหลังวันตัดสินผ่าน)
+  @ApiPropertyOptional({ description: 'เงินเดือนหลังผ่านทดลองงาน' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  postProbationSalary?: number;
+  @ApiPropertyOptional({ description: 'ค่าตำแหน่งหลังผ่านทดลองงาน' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  postProbationPositionBonus?: number;
+  @ApiPropertyOptional({ description: 'เบี้ยเลี้ยงประจำหลังผ่านทดลองงาน' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  postProbationAllowance?: number;
 
   @ApiProperty({ description: 'วันเริ่มงาน (YYYY-MM-DD)' })
   @IsDateString()
@@ -381,11 +524,18 @@ export class MakeOfferDto {
   @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: 'startTime must be HH:mm' })
   startTime?: string;
 
-  @ApiPropertyOptional({ default: 90 }) @IsOptional() @IsInt() @Min(7) @Max(365) probationDays?: number;
+  @ApiPropertyOptional({ default: 90 })
+  @IsOptional()
+  @IsInt()
+  @Min(7)
+  @Max(365)
+  probationDays?: number;
 }
 
 export class HireCandidateDto {
-  @ApiPropertyOptional({ description: 'Override email สำหรับสร้าง Employee (default: email ผู้สมัคร)' })
+  @ApiPropertyOptional({
+    description: 'Override email สำหรับสร้าง Employee (default: email ผู้สมัคร)',
+  })
   @IsOptional()
   @IsEmail()
   email?: string;
@@ -458,8 +608,14 @@ export class PublicApplicationDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(50) phone?: string;
 
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(20) nationalId?: string;
-  @ApiPropertyOptional({ description: 'วันเกิด (YYYY-MM-DD)' }) @IsOptional() @IsDateString() dateOfBirth?: string;
-  @ApiPropertyOptional({ enum: ['male', 'female', 'other'] }) @IsOptional() @IsIn(['male', 'female', 'other']) gender?: string;
+  @ApiPropertyOptional({ description: 'วันเกิด (YYYY-MM-DD)' })
+  @IsOptional()
+  @IsDateString()
+  dateOfBirth?: string;
+  @ApiPropertyOptional({ enum: ['male', 'female', 'other'] })
+  @IsOptional()
+  @IsIn(['male', 'female', 'other'])
+  gender?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(1000) address?: string;
 
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Min(0) expectedSalary?: number;
@@ -471,19 +627,31 @@ export class PublicApplicationDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(2000) note?: string;
 
   @ApiPropertyOptional({ type: [ApplicantEducationDto] })
-  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => ApplicantEducationDto)
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ApplicantEducationDto)
   educations?: ApplicantEducationDto[];
 
   @ApiPropertyOptional({ type: [ApplicantExperienceDto] })
-  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => ApplicantExperienceDto)
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ApplicantExperienceDto)
   workExperiences?: ApplicantExperienceDto[];
 
   @ApiPropertyOptional({ type: [ApplicantEmergencyContactDto] })
-  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => ApplicantEmergencyContactDto)
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ApplicantEmergencyContactDto)
   emergencyContacts?: ApplicantEmergencyContactDto[];
 
   @ApiPropertyOptional({ type: [ApplicationAttachmentDto] })
-  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => ApplicationAttachmentDto)
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ApplicationAttachmentDto)
   attachments?: ApplicationAttachmentDto[];
 
   @ApiProperty({ description: 'ยินยอม PDPA (ต้องเป็น true)' })

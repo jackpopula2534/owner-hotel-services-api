@@ -6,8 +6,20 @@ import { AuditLogService } from '../../audit-log/audit-log.service';
 
 function createMockPrisma() {
   const tx = {
-    employee: { update: jest.fn() },
-    hrProbationRound: { create: jest.fn().mockResolvedValue({ id: 'round-new' }), update: jest.fn() },
+    employee: {
+      update: jest.fn(),
+      findFirst: jest.fn().mockResolvedValue({ baseSalary: 15000, positionBonus: 0, allowance: 0 }),
+    },
+    hrCompensationChange: {
+      findFirst: jest.fn().mockResolvedValue(null),
+      create: jest.fn().mockResolvedValue({ id: 'cc-new' }),
+      update: jest.fn(),
+      updateMany: jest.fn(),
+    },
+    hrProbationRound: {
+      create: jest.fn().mockResolvedValue({ id: 'round-new' }),
+      update: jest.fn(),
+    },
     hrProbationCheckpoint: { create: jest.fn(), updateMany: jest.fn(), update: jest.fn() },
     hrProbationCheckpointRating: { deleteMany: jest.fn(), create: jest.fn() },
     hrHireRecord: { findFirst: jest.fn() },
@@ -92,7 +104,11 @@ describe('HrProbationService (rounds redesign)', () => {
       expect(prisma.tx.hrProbationCheckpoint.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: 'cp1' },
-          data: expect.objectContaining({ status: 'done', score: '85.00', reviewerId: 'reviewer1' }),
+          data: expect.objectContaining({
+            status: 'done',
+            score: '85.00',
+            reviewerId: 'reviewer1',
+          }),
         }),
       );
     });
@@ -142,16 +158,18 @@ describe('HrProbationService (rounds redesign)', () => {
         't1',
       );
       expect(prisma.tx.hrProbationRound.create).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ extendedFrom: 'r1', status: 'active' }) }),
+        expect.objectContaining({
+          data: expect.objectContaining({ extendedFrom: 'r1', status: 'active' }),
+        }),
       );
       expect(result.nextRound).not.toBeNull();
     });
 
     it('extended without newDueDate → 400', async () => {
       prisma.hrProbationRound.findFirst.mockResolvedValue(activeRound);
-      await expect(service.decide('r1', { decision: 'extended' }, 'boss1', 't1')).rejects.toBeInstanceOf(
-        BadRequestException,
-      );
+      await expect(
+        service.decide('r1', { decision: 'extended' }, 'boss1', 't1'),
+      ).rejects.toBeInstanceOf(BadRequestException);
     });
 
     it('failed → employee TERMINATED', async () => {
@@ -172,7 +190,9 @@ describe('HrProbationService (rounds redesign)', () => {
         candidate: { manpowerRequestId: 'mpr1' },
       });
       // ทุกอัตราที่จ้างจบทดลองงานแล้ว → ปิดคำขอ
-      prisma.tx.hrCandidate.findMany.mockResolvedValue([{ hireRecord: { employee: { status: 'ACTIVE' } } }]);
+      prisma.tx.hrCandidate.findMany.mockResolvedValue([
+        { hireRecord: { employee: { status: 'ACTIVE' } } },
+      ]);
       await service.decide('r1', { decision: 'passed' }, 'boss1', 't1');
       expect(prisma.tx.hrManpowerRequest.updateMany).toHaveBeenCalledWith({
         where: { id: 'mpr1', status: 'probation' },
@@ -180,11 +200,79 @@ describe('HrProbationService (rounds redesign)', () => {
       });
     });
 
+    it('passed + pending PROBATION_PASS → schedules it for the next payroll cycle (system)', async () => {
+      prisma.hrProbationRound.findFirst.mockResolvedValue(activeRound);
+      prisma.tx.hrProbationRound.update.mockResolvedValue({ id: 'r1', status: 'passed' });
+      prisma.tx.hrCompensationChange.findFirst
+        .mockResolvedValueOnce({
+          id: 'pend1',
+          baseSalary: 20000,
+          positionBonus: 2000,
+          allowance: 1000,
+          refId: null,
+        })
+        .mockResolvedValue(null);
+      const result = await service.decide('r1', { decision: 'passed' }, 'boss1', 't1');
+      expect(prisma.tx.hrCompensationChange.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'pend1' },
+          data: expect.objectContaining({ status: 'cancelled' }),
+        }),
+      );
+      const created = prisma.tx.hrCompensationChange.create.mock.calls[0][0].data;
+      expect(created).toMatchObject({
+        changeType: 'PROBATION_PASS',
+        source: 'system',
+        status: 'scheduled',
+        baseSalary: 20000,
+        positionBonus: 2000,
+        allowance: 1000,
+      });
+      expect(created.effectiveDate.getUTCDate()).toBe(1);
+      expect(result.compensationChange).toEqual({ id: 'cc-new' });
+    });
+
+    it('passed with HR override → records the override as a user change', async () => {
+      prisma.hrProbationRound.findFirst.mockResolvedValue(activeRound);
+      prisma.tx.hrProbationRound.update.mockResolvedValue({ id: 'r1', status: 'passed' });
+      await service.decide(
+        'r1',
+        {
+          decision: 'passed',
+          compensation: {
+            baseSalary: 22000,
+            positionBonus: 0,
+            allowance: 500,
+            reason: 'ผลงานดีเยี่ยม',
+          },
+        },
+        'boss1',
+        't1',
+      );
+      expect(prisma.tx.hrCompensationChange.create.mock.calls[0][0].data).toMatchObject({
+        source: 'user',
+        actorUserId: 'boss1',
+        baseSalary: 22000,
+        reason: 'ผลงานดีเยี่ยม',
+      });
+    });
+
+    it('failed → cancels the pending PROBATION_PASS', async () => {
+      prisma.hrProbationRound.findFirst.mockResolvedValue(activeRound);
+      prisma.tx.hrProbationRound.update.mockResolvedValue({ id: 'r1', status: 'failed' });
+      await service.decide('r1', { decision: 'failed' }, 'boss1', 't1');
+      expect(prisma.tx.hrCompensationChange.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ changeType: 'PROBATION_PASS', status: 'pending' }),
+        }),
+      );
+    });
+
     it('rejects deciding an already-decided round', async () => {
       prisma.hrProbationRound.findFirst.mockResolvedValue({ ...activeRound, status: 'passed' });
-      await expect(service.decide('r1', { decision: 'failed' }, 'boss1', 't1')).rejects.toBeInstanceOf(
-        BadRequestException,
-      );
+      await expect(
+        service.decide('r1', { decision: 'failed' }, 'boss1', 't1'),
+      ).rejects.toBeInstanceOf(BadRequestException);
     });
   });
 });

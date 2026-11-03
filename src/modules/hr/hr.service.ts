@@ -1,4 +1,11 @@
 import {
+  recordCompensationChange,
+  sameCompensation,
+  todayBusinessDate,
+  toCompensation,
+} from './compensation/compensation.core';
+import { toBusinessDate } from '../../common/utils/bangkok-day.util';
+import {
   Injectable,
   NotFoundException,
   BadRequestException,
@@ -19,7 +26,10 @@ import { StaffService } from '../staff/staff.service';
  * ENG (วิศวกรรม) และแผนกที่ชื่อสื่อถึงงานช่าง → ช่างซ่อมบำรุง
  * นอกนั้น (HK ฯลฯ) → แม่บ้าน
  */
-function inferStaffRoleFromDepartment(code?: string | null, name?: string | null): 'housekeeper' | 'technician' {
+function inferStaffRoleFromDepartment(
+  code?: string | null,
+  name?: string | null,
+): 'housekeeper' | 'technician' {
   const c = (code ?? '').toUpperCase();
   if (c === 'ENG' || c === 'MAINT' || c === 'MAINTENANCE') return 'technician';
   const n = (name ?? '').toLowerCase();
@@ -149,7 +159,7 @@ export class HrService {
     };
   }
 
-  async create(createEmployeeDto: CreateEmployeeDto, tenantId?: string) {
+  async create(createEmployeeDto: CreateEmployeeDto, tenantId?: string, userId?: string) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID is required');
     }
@@ -217,14 +227,42 @@ export class HrService {
       .recomputeForEmployee(created.id, tenantId)
       .catch((error: unknown) => {
         const msg = error instanceof Error ? error.message : String(error);
-        this.logger.warn(`Lifecycle assignment bootstrap failed for employee ${created.id}: ${msg}`);
+        this.logger.warn(
+          `Lifecycle assignment bootstrap failed for employee ${created.id}: ${msg}`,
+        );
       });
+
+    // ประวัติค่าตอบแทนแถวแรก (พนักงานที่ HR เพิ่มเอง ไม่ผ่านการสรรหา)
+    if (created.baseSalary !== null && created.baseSalary !== undefined) {
+      await recordCompensationChange(this.prisma, {
+        tenantId,
+        employeeId: created.id,
+        effectiveDate: toBusinessDate(created.startDate ?? new Date()),
+        compensation: toCompensation(created),
+        changeType: 'HIRE',
+        source: 'user',
+        actorUserId: userId ?? null,
+        reason: 'บันทึกพนักงานใหม่',
+        previous: null,
+      }).catch((error: unknown) => {
+        const msg = error instanceof Error ? error.message : String(error);
+        this.logger.warn(
+          `Compensation history bootstrap failed for employee ${created.id}: ${msg}`,
+        );
+      });
+    }
 
     return created;
   }
 
-  async update(id: string, updateEmployeeDto: UpdateEmployeeDto, tenantId?: string) {
+  async update(
+    id: string,
+    updateEmployeeDto: UpdateEmployeeDto,
+    tenantId?: string,
+    userId?: string,
+  ) {
     const employee = await this.findOne(id, tenantId);
+    const payBefore = toCompensation(employee as Record<string, unknown>);
 
     const { hotelId, propertyId, startDate, dateOfBirth, ...rest } = updateEmployeeDto;
     const finalPropertyId = propertyId || hotelId || (employee as any).propertyId;
@@ -261,6 +299,28 @@ export class HrService {
         hrPosition: true,
       },
     })) as any;
+
+    // แก้เงินเดือน/ค่าตำแหน่ง/เบี้ยเลี้ยงจากหน้าข้อมูลพนักงาน → บันทึกประวัติ (มีผลวันนี้)
+    const payAfter = toCompensation(updated);
+    const payTouched = ['baseSalary', 'positionBonus', 'allowance'].some((field) =>
+      Object.prototype.hasOwnProperty.call(updateEmployeeDto, field),
+    );
+    if (payTouched && !sameCompensation(payBefore, payAfter)) {
+      await recordCompensationChange(this.prisma, {
+        tenantId: tenantId!,
+        employeeId: id,
+        effectiveDate: todayBusinessDate(),
+        compensation: payAfter,
+        changeType: 'MANUAL_ADJUST',
+        source: 'user',
+        actorUserId: userId ?? null,
+        reason: 'แก้ไขจากหน้าข้อมูลพนักงาน',
+        previous: payBefore,
+      }).catch((error: unknown) => {
+        const msg = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`Compensation history failed for employee ${id}: ${msg}`);
+      });
+    }
 
     const lifecycleFieldsChanged = [
       'propertyId',

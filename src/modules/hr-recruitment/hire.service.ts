@@ -1,3 +1,10 @@
+import {
+  recordCompensationChange,
+  sameCompensation,
+  totalOf,
+} from '../hr/compensation/compensation.core';
+import { offerCompensation } from '../hr/compensation/offer-compensation';
+import { toBusinessDate } from '../../common/utils/bangkok-day.util';
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -35,9 +42,25 @@ export class HireService {
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
-  private audit(action: AuditAction, resourceId: string, tenantId: string, userId: string, description: string, newValues?: Record<string, unknown>): void {
+  private audit(
+    action: AuditAction,
+    resourceId: string,
+    tenantId: string,
+    userId: string,
+    description: string,
+    newValues?: Record<string, unknown>,
+  ): void {
     this.auditLog
-      .log({ action, resource: AuditResource.HIRE_RECORD, resourceId, category: AuditCategory.HR, tenantId, userId, description, newValues })
+      .log({
+        action,
+        resource: AuditResource.HIRE_RECORD,
+        resourceId,
+        category: AuditCategory.HR,
+        tenantId,
+        userId,
+        description,
+        newValues,
+      })
       .catch((err: Error) => this.logger.error(`Audit log failed: ${err.message}`));
   }
 
@@ -56,7 +79,10 @@ export class HireService {
     }
 
     const email = dto.email ?? candidate.email;
-    if (!email) throw new BadRequestException('An email is required to create the employee record');
+    if (!email)
+      throw new BadRequestException(
+        'ผู้สมัครยังไม่มีอีเมล — กรุณาเพิ่มอีเมลในข้อมูลผู้สมัครก่อนสร้างพนักงาน',
+      );
 
     const employeeCode = await this.employeeCode.generateNextCode(
       tenantId,
@@ -69,6 +95,11 @@ export class HireService {
 
     // ข้อมูลใบสมัคร public (ชุดเดียว) → map เข้า Employee เมื่อมีค่า
     const applicationFields = this.mapApplicationToEmployee(candidate);
+
+    // ค่าตอบแทน: ช่วงทดลองงาน = เริ่มงาน, หลังผ่าน = รอวันตัดสิน (ไม่มีทดลองงาน = ใช้ชุดหลังผ่านตั้งแต่วันแรก)
+    const { probation: probationPay, post: postPay } = offerCompensation(candidate.hireRecord);
+    const hasProbation = (candidate.hireRecord.probationDays ?? 0) > 0;
+    const startPay = hasProbation ? probationPay : postPay;
 
     const result = await this.prisma.$transaction(async (tx: any) => {
       const employee = await tx.employee.create({
@@ -84,8 +115,10 @@ export class HireService {
           phone: candidate.phone ?? null,
           employeeCode,
           employmentType: candidate.manpowerRequest.employmentType,
-          baseSalary: candidate.hireRecord.offeredSalary,
-          initialSalary: candidate.hireRecord.offeredSalary,
+          baseSalary: startPay.baseSalary,
+          initialSalary: startPay.baseSalary,
+          positionBonus: startPay.positionBonus,
+          allowance: startPay.allowance,
           startDate: candidate.hireRecord.startDate,
           status: 'PENDING_START',
           ...applicationFields,
@@ -96,6 +129,38 @@ export class HireService {
         where: { id: candidate.hireRecord.id },
         data: { offerStatus: 'accepted', acceptedAt: new Date(), employeeId: employee.id },
       });
+
+      // ประวัติค่าตอบแทน: HIRE (มีผลวันเริ่มงาน) + PROBATION_PASS รอวันตัดสิน ถ้าค่าหลังผ่านต่างจากช่วงทดลองงาน
+      await recordCompensationChange(tx, {
+        tenantId,
+        employeeId: employee.id,
+        effectiveDate: toBusinessDate(candidate.hireRecord.startDate),
+        compensation: startPay,
+        changeType: 'HIRE',
+        source: 'system',
+        actorUserId: userId,
+        reason: hasProbation
+          ? 'เริ่มงาน — ค่าตอบแทนช่วงทดลองงานตามข้อเสนอจ้าง'
+          : 'เริ่มงาน — ตามข้อเสนอจ้าง',
+        refType: 'hire_record',
+        refId: candidate.hireRecord.id,
+        previous: null,
+      });
+      if (hasProbation && !sameCompensation(probationPay, postPay)) {
+        await recordCompensationChange(tx, {
+          tenantId,
+          employeeId: employee.id,
+          effectiveDate: null,
+          compensation: postPay,
+          changeType: 'PROBATION_PASS',
+          source: 'system',
+          actorUserId: userId,
+          reason: 'ค่าตอบแทนหลังผ่านทดลองงานตามข้อเสนอจ้าง (มีผลต้นรอบเงินเดือนถัดไปหลังผ่าน)',
+          refType: 'hire_record',
+          refId: candidate.hireRecord.id,
+          previous: probationPay,
+        });
+      }
 
       // First-day issuance checklist from every approved equipment request.
       for (const eq of candidate.manpowerRequest.equipmentRequests) {
@@ -133,7 +198,11 @@ export class HireService {
       // อุปกรณ์เป็นขั้นบังคับก่อนเริ่มงาน: ถ้ามีคำขอเบิกที่ "อนุมัติแล้ว" ตอนจ้างครบ → ข้ามไปขั้นรับของ
       // (onboarding) ได้เลย; ถ้ายังไม่มี ค้างที่ "hired" (ขั้นขออุปกรณ์) จนกว่าจะสร้าง+อนุมัติคำขอเบิก
       const hasApprovedEquipment = (candidate.manpowerRequest.equipmentRequests?.length ?? 0) > 0;
-      const nextStatus = quotaFilled ? (hasApprovedEquipment ? 'onboarding' : 'hired') : 'recruiting';
+      const nextStatus = quotaFilled
+        ? hasApprovedEquipment
+          ? 'onboarding'
+          : 'hired'
+        : 'recruiting';
       await tx.hrManpowerRequest.update({
         where: { id: candidate.manpowerRequestId },
         data: { status: nextStatus },
@@ -141,7 +210,14 @@ export class HireService {
       return { employee, hireRecord };
     });
 
-    this.audit(AuditAction.CANDIDATE_HIRE, result.hireRecord.id, tenantId, userId, `Candidate hired → employee ${employeeCode} (start ${candidate.hireRecord.startDate.toISOString().slice(0, 10)})`, { employeeId: result.employee.id });
+    this.audit(
+      AuditAction.CANDIDATE_HIRE,
+      result.hireRecord.id,
+      tenantId,
+      userId,
+      `Candidate hired → employee ${employeeCode} (start ${candidate.hireRecord.startDate.toISOString().slice(0, 10)})`,
+      { employeeId: result.employee.id },
+    );
 
     // จ้างสำเร็จ + มี COST_ACCOUNTING_MODULE → ส่งเงินเดือนที่ commit ให้บัญชีต้นทุน (double-gate, ไม่ block)
     await this.emitSalaryCommitted(candidate, result, tenantId, userId);
@@ -166,8 +242,10 @@ export class HireService {
     if (app.taxId) out.taxId = app.taxId;
     if (app.socialSecurity) out.socialSecurity = app.socialSecurity;
     if (Array.isArray(app.educations) && app.educations.length) out.educations = app.educations;
-    if (Array.isArray(app.workExperiences) && app.workExperiences.length) out.workExperiences = app.workExperiences;
-    if (Array.isArray(app.emergencyContacts) && app.emergencyContacts.length) out.emergencyContacts = app.emergencyContacts;
+    if (Array.isArray(app.workExperiences) && app.workExperiences.length)
+      out.workExperiences = app.workExperiences;
+    if (Array.isArray(app.emergencyContacts) && app.emergencyContacts.length)
+      out.emergencyContacts = app.emergencyContacts;
     if (app.address) out.notes = app.address;
 
     // รูปโปรไฟล์จากใบสมัคร (attachments kind='photo') → Employee.profileImage
@@ -190,7 +268,10 @@ export class HireService {
     userId: string,
   ): Promise<void> {
     try {
-      const hasCostAddon = await this.addonService.hasActiveAddon(tenantId, ADDON_CODES.COST_ACCOUNTING_MODULE);
+      const hasCostAddon = await this.addonService.hasActiveAddon(
+        tenantId,
+        ADDON_CODES.COST_ACCOUNTING_MODULE,
+      );
       if (!hasCostAddon) return;
       const payload: RecruitmentSalaryCommittedEvent = {
         hireRecordId: result.hireRecord.id,
@@ -200,13 +281,16 @@ export class HireService {
         departmentId: candidate.manpowerRequest.departmentId ?? null,
         positionTitle: candidate.manpowerRequest.positionTitle,
         employeeId: result.employee.id,
-        monthlySalary: Number(result.hireRecord.offeredSalary ?? 0),
+        // ต้นทุนผูกพันระยะยาว = ค่าตอบแทนหลังผ่านทดลองงาน
+        monthlySalary: totalOf(offerCompensation(result.hireRecord).post),
         startDate: result.hireRecord.startDate.toISOString(),
         createdBy: userId,
       };
       this.eventEmitter.emit(COST_EVENTS.RECRUITMENT_SALARY_COMMITTED, payload);
     } catch (error) {
-      this.logger.warn(`Failed to emit salary_committed for hire ${result.hireRecord.id}: ${(error as Error).message}`);
+      this.logger.warn(
+        `Failed to emit salary_committed for hire ${result.hireRecord.id}: ${(error as Error).message}`,
+      );
     }
   }
 
@@ -221,7 +305,9 @@ export class HireService {
     });
     if (!hireRecord) throw new NotFoundException(`Hire record ${hireRecordId} not found`);
     if (hireRecord.offerStatus !== 'accepted' || !hireRecord.employeeId) {
-      throw new BadRequestException('Offer must be accepted (employee created) before confirming start');
+      throw new BadRequestException(
+        'Offer must be accepted (employee created) before confirming start',
+      );
     }
 
     // หมายเหตุ: การเบิกอุปกรณ์เป็นขั้นคู่ขนาน (เตรียมของก่อน/หลังวันเริ่มก็ได้) — ไม่บังคับว่าต้อง
@@ -230,7 +316,8 @@ export class HireService {
     const existingRound = await (this.prisma as any).hrProbationRound.findFirst({
       where: { tenantId, employeeId: hireRecord.employeeId, status: 'active' },
     });
-    if (existingRound) throw new BadRequestException('Employee already has an active probation round');
+    if (existingRound)
+      throw new BadRequestException('Employee already has an active probation round');
 
     const startDate = new Date();
     const dueDate = new Date(startDate.getTime() + hireRecord.probationDays * DAY_MS);
@@ -264,11 +351,22 @@ export class HireService {
       }
       // ขยับคำขอไป "probation" เมื่อผ่านขั้นอุปกรณ์แล้ว (onboarding) หรือกรณีจ้างครบ+อนุมัติอุปกรณ์
       // พร้อมกัน (hired) — แต่ต้อง "ยืนยันเริ่มงานครบทุกอัตรา" ก่อน (รับหลายคนต้องรายงานตัวครบ)
-      await this.advanceToProbationIfAllStarted(tx, hireRecord.candidate.manpowerRequestId, tenantId);
+      await this.advanceToProbationIfAllStarted(
+        tx,
+        hireRecord.candidate.manpowerRequestId,
+        tenantId,
+      );
       return created;
     });
 
-    this.audit(AuditAction.PROBATION_OPEN, round.id, tenantId, userId, `Employee started — probation round opened (due ${dueDate.toISOString().slice(0, 10)})`, { employeeId: hireRecord.employeeId });
+    this.audit(
+      AuditAction.PROBATION_OPEN,
+      round.id,
+      tenantId,
+      userId,
+      `Employee started — probation round opened (due ${dueDate.toISOString().slice(0, 10)})`,
+      { employeeId: hireRecord.employeeId },
+    );
     return round;
   }
 
@@ -277,7 +375,11 @@ export class HireService {
    * (รับหลายคน: ตราบใดยังมีพนักงานที่ยังไม่ยืนยันเริ่มงาน — status = PENDING_START — คำขอจะค้างขั้นเดิม)
    * เรียกภายใน transaction ของ confirmStart หลังตั้งพนักงานคนปัจจุบันเป็น PROBATION แล้ว
    */
-  private async advanceToProbationIfAllStarted(tx: any, manpowerRequestId: string, tenantId: string): Promise<void> {
+  private async advanceToProbationIfAllStarted(
+    tx: any,
+    manpowerRequestId: string,
+    tenantId: string,
+  ): Promise<void> {
     const hiredCandidates = await tx.hrCandidate.findMany({
       where: { tenantId, manpowerRequestId, status: 'hired' },
       select: { hireRecord: { select: { employee: { select: { status: true } } } } },
@@ -300,7 +402,10 @@ export class HireService {
   async cancelNoShow(hireRecordId: string, dto: CancelHireDto, tenantId: string, userId: string) {
     const hireRecord = await (this.prisma as any).hrHireRecord.findFirst({
       where: { id: hireRecordId, tenantId },
-      include: { candidate: { include: { manpowerRequest: { select: { id: true, headcount: true } } } }, employee: true },
+      include: {
+        candidate: { include: { manpowerRequest: { select: { id: true, headcount: true } } } },
+        employee: true,
+      },
     });
     if (!hireRecord) throw new NotFoundException(`Hire record ${hireRecordId} not found`);
     if (hireRecord.offerStatus !== 'accepted' || !hireRecord.employeeId) {
@@ -329,11 +434,18 @@ export class HireService {
 
       // ใบเบิกวันแรกที่ยังไม่จ่ายของ → ปลดจองสต๊อก (graceful ถ้าไม่มี INVENTORY_MODULE) แล้วยกเลิก
       const issuances = await tx.hrEquipmentIssuance.findMany({
-        where: { tenantId, employeeId: hireRecord.employeeId, status: { in: ['pending', 'reserved'] } },
+        where: {
+          tenantId,
+          employeeId: hireRecord.employeeId,
+          status: { in: ['pending', 'reserved'] },
+        },
       });
       for (const issuance of issuances) {
         await this.recruitmentInventory.releaseReservation(tx, issuance);
-        await tx.hrEquipmentIssuance.update({ where: { id: issuance.id }, data: { status: 'cancelled' } });
+        await tx.hrEquipmentIssuance.update({
+          where: { id: issuance.id },
+          data: { status: 'cancelled' },
+        });
       }
 
       // จ้างยังไม่ครบโควต้า → วนคำขอกลับไปหาคนใหม่
@@ -348,7 +460,14 @@ export class HireService {
       }
     });
 
-    this.audit(AuditAction.UPDATE, hireRecordId, tenantId, userId, `Hire cancelled (no-show)${dto.reason ? `: ${dto.reason}` : ''} — request reopened for recruiting`, { employeeId: hireRecord.employeeId });
+    this.audit(
+      AuditAction.UPDATE,
+      hireRecordId,
+      tenantId,
+      userId,
+      `Hire cancelled (no-show)${dto.reason ? `: ${dto.reason}` : ''} — request reopened for recruiting`,
+      { employeeId: hireRecord.employeeId },
+    );
     return (this.prisma as any).hrHireRecord.findFirst({
       where: { id: hireRecordId, tenantId },
       include: { candidate: true, employee: true },
