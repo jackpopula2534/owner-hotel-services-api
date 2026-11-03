@@ -7134,7 +7134,7 @@ model BankStatementLine {
   updatedAt     DateTime                @updatedAt
 
   @@unique([tenantId, bankAccountId, fingerprint])
-  @@index([tenantId, propertyId, bankAccountId, txnDate])
+  @@index([tenantId, propertyId, bankAccountId, txnDate], map: "bank_stmt_lines_tenant_prop_acct_date_idx")
   @@index([status])
   @@index([journalLineId])
   @@index([arReceiptId])
