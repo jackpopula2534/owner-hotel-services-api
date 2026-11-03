@@ -2,7 +2,13 @@ import { Injectable, Logger } from '@nestjs/common';
 import { RevenueSourceModule, RevenueType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RevenueFilter, RevenueQueryService } from '../revenue/revenue-query.service';
-import { round2, shiftDate, toBangkokDate } from '../../common/utils/bangkok-day.util';
+import {
+  bangkokDayRange,
+  DAY_MS,
+  round2,
+  shiftDate,
+  toBangkokDate,
+} from '../../common/utils/bangkok-day.util';
 
 interface TodayActionsResponse {
   checkInsDue: number;
@@ -109,10 +115,8 @@ export class DashboardService {
     }
 
     try {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const tomorrow = new Date(today);
-      tomorrow.setDate(tomorrow.getDate() + 1);
+      // Bangkok day — same window the bookings list filters by (booking-list-filter)
+      const { start: today, end: tomorrow } = bangkokDayRange(toBangkokDate(new Date()));
 
       const whereBase: Record<string, unknown> = { tenantId };
       if (propertyId) whereBase.propertyId = propertyId;
@@ -231,12 +235,9 @@ export class DashboardService {
     }
 
     try {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const tomorrow = new Date(today);
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      const yesterday = new Date(today);
-      yesterday.setDate(yesterday.getDate() - 1);
+      // Bangkok day — same window the bookings list filters by (booking-list-filter)
+      const { start: today, end: tomorrow } = bangkokDayRange(toBangkokDate(new Date()));
+      const yesterday = new Date(today.getTime() - DAY_MS);
 
       const whereBase: Record<string, unknown> = { tenantId };
       if (propertyId) whereBase.propertyId = propertyId;
@@ -269,9 +270,8 @@ export class DashboardService {
       const occupancyTrend = occupancyRate - yesterdayOccupancy;
 
       // Money comes from the revenue ledger, which files a stay under the day its
-      // folio closed and cuts the day at Bangkok midnight. The counts above still
-      // use the server-local day boundaries they always did — changing those is a
-      // separate correction, and mixing the two here would be worse than either.
+      // folio closed and cuts the day at Bangkok midnight — the same day the
+      // booking counts above use.
       //
       // ADR and RevPAR divide *room* revenue, not everything the hotel earned:
       // a minibar charge is not part of the average daily rate. Reading the
@@ -348,7 +348,11 @@ export class DashboardService {
         },
       });
       const inHouseGuests = guestsSum._sum.numberOfGuests || 0;
-      const availableRooms = totalRooms - occupiedBookings;
+      // ว่างพร้อมขาย = ห้องสถานะ available จริง ๆ — เดิมเอา totalRooms − ห้องมีแขก ซึ่งนับห้อง
+      // รอทำความสะอาด/ซ่อมเป็น "ว่าง" ด้วย เลยไม่ตรงกับหน้าโรงแรมและหน้าภาพรวม (นับจากสถานะห้อง)
+      const availableRooms = await this.prisma.room.count({
+        where: { ...whereBase, status: 'available' },
+      });
 
       return {
         occupancyRate,
@@ -391,10 +395,8 @@ export class DashboardService {
     if (!tenantId) return { events: [] };
 
     try {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const tomorrow = new Date(today);
-      tomorrow.setDate(tomorrow.getDate() + 1);
+      // Bangkok day — same window the bookings list filters by (booking-list-filter)
+      const { start: today, end: tomorrow } = bangkokDayRange(toBangkokDate(new Date()));
 
       const whereBase: Record<string, unknown> = { tenantId };
       if (propertyId) whereBase.propertyId = propertyId;
