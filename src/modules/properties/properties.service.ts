@@ -4,7 +4,12 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CreatePropertyDto } from './dto/create-property.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
 import { AuditLogService } from '../../audit-log/audit-log.service';
-import { toBangkokDate } from '../../common/utils/bangkok-day.util';
+import {
+  bangkokDayRange,
+  bangkokMonthRange,
+  toBangkokDate,
+  toBangkokMonth,
+} from '../../common/utils/bangkok-day.util';
 import { RevenueFilter, RevenueQueryService } from '../revenue/revenue-query.service';
 
 @Injectable()
@@ -164,11 +169,9 @@ export class PropertiesService {
 
     // Build detailed statistics filtered by tenantId + propertyId
     const now = new Date();
-    const today = new Date(now);
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    // วันนี้/ต้นเดือนตามปฏิทินไทย — หน้าต่างเดียวกับ dashboard และตัวกรองรายการจอง
+    const { start: today, end: tomorrow } = bangkokDayRange(toBangkokDate(now));
+    const { start: firstDayOfMonth } = bangkokMonthRange(toBangkokMonth(now));
 
     const roomWhere = { tenantId, propertyId: id };
 

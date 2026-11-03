@@ -1,4 +1,10 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+} from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
@@ -17,6 +23,32 @@ import {
   INVENTORY_EVENTS,
   HousekeepingTaskCompletedEvent,
 } from '../inventory/events/inventory.events';
+import { HK_REVERT_TO, HkStatusAction, revertClearFields } from './housekeeping-status-flow';
+
+export interface HkStatusLogEntry {
+  id: string;
+  action: string;
+  fromStatus: string;
+  toStatus: string;
+  roomStatusBefore: string | null;
+  roomStatusAfter: string | null;
+  reason: string | null;
+  changedById: string | null;
+  changedByName: string | null;
+  createdAt: Date;
+}
+
+interface StatusLogInput {
+  tenantId: string;
+  taskId: string;
+  action: HkStatusAction;
+  fromStatus: string;
+  toStatus: string;
+  roomStatusBefore?: string | null;
+  roomStatusAfter?: string | null;
+  reason?: string | null;
+  userId?: string;
+}
 
 interface TaskQuery {
   status?: string;
@@ -285,7 +317,12 @@ export class HousekeepingService {
   /**
    * Update task details
    */
-  async updateTask(id: string, dto: UpdateHousekeepingTaskDto, tenantId: string): Promise<any> {
+  async updateTask(
+    id: string,
+    dto: UpdateHousekeepingTaskDto,
+    tenantId: string,
+    userId?: string,
+  ): Promise<any> {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID is required');
     }
@@ -339,6 +376,18 @@ export class HousekeepingService {
         });
       }
 
+      // แก้สถานะตรง ๆ ผ่าน PATCH :id ก็ต้องเข้าประวัติ ไม่งั้นเป็นทางหลบการบันทึก
+      if (dto.status && dto.status !== task.status) {
+        await this.recordStatusChange({
+          tenantId,
+          taskId: id,
+          action: 'update',
+          fromStatus: task.status,
+          toStatus: dto.status,
+          userId,
+        });
+      }
+
       this.logger.log(`Updated task ${id}`);
       return updated;
     } catch (error) {
@@ -353,7 +402,12 @@ export class HousekeepingService {
    * ไม่ยุ่งกับสถานะห้องโดยตั้งใจ: การ "เริ่มงาน" ไม่ได้เปลี่ยนสถานะห้อง มีแต่ตอน
    * completeTask ที่ปล่อยห้องเป็น available ยกเลิกงานจึงไม่มีสถานะห้องให้ย้อนคืน
    */
-  async cancelTask(id: string, reason: string | undefined, tenantId: string): Promise<any> {
+  async cancelTask(
+    id: string,
+    reason: string | undefined,
+    tenantId: string,
+    userId?: string,
+  ): Promise<any> {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID is required');
     }
@@ -378,6 +432,16 @@ export class HousekeepingService {
         where: { id },
         data: { status: HousekeepingTaskStatus.CANCELLED, notes },
         include: { room: true },
+      });
+
+      await this.recordStatusChange({
+        tenantId,
+        taskId: id,
+        action: 'cancel',
+        fromStatus: task.status,
+        toStatus: HousekeepingTaskStatus.CANCELLED,
+        reason: trimmedReason || null,
+        userId,
       });
 
       this.logger.log(
@@ -465,7 +529,7 @@ export class HousekeepingService {
   /**
    * Start task (set status and actualStartTime)
    */
-  async startTask(id: string, tenantId: string): Promise<any> {
+  async startTask(id: string, tenantId: string, userId?: string): Promise<any> {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID is required');
     }
@@ -494,6 +558,15 @@ export class HousekeepingService {
           include: { room: true },
         });
       }
+
+      await this.recordStatusChange({
+        tenantId,
+        taskId: id,
+        action: 'start',
+        fromStatus: task.status,
+        toStatus: 'in_progress',
+        userId,
+      });
 
       this.logger.log(`Started task ${id}`);
       return updated;
@@ -559,6 +632,9 @@ export class HousekeepingService {
         });
       }
 
+      // ย้อนจาก "เสร็จแล้ว" มาทำใหม่ แล้วส่งงานอีกรอบ → ห้ามตัดของใช้ในห้องซ้ำ
+      const completedBefore = await this.hasBeenCompletedBefore(id, tenantId);
+
       // Update room status to available
       if (task.roomId) {
         await this.prisma.room.update({
@@ -566,6 +642,17 @@ export class HousekeepingService {
           data: { status: 'available' },
         });
       }
+
+      await this.recordStatusChange({
+        tenantId,
+        taskId: id,
+        action: 'complete',
+        fromStatus: task.status,
+        toStatus: 'completed',
+        roomStatusBefore: task.room?.status ?? null,
+        roomStatusAfter: task.roomId ? 'available' : null,
+        userId: completedByUserId,
+      });
 
       await this.auditLogService.logHousekeepingTaskCompletion(
         {
@@ -580,7 +667,7 @@ export class HousekeepingService {
       // Emit event for inventory integration (auto-deduct amenities)
       try {
         const room = updated.room || task.room;
-        if (room) {
+        if (room && !completedBefore) {
           const event: HousekeepingTaskCompletedEvent = {
             taskId: id,
             tenantId,
@@ -617,6 +704,7 @@ export class HousekeepingService {
     inspectedById: string,
     inspectedByName: string,
     tenantId: string,
+    userId?: string,
   ): Promise<any> {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID is required');
@@ -650,11 +738,183 @@ export class HousekeepingService {
         });
       }
 
+      await this.recordStatusChange({
+        tenantId,
+        taskId: id,
+        action: 'inspect',
+        fromStatus: task.status,
+        toStatus: 'inspected',
+        userId,
+      });
+
       this.logger.log(`Inspected task ${id}`);
       return updated;
     } catch (error) {
       this.logger.error(`Failed to inspect task ${id}: ${error.message}`);
       throw error;
+    }
+  }
+
+  /**
+   * ย้อนสถานะงาน 1 ขั้น (in_progress→pending, completed→in_progress, inspected→completed)
+   * ล้างข้อมูลที่ขั้นนั้นสร้างไว้ และบันทึกประวัติว่าใครย้อน เพราะอะไร
+   */
+  async revertTask(
+    id: string,
+    toStatus: string,
+    reason: string,
+    tenantId: string,
+    userId?: string,
+  ): Promise<any> {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+    const trimmedReason = reason?.trim();
+    if (!trimmedReason) {
+      throw new BadRequestException('ต้องระบุเหตุผลที่ย้อนสถานะ');
+    }
+
+    const task = await this.getTask(id, tenantId);
+    const expected = HK_REVERT_TO[task.status];
+    if (!expected) {
+      throw new BadRequestException(`งานสถานะ ${task.status} ย้อนกลับไม่ได้`);
+    }
+    if (toStatus !== expected) {
+      // หน้าจอเห็นสถานะเก่า (มีคนเปลี่ยนไปก่อนแล้ว) — ไม่ย้อนข้ามขั้นให้
+      throw new ConflictException(
+        `งานนี้อยู่สถานะ ${task.status} ย้อนได้เป็น ${expected} เท่านั้น — รีเฟรชแล้วลองใหม่`,
+      );
+    }
+
+    const roomStatusBefore: string | null = task.room?.status ?? null;
+    // ส่งงานแล้วห้องถูกปล่อยเป็น "ว่าง" — ย้อนกลับมาทำต่อ ห้องต้องกลับไปรอทำความสะอาด
+    // (คืนค่าเดิมก่อนส่งงาน ถ้าไม่รู้ใช้ dirty) แต่ถ้าห้องถูกใช้ต่อแล้ว (occupied ฯลฯ) ไม่ไปแตะ
+    let roomStatusAfter: string | null = roomStatusBefore;
+    if (task.status === 'completed' && task.roomId && roomStatusBefore === 'available') {
+      const lastComplete = await this.prisma.housekeepingTaskStatusLog.findFirst({
+        where: { tenantId, taskId: id, action: 'complete' },
+        orderBy: { createdAt: 'desc' },
+        select: { roomStatusBefore: true },
+      });
+      const previous = lastComplete?.roomStatusBefore;
+      roomStatusAfter = previous && previous !== 'available' ? previous : 'dirty';
+    }
+
+    const changedByName = await this.resolveActorName(userId, tenantId);
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const { count } = await tx.housekeepingTask.updateMany({
+        where: { id, tenantId, status: task.status },
+        data: { status: expected, ...revertClearFields(task.status) },
+      });
+      if (count === 0) {
+        throw new ConflictException('สถานะงานถูกเปลี่ยนไปแล้ว — รีเฟรชแล้วลองใหม่');
+      }
+
+      if (roomStatusAfter !== roomStatusBefore && task.roomId) {
+        await tx.room.updateMany({
+          where: { id: task.roomId, tenantId, status: 'available' },
+          data: { status: roomStatusAfter as string },
+        });
+      }
+
+      await tx.housekeepingTaskStatusLog.create({
+        data: {
+          tenantId,
+          taskId: id,
+          action: 'revert',
+          fromStatus: task.status,
+          toStatus: expected,
+          roomStatusBefore,
+          roomStatusAfter,
+          reason: trimmedReason,
+          changedById: userId ?? null,
+          changedByName,
+        },
+      });
+
+      return tx.housekeepingTask.findFirst({
+        where: { id, tenantId },
+        include: { room: true, assignedTo: true, inspectedBy: true },
+      });
+    });
+
+    this.logger.log(`Reverted task ${id}: ${task.status} → ${expected}`);
+    return updated;
+  }
+
+  /** ประวัติการเปลี่ยนสถานะ ใหม่สุดก่อน */
+  async getStatusHistory(id: string, tenantId: string): Promise<HkStatusLogEntry[]> {
+    await this.getTask(id, tenantId);
+    return this.prisma.housekeepingTaskStatusLog.findMany({
+      where: { tenantId, taskId: id },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        action: true,
+        fromStatus: true,
+        toStatus: true,
+        roomStatusBefore: true,
+        roomStatusAfter: true,
+        reason: true,
+        changedById: true,
+        changedByName: true,
+        createdAt: true,
+      },
+    });
+  }
+
+  private async hasBeenCompletedBefore(taskId: string, tenantId: string): Promise<boolean> {
+    try {
+      const prior = await this.prisma.housekeepingTaskStatusLog.count({
+        where: { tenantId, taskId, OR: [{ toStatus: 'completed' }, { fromStatus: 'completed' }] },
+      });
+      return prior > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  private async resolveActorName(userId: string | undefined, tenantId: string): Promise<string | null> {
+    if (!userId) return null;
+    try {
+      const user = await this.prisma.user.findFirst({
+        where: { id: userId, tenantId },
+        select: { firstName: true, lastName: true, email: true },
+      });
+      if (!user) return null;
+      const full = [user.firstName, user.lastName].filter(Boolean).join(' ').trim();
+      return full || user.email || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * บันทึกประวัติการเปลี่ยนสถานะ — พังแล้วไม่ล้มงานหลัก (สถานะเปลี่ยนไปแล้ว)
+   * แต่ต้อง log error ให้เห็น เพราะประวัติขาดหายคือปัญหาตรวจสอบย้อนหลัง
+   */
+  private async recordStatusChange(input: StatusLogInput): Promise<void> {
+    try {
+      const changedByName = await this.resolveActorName(input.userId, input.tenantId);
+      await this.prisma.housekeepingTaskStatusLog.create({
+        data: {
+          tenantId: input.tenantId,
+          taskId: input.taskId,
+          action: input.action,
+          fromStatus: input.fromStatus,
+          toStatus: input.toStatus,
+          roomStatusBefore: input.roomStatusBefore ?? null,
+          roomStatusAfter: input.roomStatusAfter ?? null,
+          reason: input.reason ?? null,
+          changedById: input.userId ?? null,
+          changedByName,
+        },
+      });
+    } catch (error) {
+      this.logger.error(
+        `Failed to record status log for task ${input.taskId}: ${(error as Error)?.message ?? error}`,
+      );
     }
   }
 

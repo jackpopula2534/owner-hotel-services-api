@@ -82,6 +82,7 @@ export const TENANT_SCOPED_MODELS: Readonly<Record<string, TenantScopeField>> = 
   Guest: 'tenantId',
   GuestFolio: 'tenantId',
   HousekeepingTask: 'tenantId',
+  HousekeepingTaskStatusLog: 'tenantId',
   HrAllowanceType: 'tenantId',
   HrApprovalFlow: 'tenantId',
   HrAttendance: 'tenantId',

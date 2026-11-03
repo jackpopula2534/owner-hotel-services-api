@@ -24,6 +24,7 @@ import { HousekeepingService } from './housekeeping.service';
 import { CreateHousekeepingTaskDto } from './dto/create-housekeeping-task.dto';
 import { UpdateHousekeepingTaskDto } from './dto/update-housekeeping-task.dto';
 import { CancelHousekeepingTaskDto } from './dto/cancel-housekeeping-task.dto';
+import { RevertHousekeepingTaskDto } from './dto/revert-housekeeping-task.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
@@ -181,6 +182,7 @@ export class HousekeepingController {
       id,
       updateHousekeepingTaskDto,
       user?.tenantId,
+      user?.id,
     );
 
     return {
@@ -214,6 +216,7 @@ export class HousekeepingController {
       id,
       cancelTaskDto?.reason,
       user?.tenantId,
+      user?.id,
     );
 
     return {
@@ -285,7 +288,7 @@ export class HousekeepingController {
   })
   @ApiResponse({ status: 429, description: 'Too many requests' })
   async startTask(@Param('id') id: string, @CurrentUser() user?: any): Promise<any> {
-    const task = await this.housekeepingService.startTask(id, user?.tenantId);
+    const task = await this.housekeepingService.startTask(id, user?.tenantId, user?.id);
 
     return {
       success: true,
@@ -354,12 +357,50 @@ export class HousekeepingController {
       inspectTaskDto.inspectedById,
       inspectTaskDto.inspectedByName ?? '',
       user?.tenantId,
+      user?.id,
     );
 
     return {
       success: true,
       data: task,
     };
+  }
+
+  @Patch(':id/revert')
+  @Throttle({ default: { limit: 15, ttl: 60 } })
+  @ApiOperation({ summary: 'Revert task status one step back (requires reason, recorded in history)' })
+  @ApiParam({ name: 'id', description: 'Task ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Task reverted',
+    schema: { example: { success: true, data: { id: 'task-123', status: 'in_progress' } } },
+  })
+  @ApiResponse({ status: 400, description: 'Status cannot be reverted / reason missing' })
+  @ApiResponse({ status: 409, description: 'Task status changed meanwhile or wrong target step' })
+  @ApiResponse({ status: 429, description: 'Too many requests' })
+  async revertTask(
+    @Param('id') id: string,
+    @Body() dto: RevertHousekeepingTaskDto,
+    @CurrentUser() user?: any,
+  ): Promise<any> {
+    const task = await this.housekeepingService.revertTask(
+      id,
+      dto.toStatus,
+      dto.reason,
+      user?.tenantId,
+      user?.id,
+    );
+    return { success: true, data: task };
+  }
+
+  @Get(':id/history')
+  @Throttle({ default: { limit: 60, ttl: 60 } })
+  @ApiOperation({ summary: 'Status change history of a task (newest first)' })
+  @ApiParam({ name: 'id', description: 'Task ID' })
+  @ApiResponse({ status: 200, description: 'History entries' })
+  async getHistory(@Param('id') id: string, @CurrentUser() user?: any): Promise<any> {
+    const data = await this.housekeepingService.getStatusHistory(id, user?.tenantId);
+    return { success: true, data };
   }
 
   @Get('dashboard/stats')

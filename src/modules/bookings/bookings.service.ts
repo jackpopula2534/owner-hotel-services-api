@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
+import { buildBookingListWhere } from './booking-list-filter';
 import { EmailEventsService } from '../../email/email-events.service';
 import { AuditLogService } from '../../audit-log/audit-log.service';
 import { AuditAction, AuditResource } from '../../audit-log/dto/audit-log.dto';
@@ -763,7 +764,6 @@ export class BookingsService {
   async findAll(query: any, tenantId?: string) {
     const page = parseInt(query.page) || 1;
     const limit = parseInt(query.limit) || 10;
-    const { status, guestId, roomId, propertyId, search } = query;
     const skip = (page - 1) * limit;
 
     // tenantId is required for data isolation
@@ -771,20 +771,7 @@ export class BookingsService {
       throw new BadRequestException('Tenant ID is required');
     }
 
-    const where: any = { tenantId };
-    if (status) where.status = status;
-    if (guestId) where.guestId = guestId;
-    if (roomId) where.roomId = roomId;
-    if (propertyId) where.propertyId = propertyId;
-
-    if (search) {
-      where.OR = [
-        { guestFirstName: { contains: search } },
-        { guestLastName: { contains: search } },
-        { guestEmail: { contains: search } },
-        { room: { number: { contains: search } } },
-      ];
-    }
+    const where = buildBookingListWhere(query, tenantId);
 
     try {
       const [data, total] = await Promise.all([
