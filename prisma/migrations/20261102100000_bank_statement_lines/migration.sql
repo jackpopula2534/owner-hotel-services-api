@@ -21,7 +21,7 @@ CREATE TABLE `bank_statement_lines` (
     `updatedAt` DATETIME(3) NOT NULL,
 
     UNIQUE INDEX `bank_statement_lines_tenantId_bankAccountId_fingerprint_key`(`tenantId`, `bankAccountId`, `fingerprint`),
-    INDEX `bank_statement_lines_tenantId_propertyId_bankAccountId_txnDate_idx`(`tenantId`, `propertyId`, `bankAccountId`, `txnDate`),
+    INDEX `bank_stmt_lines_tenant_prop_acct_date_idx`(`tenantId`, `propertyId`, `bankAccountId`, `txnDate`),
     INDEX `bank_statement_lines_status_idx`(`status`),
     INDEX `bank_statement_lines_journalLineId_idx`(`journalLineId`),
     INDEX `bank_statement_lines_arReceiptId_idx`(`arReceiptId`),
