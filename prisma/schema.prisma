@@ -598,28 +598,28 @@ model TableReservation {
 }
 
 model MenuCategory {
-  id           String      @id @default(uuid())
-  tenantId     String?
-  restaurantId String
-  name         String
-  description  String?
-  image        String?     @db.LongText
-  displayOrder Int         @default(0)
-  isActive     Boolean     @default(true)
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
-  icon         String?
-  color        String?
+  id             String      @id @default(uuid())
+  tenantId       String?
+  restaurantId   String
+  name           String
+  description    String?
+  image          String?     @db.LongText
+  displayOrder   Int         @default(0)
+  isActive       Boolean     @default(true)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  icon           String?
+  color          String?
   /// รายได้ที่ขายในหมวดนี้ถือเป็นชนิดไหนในสมุดรายได้ — ตัวเดียวที่แยกอาหารจากเครื่องดื่ม
   ///
   /// ค่าเริ่มต้น FOOD เพราะหมวดส่วนใหญ่เป็นอาหาร และการเดาผิดฝั่งอาหารทำให้ยอด
   /// Food Cost% เพี้ยนน้อยกว่าการเดาผิดฝั่งเครื่องดื่ม (ต้นทุนอาหารเป็นตัวเศษที่ใหญ่กว่า)
   /// ค่าที่ยอมรับจำกัดไว้ที่ FOOD | BEVERAGE | OTHER ในชั้น DTO — ดู MENU_REVENUE_TYPES
-  revenueType  RevenueType @default(FOOD)
+  revenueType    RevenueType @default(FOOD)
   /// สถานีบนจอครัว: KITCHEN | BAR · null = ตามประเภทรายได้ (BEVERAGE → BAR, อื่น ๆ → KITCHEN)
   kitchenStation String?
-  restaurant   Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
-  items        MenuItem[]
+  restaurant     Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  items          MenuItem[]
 
   @@index([tenantId])
   @@index([restaurantId])
@@ -3181,15 +3181,15 @@ model BookingAddOn {
 }
 
 model HousekeepingTask {
-  id                   String    @id @default(uuid())
+  id                   String                      @id @default(uuid())
   tenantId             String
   roomId               String
   bookingId            String?
-  type                 String    @default("daily")
-  priority             String    @default("medium")
-  status               String    @default("pending")
+  type                 String                      @default("daily")
+  priority             String                      @default("medium")
+  status               String                      @default("pending")
   scheduledFor         DateTime?
-  estimatedDuration    Int       @default(30)
+  estimatedDuration    Int                         @default(30)
   actualStartTime      DateTime?
   actualEndTime        DateTime?
   actualDuration       Int?
@@ -3203,14 +3203,15 @@ model HousekeepingTask {
   inspectedByName      String?
   inspectedAt          DateTime?
   rating               Int?
-  inspectionNotes      String?   @db.Text
-  notes                String?   @db.Text
-  createdAt            DateTime  @default(now()) @db.DateTime(6)
-  updatedAt            DateTime  @default(now()) @updatedAt @db.DateTime(6)
-  assignedTo           Staff?    @relation("AssignedStaff", fields: [assignedToId], references: [id])
-  booking              Booking?  @relation(fields: [bookingId], references: [id])
-  inspectedBy          Staff?    @relation("InspectorStaff", fields: [inspectedById], references: [id])
-  room                 Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  inspectionNotes      String?                     @db.Text
+  notes                String?                     @db.Text
+  createdAt            DateTime                    @default(now()) @db.DateTime(6)
+  updatedAt            DateTime                    @default(now()) @updatedAt @db.DateTime(6)
+  assignedTo           Staff?                      @relation("AssignedStaff", fields: [assignedToId], references: [id])
+  booking              Booking?                    @relation(fields: [bookingId], references: [id])
+  inspectedBy          Staff?                      @relation("InspectorStaff", fields: [inspectedById], references: [id])
+  room                 Room                        @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  statusLogs           HousekeepingTaskStatusLog[]
 
   @@index([roomId])
   @@index([bookingId])
@@ -3221,6 +3222,28 @@ model HousekeepingTask {
   @@index([scheduledFor])
   @@index([inspectedById], map: "housekeeping_tasks_inspectedById_fkey")
   @@map("housekeeping_tasks")
+}
+
+/// ประวัติการเปลี่ยนสถานะงานแม่บ้าน — ทุกครั้งที่เริ่ม/ส่ง/อนุมัติ/ย้อนสถานะ
+/// เพื่อตามได้ว่าใครเปลี่ยนจากอะไรเป็นอะไร เมื่อไหร่ และ (ถ้าย้อน) เพราะอะไร
+model HousekeepingTaskStatusLog {
+  id               String           @id @default(uuid())
+  tenantId         String
+  taskId           String
+  action           String // start | complete | inspect | revert | cancel
+  fromStatus       String
+  toStatus         String
+  roomStatusBefore String?
+  roomStatusAfter  String?
+  reason           String?          @db.Text
+  changedById      String?
+  changedByName    String?
+  createdAt        DateTime         @default(now()) @db.DateTime(3)
+  task             HousekeepingTask @relation(fields: [taskId], references: [id], onDelete: Cascade, map: "hk_status_logs_taskId_fkey")
+
+  @@index([tenantId, taskId, createdAt], map: "hk_status_logs_tenant_task_created_idx")
+  @@index([taskId], map: "hk_status_logs_taskId_fkey")
+  @@map("housekeeping_task_status_logs")
 }
 
 model EmployeeCodeConfig {
@@ -4539,42 +4562,42 @@ model MaterialRequisitionItem {
 }
 
 model SupplierQuote {
-  id                    String               @id @default(uuid())
+  id                    String                    @id @default(uuid())
   tenantId              String
   purchaseRequisitionId String
   supplierId            String
   quoteNumber           String?
-  status                SupplierQuoteStatus  @default(REQUESTED)
+  status                SupplierQuoteStatus       @default(REQUESTED)
   quotedDate            DateTime?
   validUntil            DateTime?
   deliveryDays          Int?
   paymentTerms          String?
-  subtotal              Decimal              @default(0.00) @db.Decimal(12, 2)
-  taxAmount             Decimal              @default(0.00) @db.Decimal(10, 2)
-  discountAmount        Decimal              @default(0.00) @db.Decimal(10, 2)
-  totalAmount           Decimal              @default(0.00) @db.Decimal(12, 2)
+  subtotal              Decimal                   @default(0.00) @db.Decimal(12, 2)
+  taxAmount             Decimal                   @default(0.00) @db.Decimal(10, 2)
+  discountAmount        Decimal                   @default(0.00) @db.Decimal(10, 2)
+  totalAmount           Decimal                   @default(0.00) @db.Decimal(12, 2)
   discountMode          PurchaseOrderDiscountMode @default(BEFORE_VAT)
-  headerDiscount        Decimal              @default(0.00) @db.Decimal(12, 2)
+  headerDiscount        Decimal                   @default(0.00) @db.Decimal(12, 2)
   headerDiscountType    PurchaseOrderDiscountType @default(AMOUNT)
-  pricesIncludeVat      Boolean              @default(false)
-  currency              String               @default("THB")
-  notes                 String?              @db.Text
+  pricesIncludeVat      Boolean                   @default(false)
+  currency              String                    @default("THB")
+  notes                 String?                   @db.Text
   attachmentUrl         String?
-  requestedAt           DateTime             @default(now())
+  requestedAt           DateTime                  @default(now())
   receivedAt            DateTime?
   selectedAt            DateTime?
   rejectedAt            DateTime?
-  rejectionReason       String?              @db.Text
-  createdAt             DateTime             @default(now())
-  updatedAt             DateTime             @updatedAt
+  rejectionReason       String?                   @db.Text
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
   requestForQuotationId String?
-  round                 Int                  @default(1)
+  round                 Int                       @default(1)
   priceComparisons      PriceComparison[]
   items                 SupplierQuoteItem[]
   accessTokens          SupplierQuoteToken[]
-  purchaseRequisition   PurchaseRequisition  @relation(fields: [purchaseRequisitionId], references: [id])
-  requestForQuotation   RequestForQuotation? @relation(fields: [requestForQuotationId], references: [id])
-  supplier              Supplier             @relation(fields: [supplierId], references: [id])
+  purchaseRequisition   PurchaseRequisition       @relation(fields: [purchaseRequisitionId], references: [id])
+  requestForQuotation   RequestForQuotation?      @relation(fields: [requestForQuotationId], references: [id])
+  supplier              Supplier                  @relation(fields: [supplierId], references: [id])
 
   @@unique([tenantId, purchaseRequisitionId, supplierId, round], map: "supplier_quotes_tenant_pr_supplier_round_key")
   @@index([tenantId])
@@ -4586,20 +4609,20 @@ model SupplierQuote {
 }
 
 model SupplierQuoteItem {
-  id              String        @id @default(uuid())
+  id              String                    @id @default(uuid())
   supplierQuoteId String
   itemId          String
   quantity        Int
-  unitPrice       Decimal       @db.Decimal(10, 2)
-  discount        Decimal       @default(0.00) @db.Decimal(10, 2)
+  unitPrice       Decimal                   @db.Decimal(10, 2)
+  discount        Decimal                   @default(0.00) @db.Decimal(10, 2)
   discountType    PurchaseOrderDiscountType @default(PERCENT)
-  taxRate         Decimal       @default(0.00) @db.Decimal(5, 2)
-  totalPrice      Decimal       @db.Decimal(12, 2)
+  taxRate         Decimal                   @default(0.00) @db.Decimal(5, 2)
+  totalPrice      Decimal                   @db.Decimal(12, 2)
   leadTimeDays    Int?
-  notes           String?       @db.Text
-  createdAt       DateTime      @default(now())
-  item            InventoryItem @relation(fields: [itemId], references: [id])
-  supplierQuote   SupplierQuote @relation(fields: [supplierQuoteId], references: [id], onDelete: Cascade)
+  notes           String?                   @db.Text
+  createdAt       DateTime                  @default(now())
+  item            InventoryItem             @relation(fields: [itemId], references: [id])
+  supplierQuote   SupplierQuote             @relation(fields: [supplierQuoteId], references: [id], onDelete: Cascade)
 
   @@index([supplierQuoteId])
   @@index([itemId])
@@ -8647,45 +8670,44 @@ model AddonPurchase {
   @@map("addon_purchases")
 }
 
-
 /// คำขอสร้าง/แก้ไขสินค้าจากฝั่งจัดซื้อ — สินค้าสร้างได้จากฝั่งคลังเท่านั้น
 /// และข้อมูลที่จัดซื้อเป็นเจ้าของ ทุกการเปลี่ยนแปลงต้องผ่านคลัง (รับทราบ / อนุมัติ)
 model ProductChangeRequest {
-  id              String                       @id @default(uuid())
-  tenantId        String
-  requestNumber   String
-  type            ProductChangeRequestType
-  status          ProductChangeRequestStatus   @default(PENDING)
+  id                 String                      @id @default(uuid())
+  tenantId           String
+  requestNumber      String
+  type               ProductChangeRequestType
+  status             ProductChangeRequestStatus  @default(PENDING)
   /// ระดับสูงสุดของฟิลด์ในคำขอ — APPROVAL ถ้ามีฟิลด์ที่กระทบสต๊อก
-  level           ProductChangeLevel
+  level              ProductChangeLevel
   /// UPDATE: สินค้าที่ขอแก้ · CREATE: สินค้าที่ถูกสร้างหลังอนุมัติ
-  itemId          String?
+  itemId             String?
   /// CREATE: ข้อมูลสินค้า + การจัดซื้อที่เสนอ · UPDATE: { field: newValue }
-  proposed        Json
+  proposed           Json
   /// UPDATE: ค่าเดิม ณ ตอนส่งคำขอ
-  baseline        Json?
+  baseline           Json?
   /// UPDATE: [{ field, from, to, level, decision }]
-  changes         Json?
+  changes            Json?
   /// CREATE: ค่าฝั่งคลังที่จัดซื้อเสนอ (ไม่ผูกมัด)
   suggestedWarehouse Json?
   /// CREATE: ค่าฝั่งคลังที่คลังยืนยันตอนอนุมัติ
-  warehouseData   Json?
-  reason          String?                      @db.Text
-  prReference     String?
-  neededBy        DateTime?
-  effectiveDate   DateTime?
-  requestedById   String
-  requestedByName String?
-  reviewedById    String?
-  reviewedByName  String?
-  reviewedAt      DateTime?
-  reviewNote      String?                      @db.Text
-  duplicateOfItemId String?
-  appliedAt       DateTime?
-  createdAt       DateTime                     @default(now())
-  updatedAt       DateTime                     @updatedAt
-  item            InventoryItem?               @relation(fields: [itemId], references: [id], onDelete: SetNull)
-  events          ProductChangeRequestEvent[]
+  warehouseData      Json?
+  reason             String?                     @db.Text
+  prReference        String?
+  neededBy           DateTime?
+  effectiveDate      DateTime?
+  requestedById      String
+  requestedByName    String?
+  reviewedById       String?
+  reviewedByName     String?
+  reviewedAt         DateTime?
+  reviewNote         String?                     @db.Text
+  duplicateOfItemId  String?
+  appliedAt          DateTime?
+  createdAt          DateTime                    @default(now())
+  updatedAt          DateTime                    @updatedAt
+  item               InventoryItem?              @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  events             ProductChangeRequestEvent[]
 
   @@unique([tenantId, requestNumber])
   @@index([tenantId, status])
