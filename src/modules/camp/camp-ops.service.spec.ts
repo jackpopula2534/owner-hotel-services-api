@@ -20,7 +20,7 @@ function opsTx(overrides: Record<string, any> = {}) {
       findFirst: jest.fn().mockResolvedValue(null),
       findMany: jest.fn().mockResolvedValue([]),
       update: jest.fn().mockImplementation(({ data }) => ({ id: 'res-1', ...data, pitch: { code: 'A1' } })),
-      findUniqueOrThrow: jest.fn(),
+      findFirstOrThrow: jest.fn(),
     },
     campOpsTask: {
       create: jest.fn().mockImplementation(({ data }) => ({ id: 'task-new', cost: null, ...data })),
@@ -143,7 +143,7 @@ describe('ReservationsService — งานหน้าลาน', () => {
       .mockResolvedValueOnce({ id: 'res-1' }) // ensureExists
       .mockResolvedValueOnce({ status: 'checked_in' }) // before
       .mockResolvedValue({ id: 'res-1', addonItems: [] }); // revenue row
-    tx.campReservation.findUniqueOrThrow = jest.fn().mockResolvedValue(stay({ status: 'checked_in', amountPaid: 1000 }));
+    tx.campReservation.findFirstOrThrow = jest.fn().mockResolvedValue(stay({ status: 'checked_in', amountPaid: 1000 }));
     tx.campReservation.update = jest
       .fn()
       .mockImplementation(({ data }) => ({ ...stay({ status: 'checked_in' }), ...data, pitch: { code: 'A1' } }));
@@ -160,7 +160,7 @@ describe('ReservationsService — งานหน้าลาน', () => {
   it('ยกเลิก No-show แขกที่เช็คอินแล้ว: จุดไปรอแม่บ้าน + เก็บเหตุผล', async () => {
     const tx = opsTx();
     tx.campReservation.findFirst = jest.fn().mockResolvedValue({ id: 'res-1' });
-    tx.campReservation.findUniqueOrThrow = jest.fn().mockResolvedValue(stay({ status: 'checked_in', amountPaid: 500, notes: null }));
+    tx.campReservation.findFirstOrThrow = jest.fn().mockResolvedValue(stay({ status: 'checked_in', amountPaid: 500, notes: null }));
     tx.campReservation.update = jest.fn().mockImplementation(({ data }) => data);
     const svc = new ReservationsService(
       tx,

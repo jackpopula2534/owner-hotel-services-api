@@ -333,6 +333,8 @@ export class PitchesService {
     const data = pitches.map((pitch) => ({
       ...pitch,
       available: pitch.status === 'available' && !bookedPitchIds.has(pitch.id),
+      // มีการจองทับช่วงนี้ — ใช้แยก "จองแล้ว" ออกจาก "ปิด/ซ่อม" ในหน้าเลือกจุด
+      booked: bookedPitchIds.has(pitch.id),
     }));
 
     return { success: true, data };

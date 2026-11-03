@@ -55,7 +55,8 @@ export class ReservationsService {
 
     const data = await this.prisma.campReservation.findMany({
       where,
-      orderBy: { checkIn: 'desc' },
+      // รายการที่บันทึกล่าสุดขึ้นก่อนเสมอ
+      orderBy: [{ createdAt: 'desc' }, { checkIn: 'desc' }],
       include: {
         pitch: { select: { id: true, code: true, zoneId: true } },
       },
@@ -717,8 +718,8 @@ export class ReservationsService {
     }
     await this.ensureExists(id, tenantId);
     const data = await this.prisma.$transaction(async (tx) => {
-      const current = await tx.campReservation.findUniqueOrThrow({
-        where: { id },
+      const current = await tx.campReservation.findFirstOrThrow({
+        where: { id, ...(tenantId ? { tenantId } : {}) },
         select: { status: true },
       });
       if (current.status === 'cancelled') {
@@ -732,8 +733,8 @@ export class ReservationsService {
   async removeCharge(id: string, chargeId: string, tenantId?: string, actorId?: string | null) {
     await this.ensureExists(id, tenantId);
     const data = await this.prisma.$transaction(async (tx) => {
-      const current = await tx.campReservation.findUniqueOrThrow({
-        where: { id },
+      const current = await tx.campReservation.findFirstOrThrow({
+        where: { id, ...(tenantId ? { tenantId } : {}) },
         include: { addonItems: true, pitch: { include: { zone: true } } },
       });
       if (current.status === 'checked_out' || current.status === 'cancelled') {
@@ -778,7 +779,8 @@ export class ReservationsService {
     actorId?: string | null,
     log = false,
   ) {
-    const current = await tx.campReservation.findUniqueOrThrow({
+    // tenant scope ห้าม findUnique — ผู้เรียกตรวจ tenant ด้วย ensureExists มาแล้ว
+    const current = await tx.campReservation.findFirstOrThrow({
       where: { id },
       include: { addonItems: true, pitch: { include: { zone: true } } },
     });
@@ -870,8 +872,8 @@ export class ReservationsService {
   async cancel(id: string, tenantId?: string, dto: CancelReservationDto = {}, actorId?: string | null) {
     await this.ensureExists(id, tenantId);
     const data = await this.prisma.$transaction(async (tx) => {
-      const reservation = await tx.campReservation.findUniqueOrThrow({
-        where: { id },
+      const reservation = await tx.campReservation.findFirstOrThrow({
+        where: { id, ...(tenantId ? { tenantId } : {}) },
         include: { addonItems: true, pitch: { select: { code: true } } },
       });
       if (reservation.status === 'cancelled') {

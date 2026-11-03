@@ -21,7 +21,7 @@ function makeTx(overrides: Record<string, unknown> = {}) {
       findFirst: jest.fn().mockResolvedValue(null), // ไม่มี clash
       create: jest.fn().mockImplementation(({ data }) => ({ id: 'res-1', ...data })),
       update: jest.fn().mockResolvedValue({ id: 'res-1', pitch: { code: 'A1' } }),
-      findUniqueOrThrow: jest
+      findFirstOrThrow: jest
         .fn()
         .mockResolvedValue({ id: 'res-1', addonItems: [], pitch: { code: 'A1' } }),
     },
@@ -273,7 +273,7 @@ describe('ReservationsService.update', () => {
 describe('ReservationsService.cancel', () => {
   it('คืน stock อุปกรณ์กลับคลังตอนยกเลิก', async () => {
     const tx = makeTx();
-    tx.campReservation.findUniqueOrThrow = jest.fn().mockResolvedValue({
+    tx.campReservation.findFirstOrThrow = jest.fn().mockResolvedValue({
       id: 'res-1',
       addonItems: [{ addonId: 'addon-1', qty: 2 }],
       pitch: { code: 'A1' },
@@ -288,7 +288,7 @@ describe('ReservationsService.cancel', () => {
 
   it('ดึงรายได้ที่เคยลงไว้กลับ ในทรานแซกชันเดียวกับการยกเลิก', async () => {
     const tx = makeTx();
-    tx.campReservation.findUniqueOrThrow = jest.fn().mockResolvedValue({
+    tx.campReservation.findFirstOrThrow = jest.fn().mockResolvedValue({
       id: 'res-1',
       tenantId: 'tenant-1',
       addonItems: [],
