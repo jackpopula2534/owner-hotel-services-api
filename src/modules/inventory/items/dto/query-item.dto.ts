@@ -1,6 +1,6 @@
 import { IsOptional, IsString, IsInt, IsBoolean, IsEnum, Min, Max } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { InventoryItemTypeEnum } from './create-item.dto';
 
 export enum SortField {
@@ -8,8 +8,37 @@ export enum SortField {
   NAME = 'name',
   SKU = 'sku',
   TOTAL_STOCK = 'totalStock',
+  REORDER_POINT = 'reorderPoint',
   UPDATED_AT = 'updatedAt',
 }
+
+/** สถานะสต็อกรวม (ตามคลังที่กรอง ถ้ามี) — นิยามเดียวกับ lowStock/summary: low = 0 < คงเหลือ < จุดสั่งซื้อ */
+export enum StockStatusFilter {
+  OK = 'ok',
+  LOW = 'low',
+  OUT = 'out',
+}
+
+/**
+ * query string เป็นข้อความเสมอ และ main.ts เปิด enableImplicitConversion ไว้
+ * `@Type(() => Boolean)` จึงแปลง "false" เป็น true (สตริงไม่ว่าง) — ตัวกรอง "ปิดใช้งาน" เลยได้ของที่เปิดอยู่
+ * แปลงเองจากค่าตัวอักษรแทน
+ */
+const toQueryBoolean = ({
+  obj,
+  key,
+  value: converted,
+}: {
+  obj: Record<string, unknown>;
+  key: string;
+  value: unknown;
+}): unknown => {
+  // implicit conversion รันก่อน @Transform และเปลี่ยน "false" เป็น true ไปแล้ว — อ่านค่าดิบจาก obj
+  const value = obj?.[key] ?? converted;
+  if (value === true || value === 'true' || value === '1') return true;
+  if (value === false || value === 'false' || value === '0') return false;
+  return value;
+};
 
 export enum SortOrder {
   ASC = 'asc',
@@ -59,8 +88,8 @@ export class QueryItemDto {
     example: true,
   })
   @IsOptional()
+  @Transform(toQueryBoolean)
   @IsBoolean()
-  @Type(() => Boolean)
   isActive?: boolean;
 
   @ApiPropertyOptional({
@@ -68,9 +97,31 @@ export class QueryItemDto {
     example: true,
   })
   @IsOptional()
+  @Transform(toQueryBoolean)
   @IsBoolean()
-  @Type(() => Boolean)
   isPerishable?: boolean;
+
+  @ApiPropertyOptional({
+    enum: StockStatusFilter,
+    description: 'กรองตามสถานะสต็อก: ok = ปกติ, low = ต่ำกว่าจุดสั่งซื้อ, out = หมด',
+  })
+  @IsOptional()
+  @IsEnum(StockStatusFilter)
+  stockStatus?: StockStatusFilter;
+
+  @ApiPropertyOptional({
+    description: 'true = เฉพาะสินค้าที่ยังไม่ตั้งจุดสั่งซื้อ (reorderPoint = 0)',
+  })
+  @IsOptional()
+  @Transform(toQueryBoolean)
+  @IsBoolean()
+  noReorderPoint?: boolean;
+
+  @ApiPropertyOptional({ description: 'true = เฉพาะสินค้าที่ยังไม่จัดหมวดหมู่' })
+  @IsOptional()
+  @Transform(toQueryBoolean)
+  @IsBoolean()
+  uncategorized?: boolean;
 
   @ApiPropertyOptional({
     enum: InventoryItemTypeEnum,

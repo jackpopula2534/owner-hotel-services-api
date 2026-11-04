@@ -9,7 +9,7 @@ import { PrismaService } from '@/prisma/prisma.service';
 import { assertProcurementOwnedFieldsUnchanged } from '../product-change-requests/product-change-access';
 import { CreateItemDto } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
-import { QueryItemDto, SortField, SortOrder } from './dto/query-item.dto';
+import { QueryItemDto, SortField, SortOrder, StockStatusFilter } from './dto/query-item.dto';
 import { SearchItemDto } from './dto/search-item.dto';
 import { ScanBarcodeDto } from './dto/scan-barcode.dto';
 
@@ -52,6 +52,14 @@ export interface ItemWithStock {
   category: { id: string; name: string } | null;
   totalStock: number;
   lowStock: boolean;
+  /** มูลค่าคงเหลือรวม (ตามคลังที่กรอง ถ้ามี) */
+  stockValue: number;
+  /** คลังที่มีแถวสต็อกของสินค้านี้ เรียงจากยอดมากไปน้อย */
+  stockWarehouses: { id: string; name: string; quantity: number }[];
+  /** lot ที่ยังมีของ (ACTIVE, remainingQty > 0) */
+  activeLotCount: number;
+  /** วันหมดอายุที่ใกล้ที่สุดของ lot ที่ยังมีของ — null = ไม่มี lot ที่มีวันหมดอายุ */
+  nearestExpiry: Date | null;
 }
 
 export interface ItemSearchResult {
@@ -104,6 +112,20 @@ export interface StockSummary {
   totalValue: number;
   lowStockCount: number;
   outOfStockCount: number;
+  /** สินค้าที่จุดสั่งซื้อเป็น 0 — ระบบจะไม่เตือนใกล้หมดจนกว่าของหมด */
+  noReorderPointCount: number;
+  /** สินค้าที่ยังไม่อยู่ในหมวดใด */
+  uncategorizedCount: number;
+}
+
+/**
+ * สถานะสต็อกจากยอดรวม — ใช้ที่เดียวทั้งตัวกรองรายการและตัวนับ summary ให้เลขตรงกัน
+ * ยอด 0 หรือติดลบ = หมด, ต่ำกว่าจุดสั่งซื้อ = ใกล้หมด (จุดสั่งซื้อ 0 จึงไม่มีวันใกล้หมด)
+ */
+export function stockStatusOf(totalStock: number, reorderPoint: number): StockStatusFilter {
+  if (totalStock <= 0) return StockStatusFilter.OUT;
+  if (totalStock < reorderPoint) return StockStatusFilter.LOW;
+  return StockStatusFilter.OK;
 }
 
 @Injectable()
@@ -193,6 +215,37 @@ export class ItemsService {
         where.warehouseStocks = { some: { warehouseId: query.warehouseId } };
       }
 
+      if (query.noReorderPoint) {
+        where.reorderPoint = { lte: 0 };
+      }
+
+      if (query.uncategorized) {
+        where.categoryId = null;
+      }
+
+      // สถานะสต็อกคิดจากยอดรวมของหลายแถว จึงกรองใน where ตรง ๆ ไม่ได้ —
+      // หา id ที่เข้าเงื่อนไขก่อน แล้วค่อยแบ่งหน้า (นิยามเดียวกับ lowStock และ getStockSummary)
+      if (query.stockStatus) {
+        const candidates = await this.prisma.inventoryItem.findMany({
+          where,
+          select: {
+            id: true,
+            reorderPoint: true,
+            warehouseStocks: {
+              ...(query.warehouseId ? { where: { warehouseId: query.warehouseId } } : {}),
+              select: { quantity: true },
+            },
+          },
+        });
+        const ids = candidates
+          .filter((c) => {
+            const qty = c.warehouseStocks.reduce((sum, ws) => sum + ws.quantity, 0);
+            return stockStatusOf(qty, c.reorderPoint) === query.stockStatus;
+          })
+          .map((c) => c.id);
+        where.id = { in: ids };
+      }
+
       // Get total count
       const total = await this.prisma.inventoryItem.count({ where });
 
@@ -207,7 +260,11 @@ export class ItemsService {
             // Scope the stock rows to the selected warehouse so totalStock
             // reflects that warehouse only; otherwise aggregate across all.
             ...(query.warehouseId ? { where: { warehouseId: query.warehouseId } } : {}),
-            select: { quantity: true },
+            select: {
+              quantity: true,
+              totalValue: true,
+              warehouse: { select: { id: true, name: true } },
+            },
           },
         },
         skip,
@@ -218,14 +275,39 @@ export class ItemsService {
             : { [sort]: order },
       });
 
+      // lot ที่ยังมีของของสินค้าในหน้านี้ — นับ + วันหมดอายุที่ใกล้สุด (คิวรีเดียวทั้งหน้า)
+      const lotStats = items.length
+        ? await this.prisma.inventoryLot.groupBy({
+            by: ['itemId'],
+            where: {
+              tenantId,
+              itemId: { in: items.map((i) => i.id) },
+              status: 'ACTIVE',
+              remainingQty: { gt: 0 },
+              ...(query.warehouseId ? { warehouseId: query.warehouseId } : {}),
+            },
+            _count: { _all: true },
+            _min: { expiryDate: true },
+          })
+        : [];
+      const lotsByItem = new Map(lotStats.map((l) => [l.itemId, l]));
+
       // Map items and calculate totals
       const data: ItemWithStock[] = items.map((item) => {
         const totalStock = item.warehouseStocks.reduce((sum, ws) => sum + ws.quantity, 0);
+        const stockValue = item.warehouseStocks.reduce((sum, ws) => sum + Number(ws.totalValue), 0);
+        const lots = lotsByItem.get(item.id);
         return {
           ...item,
           category: item.category,
           totalStock,
           lowStock: totalStock < item.reorderPoint,
+          stockValue: Number(stockValue.toFixed(2)),
+          stockWarehouses: item.warehouseStocks
+            .map((ws) => ({ id: ws.warehouse.id, name: ws.warehouse.name, quantity: ws.quantity }))
+            .sort((a, b) => b.quantity - a.quantity),
+          activeLotCount: lots?._count._all ?? 0,
+          nearestExpiry: lots?._min.expiryDate ?? null,
         };
       });
 
@@ -627,6 +709,7 @@ export class ItemsService {
           ...(dto.brand !== undefined && { brand: dto.brand }),
           ...(dto.imageUrl !== undefined && { imageUrl: dto.imageUrl }),
           ...(dto.isPerishable !== undefined && { isPerishable: dto.isPerishable }),
+          ...(dto.isActive !== undefined && { isActive: dto.isActive }),
           ...(dto.defaultShelfLifeDays !== undefined && {
             defaultShelfLifeDays: dto.defaultShelfLifeDays,
           }),
@@ -671,10 +754,7 @@ export class ItemsService {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      this.logger.error(
-        `Error setting image for item ${id}: ${error.message}`,
-        error.stack,
-      );
+      this.logger.error(`Error setting image for item ${id}: ${error.message}`, error.stack);
       throw error;
     }
   }
@@ -782,6 +862,8 @@ export class ItemsService {
       let totalValue = 0;
       let lowStockCount = 0;
       let outOfStockCount = 0;
+      let noReorderPointCount = 0;
+      let uncategorizedCount = 0;
 
       items.forEach((item) => {
         let itemTotalStock = 0;
@@ -796,11 +878,14 @@ export class ItemsService {
 
         totalValue += itemTotalValue;
 
-        if (itemTotalStock === 0) {
+        const status = stockStatusOf(itemTotalStock, item.reorderPoint);
+        if (status === StockStatusFilter.OUT) {
           outOfStockCount++;
-        } else if (itemTotalStock < item.reorderPoint) {
+        } else if (status === StockStatusFilter.LOW) {
           lowStockCount++;
         }
+        if (item.reorderPoint <= 0) noReorderPointCount++;
+        if (!item.categoryId) uncategorizedCount++;
       });
 
       return {
@@ -808,6 +893,8 @@ export class ItemsService {
         totalValue: Number(totalValue.toFixed(2)),
         lowStockCount,
         outOfStockCount,
+        noReorderPointCount,
+        uncategorizedCount,
       };
     } catch (error) {
       this.logger.error(`Error getting stock summary: ${error.message}`, error.stack);
