@@ -40,6 +40,38 @@ export interface PaginatedResponse<T> {
   };
 }
 
+export interface GrQcSummary {
+  total: number;
+  pending: number;
+  passed: number;
+  partialFail: number;
+  failed: number;
+  /** ใบ QC ที่ยังรอตรวจใบแรก (ไว้ลิงก์ไปหน้าตรวจ) */
+  pendingRecordId: string | null;
+  /** ใบ QC แรก (ไว้ลิงก์ไปดูผล) */
+  firstRecordId: string | null;
+}
+
+/** Roll the GR's QC records up into counts per status. */
+export function summarizeGrQc(
+  records: Array<{ id: string; status?: string | null }> | undefined | null,
+): GrQcSummary {
+  const all = Array.isArray(records) ? records : [];
+  const isPending = (r: { status?: string | null }) => !r.status || r.status === 'PENDING';
+  // Rows synthesised right after create carry an empty id — count them, never link them.
+  const list = all.filter((r) => r.id);
+  const count = (st: string) => all.filter((r) => r.status === st).length;
+  return {
+    total: all.length,
+    pending: all.filter(isPending).length,
+    passed: count('PASSED'),
+    partialFail: count('PARTIAL_FAIL'),
+    failed: count('FAILED'),
+    pendingRecordId: list.find(isPending)?.id ?? null,
+    firstRecordId: list[0]?.id ?? null,
+  };
+}
+
 export interface GoodsReceiveDetail {
   id: string;
   tenantId: string;
@@ -65,6 +97,8 @@ export interface GoodsReceiveDetail {
     pendingQty: number;
     percent: number;
   };
+  /** QC ของใบนี้ — ใช้บอกว่าใบรับอยู่ขั้นไหน (รอตรวจ / ตรวจแล้วรอยืนยันรับเข้า) */
+  qcSummary: GrQcSummary;
   // Extended PO snapshot (only set when GR is linked to a PO)
   poSnapshot?: {
     id: string;
@@ -195,6 +229,13 @@ interface PreparedSlip {
   sizeBytes: number;
 }
 
+/** เทมเพลต QC ที่สินค้าตัวหนึ่งจะใช้ตอนรับเข้า และมาจากชั้นไหนของ cascade */
+export interface ResolvedQcTemplate {
+  templateId: string;
+  templateName: string;
+  source: 'ITEM_DEFAULT' | 'ITEM' | 'CATEGORY';
+}
+
 @Injectable()
 export class GoodsReceivesService {
   private readonly logger = new Logger(GoodsReceivesService.name);
@@ -307,7 +348,7 @@ export class GoodsReceivesService {
             },
           },
           items: true,
-          qcRecords: { select: { id: true } },
+          qcRecords: { select: { id: true, status: true } },
         },
         orderBy: { [sort]: order },
         skip,
@@ -379,7 +420,7 @@ export class GoodsReceivesService {
             },
           },
         },
-        qcRecords: { select: { id: true } },
+        qcRecords: { select: { id: true, status: true } },
         // เรียงตามเวลาที่แนบ เพื่อให้ลำดับสลิปตรงกับตอนที่ผู้ใช้เลือกไฟล์
         attachments: { orderBy: { uploadedAt: 'asc' } },
       },
@@ -685,7 +726,7 @@ export class GoodsReceivesService {
         items: grItems,
         // Synthetic array — mapToDetail only needs length > 0 to set requiresQC/qcPending.
         // Real IDs are available via findOne; this avoids an extra round-trip.
-        qcRecords: Array.from({ length: qcRecordsCreated }, () => ({ id: '' })),
+        qcRecords: Array.from({ length: qcRecordsCreated }, () => ({ id: '', status: 'PENDING' })),
       });
     });
 
@@ -1061,7 +1102,7 @@ export class GoodsReceivesService {
             item: { select: { id: true, name: true, sku: true } },
           },
         },
-        qcRecords: { select: { id: true } },
+        qcRecords: { select: { id: true, status: true } },
       },
     });
 
@@ -1088,6 +1129,119 @@ export class GoodsReceivesService {
    * double-creation. If the tx rolls back the QC records roll back too.
    */
   /**
+   * เทมเพลต QC ของสินค้าแต่ละตัว — กฎเดียวกับตอนบันทึกใบรับจริง (cascade):
+   *   1. inventoryItem.defaultQCTemplateId   2. เทมเพลตระดับสินค้า   3. เทมเพลตระดับหมวด
+   * ไม่มีในแผนที่ = ไม่ต้อง QC (รับแล้วเข้าสต็อกทันที)
+   *
+   * ใช้ทั้งตอนสร้างใบรับ และหน้า "สร้างใบรับ" ที่ต้องบอกผู้ใช้ล่วงหน้า — ห้ามแยกตรรกะสองที่
+   */
+  async resolveQcTemplates(
+    db: any,
+    tenantId: string,
+    items: Array<{ id: string; categoryId: string | null; defaultQCTemplateId: string | null }>,
+  ): Promise<Map<string, ResolvedQcTemplate>> {
+    const result = new Map<string, ResolvedQcTemplate>();
+    if (items.length === 0) return result;
+    const itemIds = items.map((i) => i.id);
+    const categoryIds = Array.from(
+      new Set(items.map((i) => i.categoryId).filter((c): c is string => !!c)),
+    );
+    const defaultIds = Array.from(
+      new Set(items.map((i) => i.defaultQCTemplateId).filter((c): c is string => !!c)),
+    );
+
+    const [defaults, itemTemplates, categoryTemplates] = await Promise.all([
+      defaultIds.length
+        ? db.qCTemplate.findMany({
+            where: { tenantId, id: { in: defaultIds } },
+            select: { id: true, name: true },
+          })
+        : Promise.resolve([]),
+      db.qCTemplate.findMany({
+        where: { tenantId, isActive: true, appliesTo: 'ITEM', itemId: { in: itemIds } },
+        select: { id: true, name: true, itemId: true },
+      }),
+      categoryIds.length
+        ? db.qCTemplate.findMany({
+            where: {
+              tenantId,
+              isActive: true,
+              appliesTo: 'CATEGORY',
+              categoryId: { in: categoryIds },
+            },
+            select: { id: true, name: true, categoryId: true },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const defaultMap = new Map<string, string>(defaults.map((t: any) => [t.id, t.name]));
+    const itemMap = new Map<string, { id: string; name: string }>(
+      itemTemplates.map((t: any) => [t.itemId, { id: t.id, name: t.name }]),
+    );
+    const categoryMap = new Map<string, { id: string; name: string }>(
+      categoryTemplates.map((t: any) => [t.categoryId, { id: t.id, name: t.name }]),
+    );
+
+    for (const item of items) {
+      if (item.defaultQCTemplateId) {
+        // ค่าที่ตั้งไว้ที่สินค้าชนะเสมอ (พฤติกรรมเดิมของการบันทึกใบรับ)
+        result.set(item.id, {
+          templateId: item.defaultQCTemplateId,
+          templateName: defaultMap.get(item.defaultQCTemplateId) ?? 'เทมเพลตประจำสินค้า',
+          source: 'ITEM_DEFAULT',
+        });
+        continue;
+      }
+      const byItem = itemMap.get(item.id);
+      if (byItem) {
+        result.set(item.id, { templateId: byItem.id, templateName: byItem.name, source: 'ITEM' });
+        continue;
+      }
+      const byCategory = item.categoryId ? categoryMap.get(item.categoryId) : undefined;
+      if (byCategory) {
+        result.set(item.id, {
+          templateId: byCategory.id,
+          templateName: byCategory.name,
+          source: 'CATEGORY',
+        });
+      }
+    }
+    return result;
+  }
+
+  /** หน้า "สร้างใบรับ" — สินค้าแต่ละตัวต้องผ่าน QC ไหม ก่อนผู้ใช้กดบันทึก */
+  async qcPreview(
+    tenantId: string,
+    itemIds: string[],
+  ): Promise<
+    Array<{
+      itemId: string;
+      requiresQC: boolean;
+      templateId: string | null;
+      templateName: string | null;
+      source: ResolvedQcTemplate['source'] | null;
+    }>
+  > {
+    const ids = Array.from(new Set(itemIds.filter(Boolean))).slice(0, 200);
+    if (ids.length === 0) return [];
+    const items = await this.prisma.inventoryItem.findMany({
+      where: { tenantId, id: { in: ids } },
+      select: { id: true, categoryId: true, defaultQCTemplateId: true },
+    });
+    const templates = await this.resolveQcTemplates(this.prisma, tenantId, items);
+    return ids.map((itemId) => {
+      const t = templates.get(itemId);
+      return {
+        itemId,
+        requiresQC: Boolean(t),
+        templateId: t?.templateId ?? null,
+        templateName: t?.templateName ?? null,
+        source: t?.source ?? null,
+      };
+    });
+  }
+
+  /**
    * Returns the number of QC records actually created.
    * 0 means no matching template was found → caller should fast-path to accept.
    */
@@ -1106,53 +1260,20 @@ export class GoodsReceivesService {
     const qcCandidateIds = Array.from(new Set(sourceItems.map((it) => it.itemId)));
     if (qcCandidateIds.length === 0) return 0;
 
-    // Pre-load all candidate templates in two round-trips:
-    //   1. ITEM-scoped templates for any of these items
-    //   2. CATEGORY-scoped templates for any of these items' categories
-    const categoryIds = Array.from(
-      new Set(
-        qcCandidateIds.map((id) => invItemMap.get(id)?.categoryId).filter((c): c is string => !!c),
-      ),
-    );
-
-    const [itemTemplates, categoryTemplates] = await Promise.all([
-      tx.qCTemplate.findMany({
-        where: {
-          tenantId,
-          isActive: true,
-          appliesTo: 'ITEM',
-          itemId: { in: qcCandidateIds },
-        },
-        select: { id: true, itemId: true },
-      }),
-      categoryIds.length
-        ? tx.qCTemplate.findMany({
-            where: {
-              tenantId,
-              isActive: true,
-              appliesTo: 'CATEGORY',
-              categoryId: { in: categoryIds },
-            },
-            select: { id: true, categoryId: true },
-          })
-        : Promise.resolve([] as Array<{ id: string; categoryId: string }>),
-    ]);
-
-    const itemTemplateMap = new Map<string, string>(
-      itemTemplates.map((t: any) => [t.itemId, t.id]),
-    );
-    const categoryTemplateMap = new Map<string, string>(
-      categoryTemplates.map((t: any) => [t.categoryId, t.id]),
+    const templates = await this.resolveQcTemplates(
+      tx,
+      tenantId,
+      qcCandidateIds.map((id) => ({
+        id,
+        categoryId: invItemMap.get(id)?.categoryId ?? null,
+        defaultQCTemplateId: invItemMap.get(id)?.defaultQCTemplateId ?? null,
+      })),
     );
 
     let createdCount = 0;
 
     for (const itemId of qcCandidateIds) {
-      const inv = invItemMap.get(itemId);
-      const templateId =
-        inv?.defaultQCTemplateId ??
-        itemTemplateMap.get(itemId) ??
-        (inv?.categoryId ? categoryTemplateMap.get(inv.categoryId) : undefined);
+      const templateId = templates.get(itemId)?.templateId;
 
       if (!templateId) {
         // No template → item doesn't need QC. This is normal for items that
@@ -1432,7 +1553,7 @@ export class GoodsReceivesService {
             items: true,
             warehouse: true,
             purchaseOrder: { include: { items: true } },
-            qcRecords: { select: { id: true } },
+            qcRecords: { select: { id: true, status: true } },
           },
         });
         return fresh;
@@ -1508,7 +1629,7 @@ export class GoodsReceivesService {
               item: { select: { id: true, name: true, sku: true, unit: true, requiresQC: true } },
             },
           },
-          qcRecords: { select: { id: true } },
+          qcRecords: { select: { id: true, status: true } },
         },
       });
       return fresh;
@@ -1726,6 +1847,7 @@ export class GoodsReceivesService {
       requiresQC: Array.isArray(receive.qcRecords) && receive.qcRecords.length > 0,
       qcPending:
         Array.isArray(receive.qcRecords) && receive.qcRecords.length > 0 && !receive.inspectedAt,
+      qcSummary: summarizeGrQc(receive.qcRecords),
       itemCount: items.length,
       totalReceivedQty,
       totalRejectedQty,

@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { IntegrationsService } from '../../integrations/integrations.service';
 import { PlanRecipeRequisitionDto } from './dto/recipe-requisition.dto';
+import { convertToStockUnit } from '../common/unit-conversion';
 import {
   REQUISITION_INTEGRATION_KEY,
   REQUISITION_OFF_MESSAGE,
@@ -96,11 +97,21 @@ export class RecipeRequisitionService {
           continue;
         }
 
+        // แปลงเป็นหน่วยที่คลังเก็บ — ยอดคงเหลือ/ยอดเบิกต้องอยู่หน่วยเดียวกัน
+        const conv = convertToStockUnit(need, ing.unit, String(ing.item.unit));
+        if (!conv.ok) {
+          const name = `${ing.item.name} (${conv.reason})`;
+          if (!unlinked.has(name)) unlinked.set(name, new Set());
+          unlinked.get(name)!.add(recipe.menuItem.name);
+          continue;
+        }
+        const needStock = conv.quantity;
+
         const line = byItem.get(ing.itemId) ?? {
           itemId: ing.itemId,
           itemName: ing.item.name,
           sku: ing.item.sku,
-          unit: ing.unit ?? String(ing.item.unit),
+          unit: String(ing.item.unit),
           requiredQty: 0,
           onHandQty: 0,
           shortageQty: 0,
@@ -109,8 +120,8 @@ export class RecipeRequisitionService {
           enough: true,
           usedBy: [],
         };
-        line.requiredQty += need;
-        line.usedBy.push({ menuItemName: recipe.menuItem.name, qty: round3(need) });
+        line.requiredQty += needStock;
+        line.usedBy.push({ menuItemName: recipe.menuItem.name, qty: round3(needStock) });
         byItem.set(ing.itemId, line);
       }
     }
@@ -164,7 +175,9 @@ export class RecipeRequisitionService {
     const short = lines.filter((l) => l.suggestedQty > 0 && !l.enough).length;
     if (short > 0) warnings.push(`มี ${short} รายการที่คลังต้นทางมีของไม่พอ`);
     if (unlinked.size > 0) {
-      warnings.push(`มีวัตถุดิบ ${unlinked.size} รายการที่ยังไม่ผูกกับสินค้าในคลัง จึงเบิกไม่ได้`);
+      warnings.push(
+        `มีวัตถุดิบ ${unlinked.size} รายการที่ยังไม่ผูกกับสินค้าในคลังหรือแปลงหน่วยไม่ได้ จึงเบิกไม่ได้`,
+      );
     }
 
     return {

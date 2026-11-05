@@ -22,8 +22,14 @@
  */
 import { round2 } from '@/common/utils/bangkok-day.util';
 import { PrismaService } from '@/prisma/prisma.service';
+import { convertToStockUnit } from '@/modules/inventory/common/unit-conversion';
 
-export type MenuItemCostSource = 'RECIPE' | 'MENU_ITEM' | 'NONE';
+/**
+ * STOCK — เมนูสำเร็จรูปที่ผูกสินค้าคลัง 1:1 ใช้ต้นทุนเฉลี่ยของสินค้าตัวนั้นตรง ๆ
+ * RECIPE — คิดจากสูตร × ต้นทุนเฉลี่ยวัตถุดิบ
+ * MENU_ITEM — ต้นทุนที่คีย์ไว้เองในเมนู (ใช้เมื่อคิดจากคลังไม่ได้)
+ */
+export type MenuItemCostSource = 'STOCK' | 'RECIPE' | 'MENU_ITEM' | 'NONE';
 
 export interface MenuItemCost {
   /** ชื่อจานตามเมนู ณ ตอนคิด — ใช้แทนการเก็บ id ลงคอลัมน์ชื่อ */
@@ -36,6 +42,11 @@ export interface MenuItemCost {
    * ถ้ารายการนี้ไม่ว่าง แปลว่า `costPerUnit` ต่ำกว่าความจริง
    */
   missingIngredients: string[];
+  /**
+   * วัตถุดิบที่ปิดบิลแล้ว **ตัดสต็อกไม่ได้** — ไม่ได้ผูกสินค้าคลัง หรือหน่วยในสูตรแปลง
+   * เป็นหน่วยของคลังไม่ได้ (ต่างจาก missingIngredients ที่รวม "ยังไม่มีราคาทุน" ด้วย)
+   */
+  unstockedIngredients: string[];
 }
 
 interface StockCost {
@@ -99,6 +110,7 @@ export async function menuItemCosts(
       id: true,
       name: true,
       cost: true,
+      inventoryItemId: true,
       recipe: {
         select: {
           servings: true,
@@ -117,17 +129,33 @@ export async function menuItemCosts(
     },
   });
 
-  const wantedItemIds = menuItems.flatMap(
-    (menuItem) =>
-      menuItem.recipe?.ingredients
-        .map((ingredient) => ingredient.item?.id)
-        .filter((id): id is string => Boolean(id)) ?? [],
-  );
+  const wantedItemIds = menuItems.flatMap((menuItem) => [
+    ...(menuItem.inventoryItemId ? [menuItem.inventoryItemId] : []),
+    ...(menuItem.recipe?.ingredients
+      .map((ingredient) => ingredient.item?.id)
+      .filter((id): id is string => Boolean(id)) ?? []),
+  ]);
   const unitCost = await unitCostByItem(prisma, tenantId, wantedItemIds);
 
   for (const menuItem of menuItems) {
     const standardCost = menuItem.cost === null ? null : Number(menuItem.cost);
     const ingredients = menuItem.recipe?.ingredients ?? [];
+
+    // ของสำเร็จรูปผูกคลัง 1:1 — ต้นทุนจริงคือต้นทุนเฉลี่ยของสินค้าตัวนั้น ณ ตอนนี้
+    // (ค่าใน menu_items.cost เป็นแค่ภาพถ่ายตอนกดผูก ต้นทุนเปลี่ยนแล้วไม่ตามมา)
+    if (menuItem.inventoryItemId) {
+      const stockCost = unitCost.get(menuItem.inventoryItemId);
+      if (stockCost !== undefined) {
+        result.set(menuItem.id, {
+          name: menuItem.name,
+          costPerUnit: round2(stockCost),
+          source: 'STOCK',
+          missingIngredients: [],
+          unstockedIngredients: [],
+        });
+        continue;
+      }
+    }
 
     if (ingredients.length === 0) {
       result.set(menuItem.id, {
@@ -135,26 +163,42 @@ export async function menuItemCosts(
         costPerUnit: standardCost ?? 0,
         source: standardCost === null ? 'NONE' : 'MENU_ITEM',
         missingIngredients: [],
+        unstockedIngredients: [],
       });
       continue;
     }
 
     const missingIngredients: string[] = [];
+    const unstockedIngredients: string[] = [];
     let recipeCost = 0;
 
     for (const ingredient of ingredients) {
       const quantity = ingredient.quantity === null ? null : Number(ingredient.quantity);
-      const perUnit = ingredient.item ? unitCost.get(ingredient.item.id) : undefined;
-      // หน่วยของสูตรต้องตรงกับหน่วยนับของสินค้า ไม่งั้นคูณกันไม่ได้ (ดูหมายเหตุหัวไฟล์)
-      const sameUnit = ingredient.item ? ingredient.unit === ingredient.item.unit : false;
-
-      if (!quantity || quantity <= 0 || perUnit === undefined || !sameUnit) {
+      if (!ingredient.item) {
+        missingIngredients.push(ingredient.name);
+        unstockedIngredients.push(ingredient.name);
+        continue;
+      }
+      // avgCost เป็นราคาต่อหน่วยของคลัง — แปลงปริมาณในสูตรให้เป็นหน่วยนั้นก่อน
+      // แปลงไม่ได้ (ช้อนโต๊ะ → กิโล) ห้ามเดา: ข้ามและรายงานชื่อ (ดูหมายเหตุหัวไฟล์)
+      const wastage = 1 + Number(ingredient.wastagePercent) / 100;
+      const conv = convertToStockUnit(
+        (quantity ?? 0) * wastage,
+        ingredient.unit,
+        ingredient.item.unit,
+      );
+      if (!conv.ok) {
+        missingIngredients.push(ingredient.name);
+        unstockedIngredients.push(ingredient.name);
+        continue;
+      }
+      const perUnit = unitCost.get(ingredient.item.id);
+      if (!quantity || quantity <= 0 || perUnit === undefined) {
         missingIngredients.push(ingredient.name);
         continue;
       }
 
-      const wastage = 1 + Number(ingredient.wastagePercent) / 100;
-      recipeCost += quantity * wastage * perUnit;
+      recipeCost += conv.quantity * perUnit;
     }
 
     // สูตรหนึ่งอาจได้หลายจาน ต้นทุนที่ต้องการคือต่อจาน
@@ -169,6 +213,7 @@ export async function menuItemCosts(
         costPerUnit: round2(standardCost),
         source: 'MENU_ITEM',
         missingIngredients,
+        unstockedIngredients,
       });
       continue;
     }
@@ -178,6 +223,7 @@ export async function menuItemCosts(
       costPerUnit: round2(perServing),
       source: noneCosted ? 'NONE' : 'RECIPE',
       missingIngredients,
+      unstockedIngredients,
     });
   }
 

@@ -583,7 +583,7 @@ describe('PeriodCloseService.closePeriod', () => {
       expect(dataOf(foodCostAnalysis.create)[0].costPerUnit).toBe(175);
     });
 
-    it('หน่วยในสูตรไม่ตรงกับหน่วยนับในคลัง = ข้ามไป ไม่แปลงหน่วยแบบเดา', async () => {
+    it('หน่วยในสูตรต่างมิติกับหน่วยนับในคลัง = ข้ามไป ไม่แปลงหน่วยแบบเดา', async () => {
       const { close, foodCostAnalysis } = makeService([orderRow('ord-1', 250, '2026-08-05')], {
         orders: [
           { id: 'ord-1', items: [{ menuItemId: 'menu-mixed', quantity: 1, unitPrice: 250 }] },
@@ -608,7 +608,7 @@ describe('PeriodCloseService.closePeriod', () => {
                 {
                   name: 'เกลือ',
                   quantity: 5,
-                  unit: 'G',
+                  unit: 'ช้อนชา', // ปริมาตร → น้ำหนัก แปลงไม่ได้
                   wastagePercent: 0,
                   itemId: 'ing-salt',
                   item: { id: 'ing-salt', unit: 'KG' },

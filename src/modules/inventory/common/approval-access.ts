@@ -43,6 +43,8 @@ export interface ApprovalActor {
   userId: string;
   tenantId: string;
   role: string;
+  /** ระบบที่ token ล็อกอินเข้ามา (จาก JWT) — undefined = ไม่ทราบ (token เก่า) */
+  systemContext?: string;
 }
 
 const DOC_LABEL: Record<ProcurementApprovePermission, string> = {

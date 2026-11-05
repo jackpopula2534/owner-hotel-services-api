@@ -76,6 +76,26 @@ export class CreateChecklistItemDto {
   @IsInt()
   @Min(0)
   orderIndex?: number = 0;
+
+  @ApiPropertyOptional({
+    description: 'วิธีตรวจ — แสดงใต้คำถาม',
+    example: 'เสียบเทอร์โมมิเตอร์ที่ชิ้นกลางกล่อง',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  description?: string;
+
+  @ApiPropertyOptional({ description: 'หน่วยของค่าตัวเลข (NUMERIC)', example: '°C' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  unit?: string;
+
+  @ApiPropertyOptional({ description: 'ไม่ผ่านแล้วต้องระบุสิ่งที่พบ', default: false })
+  @IsOptional()
+  @IsBoolean()
+  requireNoteOnFail?: boolean;
 }
 
 export class CreateQCTemplateDto {
@@ -218,6 +238,12 @@ export class SubmitQCResultDto {
   @ApiProperty({ description: 'Whether this item passed' })
   @IsBoolean()
   passed: boolean;
+
+  @ApiPropertyOptional({ description: 'สิ่งที่ผู้ตรวจพบในข้อนี้' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  note?: string;
 }
 
 export class SubmitQCRecordDto {

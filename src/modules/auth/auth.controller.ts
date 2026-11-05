@@ -10,8 +10,10 @@ import {
   UseGuards,
   ForbiddenException,
   Req,
+  Res,
+  UseInterceptors,
 } from '@nestjs/common';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
@@ -26,12 +28,40 @@ import { Public } from '../../common/decorators/public.decorator';
 import { SkipSubscriptionCheck } from '../../common/decorators/skip-subscription-check.decorator';
 import { Throttle } from '@nestjs/throttler';
 import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
+import { AuthErrors } from './auth-errors';
+import { TerminalRefreshCookieInterceptor } from './terminal-refresh-cookie.interceptor';
+import {
+  type SessionContext,
+  clearTerminalRefreshCookie,
+  readCookie,
+  refreshCookieName,
+} from './terminal-refresh-cookie';
 
 @ApiTags('auth')
 @Controller({ path: 'auth', version: '1' })
 @SkipSubscriptionCheck()
+@UseInterceptors(TerminalRefreshCookieInterceptor)
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
+
+  /**
+   * Terminal logout: revoke the refresh token (body, else the terminal's
+   * httpOnly cookie) and drop the cookie so a reload cannot restore the session.
+   */
+  private async terminalLogout(
+    user: any,
+    body: { refreshToken?: string } | undefined,
+    req: Request,
+    res: Response,
+    ctx: SessionContext,
+  ): Promise<void> {
+    const refreshToken = body?.refreshToken ?? readCookie(req, refreshCookieName(ctx));
+    try {
+      await this.authService.logout(user.userId, refreshToken, ctx);
+    } finally {
+      clearTerminalRefreshCookie(res, ctx);
+    }
+  }
 
   @Post('register')
   @Public()
@@ -115,8 +145,34 @@ export class AuthController {
   @ApiOperation({ summary: 'Refresh access token' })
   @ApiResponse({ status: 200, description: 'Token refreshed successfully' })
   @ApiResponse({ status: 401, description: 'Invalid or expired refresh token' })
-  async refresh(@Body() refreshTokenDto: RefreshTokenDto) {
-    return this.authService.refreshToken(refreshTokenDto);
+  async refresh(
+    @Body() refreshTokenDto: RefreshTokenDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const ctx = refreshTokenDto.context;
+    const cookieToken = ctx ? readCookie(req, refreshCookieName(ctx)) : undefined;
+    const bodyToken = refreshTokenDto.refreshToken;
+
+    if (bodyToken) {
+      try {
+        return await this.authService.refreshToken({ refreshToken: bodyToken });
+      } catch (error) {
+        // Another tab rotated the token this one still holds in memory — the
+        // cookie has the newest one.
+        if (!ctx || !cookieToken || cookieToken === bodyToken) throw error;
+      }
+    }
+    // Reload / stale in-memory token: the refresh token only exists as this
+    // session's httpOnly cookie. Pinned to the context — a POS cookie can never
+    // mint a main-dashboard session.
+    if (!ctx || !cookieToken) {
+      throw AuthErrors.refreshTokenInvalid();
+    }
+    // A failed refresh does NOT clear the cookie: with two tabs reloading at
+    // once, the loser's 401 would otherwise delete the cookie the winner just
+    // rotated, signing both out. A dead cookie simply expires / is replaced.
+    return this.authService.refreshToken({ refreshToken: cookieToken }, ctx);
   }
 
   @Post('logout')
@@ -129,8 +185,18 @@ export class AuthController {
     description: 'Revokes only the main-dashboard session tokens. POS sessions remain active.',
   })
   @ApiResponse({ status: 200, description: 'User successfully logged out' })
-  async logout(@CurrentUser() user: any, @Body() body?: { refreshToken?: string }) {
-    await this.authService.logout(user.userId, body?.refreshToken, 'main');
+  async logout(
+    @CurrentUser() user: any,
+    @Body() body?: { refreshToken?: string },
+    @Req() req?: Request,
+    @Res({ passthrough: true }) res?: Response,
+  ) {
+    const refreshToken = body?.refreshToken ?? (req ? readCookie(req, refreshCookieName('main')) : undefined);
+    try {
+      await this.authService.logout(user.userId, refreshToken, 'main');
+    } finally {
+      if (res) clearTerminalRefreshCookie(res, 'main');
+    }
     return { success: true, message: 'Logged out from hotel management dashboard' };
   }
 
@@ -148,8 +214,13 @@ export class AuthController {
       'This is the correct logout for POS terminals.',
   })
   @ApiResponse({ status: 200, description: 'POS session ended' })
-  async posLogout(@CurrentUser() user: any, @Body() body?: { refreshToken?: string }) {
-    await this.authService.logout(user.userId, body?.refreshToken, 'pos');
+  async posLogout(
+    @CurrentUser() user: any,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Body() body?: { refreshToken?: string },
+  ) {
+    await this.terminalLogout(user, body, req, res, 'pos');
     return { success: true, message: 'Logged out from POS system' };
   }
 
@@ -195,8 +266,13 @@ export class AuthController {
       'The main hotel management dashboard session stays active.',
   })
   @ApiResponse({ status: 200, description: 'Procurement session ended' })
-  async purchasingLogout(@CurrentUser() user: any, @Body() body?: { refreshToken?: string }) {
-    await this.authService.logout(user.userId, body?.refreshToken, 'procurement');
+  async purchasingLogout(
+    @CurrentUser() user: any,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Body() body?: { refreshToken?: string },
+  ) {
+    await this.terminalLogout(user, body, req, res, 'procurement');
     return { success: true, message: 'Logged out from Procurement system' };
   }
 
@@ -242,8 +318,13 @@ export class AuthController {
       'The main hotel management dashboard and procurement sessions stay active.',
   })
   @ApiResponse({ status: 200, description: 'Warehouse session ended' })
-  async warehouseLogout(@CurrentUser() user: any, @Body() body?: { refreshToken?: string }) {
-    await this.authService.logout(user.userId, body?.refreshToken, 'warehouse');
+  async warehouseLogout(
+    @CurrentUser() user: any,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Body() body?: { refreshToken?: string },
+  ) {
+    await this.terminalLogout(user, body, req, res, 'warehouse');
     return { success: true, message: 'Logged out from Warehouse system' };
   }
 
@@ -291,8 +372,13 @@ export class AuthController {
       'sessions stay active.',
   })
   @ApiResponse({ status: 200, description: 'Hotel terminal session ended' })
-  async hotelTerminalLogout(@CurrentUser() user: any, @Body() body?: { refreshToken?: string }) {
-    await this.authService.logout(user.userId, body?.refreshToken, 'hotel-terminal');
+  async hotelTerminalLogout(
+    @CurrentUser() user: any,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Body() body?: { refreshToken?: string },
+  ) {
+    await this.terminalLogout(user, body, req, res, 'hotel-terminal');
     return { success: true, message: 'Logged out from Hotel Management Terminal' };
   }
 
@@ -333,8 +419,13 @@ export class AuthController {
       'The main hotel management dashboard session stays active.',
   })
   @ApiResponse({ status: 200, description: 'Accounting session ended' })
-  async accountingLogout(@CurrentUser() user: any, @Body() body?: { refreshToken?: string }) {
-    await this.authService.logout(user.userId, body?.refreshToken, 'accounting');
+  async accountingLogout(
+    @CurrentUser() user: any,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Body() body?: { refreshToken?: string },
+  ) {
+    await this.terminalLogout(user, body, req, res, 'accounting');
     return { success: true, message: 'Logged out from Accounting system' };
   }
 
@@ -411,8 +502,13 @@ export class AuthController {
       'The main hotel management dashboard session stays active.',
   })
   @ApiResponse({ status: 200, description: 'HR session ended' })
-  async hrLogout(@CurrentUser() user: any, @Body() body?: { refreshToken?: string }) {
-    await this.authService.logout(user.userId, body?.refreshToken, 'hr');
+  async hrLogout(
+    @CurrentUser() user: any,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Body() body?: { refreshToken?: string },
+  ) {
+    await this.terminalLogout(user, body, req, res, 'hr');
     return { success: true, message: 'Logged out from HR system' };
   }
 

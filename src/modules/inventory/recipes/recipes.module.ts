@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { RecipesService } from './recipes.service';
 import { RecipeReadinessService } from './recipe-readiness.service';
 import { RecipeLinkingService } from './recipe-linking.service';
 import { RecipeRequisitionService } from './recipe-requisition.service';
@@ -28,7 +27,6 @@ import { NotificationsModule } from '../../../notifications/notifications.module
   ],
   controllers: [RecipesController],
   providers: [
-    RecipesService,
     RecipeReadinessService,
     RecipeLinkingService,
     RecipeRequisitionService,
@@ -36,7 +34,6 @@ import { NotificationsModule } from '../../../notifications/notifications.module
     MaterialRequisitionListener,
   ],
   exports: [
-    RecipesService,
     RecipeReadinessService,
     RecipeLinkingService,
     RecipeRequisitionService,

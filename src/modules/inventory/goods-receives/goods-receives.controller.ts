@@ -42,6 +42,8 @@ import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AddonGuard } from '@/common/guards/addon.guard';
 import { RequireAddon } from '@/common/decorators/require-addon.decorator';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
+import { PrismaService } from '@/prisma/prisma.service';
+import { assertCanReceive, purchaseOrderIdOfReceive } from '../common/receiving-access';
 
 interface JwtPayload {
   id: string;
@@ -49,6 +51,8 @@ interface JwtPayload {
   tenantId: string;
   email: string;
   role: string;
+  /** ระบบที่ token ล็อกอินเข้ามา — 'procurement' ดูได้อย่างเดียว */
+  systemContext?: string;
 }
 
 /** รูปร่างไฟล์จาก multer เท่าที่ใช้จริง — เลี่ยงการผูกกับ @types/multer */
@@ -68,7 +72,10 @@ const slipFileFilter = (
   file: { mimetype: string },
   cb: (err: Error | null, accept: boolean) => void,
 ): void => {
-  if (!/^image\/(jpeg|jpg|png|webp|heic|heif)$/.test(file.mimetype) && file.mimetype !== 'application/pdf') {
+  if (
+    !/^image\/(jpeg|jpg|png|webp|heic|heif)$/.test(file.mimetype) &&
+    file.mimetype !== 'application/pdf'
+  ) {
     return cb(
       new BadRequestException('แนบได้เฉพาะไฟล์รูป (JPG, PNG, WebP, HEIC) หรือ PDF เท่านั้น'),
       false,
@@ -86,7 +93,23 @@ export class GoodsReceivesController {
   constructor(
     private readonly goodsReceivesService: GoodsReceivesService,
     private readonly storage: StorageService,
+    private readonly prisma: PrismaService,
   ) {}
+
+  private actor(user: JwtPayload) {
+    return {
+      userId: user.userId ?? user.id,
+      tenantId: user.tenantId,
+      role: user.role,
+      systemContext: user.systemContext,
+    };
+  }
+
+  /** งาน QC/ยืนยันรับเข้าของใบรับนี้ — ฝั่งคลังเท่านั้น และไม่ใช่คนที่สั่งซื้อ/อนุมัติ PO ใบนั้น */
+  private async guardQc(user: JwtPayload, goodsReceiveId: string): Promise<void> {
+    const poId = await purchaseOrderIdOfReceive(this.prisma, user.tenantId, goodsReceiveId);
+    await assertCanReceive(this.prisma, this.actor(user), 'qc', poId);
+  }
 
   @Get()
   @ApiOperation({
@@ -138,6 +161,22 @@ export class GoodsReceivesController {
   ): Promise<{ success: boolean } & PaginatedResponse<GoodsReceiveDetail>> {
     const result = await this.goodsReceivesService.findAll(user.tenantId, query);
     return { success: true, ...result };
+  }
+
+  // ต้องประกาศก่อน @Get(':id') — Nest จับเส้นทางตามลำดับประกาศ
+  @Get('qc-preview')
+  @ApiOperation({
+    summary: 'สินค้าแต่ละตัวต้องผ่าน QC ไหม (ก่อนบันทึกใบรับ)',
+    description: 'itemIds คั่นด้วยจุลภาค — ใช้กฎเลือกเทมเพลต QC เดียวกับตอนบันทึกใบรับจริง',
+  })
+  @ApiQuery({ name: 'itemIds', required: true, example: 'uuid1,uuid2' })
+  async qcPreview(@CurrentUser() user: JwtPayload, @Query('itemIds') itemIds?: string) {
+    const ids = (itemIds ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const data = await this.goodsReceivesService.qcPreview(user.tenantId, ids);
+    return { success: true, data };
   }
 
   @Get(':id')
@@ -202,6 +241,7 @@ export class GoodsReceivesController {
     @CurrentUser() user: JwtPayload,
     @Body() createDto: CreateGoodsReceiveDto,
   ): Promise<{ success: boolean; data: GoodsReceiveDetail }> {
+    await assertCanReceive(this.prisma, this.actor(user), 'receive', createDto.purchaseOrderId);
     const data = await this.goodsReceivesService.create(createDto, user.userId, user.tenantId);
     return { success: true, data };
   }
@@ -274,7 +314,9 @@ export class GoodsReceivesController {
       limits: { fileSize: CASH_PURCHASE_SLIP_MAX_BYTES, files: CASH_PURCHASE_SLIP_MAX_FILES },
     }),
   )
-  @ApiOperation({ summary: 'Upload cash-purchase slip images — returns keys to send with the receipt' })
+  @ApiOperation({
+    summary: 'Upload cash-purchase slip images — returns keys to send with the receipt',
+  })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     schema: {
@@ -341,6 +383,7 @@ export class GoodsReceivesController {
     @CurrentUser() user: JwtPayload,
     @Param('id') id: string,
   ): Promise<{ success: boolean; data: GoodsReceiveDetail }> {
+    await this.guardQc(user, id);
     const data = await this.goodsReceivesService.accept(id, user.userId, user.tenantId);
     return { success: true, data };
   }
@@ -359,6 +402,7 @@ export class GoodsReceivesController {
     @Param('id') id: string,
     @Body() body: { reason: string },
   ): Promise<{ success: boolean; data: GoodsReceiveDetail }> {
+    await this.guardQc(user, id);
     const data = await this.goodsReceivesService.reject(
       id,
       user.userId,
@@ -383,6 +427,7 @@ export class GoodsReceivesController {
     @Param('id') id: string,
     @Body('status') status: 'INSPECTING' | 'REJECTED',
   ): Promise<{ success: boolean; data: GoodsReceiveDetail }> {
+    await this.guardQc(user, id);
     const data = await this.goodsReceivesService.inspect(id, user.userId, user.tenantId, status);
     return { success: true, data };
   }

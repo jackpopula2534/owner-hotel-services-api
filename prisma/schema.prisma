@@ -91,6 +91,18 @@ model RefreshToken {
   @@map("refresh_tokens")
 }
 
+/// Deep-link launch tokens already traded for a session — a launch token is
+/// single-use (jti is the primary key, so a replay fails on insert).
+model ConsumedLaunchToken {
+  jti       String   @id @db.VarChar(36)
+  userId    String?  @db.VarChar(36)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+  @@map("consumed_launch_tokens")
+}
+
 model password_resets {
   id        String   @id @default(uuid()) @db.VarChar(36)
   email     String
@@ -504,6 +516,9 @@ model Restaurant {
   // per-outlet choice; null keeps the old behaviour (KITCHEN → default → any).
   warehouseId              String?
   warehouse                Warehouse?        @relation(fields: [warehouseId], references: [id])
+  /// ตัดวัตถุดิบตามสูตรเมื่อปิดบิล — null = ตามสวิตช์ Integration Hub ของกิจการ
+  /// true/false = ร้านนี้ตั้งเอง (เช่น ห้องอาหารใช้สูตรครบแล้ว แต่บาร์ยังไม่พร้อม)
+  recipeStockDeduction     Boolean?
   // ── Payment policy ──────────────────────────────────────────────────────
   // วิธีชำระที่ POS ของร้านนี้แสดง (array ของ PaymentMethodEnum) — null = ทุกวิธี (พฤติกรรมเดิม)
   acceptedPaymentMethods   Json?
@@ -707,6 +722,31 @@ model MenuItemStockMovement {
   @@index([menuItemId, createdAt])
   @@index([referenceType, referenceId])
   @@map("menu_item_stock_movements")
+}
+
+/// ประวัติการผูกเมนูกับสินค้าในคลัง — ผูก / เปลี่ยนสินค้าที่ผูก / ถอดออก
+/// เก็บชื่อและ SKU ไว้เป็นภาพ ณ ตอนนั้น (สินค้าถูกเปลี่ยนชื่อหรือลบทีหลังประวัติต้องยังอ่านรู้เรื่อง)
+model MenuItemInventoryLinkLog {
+  id                  String   @id @default(uuid())
+  tenantId            String
+  menuItemId          String
+  /// LINK | RELINK | UNLINK
+  action              String
+  fromInventoryItemId String?
+  fromItemName        String?
+  fromItemSku         String?
+  toInventoryItemId   String?
+  toItemName          String?
+  toItemSku           String?
+  reason              String?  @db.Text
+  /// รายละเอียดเสริม เช่น ยอดที่ยกเข้าคลัง/ดึงกลับ
+  note                String?  @db.Text
+  changedById         String?
+  changedByName       String?
+  createdAt           DateTime @default(now())
+
+  @@index([tenantId, menuItemId, createdAt], map: "menu_link_logs_tenant_item_created_idx")
+  @@map("menu_item_inventory_link_logs")
 }
 
 model MenuItemRecipe {
@@ -3431,7 +3471,6 @@ model InventoryItem {
   materialRequisitionItems   MaterialRequisitionItem[]
   category                   ItemCategory?               @relation(fields: [categoryId], references: [id])
   inventoryLots              InventoryLot[]
-  inventoryRecipeIngredients InventoryRecipeIngredient[]
   recipeIngredients          RecipeIngredient[]
   itemSuppliers              ItemSupplier[]
   menuItems                  MenuItem[]
@@ -4115,39 +4154,20 @@ model RoomTypeAmenityTemplate {
   @@map("room_type_amenity_templates")
 }
 
-model InventoryRecipe {
-  id           String                      @id @default(uuid())
-  tenantId     String
-  menuItemId   String
-  menuItemName String
-  servings     Int                         @default(1)
-  isActive     Boolean                     @default(true)
-  notes        String?                     @db.Text
-  createdAt    DateTime                    @default(now())
-  updatedAt    DateTime                    @updatedAt
-  ingredients  InventoryRecipeIngredient[]
+/// เศษการใช้วัตถุดิบตามสูตรที่ยังไม่ครบ 1 หน่วยสต็อก (สต็อกเป็นจำนวนเต็ม)
+/// เช่น ข้าวเก็บเป็น KG แต่จานละ 0.15 KG — สะสมเศษไว้ที่นี่ ครบ 1 หน่วยเมื่อไหร่จึงตัดคลังจริง
+/// ทำให้ยอดตัดรวมตรงกับที่ใช้จริงโดยไม่ต้องปัดขึ้นทุกบิล
+model RecipeConsumptionResidual {
+  id          String   @id @default(uuid())
+  tenantId    String
+  warehouseId String
+  itemId      String
+  pendingQty  Decimal  @default(0) @db.Decimal(14, 6)
+  updatedAt   DateTime @updatedAt
 
-  @@unique([tenantId, menuItemId])
+  @@unique([warehouseId, itemId], map: "recipe_residual_wh_item_key")
   @@index([tenantId])
-  @@map("inventory_recipes")
-}
-
-model InventoryRecipeIngredient {
-  id             String          @id @default(uuid())
-  recipeId       String
-  itemId         String
-  quantity       Decimal         @db.Decimal(10, 3)
-  unit           String
-  wastagePercent Decimal         @default(0.00) @db.Decimal(5, 2)
-  notes          String?         @db.Text
-  createdAt      DateTime        @default(now())
-  item           InventoryItem   @relation(fields: [itemId], references: [id])
-  recipe         InventoryRecipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
-
-  @@unique([recipeId, itemId])
-  @@index([recipeId])
-  @@index([itemId])
-  @@map("inventory_recipe_ingredients")
+  @@map("recipe_consumption_residuals")
 }
 
 model CostCenter {
@@ -4885,6 +4905,12 @@ model QCChecklistItem {
   type          String
   required      Boolean    @default(true)
   passCondition Json?
+  /// วิธีตรวจ — คำอธิบายที่แสดงใต้คำถามให้ผู้ตรวจ
+  description       String?    @db.Text
+  /// หน่วยของค่าตัวเลข (NUMERIC) เช่น °C, kg
+  unit              String?    @db.VarChar(20)
+  /// ถ้าข้อนี้ไม่ผ่าน ผู้ตรวจต้องระบุสิ่งที่พบ (QCResult.note)
+  requireNoteOnFail Boolean    @default(false)
   orderIndex    Int        @default(0)
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
@@ -4928,6 +4954,8 @@ model QCResult {
   valueText       String?         @db.Text
   photoUrls       Json?
   passed          Boolean
+  /// สิ่งที่ผู้ตรวจพบ (บังคับเมื่อ checklistItem.requireNoteOnFail และไม่ผ่าน)
+  note            String?         @db.Text
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
   checklistItem   QCChecklistItem @relation(fields: [checklistItemId], references: [id])

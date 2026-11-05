@@ -110,6 +110,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       tenantStatus: tenantStatus,
       tenant_status: tenantStatus,
       isPlatformAdmin: payload.isPlatformAdmin ?? false,
+      // ระบบที่ token นี้ล็อกอินเข้ามา (main / procurement / warehouse ...) — ใช้แยกหน้าที่
+      // เช่น token ของระบบจัดซื้อดูงานรับเข้าได้ แต่รับของ/ผ่าน QC เองไม่ได้
+      systemContext: payload.systemContext ?? undefined,
     };
   }
 }

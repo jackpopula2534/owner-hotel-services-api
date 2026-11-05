@@ -5,6 +5,7 @@ import { IntegrationsService } from '@/modules/integrations/integrations.service
 import { SourceWarehouseResolver } from '../warehouses/source-warehouse.resolver';
 import { WarehouseIssueService } from '../warehouses/warehouse-issue.service';
 import { RestaurantOrderCompletedEvent } from './inventory.events';
+import { convertToStockUnit, round6 } from '../common/unit-conversion';
 
 /** หนึ่งบรรทัดที่จะตัดออกจากคลัง — คิดให้เสร็จก่อนเปิด transaction */
 export interface StockIssueLine {
@@ -13,6 +14,11 @@ export interface StockIssueLine {
   /** ชื่อที่เอาไปเขียนใน notes ให้คนอ่านสมุดเข้าใจว่าตัดเพราะอะไร */
   label: string;
   kind: 'retail' | 'recipe';
+  /**
+   * ปริมาณจริงตามสูตร (มีทศนิยมได้ อยู่ในหน่วยสต็อกแล้ว) — เฉพาะ kind='recipe'
+   * quantity จริงที่ตัดคำนวณตอน apply จากเศษสะสม (RecipeConsumptionResidual)
+   */
+  exactQty?: number;
   /**
    * คลังที่จะไปหักของชิ้นนี้ — ไม่ระบุแปลว่าใช้คลังตั้งต้นของร้าน
    *
@@ -45,8 +51,22 @@ export class RestaurantStockDeductionService {
     private readonly warehouseIssue: WarehouseIssueService,
   ) {}
 
-  /** สวิตช์ Integration Hub — คุมเฉพาะการตัดวัตถุดิบตามสูตร */
-  isRecipeDeductionEnabled(tenantId: string): Promise<boolean> {
+  /**
+   * ตัดวัตถุดิบตามสูตรไหม — ร้านที่ตั้งค่าเองชนะ, ไม่ตั้ง (null) = ตามสวิตช์ Integration Hub
+   *
+   * ต้องตั้งรายร้านได้เพราะความพร้อมของสูตรไม่เท่ากัน: ห้องอาหารผูกวัตถุดิบครบแล้ว
+   * แต่บาร์ยังพิมพ์สูตรลอย ๆ — เปิดทั้งกิจการพร้อมกันจะทำให้ยอดบาร์เพี้ยน
+   */
+  async isRecipeDeductionEnabled(tenantId: string, restaurantId?: string): Promise<boolean> {
+    if (restaurantId) {
+      const restaurant = await this.prisma.restaurant.findFirst({
+        where: { id: restaurantId, tenantId },
+        select: { recipeStockDeduction: true } as never,
+      });
+      const own = (restaurant as { recipeStockDeduction?: boolean | null } | null)
+        ?.recipeStockDeduction;
+      if (own === true || own === false) return own;
+    }
     return this.integrationsService.isEnabled(tenantId, 'restaurant-inventory-autodeduct');
   }
 
@@ -124,11 +144,13 @@ export class RestaurantStockDeductionService {
       include: {
         ingredients: {
           where: { itemId: { not: null } },
-          include: { item: { select: { name: true } } },
+          include: { item: { select: { name: true, unit: true } } },
         },
       },
     });
 
+    // รวมของชนิดเดียวกันทั้งบิลก่อน (หลายเมนูใช้ไข่เหมือนกัน) แล้วค่อยไปปัดตอนตัด
+    const byItem = new Map<string, { exact: number; label: string }>();
     for (const recipe of recipes) {
       const orderedQty = totals.get(recipe.menuItemId) ?? 0;
       if (orderedQty <= 0) continue;
@@ -140,15 +162,30 @@ export class RestaurantStockDeductionService {
         if (!ingredient.itemId) continue;
         const perPlate = Number(ingredient.quantity ?? 0) / servings;
         const wastageMultiplier = 1 + Number(ingredient.wastagePercent ?? 0) / 100;
-        const quantity = Math.ceil(perPlate * orderedQty * wastageMultiplier);
-        if (quantity <= 0) continue;
-        lines.push({
-          itemId: ingredient.itemId,
-          quantity,
+        const used = perPlate * orderedQty * wastageMultiplier;
+        if (used <= 0) continue;
+
+        // สูตรเขียน 150 กรัม แต่คลังเก็บเป็น KG → ต้องเป็น 0.15 ไม่ใช่ 150
+        const conv = convertToStockUnit(used, ingredient.unit, ingredient.item?.unit);
+        if (!conv.ok) {
+          this.logger.warn(
+            `Skip recipe deduction for "${ingredient.item?.name ?? ingredient.name}" ` +
+              `(order ${event.orderId}): ${conv.reason}`,
+          );
+          continue;
+        }
+        const prev = byItem.get(ingredient.itemId);
+        byItem.set(ingredient.itemId, {
+          exact: (prev?.exact ?? 0) + conv.quantity,
           label: ingredient.item?.name ?? ingredient.name,
-          kind: 'recipe',
         });
       }
+    }
+
+    for (const [itemId, { exact, label }] of byItem) {
+      const exactQty = round6(exact);
+      if (exactQty <= 0) continue;
+      lines.push({ itemId, quantity: 0, exactQty, label, kind: 'recipe' });
     }
 
     return lines;
@@ -162,8 +199,71 @@ export class RestaurantStockDeductionService {
     lines: StockIssueLine[],
   ): Promise<void> {
     for (const line of lines) {
+      if (line.kind === 'recipe' && line.exactQty !== undefined) {
+        const quantity = await this.takeWholeUnits(
+          tx,
+          event.tenantId,
+          line.warehouseId ?? warehouseId,
+          line.itemId,
+          line.exactQty,
+        );
+        if (quantity <= 0) continue; // ยังไม่ครบ 1 หน่วย — เก็บเป็นเศษไว้ก่อน
+        await this.issue(tx, event, warehouseId, { ...line, quantity });
+        continue;
+      }
       await this.issue(tx, event, warehouseId, line);
     }
+  }
+
+  /**
+   * สต็อกเป็นจำนวนเต็ม แต่สูตรใช้เป็นเศษ (ข้าว 0.15 KG/จาน)
+   *
+   * เดิมปัดขึ้นทุกบิล → ขาย 1 จานหักข้าว 1 กิโล. ตอนนี้สะสมเศษต่อ (คลัง, สินค้า)
+   * แล้วตัดเฉพาะส่วนที่ครบหน่วย: 7 จาน = 1.05 KG → ตัด 1 เหลือเศษ 0.05 ไว้บิลหน้า
+   * ยอดตัดรวมจึงตรงกับที่ใช้จริงเสมอ ต่างกันไม่เกิน 1 หน่วยต่อสินค้า
+   *
+   * ใช้ increment/decrement เพื่อให้สองบิลที่ปิดพร้อมกันไม่ทับเศษกัน
+   */
+  private async takeWholeUnits(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    warehouseId: string,
+    itemId: string,
+    exactQty: number,
+  ): Promise<number> {
+    const residuals = residualDelegate(tx);
+    const existing = await residuals.findFirst({
+      where: { tenantId, warehouseId, itemId },
+      select: { id: true },
+    });
+    let id: string;
+    let total: number;
+    if (existing) {
+      const updated = await residuals.update({
+        where: { id: existing.id },
+        data: { pendingQty: { increment: exactQty } },
+        select: { id: true, pendingQty: true },
+      });
+      id = updated.id;
+      total = Number(updated.pendingQty);
+    } else {
+      const created = await residuals.create({
+        data: { tenantId, warehouseId, itemId, pendingQty: exactQty },
+        select: { id: true, pendingQty: true },
+      });
+      id = created.id;
+      total = Number(created.pendingQty);
+    }
+
+    const whole = Math.floor(round6(total));
+    if (whole > 0) {
+      await residuals.update({
+        where: { id },
+        data: { pendingQty: { decrement: whole } },
+        select: { id: true, pendingQty: true },
+      });
+    }
+    return whole;
   }
 
   /**
@@ -194,4 +294,22 @@ export class RestaurantStockDeductionService {
       label,
     });
   }
+}
+
+/**
+ * RecipeConsumptionResidual เป็นตารางใหม่ — Prisma client ในเครื่องจะมี type หลังรัน
+ * `prisma generate` เท่านั้น จึงเข้าผ่าน interface แคบ ๆ ตัวนี้แทน
+ */
+interface ResidualRow {
+  id: string;
+  pendingQty: unknown;
+}
+interface ResidualDelegate {
+  findFirst(args: unknown): Promise<{ id: string } | null>;
+  create(args: unknown): Promise<ResidualRow>;
+  update(args: unknown): Promise<ResidualRow>;
+}
+function residualDelegate(tx: Prisma.TransactionClient): ResidualDelegate {
+  return (tx as unknown as { recipeConsumptionResidual: ResidualDelegate })
+    .recipeConsumptionResidual;
 }

@@ -10,6 +10,7 @@ import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { PrismaService } from '../../prisma/prisma.service';
 
 describe('AuthController', () => {
   let controller: AuthController;
@@ -31,6 +32,7 @@ describe('AuthController', () => {
           provide: AuthService,
           useValue: mockAuthService,
         },
+        { provide: PrismaService, useValue: { refreshToken: { findUnique: jest.fn() } } },
       ],
     }).compile();
 
@@ -158,10 +160,64 @@ describe('AuthController', () => {
 
       mockAuthService.refreshToken.mockResolvedValue(mockResult);
 
-      const result = await controller.refresh(refreshTokenDto);
+      const result = await controller.refresh(refreshTokenDto, {} as any, {} as any);
 
       expect(authService.refreshToken).toHaveBeenCalledWith(refreshTokenDto);
       expect(result).toEqual(mockResult);
+    });
+  });
+
+  describe('refresh from a terminal httpOnly cookie (BUG-01)', () => {
+    const resStub = () => ({ clearCookie: jest.fn() }) as any;
+
+    it('uses the ss_rt_<context> cookie and pins the token to that context', async () => {
+      mockAuthService.refreshToken.mockResolvedValue({ accessToken: 'a', refreshToken: 'r2' });
+      const req = { headers: { cookie: 'other=1; ss_rt_pos=cookie-token' } } as any;
+      const result = await controller.refresh({ context: 'pos' }, req, resStub());
+      expect(authService.refreshToken).toHaveBeenCalledWith({ refreshToken: 'cookie-token' }, 'pos');
+      expect(result).toEqual({ accessToken: 'a', refreshToken: 'r2' });
+    });
+
+    it('never reads another terminal\'s cookie', async () => {
+      const req = { headers: { cookie: 'ss_rt_warehouse=wh-token' } } as any;
+      await expect(controller.refresh({ context: 'pos' }, req, resStub())).rejects.toBeDefined();
+      expect(authService.refreshToken).not.toHaveBeenCalled();
+    });
+
+    it('keeps the cookie when the refresh fails (a parallel tab may have just rotated it)', async () => {
+      mockAuthService.refreshToken.mockRejectedValue(new Error('revoked'));
+      const res = resStub();
+      const req = { headers: { cookie: 'ss_rt_hr=dead' } } as any;
+      await expect(controller.refresh({ context: 'hr' }, req, res)).rejects.toThrow('revoked');
+      expect(res.clearCookie).not.toHaveBeenCalled();
+    });
+
+    it('falls back to the cookie when the in-memory body token was rotated by another tab', async () => {
+      mockAuthService.refreshToken
+        .mockRejectedValueOnce(new Error('revoked'))
+        .mockResolvedValueOnce({ accessToken: 'a', refreshToken: 'r3' });
+      const req = { headers: { cookie: 'ss_rt_main=newest' } } as any;
+      const result = await controller.refresh({ refreshToken: 'stale', context: 'main' }, req, resStub());
+      expect(authService.refreshToken).toHaveBeenLastCalledWith({ refreshToken: 'newest' }, 'main');
+      expect(result).toEqual({ accessToken: 'a', refreshToken: 'r3' });
+    });
+
+    it('main dashboard logout revokes the ss_rt_main cookie token and clears it', async () => {
+      mockAuthService.logout.mockResolvedValue(undefined);
+      const res = resStub();
+      const req = { headers: { cookie: 'ss_rt_main=main-token' } } as any;
+      await controller.logout({ userId: 'u1' }, undefined, req, res);
+      expect(authService.logout).toHaveBeenCalledWith('u1', 'main-token', 'main');
+      expect(res.clearCookie).toHaveBeenCalledWith('ss_rt_main', expect.anything());
+    });
+
+    it('terminal logout revokes the cookie token and clears the cookie', async () => {
+      mockAuthService.logout.mockResolvedValue(undefined);
+      const res = resStub();
+      const req = { headers: { cookie: 'ss_rt_pos=pos-token' } } as any;
+      await controller.posLogout({ userId: 'u1' }, req, res, undefined);
+      expect(authService.logout).toHaveBeenCalledWith('u1', 'pos-token', 'pos');
+      expect(res.clearCookie).toHaveBeenCalledWith('ss_rt_pos', expect.anything());
     });
   });
 

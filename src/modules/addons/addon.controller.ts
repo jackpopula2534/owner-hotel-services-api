@@ -29,6 +29,7 @@ import {
 import { CreateAddonDto } from './dto/create-addon.dto';
 import { UpdateAddonDto } from './dto/update-addon.dto';
 import { QueryAddonDto } from './dto/query-addon.dto';
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 
 @ApiTags('Add-ons')
 @ApiBearerAuth()
@@ -62,6 +63,9 @@ export class AddonController {
   // Tenant: get active add-ons for current subscription
   // -------------------------------------------------------------------------
 
+  // POS ร้านอาหารต้องรู้ว่ามีโมดูลคลังไหม (ปุ่ม "เพิ่มจากสินค้าในคลัง", ป้ายสถานะสูตร/ยอดคลัง)
+  // อ่านอย่างเดียว คืนแค่รหัส add-on ที่ใช้งานอยู่ — ไม่มีอะไรให้เครื่อง POS แก้
+  @AllowSystems('pos')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Get active add-ons for the current tenant' })
   @ApiResponse({

@@ -12,9 +12,75 @@ import {
   CreateChecklistItemDto,
   CreateQCRecordDto,
   SubmitQCRecordDto,
+  SubmitQCResultDto,
   QueryQCRecordDto,
 } from './dto/qc.dto';
 import { QCRecordStatus } from '@prisma/client';
+
+// ─── Checklist guidance helpers ───────────────────────────────────────────────
+// Spread into Prisma payloads so the new columns (description / unit /
+// requireNoteOnFail / note) don't depend on a regenerated client at compile time.
+
+function checklistGuidance(ci: CreateChecklistItemDto) {
+  const description = ci.description?.trim();
+  const unit = ci.unit?.trim();
+  return {
+    description: description ? description : null,
+    unit: ci.type === 'NUMERIC' && unit ? unit : null,
+    requireNoteOnFail: ci.requireNoteOnFail ?? false,
+  };
+}
+
+function resultNote(r: SubmitQCResultDto) {
+  const note = r.note?.trim();
+  return { note: note ? note : null };
+}
+
+export interface QcItemRule {
+  id: string;
+  label: string;
+  type: string;
+  required: boolean;
+  orderIndex: number;
+  requireNoteOnFail?: boolean | null;
+}
+
+/** True when the submitted value is a real answer for the item's type. */
+export function hasQcAnswer(type: string, r: SubmitQCResultDto | undefined): boolean {
+  if (!r) return false;
+  switch (type) {
+    case 'BOOLEAN':
+      return typeof r.valueBool === 'boolean';
+    case 'NUMERIC':
+      return typeof r.valueNumeric === 'number' && Number.isFinite(r.valueNumeric);
+    case 'TEXT':
+      return (r.valueText ?? '').trim().length > 0;
+    case 'PHOTO':
+      return (r.photoUrls?.length ?? 0) > 0;
+    default:
+      return true;
+  }
+}
+
+/**
+ * Required items without a real answer, and failed items whose template
+ * demands a finding note. `no` = 1-based position as the inspector sees it.
+ */
+export function findQcSubmitIssues(items: QcItemRule[], results: SubmitQCResultDto[]) {
+  const sorted = [...items].sort((a, b) => a.orderIndex - b.orderIndex);
+  const byItem = new Map(results.map((r) => [r.checklistItemId, r]));
+  const missing: Array<{ no: number; label: string }> = [];
+  const noteRequired: Array<{ no: number; label: string }> = [];
+  sorted.forEach((ci, i) => {
+    const r = byItem.get(ci.id);
+    const answered = hasQcAnswer(ci.type, r);
+    if (ci.required && !answered) missing.push({ no: i + 1, label: ci.label });
+    if (answered && r && !r.passed && ci.requireNoteOnFail && !(r.note ?? '').trim()) {
+      noteRequired.push({ no: i + 1, label: ci.label });
+    }
+  });
+  return { missing, noteRequired };
+}
 
 @Injectable()
 export class QCService {
@@ -75,6 +141,7 @@ export class QCService {
       required: ci.required ?? true,
       orderIndex: typeof ci.orderIndex === 'number' ? ci.orderIndex : idx,
       passCondition: ci.passCondition ? (ci.passCondition as unknown as object) : undefined,
+      ...checklistGuidance(ci),
     }));
 
     try {
@@ -159,6 +226,7 @@ export class QCService {
         required: ci.required ?? true,
         orderIndex: typeof ci.orderIndex === 'number' ? ci.orderIndex : idx,
         passCondition: ci.passCondition ? (ci.passCondition as unknown as object) : undefined,
+        ...checklistGuidance(ci),
       }));
 
       return this.prisma.$transaction(async (tx) => {
@@ -207,6 +275,7 @@ export class QCService {
         // a plain object, so cast through `unknown` to satisfy the typed
         // generated input.
         passCondition: dto.passCondition ? (dto.passCondition as unknown as object) : undefined,
+        ...checklistGuidance(dto),
       },
     });
   }
@@ -510,13 +579,16 @@ export class QCService {
     const template = record.template;
     const checklistItems = template.checklistItems;
 
-    // Validate all required items have results
-    const requiredItems = checklistItems.filter((ci) => ci.required);
-    const submittedItemIds = new Set(dto.results.map((r) => r.checklistItemId));
-    const missing = requiredItems.filter((ci) => !submittedItemIds.has(ci.id));
-    if (missing.length > 0) {
+    // Validate all required items have a real answer (not just an empty draft)
+    const issues = findQcSubmitIssues(checklistItems as QcItemRule[], dto.results);
+    if (issues.missing.length > 0) {
       throw new BadRequestException(
-        `ยังไม่ได้กรอก checklist items ที่จำเป็น: ${missing.map((m) => m.label).join(', ')}`,
+        `ยังไม่ได้ตอบข้อที่จำเป็น: ${issues.missing.map((m) => `ข้อ ${m.no} ${m.label}`).join(', ')}`,
+      );
+    }
+    if (issues.noteRequired.length > 0) {
+      throw new BadRequestException(
+        `ข้อที่ไม่ผ่านต้องระบุสิ่งที่พบ: ${issues.noteRequired.map((m) => `ข้อ ${m.no} ${m.label}`).join(', ')}`,
       );
     }
 
@@ -555,6 +627,7 @@ export class QCService {
             valueText: result.valueText,
             photoUrls: result.photoUrls ? result.photoUrls : undefined,
             passed: result.passed,
+            ...resultNote(result),
           },
           create: {
             recordId: id,
@@ -564,6 +637,7 @@ export class QCService {
             valueText: result.valueText,
             photoUrls: result.photoUrls ? result.photoUrls : undefined,
             passed: result.passed,
+            ...resultNote(result),
           },
         });
       }

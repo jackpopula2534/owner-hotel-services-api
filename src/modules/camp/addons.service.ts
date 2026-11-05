@@ -46,8 +46,36 @@ export class AddonsService {
       }
     }
 
+    // ลานเชื่อมคลังกลางแล้ว → ดึงยอดคงคลังจริงจาก Inventory (คลังย่อยของลาน) ของอุปกรณ์ที่ผูกสินค้าไว้
+    const warehouseQtyByItem = new Map<string, number>();
+    const linkedItemIds = addons
+      .map((a) => a.inventoryItemId)
+      .filter((v): v is string => Boolean(v));
+    let warehouseId: string | null = null;
+    if (linkedItemIds.length > 0) {
+      const campground = await this.prisma.campground.findFirst({
+        where: { id: campgroundId, ...(tenantId ? { tenantId } : {}) },
+        select: { warehouseId: true },
+      });
+      warehouseId = campground?.warehouseId ?? null;
+      if (warehouseId) {
+        const stocks = await this.prisma.warehouseStock.findMany({
+          where: { warehouseId, itemId: { in: linkedItemIds } },
+          select: { itemId: true, quantity: true, reservedQty: true },
+        });
+        for (const s of stocks) {
+          warehouseQtyByItem.set(s.itemId, Math.max(0, s.quantity - s.reservedQty));
+        }
+      }
+    }
+
     const data = addons.map((a) => {
       const borrowedQty = borrowedByAddon.get(a.id) ?? 0;
+      /** คงคลังในระบบคลัง (คลังย่อยของลาน) — null = ไม่ได้ผูกสินค้า/ลานไม่เชื่อมคลัง */
+      const warehouseQty =
+        warehouseId && a.inventoryItemId
+          ? (warehouseQtyByItem.get(a.inventoryItemId) ?? 0)
+          : null;
       return {
         ...a,
         /** กำลังถูกยืมจากใบจอง active */
@@ -56,6 +84,7 @@ export class AddonsService {
         availableQty: a.stockQty,
         /** คงเหลือทั้งหมดที่ครอบครอง = ว่าง + ถูกยืม */
         totalQty: a.stockQty + borrowedQty,
+        warehouseQty,
       };
     });
 

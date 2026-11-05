@@ -2,9 +2,11 @@ import { Module } from '@nestjs/common';
 import { SeederService } from './seeder.service';
 import { ReadyMadeGoodsSeeder } from './ready-made-goods.seeder';
 import { CampPremiumSeeder } from './camp-premium.seeder';
+import { CampSuppliersSeeder } from './camp-suppliers.seeder';
 import { Hotel3dDemoSeeder } from './hotel-3d-demo.seeder';
 import { RetailPromotionsSeeder } from './retail-promotions.seeder';
 import { WarehouseGroupsSeeder } from './warehouse-groups.seeder';
+import { SeedLotsSeeder } from './seed-lots.seeder';
 import { SeederController } from './seeder.controller';
 import { PlansModule } from '../plans/plans.module';
 import { FeaturesModule } from '../features/features.module';
@@ -38,7 +40,9 @@ import { RevenueModule } from '../modules/revenue/revenue.module';
     ReadyMadeGoodsSeeder,
     RetailPromotionsSeeder,
     WarehouseGroupsSeeder,
+    SeedLotsSeeder,
     CampPremiumSeeder,
+    CampSuppliersSeeder,
     Hotel3dDemoSeeder,
   ],
   exports: [SeederService],

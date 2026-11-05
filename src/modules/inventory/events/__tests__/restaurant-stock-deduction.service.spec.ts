@@ -205,7 +205,7 @@ describe('RestaurantStockDeductionService', () => {
             {
               itemId: 'item-shrimp',
               name: 'กุ้ง',
-              quantity: 2, // 1 ต่อจาน × 3 จาน × 1.10 = 3.3 → ปัดขึ้น 4
+              quantity: 2, // 1 ต่อจาน × 3 จาน × 1.10 = 3.3 — เก็บทศนิยมไว้ ไม่ปัดขึ้นแล้ว
               wastagePercent: 10,
               item: null,
             },
@@ -216,8 +216,8 @@ describe('RestaurantStockDeductionService', () => {
       const lines = await service.planDeduction(baseEvent(), true);
 
       expect(lines).toEqual([
-        { itemId: 'item-noodle', quantity: 6, label: 'เส้นจันท์แห้ง', kind: 'recipe' },
-        { itemId: 'item-shrimp', quantity: 4, label: 'กุ้ง', kind: 'recipe' },
+        { itemId: 'item-noodle', quantity: 0, exactQty: 6, label: 'เส้นจันท์แห้ง', kind: 'recipe' },
+        { itemId: 'item-shrimp', quantity: 0, exactQty: 3.3, label: 'กุ้ง', kind: 'recipe' },
       ]);
     });
 
@@ -235,7 +235,87 @@ describe('RestaurantStockDeductionService', () => {
       const lines = await service.planDeduction(baseEvent(), true);
 
       expect(lines).toEqual([
-        { itemId: 'item-rice', quantity: 3, label: 'ข้าว', kind: 'recipe' },
+        { itemId: 'item-rice', quantity: 0, exactQty: 3, label: 'ข้าว', kind: 'recipe' },
+      ]);
+    });
+
+    it('converts the recipe unit into the stock unit (150 กรัม → 0.15 KG)', async () => {
+      prismaMock.menuItemRecipe.findMany.mockResolvedValue([
+        {
+          menuItemId: 'mi-1',
+          servings: 1,
+          ingredients: [
+            {
+              itemId: 'item-rice',
+              name: 'ข้าวสาร',
+              quantity: 150,
+              unit: 'กรัม',
+              wastagePercent: 0,
+              item: { name: 'ข้าวหอมมะลิ', unit: 'KG' },
+            },
+          ],
+        },
+      ]);
+
+      const lines = await service.planDeduction(baseEvent(), true);
+
+      // 3 จาน × 150 g = 450 g = 0.45 KG (เดิมหัก 450 KG)
+      expect(lines).toEqual([
+        { itemId: 'item-rice', quantity: 0, exactQty: 0.45, label: 'ข้าวหอมมะลิ', kind: 'recipe' },
+      ]);
+    });
+
+    it('sums the same ingredient across menus and skips units it cannot convert', async () => {
+      prismaMock.menuItemRecipe.findMany.mockResolvedValue([
+        {
+          menuItemId: 'mi-1',
+          servings: 1,
+          ingredients: [
+            {
+              itemId: 'item-egg',
+              name: 'ไข่',
+              quantity: 1,
+              unit: 'ฟอง',
+              wastagePercent: 0,
+              item: { name: 'ไข่ไก่', unit: 'PIECE' },
+            },
+            {
+              itemId: 'item-sugar',
+              name: 'น้ำตาล',
+              quantity: 1,
+              unit: 'ช้อนโต๊ะ',
+              wastagePercent: 0,
+              item: { name: 'น้ำตาล', unit: 'KG' },
+            },
+          ],
+        },
+        {
+          menuItemId: 'mi-2',
+          servings: 1,
+          ingredients: [
+            {
+              itemId: 'item-egg',
+              name: 'ไข่',
+              quantity: 2,
+              unit: 'ฟอง',
+              wastagePercent: 0,
+              item: { name: 'ไข่ไก่', unit: 'PIECE' },
+            },
+          ],
+        },
+      ]);
+
+      const lines = await service.planDeduction(
+        baseEvent([
+          { menuItemId: 'mi-1', quantity: 1 },
+          { menuItemId: 'mi-2', quantity: 2 },
+        ]),
+        true,
+      );
+
+      // ไข่ 1 + 2×2 = 5 ฟองในบรรทัดเดียว; น้ำตาลช้อนโต๊ะ → KG แปลงไม่ได้ ห้ามเดา
+      expect(lines).toEqual([
+        { itemId: 'item-egg', quantity: 0, exactQty: 5, label: 'ไข่ไก่', kind: 'recipe' },
       ]);
     });
 
@@ -385,5 +465,88 @@ describe('RestaurantStockDeductionService', () => {
       TENANT_ID,
       'restaurant-inventory-autodeduct',
     );
+  });
+
+  // ─── เปิด/ปิดตัดตามสูตรรายร้าน ─────────────────────────────────────────────
+
+  describe('isRecipeDeductionEnabled', () => {
+    it('follows the Integration Hub switch when the outlet has no setting', async () => {
+      prismaMock.restaurant.findFirst.mockResolvedValue({ recipeStockDeduction: null });
+      integrationsMock.isEnabled.mockResolvedValue(true);
+
+      await expect(service.isRecipeDeductionEnabled(TENANT_ID, 'rest-1')).resolves.toBe(true);
+    });
+
+    it('lets an outlet opt out while the hub is on', async () => {
+      prismaMock.restaurant.findFirst.mockResolvedValue({ recipeStockDeduction: false });
+      integrationsMock.isEnabled.mockResolvedValue(true);
+
+      await expect(service.isRecipeDeductionEnabled(TENANT_ID, 'rest-1')).resolves.toBe(false);
+      expect(integrationsMock.isEnabled).not.toHaveBeenCalled();
+    });
+
+    it('lets an outlet opt in while the hub is off', async () => {
+      prismaMock.restaurant.findFirst.mockResolvedValue({ recipeStockDeduction: true });
+      integrationsMock.isEnabled.mockResolvedValue(false);
+
+      await expect(service.isRecipeDeductionEnabled(TENANT_ID, 'rest-1')).resolves.toBe(true);
+    });
+  });
+
+  // ─── เศษวัตถุดิบที่ไม่ครบหน่วย ──────────────────────────────────────────────
+
+  describe('recipe residuals', () => {
+    const residualTx = (pending: number | null) => {
+      const tx = makeTxMock() as ReturnType<typeof makeTxMock> & {
+        recipeConsumptionResidual: Record<string, jest.Mock>;
+      };
+      let current = pending ?? 0;
+      tx.recipeConsumptionResidual = {
+        findFirst: jest.fn().mockResolvedValue(pending === null ? null : { id: 'res-1' }),
+        create: jest.fn().mockImplementation(({ data }) => {
+          current = data.pendingQty;
+          return Promise.resolve({ id: 'res-1', pendingQty: current });
+        }),
+        update: jest.fn().mockImplementation(({ data }) => {
+          if (data.pendingQty.increment !== undefined) current += data.pendingQty.increment;
+          if (data.pendingQty.decrement !== undefined) current -= data.pendingQty.decrement;
+          return Promise.resolve({ id: 'res-1', pendingQty: current });
+        }),
+      };
+      return { tx, remaining: () => Math.round(current * 1e6) / 1e6 };
+    };
+
+    const riceLine = (exactQty: number) => ({
+      itemId: 'item-rice',
+      quantity: 0,
+      exactQty,
+      label: 'ข้าว',
+      kind: 'recipe' as const,
+    });
+
+    it('keeps a sub-unit amount as residual and issues nothing', async () => {
+      const { tx, remaining } = residualTx(null);
+
+      await service.applyPlan(tx as never, baseEvent(), 'wh-kitchen', [riceLine(0.45)]);
+
+      expect(tx.stockMovement.create).not.toHaveBeenCalled();
+      expect(remaining()).toBe(0.45);
+    });
+
+    it('issues only whole units once the residual crosses 1 and carries the rest', async () => {
+      const { tx, remaining } = residualTx(0.75);
+
+      await service.applyPlan(tx as never, baseEvent(), 'wh-kitchen', [riceLine(0.45)]);
+
+      // 0.75 + 0.45 = 1.2 → ตัด 1 เหลือ 0.2
+      expect(tx.stockMovement.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          itemId: 'item-rice',
+          quantity: 1,
+          warehouseId: 'wh-kitchen',
+        }),
+      });
+      expect(remaining()).toBe(0.2);
+    });
   });
 });

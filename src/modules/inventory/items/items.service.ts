@@ -4,6 +4,7 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { PrismaService } from '@/prisma/prisma.service';
 import { assertProcurementOwnedFieldsUnchanged } from '../product-change-requests/product-change-access';
@@ -364,6 +365,10 @@ export class ItemsService {
         where.categoryId = dto.categoryId;
       }
 
+      if (dto.itemType) {
+        where.itemType = dto.itemType;
+      }
+
       const items = await this.prisma.inventoryItem.findMany({
         where,
         select: {
@@ -444,6 +449,7 @@ export class ItemsService {
         barcode: true,
         imageUrl: true,
         sellingPrice: true,
+        itemType: true,
         category: { select: { id: true, name: true } },
         ...(dto.warehouseId
           ? {
@@ -470,6 +476,16 @@ export class ItemsService {
     const item = matches[0] as (typeof matches)[number] & {
       warehouseStocks?: Array<{ quantity: number; reservedQty: number }>;
     };
+
+    // เช็คหลังเจอของแล้ว ไม่ใส่ใน where — ถ้ากรองตั้งแต่ query วัตถุดิบจะกลายเป็น
+    // "ไม่พบบาร์โค้ด" ให้พนักงานเข้าใจผิดว่าบาร์โค้ดเสีย และจะซ่อนบาร์โค้ดซ้ำด้วย
+    if (dto.itemType && item.itemType !== dto.itemType) {
+      throw new UnprocessableEntityException(
+        dto.itemType === 'FINISHED_GOOD'
+          ? `${item.name} (${item.sku}) เป็นวัตถุดิบ ไม่ใช่สินค้าขายหน้าร้าน — เปลี่ยนประเภทที่หน้ารายการสินค้าก่อนจึงจะขายได้`
+          : `${item.name} (${item.sku}) ไม่ใช่สินค้าประเภท ${dto.itemType}`,
+      );
+    }
 
     return {
       id: item.id,

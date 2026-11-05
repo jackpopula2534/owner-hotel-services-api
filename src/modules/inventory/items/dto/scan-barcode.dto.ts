@@ -1,6 +1,7 @@
-import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsEnum, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
+import { InventoryItemTypeEnum } from './create-item.dto';
 
 /**
  * ยิงบาร์โค้ดที่หน้าขาย — คนละเรื่องกับ `SearchItemDto`
@@ -30,4 +31,15 @@ export class ScanBarcodeDto {
   @IsOptional()
   @IsString()
   warehouseId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'ประเภทสินค้าที่หน้าจอนี้รับได้ — หน้าขายส่ง FINISHED_GOOD; ' +
+      'ยิงโดนวัตถุดิบจะได้ 422 พร้อมชื่อสินค้า (ไม่ใช่ 404 ที่ทำให้คิดว่าบาร์โค้ดผิด)',
+    enum: InventoryItemTypeEnum,
+    example: InventoryItemTypeEnum.FINISHED_GOOD,
+  })
+  @IsOptional()
+  @IsEnum(InventoryItemTypeEnum)
+  itemType?: InventoryItemTypeEnum;
 }

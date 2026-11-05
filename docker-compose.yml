@@ -77,6 +77,8 @@ services:
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-24h}
       - FRONTEND_URL=${FRONTEND_URL}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+      - APP_BASE_URL=${APP_BASE_URL:-}
+      - REFRESH_COOKIE_SAMESITE=${REFRESH_COOKIE_SAMESITE:-}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY}
       # ── File storage (uploads) — prod ใช้ s3/R2 ──
       - STORAGE_DRIVER=${STORAGE_DRIVER:-local}

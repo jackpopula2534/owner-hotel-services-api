@@ -18,7 +18,8 @@ import { CreatePosUserDto } from './dto/create-pos-user.dto';
 import { PosLaunchDto } from './dto/pos-launch.dto';
 import { AuthErrors } from './auth-errors';
 import * as bcrypt from 'bcrypt';
-import { randomBytes } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
+import { Prisma } from '@prisma/client';
 
 // Default permissions granted to a hotel_manager when launching the Hotel
 // Management Terminal via SSO. Front-desk / housekeeper / maintenance staff
@@ -86,6 +87,11 @@ const HR_MANAGER_PERMISSIONS = [
  * everything else is whatever that particular terminal needs on open.
  */
 interface LaunchTokenClaims {
+  /** Always 'launch' — JwtStrategy refuses any typed token as a bearer. */
+  type?: string;
+  /** One-time id: recorded in consumed_launch_tokens on exchange. */
+  jti?: string;
+  exp?: number;
   sub?: string;
   email?: string;
   role?: string;
@@ -613,6 +619,7 @@ export class AuthService {
                 return [];
               }
             })(),
+            propertyId: defaultProperty?.id ?? null,
             propertyName: defaultProperty?.name ?? null,
           }
         : {};
@@ -639,6 +646,7 @@ export class AuthService {
                 return [];
               }
             })(),
+            propertyId: defaultProperty?.id ?? null,
             propertyName: defaultProperty?.name ?? null,
           }
         : {};
@@ -705,8 +713,16 @@ export class AuthService {
     };
   }
 
-  async refreshToken(refreshTokenDto: RefreshTokenDto) {
+  /**
+   * @param expectedContext set when the token came from a terminal's httpOnly
+   *   cookie: the row must belong to that terminal, so one terminal's cookie can
+   *   never be replayed as another system's session.
+   */
+  async refreshToken(refreshTokenDto: RefreshTokenDto, expectedContext?: string) {
     const { refreshToken } = refreshTokenDto;
+    if (!refreshToken) {
+      throw AuthErrors.refreshTokenInvalid();
+    }
 
     // Find refresh token in database
     const tokenRecord = await this.prisma.refreshToken.findUnique({
@@ -718,6 +734,13 @@ export class AuthService {
     });
 
     if (!tokenRecord) {
+      throw AuthErrors.refreshTokenInvalid();
+    }
+
+    if (
+      expectedContext &&
+      (tokenRecord as { systemContext?: string }).systemContext !== expectedContext
+    ) {
       throw AuthErrors.refreshTokenInvalid();
     }
 
@@ -1063,7 +1086,7 @@ export class AuthService {
     };
 
     // Short-lived token — 5 minutes only
-    const token = this.jwtService.sign(payload, { expiresIn: '5m' });
+    const token = this.signLaunchToken(payload);
 
     const posUrl = `/pos?token=${token}&restaurantId=${dto.restaurantId}${dto.tableId ? `&tableId=${dto.tableId}` : ''}`;
 
@@ -1075,6 +1098,54 @@ export class AuthService {
       success: true,
       data: { token, posUrl, restaurantId: dto.restaurantId, expiresIn: 300 },
     };
+  }
+
+  /** The tenant's default property (isDefault first, then oldest). */
+  private async resolveDefaultProperty(
+    tenantId: string | null | undefined,
+  ): Promise<{ id: string; name: string } | null> {
+    if (!tenantId) return null;
+    return this.prisma.property.findFirst({
+      where: { tenantId },
+      orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+      select: { id: true, name: true },
+    });
+  }
+
+  /**
+   * Sign a 5-minute deep-link launch token.
+   *
+   * `type: 'launch'` makes JwtStrategy refuse it as a bearer token — it carries
+   * the elevated terminal role (procurement_manager, hotel_manager…) and must
+   * only ever be traded, never used. `jti` makes it single-use: the exchange
+   * records it, so a link copied from the address bar, history or a proxy log
+   * cannot be traded for a second session within those five minutes.
+   */
+  private signLaunchToken(payload: Record<string, unknown>): string {
+    return this.jwtService.sign(
+      { ...payload, type: 'launch', jti: randomUUID() },
+      { expiresIn: '5m' },
+    );
+  }
+
+  /** Mark a launch token as spent. False when it was spent already. */
+  private async consumeLaunchToken(claims: LaunchTokenClaims): Promise<boolean> {
+    const expiresAt = new Date((claims.exp ?? Math.floor(Date.now() / 1000) + 300) * 1000);
+    try {
+      await this.prisma.consumedLaunchToken.create({
+        data: { jti: claims.jti as string, userId: claims.sub ?? null, expiresAt },
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        return false;
+      }
+      throw error;
+    }
+    // Spent ids are only needed until the token would have expired anyway.
+    void this.prisma.consumedLaunchToken
+      .deleteMany({ where: { expiresAt: { lt: new Date() } } })
+      .catch(() => undefined);
+    return true;
   }
 
   /**
@@ -1108,11 +1179,20 @@ export class AuthService {
 
     // Refuse an ordinary access token: only the matching launch claim qualifies,
     // so a POS link can never be traded for a purchasing session and vice versa.
-    if (!claims?.[claimFlag] || !claims.sub) {
+    if (!claims?.[claimFlag] || !claims.sub || claims.type !== 'launch' || !claims.jti) {
       this.logger.warn(
         `${systemLabel} launch exchange rejected: token is not a ${claimFlag} token`,
       );
       throw new UnauthorizedException(`${systemLabel} launch link is invalid or has expired`);
+    }
+
+    // Single-use: whoever trades the link first gets the session; a replay of
+    // the same URL within its five minutes gets nothing (FIND-04).
+    if (!(await this.consumeLaunchToken(claims))) {
+      this.logger.warn(
+        `${systemLabel} launch exchange rejected: token ${claims.jti} was already used (user ${claims.sub})`,
+      );
+      throw new UnauthorizedException(`${systemLabel} launch link has already been used`);
     }
 
     // findFirst (not findUnique): `User` is tenant-scoped — see completeLoginWith2FA.
@@ -1175,6 +1255,8 @@ export class AuthService {
     caller: { userId: string; email: string; role: string; tenantId: string },
     originIp?: string,
   ) {
+    // Default property, same as the other terminals (FIND-05: these two had none).
+    const property = await this.resolveDefaultProperty(caller.tenantId);
     const payload = {
       sub: caller.userId,
       email: caller.email,
@@ -1183,6 +1265,8 @@ export class AuthService {
       purchasingLaunch: true,
       firstName: null,
       lastName: null,
+      propertyId: property?.id ?? null,
+      propertyName: property?.name ?? null,
       permissions: [
         'pr.create',
         'pr.view',
@@ -1195,9 +1279,8 @@ export class AuthService {
         'po.approve',
         'supplier.view',
         'supplier.manage',
-        'grn.create',
+        // รับของ/QC (grn.create, qc.inspect) เป็นงานฝั่งคลัง — จัดซื้อดูได้อย่างเดียว
         'grn.view',
-        'qc.inspect',
         'qc.view',
         'report.view',
         'user.manage',
@@ -1205,7 +1288,7 @@ export class AuthService {
       ],
       originIp: originIp ?? null,
     };
-    const token = this.jwtService.sign(payload, { expiresIn: '5m' });
+    const token = this.signLaunchToken(payload);
     const launchUrl = `/purchasing?token=${token}`;
     this.logger.log(`Purchasing launch token generated by user ${caller.userId}`);
     return { success: true, data: { token, launchUrl, expiresIn: 300 } };
@@ -1247,6 +1330,11 @@ export class AuthService {
         permissions: claims.permissions?.length
           ? claims.permissions
           : ((session.user as { permissions?: string[] }).permissions ?? []),
+        propertyId:
+          (session.user as { propertyId?: string | null }).propertyId ??
+          claims.propertyId ??
+          session.user.defaultPropertyId ??
+          null,
       },
     };
   }
@@ -1259,6 +1347,8 @@ export class AuthService {
     caller: { userId: string; email: string; role: string; tenantId: string },
     originIp?: string,
   ) {
+    // Default property, same as the other terminals (FIND-05: these two had none).
+    const property = await this.resolveDefaultProperty(caller.tenantId);
     const payload = {
       sub: caller.userId,
       email: caller.email,
@@ -1267,6 +1357,8 @@ export class AuthService {
       warehouseLaunch: true,
       firstName: null,
       lastName: null,
+      propertyId: property?.id ?? null,
+      propertyName: property?.name ?? null,
       permissions: [
         'item.view',
         'item.manage',
@@ -1290,7 +1382,7 @@ export class AuthService {
       ],
       originIp: originIp ?? null,
     };
-    const token = this.jwtService.sign(payload, { expiresIn: '5m' });
+    const token = this.signLaunchToken(payload);
     const launchUrl = `/inventory?token=${token}`;
     this.logger.log(`Warehouse launch token generated by user ${caller.userId}`);
     return { success: true, data: { token, launchUrl, expiresIn: 300 } };
@@ -1332,7 +1424,7 @@ export class AuthService {
       permissions: HOTEL_MANAGER_PERMISSIONS,
       originIp: originIp ?? null,
     };
-    const token = this.jwtService.sign(payload, { expiresIn: '5m' });
+    const token = this.signLaunchToken(payload);
     const launchUrl = `/hotel-terminal?token=${token}`;
     this.logger.log(`Hotel Terminal launch token generated by user ${caller.userId}`);
     return { success: true, data: { token, launchUrl, expiresIn: 300 } };
@@ -1484,7 +1576,7 @@ export class AuthService {
       originIp: originIp ?? null,
       systemContext: 'accounting',
     };
-    const token = this.jwtService.sign(payload, { expiresIn: '5m' });
+    const token = this.signLaunchToken(payload);
     const launchUrl = `/accounting?token=${token}`;
     this.logger.log(`Accounting launch token generated by user ${caller.userId}`);
     return { success: true, data: { token, launchUrl, expiresIn: 300 } };
@@ -1521,7 +1613,7 @@ export class AuthService {
       originIp: originIp ?? null,
       systemContext: 'hr',
     };
-    const token = this.jwtService.sign(payload, { expiresIn: '5m' });
+    const token = this.signLaunchToken(payload);
     const launchUrl = `/hr?token=${token}`;
     this.logger.log(`HR launch token generated by user ${caller.userId}`);
     return { success: true, data: { token, launchUrl, expiresIn: 300 } };

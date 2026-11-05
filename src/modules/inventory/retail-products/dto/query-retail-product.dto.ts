@@ -23,6 +23,11 @@ export class QueryRetailProductDto {
   @IsBooleanString()
   unpricedOnly?: string;
 
+  @ApiPropertyOptional({ description: 'true = เอาเฉพาะที่ราคาหน้าร้านหรือราคาเมนูต่ำกว่าทุน' })
+  @IsOptional()
+  @IsBooleanString()
+  belowCostOnly?: string;
+
   @ApiPropertyOptional({ default: 1 })
   @IsOptional()
   @Type(() => Number)

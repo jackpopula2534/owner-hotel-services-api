@@ -48,6 +48,8 @@ describe('AuthService — sub-system launch exchange', () => {
   };
 
   const purchasingClaims = {
+    type: 'launch',
+    jti: 'jti-1',
     sub: 'user-1',
     email: 'owner@hotel.test',
     role: 'procurement_manager',
@@ -57,6 +59,8 @@ describe('AuthService — sub-system launch exchange', () => {
   };
 
   const hotelTerminalClaims = {
+    type: 'launch',
+    jti: 'jti-1',
     sub: 'user-1',
     email: 'owner@hotel.test',
     role: 'hotel_manager',
@@ -68,6 +72,8 @@ describe('AuthService — sub-system launch exchange', () => {
   };
 
   const warehouseClaims = {
+    type: 'launch',
+    jti: 'jti-1',
     sub: 'user-1',
     email: 'owner@hotel.test',
     role: 'warehouse_manager',
@@ -77,6 +83,8 @@ describe('AuthService — sub-system launch exchange', () => {
   };
 
   const accountingClaims = {
+    type: 'launch',
+    jti: 'jti-1',
     sub: 'user-1',
     email: 'owner@hotel.test',
     role: 'accounting_manager',
@@ -88,6 +96,8 @@ describe('AuthService — sub-system launch exchange', () => {
   };
 
   const hrClaims = {
+    type: 'launch',
+    jti: 'jti-1',
     sub: 'user-1',
     email: 'owner@hotel.test',
     role: 'hr_manager',
@@ -104,6 +114,10 @@ describe('AuthService — sub-system launch exchange', () => {
     userTenant: { findFirst: jest.fn().mockResolvedValue(null) },
     property: { findFirst: jest.fn().mockResolvedValue(null) },
     user2FASettings: { findUnique: jest.fn().mockResolvedValue(null) },
+    consumedLaunchToken: {
+      create: jest.fn().mockResolvedValue({}),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
   };
   const mockJwt = {
     sign: jest.fn().mockReturnValue('new-access-token'),
@@ -134,6 +148,8 @@ describe('AuthService — sub-system launch exchange', () => {
     mockJwt.sign.mockReturnValue('new-access-token');
     mockJwt.decode.mockReturnValue({ exp: 1_800_000_000 });
     mockPrisma.refreshToken.create.mockResolvedValue({});
+    mockPrisma.consumedLaunchToken.create.mockResolvedValue({});
+    mockPrisma.consumedLaunchToken.deleteMany.mockResolvedValue({ count: 0 });
     mockPrisma.userTenant.findFirst.mockResolvedValue(null);
     mockPrisma.property.findFirst.mockResolvedValue(null);
   });

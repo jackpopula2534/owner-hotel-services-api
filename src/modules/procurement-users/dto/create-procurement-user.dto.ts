@@ -49,7 +49,8 @@ export const DEFAULT_PROCUREMENT_PERMISSIONS: Record<ProcurementRole, string[]> 
   ],
   buyer: ['pr.create', 'rfq.create', 'quote.compare', 'po.create', 'supplier.view', 'report.view'],
   approver: ['pr.approve', 'po.approve', 'quote.compare', 'report.view'],
-  receiver: ['grn.create', 'grn.view', 'qc.inspect'],
+  // ระบบจัดซื้อดูการรับเข้าได้อย่างเดียว — รับของ/ตรวจ QC ทำที่ระบบคลัง (assertCanReceive บล็อก token จัดซื้ออยู่แล้ว)
+  receiver: ['grn.view', 'qc.view'],
 };
 
 export class CreateProcurementUserDto {

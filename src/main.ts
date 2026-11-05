@@ -8,6 +8,7 @@ import { Hotel3dDemoSeeder } from './seeder/hotel-3d-demo.seeder';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
+import { resolveSameSite } from './modules/auth/terminal-refresh-cookie';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -73,6 +74,20 @@ async function bootstrap() {
   const allowedOrigins = allowedOriginsEnv.split(',').map((origin) => origin.trim());
 
   logger.log('CORS allowed origins: ' + allowedOrigins.join(', '));
+
+  // httpOnly refresh cookie (ss_rt_<context>): must reach /auth/refresh from the web app.
+  const refreshSameSite = resolveSameSite();
+  logger.log(
+    `Refresh cookie SameSite=${refreshSameSite}` +
+      (process.env.REFRESH_COOKIE_SAMESITE ? ' (REFRESH_COOKIE_SAMESITE)' : ' (auto: FRONTEND_URL vs APP_BASE_URL)'),
+  );
+  if (refreshSameSite === 'none') {
+    logger.warn(
+      'Web app and API are on different sites — refresh cookie is SameSite=None; Secure. ' +
+        'Browsers that block third-party cookies (Safari, Chrome with 3P cookies off) will sign users out on reload; ' +
+        'prefer hosting the API on a subdomain of the app (app.example.com + api.example.com).',
+    );
+  }
 
   // เว็บโรงแรม <slug>.<WEBSITE_ROOT_DOMAIN> เรียก /public/sites/* (ฟอร์มคำขอจอง) — dev ใช้ <slug>.localhost
   const escapeRe = (v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

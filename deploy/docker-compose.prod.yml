@@ -67,6 +67,8 @@ services:
       FRONTEND_URL: ${FRONTEND_URL}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS}
       APP_BASE_URL: ${APP_BASE_URL}
+      # ว่าง = auto (คนละโดเมน → none) — ดู .env.prod.example
+      REFRESH_COOKIE_SAMESITE: ${REFRESH_COOKIE_SAMESITE:-}
       # ── File storage: ใช้ Cloudflare R2 ──
       STORAGE_DRIVER: s3
       S3_BUCKET: ${S3_BUCKET}

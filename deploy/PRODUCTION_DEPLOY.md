@@ -175,6 +175,8 @@ npm install @socket.io/redis-adapter
 - [ ] ทดสอบอัพโหลดสลิป/รูป แล้วเปิด URL จาก R2 ได้จริง
 - [ ] MySQL/Redis ไม่เปิด port ออก public, มีรหัสผ่าน
 - [ ] `prisma migrate deploy` รันแล้ว
+- [ ] `FRONTEND_URL` / `APP_BASE_URL` เป็นโดเมนจริง — log ตอนบูตต้องขึ้น `Refresh cookie SameSite=lax` (API เป็น subdomain ของเว็บ). ถ้าขึ้น `none` แปลว่าอยู่คนละโดเมน: ใช้ได้แต่ Safari จะเด้ง logout ทุก reload — ย้าย API ไปเป็น `api.<โดเมนเว็บ>` ดีกว่า (ตั้งทับได้ด้วย `REFRESH_COOKIE_SAMESITE`)
+- [ ] Login แล้ว reload หน้า dashboard / terminal ต้องยังอยู่ในระบบ (session กลับมาจาก httpOnly cookie `ss_rt_*`)
 - [ ] Swagger ปิดบน production (NODE_ENV=production — ปิดให้อัตโนมัติแล้วใน main.ts)
 - [ ] backup cron รันได้ + ทดสอบ restore สำเร็จ
 - [ ] Cloudflare SSL = Full (strict), firewall เปิดแค่ 22/80/443

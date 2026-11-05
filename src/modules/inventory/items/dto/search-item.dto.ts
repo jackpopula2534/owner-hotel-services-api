@@ -7,7 +7,9 @@ import {
   MaxLength,
   Min,
   Max,
+  IsEnum,
 } from 'class-validator';
+import { InventoryItemTypeEnum } from './create-item.dto';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type, Transform } from 'class-transformer';
 
@@ -75,4 +77,13 @@ export class SearchItemDto {
     return undefined;
   })
   isActive?: boolean;
+
+  @ApiPropertyOptional({
+    enum: InventoryItemTypeEnum,
+    description:
+      'Restrict results to one item type — Retail POS asks for FINISHED_GOOD only, so rental gear / raw materials never show up as "unpriced" goods.',
+  })
+  @IsOptional()
+  @IsEnum(InventoryItemTypeEnum)
+  itemType?: InventoryItemTypeEnum;
 }

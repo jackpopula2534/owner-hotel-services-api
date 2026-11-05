@@ -52,6 +52,17 @@ export class CreateRestaurantDto {
   @IsOptional()
   warehouseId?: string | null;
 
+  @ApiPropertyOptional({
+    description:
+      'ตัดวัตถุดิบตามสูตรเมื่อปิดบิล — null = ตามสวิตช์ Integration Hub ของกิจการ, ' +
+      'true/false = ร้านนี้เปิด/ปิดเอง',
+    nullable: true,
+  })
+  @ValidateIf((_, value) => value !== null)
+  @IsBoolean()
+  @IsOptional()
+  recipeStockDeduction?: boolean | null;
+
   @ApiPropertyOptional({ example: 'REST001' })
   @IsString()
   @IsOptional()

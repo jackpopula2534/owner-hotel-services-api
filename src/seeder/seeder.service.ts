@@ -22,8 +22,10 @@ import { PaymentMethod, PaymentStatus } from '../payments/entities/payment.entit
 import { PrismaService } from '../prisma/prisma.service';
 import { ReadyMadeGoodsSeeder } from './ready-made-goods.seeder';
 import { RetailPromotionsSeeder } from './retail-promotions.seeder';
+import { SeedLotsSeeder } from './seed-lots.seeder';
 import { WarehouseGroupsSeeder } from './warehouse-groups.seeder';
 import { CAMP_PREMIUM_TENANT_NAME, CampPremiumSeeder } from './camp-premium.seeder';
+import { CampSuppliersSeeder } from './camp-suppliers.seeder';
 import { Hotel3dDemoSeeder } from './hotel-3d-demo.seeder';
 import {
   CostCenterType,
@@ -77,8 +79,10 @@ export class SeederService {
     private prisma: PrismaService,
     private readyMadeGoods: ReadyMadeGoodsSeeder,
     private retailPromotions: RetailPromotionsSeeder,
+    private seedLots: SeedLotsSeeder,
     private warehouseGroups: WarehouseGroupsSeeder,
     private campPremium: CampPremiumSeeder,
+    private campSuppliers: CampSuppliersSeeder,
     private hotel3dDemo: Hotel3dDemoSeeder,
     private moduleRef: ModuleRef,
   ) {}
@@ -143,6 +147,8 @@ export class SeederService {
       await this.readyMadeGoods.seed();
       // ลาน/โซน/จุดกาง/อุปกรณ์เช่า/การจอง/เว็บจองลาน ของ premium.camp — หลังคลัง/HR เพื่อให้ tenant มีครบ
       await this.campPremium.seed();
+      // ซัพพลายเออร์ของลาน — ขอใบเสนอราคาต้องมีอย่างน้อย 1 ราย
+      await this.campSuppliers.seed();
       // คลังของแถม + โปรตัวอย่าง — ต้องมีคลังร้านขายของ (WH-RETAIL) ก่อน
       await this.retailPromotions.seed();
       // กลุ่มคลัง — ต้องอยู่หลังคลังทุกตัวถูกสร้าง (คลังร้าน/มินิบาร์มาจาก readyMadeGoods)
@@ -156,6 +162,8 @@ export class SeederService {
       await this.seedRecruitmentPipeline();
       // ท้ายสุด — ต้องมีการจองที่เช็คเอาต์แล้ว/การจองลานครบก่อนถึงลงบัญชีย้อนหลังได้
       await this.seedAccounting();
+      // ท้ายสุดจริง ๆ — หลังทุกตัวที่เขียนยอดคลัง: ให้ของที่ซีดไว้มี lot ครบ (ยอด lot = ยอดคลัง)
+      await this.seedLots.seed();
 
       this.logger.log('✅ Database seeding completed successfully!');
     } catch (error) {
@@ -7881,41 +7889,6 @@ export class SeederService {
       }
     }
     this.logger.log(`  ✓ ${templateCount} room type amenity templates seeded`);
-
-    // ── 7. Inventory Recipes (F&B BOM) ────────────────────────────────────────
-    // Seed a simple recipe for demo (links to a restaurant menu item by ID placeholder)
-    const existingRecipe = await this.prisma.inventoryRecipe.findFirst({
-      where: { tenantId, menuItemId: 'DEMO-KAOPAT-001' },
-    });
-    if (!existingRecipe) {
-      const recipe = await this.prisma.inventoryRecipe.create({
-        data: {
-          tenantId,
-          menuItemId: 'DEMO-KAOPAT-001',
-          menuItemName: 'ข้าวผัดกุ้ง',
-          servings: 1,
-          isActive: true,
-          notes: 'สูตรมาตรฐาน',
-        },
-      });
-      const riceId = itemMap['RICE-25KG'];
-      const oilId = itemMap['OIL-5L'];
-      if (riceId && oilId) {
-        await this.prisma.inventoryRecipeIngredient.createMany({
-          data: [
-            { recipeId: recipe.id, itemId: riceId, quantity: 0.2, unit: 'กก.', wastagePercent: 5 },
-            {
-              recipeId: recipe.id,
-              itemId: oilId,
-              quantity: 0.02,
-              unit: 'ลิตร',
-              wastagePercent: 10,
-            },
-          ],
-        });
-        this.logger.log(`  ✓ Recipe seeded: ข้าวผัดกุ้ง`);
-      }
-    }
 
     this.logger.log(`✅ Inventory seed complete: warehouses, ${itemDefs.length} items, templates`);
   }

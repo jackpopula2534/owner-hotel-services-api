@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { ItemUnit, Prisma, WarehouseType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { quoteCampStay } from '../modules/camp/camp-pricing';
 import {
@@ -61,6 +61,25 @@ function atBangkok(day: Date, hhmm: string): Date {
 }
 
 const ymd = (d: Date): string => d.toISOString().slice(0, 10).replace(/-/g, '');
+
+/** สถานะใบจองที่ของยังอยู่กับแขก — ตรงกับ AddonsService.ACTIVE_RESERVATION_STATUSES */
+const GEAR_OUT_STATUSES = ['pending', 'confirmed', 'checked_in'];
+
+/**
+ * สินค้าคลังของอุปกรณ์เช่าแต่ละตัว — หน่วยนับคลัง + ต้นทุนต่อหน่วย + ยอดสำรองในคลังกลาง (WH-MAIN)
+ * ไว้ทดสอบใบเบิก/ใบโอนเติมของเข้าลาน (เก้าอี้หมดที่ลานแต่คลังกลางยังมี)
+ */
+const GEAR_INVENTORY: Record<EquipmentKey, { unit: ItemUnit; cost: number; centralQty: number }> = {
+  tent2: { unit: ItemUnit.PIECE, cost: 1800, centralQty: 5 },
+  tent4: { unit: ItemUnit.PIECE, cost: 3500, centralQty: 2 },
+  bag: { unit: ItemUnit.PIECE, cost: 450, centralQty: 10 },
+  mat: { unit: ItemUnit.PIECE, cost: 350, centralQty: 10 },
+  stove: { unit: ItemUnit.SET, cost: 900, centralQty: 4 },
+  wood: { unit: ItemUnit.PACK, cost: 40, centralQty: 50 },
+  lantern: { unit: ItemUnit.PIECE, cost: 250, centralQty: 10 },
+  cord: { unit: ItemUnit.PIECE, cost: 300, centralQty: 5 },
+  chair: { unit: ItemUnit.PIECE, cost: 400, centralQty: 12 },
+};
 
 @Injectable()
 export class CampPremiumSeeder {
@@ -163,11 +182,12 @@ export class CampPremiumSeeder {
         pitchByCode,
         gear,
       );
+      const linkedItems = await this.linkInventory(tenant.id, property.id, campground, gear);
       await this.seedWebsite(tenant.id, property.id, campground.id);
 
       this.logger.log(
         `  ✓ ${CAMP_NAME}: ${ZONES.length} zones, ${pitchByCode.size} pitches, ${FACILITIES.length} facilities, ` +
-          `${EQUIPMENT.length} rental items, ${reservationCount} reservations, website ${SITE_SLUG}`,
+          `${EQUIPMENT.length} rental items (${linkedItems} linked to inventory), ${reservationCount} reservations, website ${SITE_SLUG}`,
       );
     } catch (error) {
       this.logger.warn(`  ⚠️ Error seeding premium camp: ${(error as Error).message}`);
@@ -338,6 +358,109 @@ export class CampPremiumSeeder {
       count++;
     }
     return count;
+  }
+
+  /**
+   * เชื่อมลานเข้าคลังสินค้า แบบเดียวกับ CampgroundsService.connectInventory (คลังย่อย code CAMP-xxxxxxxx)
+   * แล้วผูกอุปกรณ์เช่าทุกตัวกับสินค้าในคลัง:
+   * - คลังลาน = จำนวนที่ลานมีทั้งหมด (ว่าง + ถูกยืม) — การเช่าไม่ตัดคลัง
+   * - campAddon.stockQty = ว่างให้เช่า = ทั้งหมด − ที่ออกไปกับใบจอง active
+   *   (ลานที่เชื่อมคลังแล้ว ReservationsService ตัด stockQty ตอนจอง ⇒ ยอด seed ต้องหักไว้ก่อน)
+   */
+  private async linkInventory(
+    tenantId: string,
+    propertyId: string,
+    campground: { id: string; name: string; address: string | null },
+    gear: Map<EquipmentKey, { id: string; name: string; price: number }>,
+  ): Promise<number> {
+    const code = `CAMP-${campground.id.replace(/-/g, '').slice(0, 8).toUpperCase()}`;
+    const warehouse =
+      (await this.prisma.warehouse.findFirst({
+        where: { tenantId, propertyId, code, deletedAt: null },
+        select: { id: true },
+      })) ??
+      (await this.prisma.warehouse.create({
+        data: {
+          tenantId,
+          propertyId,
+          code,
+          name: `คลังลาน: ${campground.name}`.slice(0, 100),
+          type: WarehouseType.GENERAL,
+          location: campground.address,
+          isDefault: false,
+          isActive: true,
+        },
+        select: { id: true },
+      }));
+    await this.prisma.campground.update({
+      where: { id: campground.id },
+      data: { warehouseId: warehouse.id },
+    });
+
+    const central = await this.prisma.warehouse.findFirst({
+      where: { tenantId, code: 'WH-MAIN', deletedAt: null },
+      select: { id: true },
+    });
+
+    const out = await this.prisma.campReservationAddon.groupBy({
+      by: ['addonId'],
+      where: {
+        addonId: { in: [...gear.values()].map((g) => g.id) },
+        reservation: { status: { in: GEAR_OUT_STATUSES } },
+      },
+      _sum: { qty: true },
+    });
+    const borrowedByAddon = new Map(out.map((o) => [o.addonId, o._sum.qty ?? 0]));
+
+    let linked = 0;
+    for (const e of EQUIPMENT) {
+      const addon = gear.get(e.key);
+      if (!addon) continue;
+      const inv = GEAR_INVENTORY[e.key];
+      const borrowed = borrowedByAddon.get(addon.id) ?? 0;
+      const owned = Math.max(e.stock, borrowed);
+      const sku = `CAMP-GEAR-${e.key.toUpperCase()}`;
+
+      const item = await this.prisma.inventoryItem.upsert({
+        where: { tenantId_sku: { tenantId, sku } },
+        create: {
+          tenantId,
+          sku,
+          name: e.name,
+          description: e.description,
+          unit: inv.unit,
+          reorderPoint: Math.ceil(e.stock * 0.2),
+          reorderQty: Math.max(5, Math.ceil(e.stock * 0.5)),
+        },
+        update: { name: e.name, unit: inv.unit, deletedAt: null },
+        select: { id: true },
+      });
+
+      const stocks = [
+        { warehouseId: warehouse.id, quantity: owned },
+        ...(central ? [{ warehouseId: central.id, quantity: inv.centralQty }] : []),
+      ];
+      for (const st of stocks) {
+        const values = {
+          quantity: st.quantity,
+          avgCost: inv.cost,
+          totalValue: st.quantity * inv.cost,
+        };
+        await this.prisma.warehouseStock.upsert({
+          where: { warehouseId_itemId: { warehouseId: st.warehouseId, itemId: item.id } },
+          create: { warehouseId: st.warehouseId, itemId: item.id, ...values },
+          update: values,
+        });
+      }
+
+      await this.prisma.campAddon.update({
+        where: { id: addon.id },
+        data: { inventoryItemId: item.id, stockQty: owned - borrowed },
+      });
+      linked++;
+    }
+    this.logger.log(`  ✓ ${campground.name}: เชื่อมคลัง ${code} + ผูกอุปกรณ์เช่า ${linked} รายการ`);
+    return linked;
   }
 
   /** เช็คเอาต์แล้ว = รายได้เกิดแล้ว — ลงสมุดรายได้กลางแบบเดียวกับ ReservationsService.checkOut

@@ -227,6 +227,28 @@ describe('MenuStockService', () => {
   });
 
   // ── ตัดสต๊อกตอนปิดบิล ─────────────────────────────────────────────────────
+  describe('availableCentralQty — ตัวเลขที่ป้ายหน้าจัดการเมนูโชว์', () => {
+    it('เท่ากับยอดที่ตอนกดสั่งจะตอบว่า "เหลือ X" — คลังที่ร้านตัดจริง − กันไว้ − ค้างในบิล', async () => {
+      prisma.warehouseStock.findFirst.mockResolvedValue({ quantity: 10, reservedQty: 2 });
+      prisma.orderItem.aggregate.mockResolvedValue({ _sum: { quantity: 3 } });
+
+      const qty = await service.availableCentralQty(TENANT, RESTAURANT, ['inv-1', 'inv-1']);
+
+      expect(qty.get('inv-1')).toBe(5);
+      // คลังเลือกทีละสินค้าด้วยตัวเดียวกับตอนขาย และถามครั้งเดียวต่อสินค้า
+      expect(sourceWarehouse.resolveForItem).toHaveBeenCalledTimes(1);
+      expect(sourceWarehouse.resolveForItem).toHaveBeenCalledWith(TENANT, RESTAURANT, 'inv-1');
+    });
+
+    it('หาคลังให้ร้านไม่ได้ = ไม่ใส่ตัวเลข (ไม่โชว์ 0 ที่ไม่จริง)', async () => {
+      sourceWarehouse.resolveForItem.mockResolvedValue(null);
+
+      const qty = await service.availableCentralQty(TENANT, RESTAURANT, ['inv-1']);
+
+      expect(qty.has('inv-1')).toBe(false);
+    });
+  });
+
   describe('deductForOrder', () => {
     it('รวมบรรทัดที่เป็นเมนูเดียวกันก่อนตัด', async () => {
       const tx = makeTxMock();

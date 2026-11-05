@@ -25,6 +25,7 @@ interface MenuItemRow {
   id: string;
   name: string;
   cost: number | null;
+  inventoryItemId?: string | null;
   recipe: { servings: number | null; ingredients: IngredientRow[] } | null;
 }
 
@@ -71,6 +72,27 @@ function makeWorld(menuItems: MenuItemRow[], stocks: StockRow[]) {
 }
 
 describe('menuItemCosts', () => {
+  it('เมนูสำเร็จรูปที่ผูกคลังใช้ต้นทุนเฉลี่ยปัจจุบัน ไม่ใช่ค่าที่ถ่ายไว้ตอนผูก', async () => {
+    const { run } = makeWorld(
+      [{ id: 'menu-water', name: 'น้ำดื่ม', cost: 4, inventoryItemId: 'inv-water', recipe: null }],
+      [
+        { itemId: 'inv-water', quantity: 30, avgCost: 6 },
+        { itemId: 'inv-water', quantity: 10, avgCost: 10 },
+      ],
+    );
+
+    const costs = await run(['menu-water']);
+
+    // (30×6 + 10×10) / 40 = 7
+    expect(costs.get('menu-water')).toEqual({
+      name: 'น้ำดื่ม',
+      costPerUnit: 7,
+      source: 'STOCK',
+      missingIngredients: [],
+      unstockedIngredients: [],
+    });
+  });
+
   it('คิดจากสูตร แล้วหารด้วยจำนวนจานที่ได้ต่อสูตร', async () => {
     const { run } = makeWorld(
       [
@@ -95,6 +117,7 @@ describe('menuItemCosts', () => {
       costPerUnit: 30,
       source: 'RECIPE',
       missingIngredients: [],
+      unstockedIngredients: [],
     });
   });
 
@@ -160,7 +183,7 @@ describe('menuItemCosts', () => {
     expect(costs.get('menu-rice')?.costPerUnit).toBe(120);
   });
 
-  it('หน่วยในสูตรไม่ตรงกับหน่วยนับในคลัง = ข้ามและรายงานชื่อ ห้ามแปลงหน่วยเอง', async () => {
+  it('หน่วยในสูตรต่างจากหน่วยนับในคลังแต่มิติเดียวกัน = แปลงให้ (5 กรัม = 0.005 กิโล)', async () => {
     const { run } = makeWorld(
       [
         {
@@ -185,11 +208,46 @@ describe('menuItemCosts', () => {
 
     const costs = await run(['menu-mixed']);
 
+    // กุ้ง 0.2 × 300 = 60 + เกลือ 0.005 × 15 = 0.075 → 60.08
+    expect(costs.get('menu-mixed')).toEqual({
+      name: 'จานผสม',
+      costPerUnit: 60.08,
+      source: 'RECIPE',
+      missingIngredients: [],
+      unstockedIngredients: [],
+    });
+  });
+
+  it('หน่วยต่างมิติ (ช้อนโต๊ะ → กิโล) = ข้ามและรายงานชื่อ ห้ามเดา', async () => {
+    const { run } = makeWorld(
+      [
+        {
+          id: 'menu-mixed',
+          name: 'จานผสม',
+          cost: null,
+          recipe: {
+            servings: 1,
+            ingredients: [
+              ingredient('กุ้ง', 'ing-shrimp', 0.2, 'KG'),
+              ingredient('เกลือ', 'ing-salt', 1, 'ช้อนโต๊ะ', 0, 'KG'),
+            ],
+          },
+        },
+      ],
+      [
+        { itemId: 'ing-shrimp', quantity: 10, avgCost: 300 },
+        { itemId: 'ing-salt', quantity: 10, avgCost: 15 },
+      ],
+    );
+
+    const costs = await run(['menu-mixed']);
+
     expect(costs.get('menu-mixed')).toEqual({
       name: 'จานผสม',
       costPerUnit: 60,
       source: 'RECIPE',
       missingIngredients: ['เกลือ'],
+      unstockedIngredients: ['เกลือ'],
     });
   });
 
@@ -237,6 +295,7 @@ describe('menuItemCosts', () => {
       costPerUnit: 0,
       source: 'NONE',
       missingIngredients: ['น้ำซุป'],
+      unstockedIngredients: [],
     });
   });
 
@@ -250,6 +309,7 @@ describe('menuItemCosts', () => {
       costPerUnit: 35,
       source: 'MENU_ITEM',
       missingIngredients: [],
+      unstockedIngredients: [],
     });
   });
 
@@ -262,7 +322,8 @@ describe('menuItemCosts', () => {
           cost: 90,
           recipe: {
             servings: 1,
-            ingredients: [ingredient('ของหายาก', 'ing-rare', 1, 'G', 0, 'KG')],
+            // ชิ้น → กิโล แปลงไม่ได้ จึงคิดต้นทุนจากสูตรไม่ได้เลย
+            ingredients: [ingredient('ของหายาก', 'ing-rare', 1, 'ชิ้น', 0, 'KG')],
           },
         },
       ],
@@ -276,6 +337,7 @@ describe('menuItemCosts', () => {
       costPerUnit: 90,
       source: 'MENU_ITEM',
       missingIngredients: ['ของหายาก'],
+      unstockedIngredients: ['ของหายาก'],
     });
   });
 
@@ -289,6 +351,7 @@ describe('menuItemCosts', () => {
       costPerUnit: 0,
       source: 'NONE',
       missingIngredients: [],
+      unstockedIngredients: [],
     });
   });
 

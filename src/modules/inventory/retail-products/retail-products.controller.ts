@@ -6,6 +6,7 @@ import { RequireAddon } from '@/common/decorators/require-addon.decorator';
 import { RetailProductsService } from './retail-products.service';
 import { QueryRetailProductDto } from './dto/query-retail-product.dto';
 import { CreateMenuFromItemDto } from './dto/create-menu-from-item.dto';
+import { AllowSystems } from '@/common/decorators/allow-systems.decorator';
 
 type AuthedReq = { user: { id: string; tenantId: string } };
 
@@ -17,6 +18,10 @@ type AuthedReq = { user: { id: string; tenantId: string } };
 export class RetailProductsController {
   constructor(private readonly retailProductsService: RetailProductsService) {}
 
+  // POS ร้านอาหาร → จัดการเมนู → "เพิ่มจากสินค้าในคลัง" เลือกสินค้าจากรายการนี้
+  // เปิดเฉพาะการอ่านรายการ — สรุปยอด/สร้างเมนูผ่าน endpoint นี้ยังปิดสำหรับ token ของ POS
+  // (ฝั่ง POS ค้นหา/เลือกสินค้าอย่างเดียว ไม่เห็นยอดสรุปของคลัง)
+  @AllowSystems('pos')
   @Get()
   @ApiOperation({ summary: 'สินค้าสำเร็จรูปที่ขายหน้าร้านได้ พร้อมยอดคลัง ต้นทุนเฉลี่ย และกำไรต่อชิ้น' })
   async findAll(@Query() query: QueryRetailProductDto, @Req() req: AuthedReq) {

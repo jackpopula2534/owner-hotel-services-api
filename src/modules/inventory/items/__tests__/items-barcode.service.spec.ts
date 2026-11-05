@@ -7,7 +7,7 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { ItemsService } from '../items.service';
 import { PrismaService } from '@/prisma/prisma.service';
 
@@ -34,6 +34,7 @@ describe('ItemsService — ยิงบาร์โค้ด', () => {
     barcode: '8850001000011',
     imageUrl: null,
     sellingPrice: '20.00',
+    itemType: 'FINISHED_GOOD',
     category: { id: 'cat-1', name: 'เครื่องดื่ม' },
   };
 
@@ -125,6 +126,56 @@ describe('ItemsService — ยิงบาร์โค้ด', () => {
       await expect(
         service.findByBarcode(tenantId, { code: '8850001000011' }),
       ).rejects.toThrow(ConflictException);
+    });
+  });
+
+  describe('findByBarcode — กรองประเภทสินค้า', () => {
+    const RAW = {
+      ...ROW,
+      id: 'item-flour',
+      sku: 'RM-FLOUR',
+      name: 'แป้งสาลี',
+      itemType: 'RAW_MATERIAL',
+    };
+
+    it('หน้าขายขอ FINISHED_GOOD แต่ยิงโดนวัตถุดิบ = 422 บอกชื่อสินค้า ไม่ใช่ 404', async () => {
+      prisma.inventoryItem.findMany.mockResolvedValue([RAW]);
+
+      const call = service.findByBarcode(tenantId, {
+        code: '8850001000011',
+        itemType: 'FINISHED_GOOD' as never,
+      });
+      await expect(call).rejects.toThrow(UnprocessableEntityException);
+      await expect(call).rejects.toThrow(/แป้งสาลี/);
+    });
+
+    it('ไม่กรองใน where — บาร์โค้ดซ้ำยังต้องเจอ 409 แม้จะขอประเภท', async () => {
+      prisma.inventoryItem.findMany.mockResolvedValue([ROW, RAW]);
+
+      await expect(
+        service.findByBarcode(tenantId, {
+          code: '8850001000011',
+          itemType: 'FINISHED_GOOD' as never,
+        }),
+      ).rejects.toThrow(ConflictException);
+      expect(prisma.inventoryItem.findMany.mock.calls[0][0].where.itemType).toBeUndefined();
+    });
+
+    it('ประเภทตรง = คืนสินค้าตามปกติ', async () => {
+      prisma.inventoryItem.findMany.mockResolvedValue([ROW]);
+
+      const result = await service.findByBarcode(tenantId, {
+        code: '8850001000011',
+        itemType: 'FINISHED_GOOD' as never,
+      });
+      expect(result.id).toBe('item-water');
+    });
+
+    it('ไม่ส่ง itemType = ไม่เช็คประเภท (หน้าคลัง/รับของยิงวัตถุดิบได้)', async () => {
+      prisma.inventoryItem.findMany.mockResolvedValue([RAW]);
+
+      const result = await service.findByBarcode(tenantId, { code: '8850001000011' });
+      expect(result.id).toBe('item-flour');
     });
   });
 

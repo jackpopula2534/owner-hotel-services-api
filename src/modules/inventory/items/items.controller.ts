@@ -257,6 +257,7 @@ export class ItemsController {
   })
   @ApiQuery({ name: 'code', required: true, type: String, example: '8850001000011' })
   @ApiQuery({ name: 'warehouseId', required: false, type: String })
+  @ApiQuery({ name: 'itemType', required: false, enum: ['RAW_MATERIAL', 'FINISHED_GOOD'] })
   @ApiResponse({
     status: 200,
     description: 'สินค้าที่ผูกกับบาร์โค้ดนี้',
@@ -279,6 +280,10 @@ export class ItemsController {
   })
   @ApiResponse({ status: 404, description: 'ไม่มีสินค้าที่ผูกกับบาร์โค้ดนี้' })
   @ApiResponse({ status: 409, description: 'บาร์โค้ดซ้ำกันหลายรายการ — ต้องไปแก้ข้อมูลสินค้าก่อน' })
+  @ApiResponse({
+    status: 422,
+    description: 'เจอสินค้าแต่ประเภทไม่ตรงกับ itemType ที่ขอ (เช่น ยิงโดนวัตถุดิบที่หน้าขาย)',
+  })
   async scanBarcode(
     @CurrentUser() user: JwtPayload,
     @Query() query: ScanBarcodeDto,

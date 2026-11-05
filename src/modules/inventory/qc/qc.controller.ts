@@ -22,6 +22,8 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard';
 import { QCService } from './qc.service';
+import { PrismaService } from '@/prisma/prisma.service';
+import { assertCanReceive, purchaseOrderIdOfReceive } from '../common/receiving-access';
 import {
   CreateQCTemplateDto,
   UpdateQCTemplateDto,
@@ -36,7 +38,29 @@ import {
 @UseGuards(JwtAuthGuard)
 @Controller('inventory/qc')
 export class QCController {
-  constructor(private readonly qcService: QCService) {}
+  constructor(
+    private readonly qcService: QCService,
+    private readonly prisma: PrismaService,
+  ) {}
+
+  /** บันทึก/ส่งผล QC — ฝั่งคลังเท่านั้น และไม่ใช่คนที่สั่งซื้อ/อนุมัติ PO ของใบรับนั้น */
+  private async guardQc(
+    user: { id?: string; userId?: string; tenantId: string; role: string; systemContext?: string },
+    goodsReceiveId?: string | null,
+  ): Promise<void> {
+    const poId = await purchaseOrderIdOfReceive(this.prisma, user.tenantId, goodsReceiveId);
+    await assertCanReceive(
+      this.prisma,
+      {
+        userId: (user.userId ?? user.id) as string,
+        tenantId: user.tenantId,
+        role: user.role,
+        systemContext: user.systemContext,
+      },
+      'qc',
+      poId,
+    );
+  }
 
   // ─── Templates ───────────────────────────────────────────────────────────────
 
@@ -105,7 +129,8 @@ export class QCController {
 
   @ApiOperation({ summary: 'Create a new QC record' })
   @Post('records')
-  createRecord(@Request() req: any, @Body() dto: CreateQCRecordDto) {
+  async createRecord(@Request() req: any, @Body() dto: CreateQCRecordDto) {
+    await this.guardQc(req.user, dto.goodsReceiveId);
     return this.qcService.createRecord(req.user.tenantId, dto, req.user.id);
   }
 
@@ -121,7 +146,9 @@ export class QCController {
   @ApiResponse({ status: 200, description: 'Record updated with status' })
   @Post('records/:id/submit')
   @HttpCode(HttpStatus.OK)
-  submitRecord(@Request() req: any, @Param('id') id: string, @Body() dto: SubmitQCRecordDto) {
+  async submitRecord(@Request() req: any, @Param('id') id: string, @Body() dto: SubmitQCRecordDto) {
+    const record = await this.qcService.getRecord(req.user.tenantId, id);
+    await this.guardQc(req.user, (record as { goodsReceiveId?: string | null }).goodsReceiveId);
     return this.qcService.submitRecord(req.user.tenantId, id, dto);
   }
 

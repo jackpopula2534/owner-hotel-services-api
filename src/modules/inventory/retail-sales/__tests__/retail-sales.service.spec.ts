@@ -175,8 +175,8 @@ describe('RetailSalesService', () => {
     it('deducts WarehouseStock, writes GOODS_ISSUE/RETAIL_SALE movement, computes totals', async () => {
       const prisma = buildPrisma();
       prisma.inventoryItem.findMany.mockResolvedValue([
-        { id: 'i1', tenantId: TENANT, sku: 'A', name: 'Cola', unit: 'CAN', isPerishable: false, requiresLotTracking: false },
-        { id: 'i2', tenantId: TENANT, sku: 'B', name: 'Water', unit: 'BOTTLE', isPerishable: false, requiresLotTracking: false },
+        { id: 'i1', tenantId: TENANT, sku: 'A', name: 'Cola', unit: 'CAN', isPerishable: false, requiresLotTracking: false, itemType: 'FINISHED_GOOD' },
+        { id: 'i2', tenantId: TENANT, sku: 'B', name: 'Water', unit: 'BOTTLE', isPerishable: false, requiresLotTracking: false, itemType: 'FINISHED_GOOD' },
       ]);
       prisma.warehouseStock.findFirst
         .mockResolvedValueOnce({ id: 's1', quantity: 10, avgCost: 60 })
@@ -218,10 +218,36 @@ describe('RetailSalesService', () => {
       expect(result.items).toHaveLength(2);
     });
 
+    it('rejects a raw material line before touching stock — only FINISHED_GOOD is sellable', async () => {
+      const prisma = buildPrisma();
+      prisma.inventoryItem.findMany.mockResolvedValue([
+        { id: 'i1', tenantId: TENANT, sku: 'A', name: 'Cola', unit: 'CAN', isPerishable: false, requiresLotTracking: false, itemType: 'FINISHED_GOOD' },
+        { id: 'i2', tenantId: TENANT, sku: 'F', name: 'Flour', unit: 'KG', isPerishable: false, requiresLotTracking: false, itemType: 'RAW_MATERIAL' },
+      ]);
+
+      const service = await makeService(prisma);
+      await expect(
+        service.create(
+          {
+            warehouseId: WH,
+            paymentMethod: 'CASH' as any,
+            lines: [
+              { itemId: 'i1', quantity: 1, unitPrice: 100 },
+              { itemId: 'i2', quantity: 1, unitPrice: 50 },
+            ],
+          },
+          USER,
+          TENANT,
+        ),
+      ).rejects.toThrow(/Flour.*วัตถุดิบ/);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.warehouseStock.findFirst).not.toHaveBeenCalled();
+    });
+
     it('consumes FEFO lots for a lot-tracked item (earliest expiry first)', async () => {
       const prisma = buildPrisma();
       prisma.inventoryItem.findMany.mockResolvedValue([
-        { id: 'i1', tenantId: TENANT, sku: 'M', name: 'Milk', unit: 'BOTTLE', isPerishable: true, requiresLotTracking: false },
+        { id: 'i1', tenantId: TENANT, sku: 'M', name: 'Milk', unit: 'BOTTLE', isPerishable: true, requiresLotTracking: false, itemType: 'FINISHED_GOOD' },
       ]);
       prisma.warehouseStock.findFirst.mockResolvedValue({ id: 's1', quantity: 10, avgCost: 20 });
       prisma.inventoryLot.findMany.mockResolvedValue([
@@ -250,7 +276,7 @@ describe('RetailSalesService', () => {
     it('throws when warehouse stock is insufficient', async () => {
       const prisma = buildPrisma();
       prisma.inventoryItem.findMany.mockResolvedValue([
-        { id: 'i1', tenantId: TENANT, sku: 'A', name: 'Cola', unit: 'CAN', isPerishable: false, requiresLotTracking: false },
+        { id: 'i1', tenantId: TENANT, sku: 'A', name: 'Cola', unit: 'CAN', isPerishable: false, requiresLotTracking: false, itemType: 'FINISHED_GOOD' },
       ]);
       prisma.warehouseStock.findFirst.mockResolvedValue({ id: 's1', quantity: 1, avgCost: 60 });
 
@@ -283,7 +309,7 @@ describe('RetailSalesService', () => {
       const prisma = buildPrisma();
       const folioPosting = buildFolioPosting();
       prisma.inventoryItem.findMany.mockResolvedValue([
-        { id: 'i1', tenantId: TENANT, sku: 'A', name: 'Cola', unit: 'CAN', isPerishable: false, requiresLotTracking: false },
+        { id: 'i1', tenantId: TENANT, sku: 'A', name: 'Cola', unit: 'CAN', isPerishable: false, requiresLotTracking: false, itemType: 'FINISHED_GOOD' },
       ]);
       prisma.warehouseStock.findFirst.mockResolvedValue({ id: 's1', quantity: 10, avgCost: 60 });
 
@@ -328,7 +354,7 @@ describe('RetailSalesService', () => {
         new BadRequestException('ไม่พบการจองที่เช็คอินอยู่สำหรับห้อง 999'),
       );
       prisma.inventoryItem.findMany.mockResolvedValue([
-        { id: 'i1', tenantId: TENANT, sku: 'A', name: 'Cola', unit: 'CAN', isPerishable: false, requiresLotTracking: false },
+        { id: 'i1', tenantId: TENANT, sku: 'A', name: 'Cola', unit: 'CAN', isPerishable: false, requiresLotTracking: false, itemType: 'FINISHED_GOOD' },
       ]);
       prisma.warehouseStock.findFirst.mockResolvedValue({ id: 's1', quantity: 10, avgCost: 60 });
 
@@ -353,7 +379,7 @@ describe('RetailSalesService', () => {
       const prisma = buildPrisma();
       const folioPosting = buildFolioPosting();
       prisma.inventoryItem.findMany.mockResolvedValue([
-        { id: 'i1', tenantId: TENANT, sku: 'A', name: 'Cola', unit: 'CAN', isPerishable: false, requiresLotTracking: false },
+        { id: 'i1', tenantId: TENANT, sku: 'A', name: 'Cola', unit: 'CAN', isPerishable: false, requiresLotTracking: false, itemType: 'FINISHED_GOOD' },
       ]);
       prisma.warehouseStock.findFirst.mockResolvedValue({ id: 's1', quantity: 10, avgCost: 60 });
 
@@ -426,7 +452,7 @@ describe('RetailSalesService', () => {
       const prisma = buildPrisma();
       const folioPosting = buildFolioPosting();
       prisma.inventoryItem.findMany.mockResolvedValue([
-        { id: 'i1', tenantId: TENANT, sku: 'A', name: 'Cola', unit: 'CAN', isPerishable: false, requiresLotTracking: false },
+        { id: 'i1', tenantId: TENANT, sku: 'A', name: 'Cola', unit: 'CAN', isPerishable: false, requiresLotTracking: false, itemType: 'FINISHED_GOOD' },
       ]);
       prisma.warehouseStock.findFirst.mockResolvedValue({ id: 's1', quantity: 10, avgCost: 60 });
 
@@ -454,7 +480,7 @@ describe('RetailSalesService', () => {
       const prisma = buildPrisma();
       const folioPosting = buildFolioPosting();
       prisma.inventoryItem.findMany.mockResolvedValue([
-        { id: 'i1', tenantId: TENANT, sku: 'A', name: 'Cola', unit: 'CAN', isPerishable: false, requiresLotTracking: false },
+        { id: 'i1', tenantId: TENANT, sku: 'A', name: 'Cola', unit: 'CAN', isPerishable: false, requiresLotTracking: false, itemType: 'FINISHED_GOOD' },
       ]);
       prisma.warehouseStock.findFirst.mockResolvedValue({ id: 's1', quantity: 10, avgCost: 60 });
 
@@ -491,7 +517,7 @@ describe('RetailSalesService', () => {
   describe('revenue ledger', () => {
     const oneItem = (prisma: any) => {
       prisma.inventoryItem.findMany.mockResolvedValue([
-        { id: 'i1', tenantId: TENANT, sku: 'A', name: 'Cola', unit: 'CAN', isPerishable: false, requiresLotTracking: false },
+        { id: 'i1', tenantId: TENANT, sku: 'A', name: 'Cola', unit: 'CAN', isPerishable: false, requiresLotTracking: false, itemType: 'FINISHED_GOOD' },
       ]);
       prisma.warehouseStock.findFirst.mockResolvedValue({ id: 's1', quantity: 10, avgCost: 60 });
     };
@@ -590,10 +616,10 @@ describe('RetailSalesService', () => {
     async function setup(ev = evaluated()) {
       const prisma = buildPrisma();
       prisma.inventoryItem.findMany.mockResolvedValue([
-        { id: 'i1', tenantId: TENANT, sku: 'A', name: 'Cola', unit: 'CAN', isPerishable: false, requiresLotTracking: false },
+        { id: 'i1', tenantId: TENANT, sku: 'A', name: 'Cola', unit: 'CAN', isPerishable: false, requiresLotTracking: false, itemType: 'FINISHED_GOOD' },
       ]);
       prisma.inventoryItem.findFirst = jest.fn().mockResolvedValue(
-        { id: 'tote', tenantId: TENANT, sku: 'T', name: 'Tote', unit: 'PCS', isPerishable: false, requiresLotTracking: false },
+        { id: 'tote', tenantId: TENANT, sku: 'T', name: 'Tote', unit: 'PCS', isPerishable: false, requiresLotTracking: false, itemType: 'FINISHED_GOOD' },
       );
       prisma.warehouseStock.findFirst
         .mockResolvedValueOnce({ id: 's1', quantity: 10, avgCost: 60 }) // ขาย

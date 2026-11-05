@@ -1,4 +1,5 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { convertToStockUnit } from '../common/unit-conversion';
 import { PrismaService } from '../../../prisma/prisma.service';
 
 /** A menu is flagged "near empty" when it can make this many plates or fewer. */
@@ -10,6 +11,8 @@ export interface ReadinessIngredient {
   itemId: string | null;
   perPlateQty: number;
   unit: string | null;
+  /** หน่วยในสูตรแปลงเป็นหน่วยสต็อกไม่ได้ — ตัดสต็อก/คำนวณจานให้ไม่ได้ */
+  unitIssue?: string | null;
   wastagePercent: number;
   stockQty: number | null;
   plates: number | null;
@@ -151,10 +154,29 @@ export class RecipeReadinessService {
           };
         }
 
+        // สูตรเขียน 150 กรัม แต่สต็อกเก็บเป็น KG → เทียบกันต้องเป็น 0.15
+        const conv = convertToStockUnit(withWastage, ing.unit, ing.item?.unit);
+        if (!conv.ok) {
+          return {
+            name: displayName,
+            linked: true,
+            itemId: ing.itemId,
+            perPlateQty,
+            unit: ing.unit ?? null,
+            unitIssue: conv.reason ?? 'แปลงหน่วยไม่ได้',
+            wastagePercent,
+            stockQty: null,
+            plates: null,
+            isLimiting: false,
+            isLow: false,
+          };
+        }
+        const perPlateStock = conv.quantity;
+
         trackedCount += 1;
         const stock = warehouseId ? stockMap.get(`${warehouseId}:${ing.itemId}`) : undefined;
         const avgCost = stock ? Number(stock.avgCost) : 0;
-        costPerPlate += withWastage * avgCost;
+        costPerPlate += perPlateStock * avgCost;
 
         // No kitchen warehouse resolved → readiness for this menu is unknown.
         if (!warehouseId) {
@@ -173,7 +195,7 @@ export class RecipeReadinessService {
         }
 
         const stockQty = stock?.quantity ?? 0;
-        const plates = withWastage > 0 ? Math.floor(stockQty / withWastage) : null;
+        const plates = perPlateStock > 0 ? Math.floor(stockQty / perPlateStock) : null;
         const reorderPoint = ing.item?.reorderPoint ?? 0;
         const isLow =
           (plates !== null && plates <= LOW_PLATES_THRESHOLD) ||

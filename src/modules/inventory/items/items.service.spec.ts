@@ -56,6 +56,16 @@ describe('ItemsService — searchItems', () => {
     expect(Array.isArray(args.where.OR)).toBe(true);
   });
 
+  // FIND-07: Retail POS asks for finished goods only — camp rental gear (RAW_MATERIAL) stays out
+  it('filters by itemType when given, and not otherwise', async () => {
+    mockPrismaService.inventoryItem.findMany.mockResolvedValue([]);
+    await service.searchItems(tenantId, { q: 'tent', itemType: 'FINISHED_GOOD' as never });
+    await service.searchItems(tenantId, { q: 'tent' });
+
+    expect(mockPrismaService.inventoryItem.findMany.mock.calls[0][0].where.itemType).toBe('FINISHED_GOOD');
+    expect(mockPrismaService.inventoryItem.findMany.mock.calls[1][0].where).not.toHaveProperty('itemType');
+  });
+
   // MySQL collation is already case-insensitive; Prisma v5 + MySQL rejects `mode: 'insensitive'`
   it('matches name, sku (contains) and barcode (exact)', async () => {
     mockPrismaService.inventoryItem.findMany.mockResolvedValue([]);

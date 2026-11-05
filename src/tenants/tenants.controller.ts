@@ -9,12 +9,14 @@ import {
   Query,
   UseGuards,
   ForbiddenException,
+  UseInterceptors,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { randomBytes } from 'crypto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { TerminalRefreshCookieInterceptor } from '../modules/auth/terminal-refresh-cookie.interceptor';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -35,6 +37,8 @@ import { InviteUserDto } from './dto/invite-user.dto';
 @ApiTags('tenants')
 @ApiBearerAuth('JWT-auth')
 @Controller({ path: 'tenants', version: '1' })
+// POST /tenants/switch mints a new main-dashboard refresh token → ss_rt_main cookie.
+@UseInterceptors(TerminalRefreshCookieInterceptor)
 @SkipSubscriptionCheck()
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class TenantsController {

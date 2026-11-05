@@ -4,7 +4,9 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
+import { MenuInventoryLinkService } from './menu-inventory-link.service';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AddonService } from '../../addons/addon.service';
@@ -29,6 +31,7 @@ export class MenuInventoryPromoteService {
     private readonly prisma: PrismaService,
     private readonly addonService: AddonService,
     private readonly sourceWarehouse: SourceWarehouseResolver,
+    @Optional() private readonly linkLog?: MenuInventoryLinkService,
   ) {}
 
   async promote(
@@ -167,6 +170,14 @@ export class MenuInventoryPromoteService {
     this.logger.log(
       `Promoted menu item ${menuItem.id} to inventory item ${result.inventoryItem.id} (${result.movedQty} units into warehouse ${warehouseId})`,
     );
+    await this.linkLog?.record({
+      tenantId,
+      menuItemId: menuItem.id,
+      action: 'LINK',
+      toInventoryItemId: result.inventoryItem.id,
+      note: `ย้ายเมนูที่นับสต๊อกเองเข้าคลังกลาง — ยกยอด ${result.movedQty} หน่วยเข้าคลัง`,
+      userId,
+    });
 
     return {
       inventoryItemId: result.inventoryItem.id,
@@ -273,6 +284,16 @@ export class MenuInventoryPromoteService {
     this.logger.log(
       `Demoted menu item ${menuItem.id} from inventory item ${inventoryItemId} (${quantity} units back from warehouse ${warehouseId ?? 'none'})`,
     );
+    await this.linkLog?.record({
+      tenantId,
+      menuItemId: menuItem.id,
+      action: 'UNLINK',
+      fromInventoryItemId: inventoryItemId,
+      note: returnStock
+        ? `ถอดออกจากคลังกลาง — ดึงของกลับมานับที่เมนู ${quantity} หน่วย`
+        : 'ถอดออกจากคลังกลาง — ตัดสายอย่างเดียว ของยังอยู่ในคลัง (เมนูขายไม่จำกัด)',
+      userId,
+    });
 
     return {
       menuItemId: menuItem.id,

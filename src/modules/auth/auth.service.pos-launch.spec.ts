@@ -43,6 +43,8 @@ describe('AuthService — POS launch exchange', () => {
   };
 
   const launchClaims = {
+    type: 'launch',
+    jti: 'jti-1',
     sub: 'user-1',
     email: 'manager@hotel.test',
     role: 'manager',
@@ -58,6 +60,10 @@ describe('AuthService — POS launch exchange', () => {
     userTenant: { findFirst: jest.fn().mockResolvedValue(null) },
     property: { findFirst: jest.fn().mockResolvedValue(null) },
     user2FASettings: { findUnique: jest.fn().mockResolvedValue(null) },
+    consumedLaunchToken: {
+      create: jest.fn().mockResolvedValue({}),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
   };
   const mockJwt = {
     sign: jest.fn().mockReturnValue('new-access-token'),
@@ -88,6 +94,8 @@ describe('AuthService — POS launch exchange', () => {
     mockJwt.sign.mockReturnValue('new-access-token');
     mockJwt.decode.mockReturnValue({ exp: 1_800_000_000 });
     mockPrisma.refreshToken.create.mockResolvedValue({});
+    mockPrisma.consumedLaunchToken.create.mockResolvedValue({});
+    mockPrisma.consumedLaunchToken.deleteMany.mockResolvedValue({ count: 0 });
   });
 
   it('trades a launch token for a POS session the terminal can renew', async () => {

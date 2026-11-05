@@ -1,4 +1,11 @@
-import { Injectable, NotFoundException, BadRequestException, ConflictException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+  Logger,
+  Optional,
+} from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogService } from '../../../audit-log/audit-log.service';
 import { CreateMenuCategoryDto } from './dto/create-menu-category.dto';
@@ -9,6 +16,35 @@ import { CreateMenuItemDto } from './dto/create-menu-item.dto';
 import { UpdateMenuItemDto } from './dto/update-menu-item.dto';
 import { CreateRecipeDto } from './dto/create-recipe.dto';
 import { sampleMenuCategoryMockups } from './menu-category-mockups';
+import { MenuStockService } from './menu-stock.service';
+import { MenuInventoryLinkService } from './menu-inventory-link.service';
+import {
+  menuItemCosts,
+  type MenuItemCostSource,
+} from '../../cost-accounting/shared/menu-item-cost';
+
+/**
+ * สถานะการตัดสต็อกของเมนู — ให้หน้าจัดการเมนูเห็นว่าขายแล้วคลังจะลดหรือไม่
+ *   LINKED     ของสำเร็จรูปผูกสินค้าคลัง 1:1
+ *   COMPLETE   มีสูตร และวัตถุดิบทุกตัวตัดสต็อกได้
+ *   INCOMPLETE มีสูตร แต่บางตัวไม่ได้ผูกคลังหรือแปลงหน่วยไม่ได้ (ตัวนั้นจะไม่ถูกตัด)
+ *   NONE       ไม่มีสูตร และไม่ได้ผูกคลัง — ขายแล้วไม่มีอะไรออกจากคลัง
+ */
+export type MenuRecipeStatus = 'LINKED' | 'COMPLETE' | 'INCOMPLETE' | 'NONE';
+
+export interface MenuItemStockInsight {
+  /** ต้นทุนต่อจาน ณ ตอนนี้ (null = ยังไม่รู้) — ใช้แทน cost ที่ถ่ายไว้ตอนสร้างเมนู */
+  liveCost: number | null;
+  costSource: MenuItemCostSource;
+  recipeStatus: MenuRecipeStatus;
+  /** วัตถุดิบที่จะไม่ถูกตัดสต็อกตอนขาย */
+  unstockedIngredients: string[];
+  /**
+   * เมนูที่ผูกสินค้าคลัง: ยอดที่หยิบขายได้ในคลังของสาขานี้ (หักของที่คลังกันไว้แล้ว)
+   * null = ไม่ได้ผูกคลัง — ยอดนี้อ่านจากคลังตรง ๆ ไม่ใช่ตัวเลขที่ถ่ายเก็บไว้ในเมนู
+   */
+  centralStockQty: number | null;
+}
 
 @Injectable()
 export class MenuService {
@@ -17,6 +53,9 @@ export class MenuService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLogService: AuditLogService,
+    // Optional: ยอดคลังที่ร้านขายได้จริงต้องคิดด้วยตัวเดียวกับที่กันขายเกิน
+    @Optional() private readonly menuStock?: MenuStockService,
+    @Optional() private readonly linkLog?: MenuInventoryLinkService,
   ) {}
 
   // ─── Menu Categories ──────────────────────────────────────────────────────
@@ -246,8 +285,9 @@ export class MenuService {
       this.prisma.menuItem.count({ where }),
     ]);
 
+    const insights = await this.stockInsights(data, tenantId, restaurantId);
     return {
-      data: data.map((item) => this.parseItemAllergens(item)),
+      data: data.map((item) => ({ ...this.parseItemAllergens(item), ...insights.get(item.id) })),
       total,
       page: Number(page),
       limit: Number(limit),
@@ -267,7 +307,76 @@ export class MenuService {
       throw new NotFoundException(`Menu item with ID ${itemId} not found`);
     }
 
-    return this.parseItemAllergens(item);
+    const insights = await this.stockInsights([item], tenantId, restaurantId);
+    return { ...this.parseItemAllergens(item), ...insights.get(item.id) };
+  }
+
+  /**
+   * ต้นทุนสด + สถานะสูตรของหลายเมนูในครั้งเดียว (2 query ไม่ว่าจะกี่เมนู)
+   * ไม่ให้หน้ารายการล่มเพราะคิดต้นทุนไม่ได้ — พลาดแล้วคืน map ว่าง หน้าจอใช้ cost เดิม
+   */
+  private async stockInsights(
+    items: Array<{ id: string; inventoryItemId: string | null }>,
+    tenantId: string,
+    restaurantId: string,
+  ): Promise<Map<string, MenuItemStockInsight>> {
+    const result = new Map<string, MenuItemStockInsight>();
+    if (items.length === 0) return result;
+    try {
+      const ids = items.map((i) => i.id);
+      // ทีละตัว ไม่ใช้ Promise.all — ถ้าตัวหลังพังทันที ตัวแรกจะกลายเป็น rejection ที่ไม่มีใครรับ
+      const costs = await menuItemCosts(this.prisma, tenantId, ids);
+      const recipes = await this.prisma.menuItemRecipe.findMany({
+        where: { menuItemId: { in: ids } },
+        select: { menuItemId: true, _count: { select: { ingredients: true } } },
+      });
+      const ingredientCount = new Map(recipes.map((r) => [r.menuItemId, r._count.ingredients]));
+      const centralQty = await this.centralStockByItem(
+        tenantId,
+        restaurantId,
+        items.map((i) => i.inventoryItemId).filter((id): id is string => Boolean(id)),
+      );
+      for (const item of items) {
+        const cost = costs.get(item.id);
+        const unstocked = cost?.unstockedIngredients ?? [];
+        const recipeStatus: MenuRecipeStatus = item.inventoryItemId
+          ? 'LINKED'
+          : (ingredientCount.get(item.id) ?? 0) === 0
+            ? 'NONE'
+            : unstocked.length > 0
+              ? 'INCOMPLETE'
+              : 'COMPLETE';
+        result.set(item.id, {
+          liveCost: cost && cost.source !== 'NONE' ? cost.costPerUnit : null,
+          costSource: cost?.source ?? 'NONE',
+          recipeStatus,
+          unstockedIngredients: recipeStatus === 'LINKED' ? [] : unstocked,
+          // ไม่อยู่ใน map = หาคลังให้ร้านนี้ไม่ได้ → ไม่โชว์ตัวเลข ดีกว่าโชว์ 0 ที่ไม่จริง
+          centralStockQty: item.inventoryItemId
+            ? (centralQty.get(item.inventoryItemId) ?? null)
+            : null,
+        });
+      }
+    } catch (error) {
+      this.logger.warn(`Menu stock insight failed: ${(error as Error).message}`);
+    }
+    return result;
+  }
+
+  /**
+   * ยอดที่ร้านนี้ยังขายได้ของสินค้าคลังแต่ละตัว
+   *
+   * ใช้ตัวคิดเดียวกับตอนกดสั่ง (MenuStockService) — คลังที่ร้านตัดจริงทีละสินค้า
+   * หักของที่คลังกันไว้และของค้างในบิลที่ยังไม่ปิด ป้ายในหน้าเมนูจึงตรงกับ
+   * ข้อความ "คงเหลือไม่พอ (เหลือ X)" ที่พนักงานเจอตอนขาย
+   */
+  private async centralStockByItem(
+    tenantId: string,
+    restaurantId: string,
+    itemIds: string[],
+  ): Promise<Map<string, number>> {
+    if (itemIds.length === 0 || !this.menuStock) return new Map();
+    return this.menuStock.availableCentralQty(tenantId, restaurantId, itemIds);
   }
 
   /**
@@ -356,6 +465,17 @@ export class MenuService {
       await this.recordOpeningStock(item.id, item.stockQty, tenantId, userId);
     }
 
+    if (item.inventoryItemId) {
+      await this.linkLog?.record({
+        tenantId,
+        menuItemId: item.id,
+        action: 'LINK',
+        toInventoryItemId: item.inventoryItemId,
+        note: 'สร้างเมนูขายตรงที่ผูกสินค้าในคลัง',
+        userId,
+      });
+    }
+
     this.auditLogService.log({
       action: 'menu_create' as any,
       resource: 'menu' as any,
@@ -382,6 +502,17 @@ export class MenuService {
       await this.findCategoryOrFail(dto.categoryId, restaurantId, tenantId);
     }
     this.assertStockConfigValid({ ...current, ...dto });
+    // เปลี่ยนจากสินค้าตัวหนึ่งไปอีกตัวต้องผ่านขั้นตอน "เปลี่ยนสินค้าที่ผูก" — ตรวจบิลค้าง
+    // ขอเหตุผล และเก็บประวัติ แก้ทับผ่านฟอร์มเงียบ ๆ ไม่ได้
+    if (
+      current.inventoryItemId &&
+      dto.inventoryItemId &&
+      dto.inventoryItemId !== current.inventoryItemId
+    ) {
+      throw new BadRequestException(
+        'เมนูนี้ผูกกับสินค้าในคลังอยู่แล้ว — ใช้ปุ่ม "เปลี่ยนสินค้าที่ผูก" เพื่อเปลี่ยน (ต้องระบุเหตุผล)',
+      );
+    }
     if (dto.inventoryItemId) {
       await this.validateInventoryItem(dto.inventoryItemId, tenantId);
       await this.assertNoRecipe(itemId);
@@ -409,6 +540,20 @@ export class MenuService {
 
     if (openingQty !== undefined && openingQty > 0) {
       await this.recordOpeningStock(itemId, openingQty, tenantId, userId);
+    }
+
+    const linkBefore = current.inventoryItemId ?? null;
+    const linkAfter = item.inventoryItemId ?? null;
+    if (linkBefore !== linkAfter) {
+      await this.linkLog?.record({
+        tenantId,
+        menuItemId: itemId,
+        action: linkAfter ? 'LINK' : 'UNLINK',
+        fromInventoryItemId: linkBefore,
+        toInventoryItemId: linkAfter,
+        note: linkAfter ? 'ผูกสินค้าในคลังจากฟอร์มแก้ไขเมนู' : 'ถอดการผูกจากฟอร์มแก้ไขเมนู',
+        userId,
+      });
     }
 
     this.auditLogService.log({

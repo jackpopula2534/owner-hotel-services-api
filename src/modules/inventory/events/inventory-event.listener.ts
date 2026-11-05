@@ -253,6 +253,7 @@ export class InventoryEventListener {
 
       const recipesEnabled = await this.restaurantDeduction.isRecipeDeductionEnabled(
         event.tenantId,
+        event.restaurantId,
       );
       const lines = await this.restaurantDeduction.planDeduction(event, recipesEnabled);
       if (!lines.length) return; // ไม่มีอะไรผูกกับคลัง — ไม่ต้องเปิด transaction เปล่า

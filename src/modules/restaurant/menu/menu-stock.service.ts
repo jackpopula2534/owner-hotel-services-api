@@ -124,47 +124,85 @@ export class MenuStockService {
   ): Promise<void> {
     if (!item.inventoryItemId) return;
 
-    let onHand: number;
-    let reserved: number;
+    let availability: { onHand: number; reserved: number } | null;
     try {
-      const warehouseId = await this.sourceWarehouse.resolveForItem(
+      availability = await this.centralAvailability(
         tenantId,
         item.restaurantId,
         item.inventoryItemId,
       );
-      if (!warehouseId) return; // ไม่มีคลังให้เทียบ ก็ไม่มีข้อมูลพอจะบอกว่าขายเกิน
-
-      // findFirst + เช็ค tenant ของสินค้าด้วย ไม่ใช่ findUnique เฉย ๆ — inventoryItemId
-      // ที่ค้างอยู่ผิดกิจการจะได้ไม่ไปอ่านยอดคงเหลือของคนอื่นมาตอบ
-      const stock = await this.prisma.warehouseStock.findFirst({
-        where: {
-          warehouseId,
-          itemId: item.inventoryItemId,
-          item: { tenantId },
-        },
-        select: { quantity: true, reservedQty: true },
-      });
-      // reservedQty คือของที่คลังกันไว้ให้งานอื่นแล้ว (เช่น เบิกให้พนักงานใหม่)
-      // ไม่ใช่ของที่หน้าร้านหยิบขายได้
-      onHand = stock ? stock.quantity - stock.reservedQty : 0;
-
-      // จองข้ามเมนูในร้านเดียวกันที่ผูกสินค้าตัวเดียวกัน — ร้านหนึ่งมีได้หลายเมนู
-      // ที่ชี้ไปที่น้ำขวดเดียวกัน (เช่น "น้ำเปล่า" กับ "น้ำเปล่า (แถม)")
-      //
-      // จงใจไม่นับข้ามร้าน: ร้านอื่นอาจตัดจากคลังคนละใบ การเหมานับจะกันการขาย
-      // ทั้งที่ของยังมี ซึ่งแย่กว่าการกันไม่ครบ (กันไม่ครบยังมี shortfallQty รับไว้)
-      reserved = await this.reservedQty(tenantId, {
-        restaurantId: item.restaurantId,
-        inventoryItemId: item.inventoryItemId,
-      });
     } catch (error) {
       this.logger.warn(
         `Central stock check failed for menu item ${item.name} (tenant ${tenantId}): ${(error as Error).message}`,
       );
       return;
     }
+    if (!availability) return; // ไม่มีคลังให้เทียบ ก็ไม่มีข้อมูลพอจะบอกว่าขายเกิน
+    const { onHand, reserved } = availability;
 
     this.assertEnough(item.name, onHand, reserved, quantity);
+  }
+
+  /**
+   * ยอดของสินค้าคลังหนึ่งตัว "ในมุมของร้านนี้" — ตัวเดียวกับที่ใช้กันขายเกิน
+   *
+   * onHand = ยอดในคลังที่ร้านนี้จะตัดจริง (เลือกทีละสินค้า) หักของที่คลังกันไว้ให้งานอื่น
+   * reserved = ของที่ค้างอยู่ในบิลที่ยังไม่ปิดของร้านนี้
+   * null = หาคลังให้ร้านนี้ไม่ได้
+   */
+  private async centralAvailability(
+    tenantId: string,
+    restaurantId: string,
+    inventoryItemId: string,
+  ): Promise<{ onHand: number; reserved: number } | null> {
+    const warehouseId = await this.sourceWarehouse.resolveForItem(
+      tenantId,
+      restaurantId,
+      inventoryItemId,
+    );
+    if (!warehouseId) return null;
+
+    // findFirst + เช็ค tenant ของสินค้าด้วย ไม่ใช่ findUnique เฉย ๆ — inventoryItemId
+    // ที่ค้างอยู่ผิดกิจการจะได้ไม่ไปอ่านยอดคงเหลือของคนอื่นมาตอบ
+    const stock = await this.prisma.warehouseStock.findFirst({
+      where: { warehouseId, itemId: inventoryItemId, item: { tenantId } },
+      select: { quantity: true, reservedQty: true },
+    });
+    // reservedQty คือของที่คลังกันไว้ให้งานอื่นแล้ว (เช่น เบิกให้พนักงานใหม่)
+    // ไม่ใช่ของที่หน้าร้านหยิบขายได้
+    const onHand = stock ? stock.quantity - stock.reservedQty : 0;
+
+    // จองข้ามเมนูในร้านเดียวกันที่ผูกสินค้าตัวเดียวกัน — ร้านหนึ่งมีได้หลายเมนู
+    // ที่ชี้ไปที่น้ำขวดเดียวกัน (เช่น "น้ำเปล่า" กับ "น้ำเปล่า (แถม)")
+    //
+    // จงใจไม่นับข้ามร้าน: ร้านอื่นอาจตัดจากคลังคนละใบ การเหมานับจะกันการขาย
+    // ทั้งที่ของยังมี ซึ่งแย่กว่าการกันไม่ครบ (กันไม่ครบยังมี shortfallQty รับไว้)
+    const reserved = await this.reservedQty(tenantId, { restaurantId, inventoryItemId });
+    return { onHand, reserved };
+  }
+
+  /**
+   * ยอดที่ร้านนี้ยังขายได้จริงของสินค้าคลังแต่ละตัว — ตัวเลขเดียวกับที่ตอนกดสั่ง
+   * จะตอบว่า "เหลือ X" (คลังที่ร้านตัดจริง − ของที่คลังกันไว้ − ของค้างในบิลที่ยังไม่ปิด)
+   * สินค้าที่หาคลังไม่ได้หรืออ่านไม่สำเร็จจะไม่อยู่ใน map
+   */
+  async availableCentralQty(
+    tenantId: string,
+    restaurantId: string,
+    inventoryItemIds: string[],
+  ): Promise<Map<string, number>> {
+    const result = new Map<string, number>();
+    for (const itemId of new Set(inventoryItemIds)) {
+      try {
+        const a = await this.centralAvailability(tenantId, restaurantId, itemId);
+        if (a) result.set(itemId, a.onHand - a.reserved);
+      } catch (error) {
+        this.logger.warn(
+          `Central availability failed for item ${itemId}: ${(error as Error).message}`,
+        );
+      }
+    }
+    return result;
   }
 
   private assertEnough(

@@ -33,6 +33,8 @@ import { CreateRecipeDto } from './dto/create-recipe.dto';
 import { MenuStockMovementDto } from './dto/menu-stock.dto';
 import { PromoteToInventoryDto } from './dto/promote-to-inventory.dto';
 import { DemoteFromInventoryDto } from './dto/demote-from-inventory.dto';
+import { RelinkInventoryDto } from './dto/relink-inventory.dto';
+import { MenuInventoryLinkService } from './menu-inventory-link.service';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../../common/guards/roles.guard';
 import { AddonGuard } from '../../../common/guards/addon.guard';
@@ -52,6 +54,7 @@ export class MenuController {
     private readonly menuService: MenuService,
     private readonly menuStockService: MenuStockService,
     private readonly promoteService: MenuInventoryPromoteService,
+    private readonly linkService: MenuInventoryLinkService,
   ) {}
 
   // ─── Menu (Full) ──────────────────────────────────────────────────────────
@@ -412,6 +415,41 @@ export class MenuController {
     @CurrentUser() user: { tenantId: string; id?: string },
   ) {
     return this.promoteService.demote(restaurantId, itemId, dto, user.tenantId, user?.id);
+  }
+
+  @Post('menu-items/:itemId/relink-inventory')
+  @ApiOperation({
+    summary: 'เปลี่ยนสินค้าในคลังที่เมนูขายตรงผูกอยู่',
+    description:
+      'ย้ายการผูกไปสินค้าสำเร็จรูปตัวใหม่โดยไม่ขยับสต็อก (ของเดิมอยู่ที่สินค้าตัวเดิม) ' +
+      'ต้องไม่มีบิลค้างที่สั่งเมนูนี้ และต้องระบุเหตุผล — บันทึกลงประวัติการผูก',
+  })
+  @ApiParam({ name: 'restaurantId' })
+  @ApiParam({ name: 'itemId' })
+  @ApiResponse({ status: 201, description: 'เปลี่ยนแล้ว คืนสินค้าตัวใหม่' })
+  @ApiResponse({ status: 400, description: 'ไม่มีเหตุผล / สินค้าไม่ใช่สำเร็จรูป / ตัวเดิม' })
+  @ApiResponse({ status: 409, description: 'เมนูยังไม่ได้ผูก / มีบิลค้าง' })
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager')
+  async relinkInventory(
+    @Param('restaurantId') restaurantId: string,
+    @Param('itemId') itemId: string,
+    @Body() dto: RelinkInventoryDto,
+    @CurrentUser() user: { tenantId: string; id?: string },
+  ) {
+    return this.linkService.relink(restaurantId, itemId, dto, user.tenantId, user?.id);
+  }
+
+  @Get('menu-items/:itemId/inventory-link-history')
+  @ApiOperation({ summary: 'ประวัติการผูก/เปลี่ยน/ถอดสินค้าในคลังของเมนู (ล่าสุดก่อน)' })
+  @ApiParam({ name: 'restaurantId' })
+  @ApiParam({ name: 'itemId' })
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager', 'chef')
+  async inventoryLinkHistory(
+    @Param('restaurantId') restaurantId: string,
+    @Param('itemId') itemId: string,
+    @CurrentUser() user: { tenantId: string },
+  ) {
+    return this.linkService.history(restaurantId, itemId, user.tenantId);
   }
 
   // ─── Recipe ───────────────────────────────────────────────────────────────

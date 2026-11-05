@@ -39,6 +39,9 @@ describe('RetailProductsService', () => {
         findFirst: jest.fn(),
       },
       menuCategory: { findFirst: jest.fn().mockResolvedValue({ id: 'cat-1' }) },
+      restaurant: {
+        findMany: jest.fn().mockResolvedValue([{ id: 'rest-1', name: 'ครัวริมลาน' }]),
+      },
       menuItem: {
         findFirst: jest.fn().mockResolvedValue(null),
         create: jest.fn().mockImplementation(({ data }) => ({ id: 'menu-new', ...data })),
@@ -114,7 +117,54 @@ describe('RetailProductsService', () => {
         id: 'm1',
         name: 'น้ำเปล่า',
         restaurantId: 'rest-1',
+        restaurantName: 'ครัวริมลาน',
         price: 25,
+        marginPerUnit: null,
+        priceDiffers: true, // หน้าร้าน 20 แต่เมนู 25
+        belowCost: false,
+      });
+      expect(data[0].priceMismatch).toBe(true);
+    });
+
+    it('flags a product whose shop price or menu price is under cost', async () => {
+      prismaMock.inventoryItem.findMany.mockResolvedValue([
+        product({
+          sellingPrice: 35,
+          warehouseStocks: [
+            { warehouseId: 'w1', quantity: 10, avgCost: 30, warehouse: { name: 'คลัง' } },
+          ],
+          menuItems: [{ id: 'm1', name: 'มันฝรั่ง', restaurantId: 'rest-1', price: 25 }],
+        }),
+      ]);
+
+      const { data } = await service.findAll(TENANT_ID, {});
+
+      expect(data[0].belowCost).toBe(true);
+      expect(data[0].linkedMenus[0]).toMatchObject({ belowCost: true, marginPerUnit: -5 });
+    });
+
+    it('filters to below-cost products before paging', async () => {
+      prismaMock.inventoryItem.findMany
+        .mockResolvedValueOnce([
+          {
+            id: 'cheap',
+            sellingPrice: 5,
+            warehouseStocks: [{ quantity: 1, avgCost: 10 }],
+            menuItems: [],
+          },
+          {
+            id: 'fine',
+            sellingPrice: 50,
+            warehouseStocks: [{ quantity: 1, avgCost: 10 }],
+            menuItems: [],
+          },
+        ])
+        .mockResolvedValue([]);
+
+      await service.findAll(TENANT_ID, { belowCostOnly: 'true' });
+
+      expect(prismaMock.inventoryItem.count).toHaveBeenCalledWith({
+        where: expect.objectContaining({ id: { in: ['cheap'] } }),
       });
     });
 
@@ -141,16 +191,19 @@ describe('RetailProductsService', () => {
           sellingPrice: 20,
           warehouseStocks: [{ quantity: -3, avgCost: 6 }],
           _count: { menuItems: 1 },
+          menuItems: [{ price: 20 }],
         },
         {
           sellingPrice: null,
           warehouseStocks: [{ quantity: 0, avgCost: 0 }],
           _count: { menuItems: 0 },
+          menuItems: [],
         },
         {
           sellingPrice: 15,
           warehouseStocks: [{ quantity: 10, avgCost: 5 }],
           _count: { menuItems: 2 },
+          menuItems: [{ price: 15 }, { price: 4 }], // เมนูหนึ่งตั้ง 4 บาท ต่ำกว่าทุน 5
         },
       ]);
 
@@ -162,6 +215,8 @@ describe('RetailProductsService', () => {
         outOfStock: 1,
         negativeStock: 1,
         stockValue: 32, // (-3×6) + 0 + (10×5)
+        belowCostProducts: 1,
+        priceMismatchProducts: 1,
       });
     });
   });

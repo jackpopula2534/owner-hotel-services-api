@@ -143,6 +143,13 @@ export class RetailSalesService {
         throw new BadRequestException(`ไม่พบสินค้า (itemId: ${line.itemId}) ในองค์กรของคุณ`);
       }
     }
+    // ขายได้เฉพาะสินค้าสำเร็จรูป — กันยิง API/บาร์โค้ดเอาวัตถุดิบออกจากคลังมาคิดเงินแขก
+    const notForSale = items.filter((i) => i.itemType !== 'FINISHED_GOOD');
+    if (notForSale.length > 0) {
+      throw new BadRequestException(
+        `${notForSale.map((i) => i.name).join(', ')} เป็นวัตถุดิบ ไม่ใช่สินค้าขายหน้าร้าน`,
+      );
+    }
 
     if (dto.promoCode?.trim() && !dto.memberGuestId) {
       throw promoError('PROMO_MEMBER_REQUIRED', 'ต้องเลือกสมาชิกก่อนใช้โค้ดโปรโมชั่น');
