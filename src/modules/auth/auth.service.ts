@@ -1070,7 +1070,14 @@ export class AuthService {
     if (!restaurant) {
       throw new BadRequestException('Restaurant not found or does not belong to your account');
     }
-    await assertSubSystemReady(this.prisma, caller.tenantId, 'pos');
+    // POS กับ KDS ใช้ endpoint นี้ร่วมกัน แต่ความพร้อมไม่เท่ากัน: จอครัวไม่ต้องมีเมนู
+    // (เช็ค 'pos' ตายตัวทำให้ KDS ของร้านใหม่โดน 409 NO_MENU ทั้งที่การ์ดขึ้น "พร้อมใช้งาน")
+    const target = dto.target ?? 'pos';
+    await assertSubSystemReady(
+      this.prisma,
+      caller.tenantId,
+      target === 'kitchen' ? 'pos-kitchen' : 'pos',
+    );
 
     const payload = {
       sub: caller.userId,
@@ -1088,7 +1095,10 @@ export class AuthService {
     // Short-lived token — 5 minutes only
     const token = this.signLaunchToken(payload);
 
-    const posUrl = `/pos?token=${token}&restaurantId=${dto.restaurantId}${dto.tableId ? `&tableId=${dto.tableId}` : ''}`;
+    const posUrl =
+      target === 'kitchen'
+        ? `/pos/kitchen?token=${token}&restaurantId=${dto.restaurantId}`
+        : `/pos?token=${token}&restaurantId=${dto.restaurantId}${dto.tableId ? `&tableId=${dto.tableId}` : ''}`;
 
     this.logger.log(
       `POS launch token generated for restaurant "${restaurant.name}" by user ${caller.userId}`,
