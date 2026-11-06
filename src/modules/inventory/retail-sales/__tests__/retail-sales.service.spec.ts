@@ -10,7 +10,7 @@ import {
   SettlementType,
 } from '@prisma/client';
 import { RetailPromotionsService } from '../../retail-promotions/retail-promotions.service';
-import { RetailSalesService } from '../retail-sales.service';
+import { RetailSalesService, resolveRetailVatRate } from '../retail-sales.service';
 import { RetailPromotionHealthService } from '../../retail-promotions/retail-promotion-health.service';
 import { RetailPromotionCheckoutService } from '../../retail-promotions/retail-promotion-checkout.service';
 import { LoyaltyService } from '@/loyalty/loyalty.service';
@@ -446,6 +446,51 @@ describe('RetailSalesService', () => {
    * ตัวเลขจริงพิสูจน์กับฐานข้อมูลจริงใน `scripts/verify-revenue-ledger.ts` ตรงนี้
    * ตรึงว่า "ใบไหน ยอดเท่าไร ช่องทางอะไร" ถูกส่งให้สมุด และส่งใน tx เดียวกับที่ตัดสต็อก
    */
+  describe('VAT มาจากการตั้งค่าที่พัก (FIND-10)', () => {
+    const cola = { id: 'i1', tenantId: TENANT, sku: 'A', name: 'Cola', unit: 'CAN', isPerishable: false, requiresLotTracking: false, itemType: 'FINISHED_GOOD' };
+    async function sellCola(property: unknown, vatRateFromClient?: number) {
+      const prisma = buildPrisma();
+      prisma.warehouse.findFirst.mockResolvedValue({ id: WH, tenantId: TENANT, propertyId: 'p1', property });
+      prisma.inventoryItem.findMany.mockResolvedValue([cola]);
+      prisma.warehouseStock.findFirst.mockResolvedValue({ id: 's1', quantity: 10, avgCost: 10 });
+      const service = await makeService(prisma);
+      return service.create(
+        { warehouseId: WH, paymentMethod: 'CASH' as any, vatRate: vatRateFromClient, lines: [{ itemId: 'i1', quantity: 1, unitPrice: 30 }] },
+        USER,
+        TENANT,
+      );
+    }
+
+    it('client ส่ง vatRate: 0 มา → ไม่สน ใช้ 7% ของที่พัก (โค้ก ฿30 → VAT ฿2.10)', async () => {
+      const sale = await sellCola({ vatEnabled: true, vatPercent: 7 }, 0);
+      expect(sale.vatAmount).toBe(2.1);
+      expect(sale.grandTotal).toBe(32.1);
+    });
+
+    it('ที่พักปิด VAT → 0 แม้ client ส่ง 7 มา', async () => {
+      const sale = await sellCola({ vatEnabled: false, vatPercent: 7 }, 7);
+      expect(sale.vatAmount).toBe(0);
+      expect(sale.grandTotal).toBe(30);
+    });
+
+    it('resolveRetailVatRate: ไม่มีข้อมูลที่พัก/ค่าเพี้ยน → 7', () => {
+      expect(resolveRetailVatRate(null)).toBe(7);
+      expect(resolveRetailVatRate({ vatEnabled: true, vatPercent: 10 })).toBe(10);
+      expect(resolveRetailVatRate({ vatEnabled: true, vatPercent: -1 })).toBe(7);
+      expect(resolveRetailVatRate({ vatEnabled: true, vatPercent: NaN })).toBe(7);
+    });
+
+    it('getVatRate: คลังต่าง tenant → 404', async () => {
+      const prisma = buildPrisma();
+      prisma.warehouse.findFirst.mockResolvedValue(null);
+      const service = await makeService(prisma);
+      await expect(service.getVatRate(TENANT, WH)).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.warehouse.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: WH, tenantId: TENANT } }),
+      );
+    });
+  });
+
   describe('ช่องทางการขาย', () => {
     /** ผู้เรียกเดิมทุกคนต้องได้ SHOP โดยไม่ต้องแก้อะไร */
     it('ไม่ระบุช่องทาง → ใบเสร็จเป็นของหน้าร้าน และค่าใช้จ่ายในโฟลิโอเป็น OTHER', async () => {

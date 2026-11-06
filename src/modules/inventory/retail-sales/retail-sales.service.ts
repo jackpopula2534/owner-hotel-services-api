@@ -45,6 +45,19 @@ const MONTHS_TH_SHORT = [
 ];
 
 /** Round to 2 decimal places (THB). */
+/**
+ * อัตรา VAT ของบิลขายหน้าร้าน/มินิบาร์ — อ่านจากการตั้งค่าที่พักเจ้าของคลังเท่านั้น (FIND-10)
+ * ห้ามรับจาก client: ใครยิง API ตรงส่ง vatRate: 0 ก็ออกบิลไม่มี VAT ได้
+ * ที่พักปิด VAT (ไม่ได้จด VAT) → 0; ไม่มีข้อมูลที่พัก → 7 ตามค่า default ของ schema
+ */
+export function resolveRetailVatRate(
+  property: { vatEnabled?: boolean | null; vatPercent?: number | null } | null | undefined,
+): number {
+  if (property?.vatEnabled === false) return 0;
+  const pct = Number(property?.vatPercent ?? 7);
+  return Number.isFinite(pct) && pct >= 0 && pct <= 100 ? round2(pct) : 7;
+}
+
 function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
@@ -113,7 +126,10 @@ export class RetailSalesService {
     // Validate the store/warehouse belongs to this tenant.
     const warehouse = await this.prisma.warehouse.findFirst({
       where: { id: dto.warehouseId, tenantId },
-      include: { group: { select: { channels: true, isActive: true } } },
+      include: {
+        group: { select: { channels: true, isActive: true } },
+        property: { select: { vatEnabled: true, vatPercent: true } },
+      },
     });
     if (!warehouse) {
       throw new BadRequestException('ไม่พบคลัง/ร้านค้านี้ หรือไม่ได้อยู่ในองค์กรของคุณ');
@@ -156,7 +172,8 @@ export class RetailSalesService {
     }
 
     const saleId = randomUUID();
-    const vatRate = dto.vatRate ?? 7;
+    // dto.vatRate ถูกเพิกเฉย — ยอดเงินคิดฝั่ง server ล้วน ๆ
+    const vatRate = resolveRetailVatRate(warehouse.property);
     const billDiscount = dto.billDiscount ?? 0;
 
     const sale = await this.prisma.$transaction(async (tx) => {
@@ -461,6 +478,16 @@ export class RetailSalesService {
    * มาจากตัวเดียวกับที่ลงรายการหนี้จริง ร้านค้าจึงเสนอได้เฉพาะห้องที่ระบบยอมรับ
    * (ไม่ระบุ propertyId เพราะร้านค้าปลีกไม่ได้ผูกกับโรงแรมสาขาใดสาขาหนึ่ง)
    */
+  /** อัตรา VAT ที่จะใช้กับบิลของคลังนี้ — ให้หน้า POS โชว์ยอดตรงกับใบเสร็จ */
+  async getVatRate(tenantId: string, warehouseId: string): Promise<{ vatRate: number }> {
+    const warehouse = await this.prisma.warehouse.findFirst({
+      where: { id: warehouseId, tenantId },
+      select: { property: { select: { vatEnabled: true, vatPercent: true } } },
+    });
+    if (!warehouse) throw new NotFoundException('ไม่พบคลัง/ร้านค้านี้');
+    return { vatRate: resolveRetailVatRate(warehouse.property) };
+  }
+
   async listChargeableRooms(tenantId: string, search?: string) {
     return this.folioPosting.listChargeableRooms({ tenantId, search });
   }

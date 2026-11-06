@@ -185,7 +185,6 @@ export class MinibarService {
         bookingId: booking.id,
         roomNumber,
         guestName,
-        vatRate: dto.vatRate,
         notes: dto.notes,
         lines,
       },

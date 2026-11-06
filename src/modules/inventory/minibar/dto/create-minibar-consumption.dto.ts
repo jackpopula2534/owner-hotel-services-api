@@ -51,7 +51,8 @@ export class CreateMinibarConsumptionDto {
   @Type(() => CreateMinibarConsumptionLineDto)
   lines!: CreateMinibarConsumptionLineDto[];
 
-  @ApiPropertyOptional({ description: 'อัตรา VAT (%)', default: 7 })
+  /** @deprecated ไม่ถูกใช้ — VAT มาจากการตั้งค่าที่พักของคลัง (FIND-10) */
+  @ApiPropertyOptional({ description: 'DEPRECATED — ignored; VAT comes from property settings', deprecated: true })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()

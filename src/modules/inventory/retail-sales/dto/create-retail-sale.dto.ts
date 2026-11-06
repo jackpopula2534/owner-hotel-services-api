@@ -60,7 +60,14 @@ export class CreateRetailSaleDto {
   @Min(0)
   billDiscount?: number;
 
-  @ApiPropertyOptional({ description: 'VAT rate as a percentage, default 7', minimum: 0 })
+  /**
+   * @deprecated ไม่ถูกใช้แล้ว — server อ่าน VAT จากการตั้งค่าที่พักของคลัง (FIND-10)
+   * ยังรับไว้เพื่อไม่ให้ client รุ่นเก่าโดน forbidNonWhitelisted
+   */
+  @ApiPropertyOptional({
+    description: 'DEPRECATED — ignored; VAT comes from the warehouse property settings',
+    deprecated: true,
+  })
   @IsOptional()
   @IsNumber()
   @Min(0)

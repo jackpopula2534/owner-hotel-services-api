@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  ParseUUIDPipe,
   Post,
   Query,
   Req,
@@ -75,6 +76,18 @@ export class RetailSalesController {
     @Req() req: AuthedReq,
   ): Promise<{ success: boolean; data: unknown }> {
     const data = await this.retailSalesService.getDashboard(req.user.tenantId, query);
+    return { success: true, data };
+  }
+
+  // ต้องประกาศก่อน @Get(':id')
+  @Get('vat-rate')
+  @ApiOperation({ summary: 'VAT rate the server will apply to sales from this warehouse (property setting)' })
+  @ApiResponse({ status: 200, description: 'VAT rate retrieved' })
+  async vatRate(
+    @Query('warehouseId', new ParseUUIDPipe()) warehouseId: string,
+    @Req() req: AuthedReq,
+  ): Promise<{ success: boolean; data: { vatRate: number } }> {
+    const data = await this.retailSalesService.getVatRate(req.user.tenantId, warehouseId);
     return { success: true, data };
   }
 
