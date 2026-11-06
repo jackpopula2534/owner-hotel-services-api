@@ -6,6 +6,7 @@ jest.mock('bcrypt', () => ({
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuthController } from './auth.controller';
+import { AddonGuard } from '../../common/guards/addon.guard';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -34,7 +35,11 @@ describe('AuthController', () => {
         },
         { provide: PrismaService, useValue: { refreshToken: { findUnique: jest.fn() } } },
       ],
-    }).compile();
+    })
+      // pos-launch ติด AddonGuard (ต้องใช้ AddonService) — เทสต์นี้ทดสอบ handler ไม่ใช่ guard
+      .overrideGuard(AddonGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
 
     controller = module.get<AuthController>(AuthController);
     authService = module.get<AuthService>(AuthService);

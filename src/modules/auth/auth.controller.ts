@@ -31,6 +31,8 @@ import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 import { AuthErrors } from './auth-errors';
 import { TerminalRefreshCookieInterceptor } from './terminal-refresh-cookie.interceptor';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { AddonGuard } from '../../common/guards/addon.guard';
+import { RequireAddon } from '../../common/decorators/require-addon.decorator';
 import { Roles, UserRole } from '../../common/decorators/roles.decorator';
 import {
   type SessionContext,
@@ -633,7 +635,10 @@ export class AuthController {
   // ─── POS Deep-link Launch ───────────────────────────────────────────────────
 
   @Post('pos-launch')
-  @UseGuards(JwtAuthGuard)
+  // POS/KDS ใช้ข้อมูลร้านซึ่ง /restaurants กั้นด้วย RESTAURANT_MODULE ทั้ง controller —
+  // ไม่กั้นตรงนี้ tenant ที่ไม่มี add-on ได้ token ไปเปิด Terminal ที่ทุก request โดน 403 (BUG-13)
+  @UseGuards(JwtAuthGuard, AddonGuard)
+  @RequireAddon('RESTAURANT_MODULE')
   @ApiBearerAuth('JWT-auth')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 30, ttl: 60 } })
@@ -645,6 +650,7 @@ export class AuthController {
   })
   @ApiResponse({ status: 200, description: 'POS launch token generated' })
   @ApiResponse({ status: 400, description: 'Restaurant not found in your account' })
+  @ApiResponse({ status: 403, description: 'RESTAURANT_MODULE add-on required' })
   async posLaunch(@Body() dto: PosLaunchDto, @CurrentUser() caller: any, @Req() req: Request) {
     return this.authService.generatePosLaunchToken(
       dto,
