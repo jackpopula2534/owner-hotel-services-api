@@ -28,6 +28,14 @@ export interface TonightUnit {
   code: string;
   status: TonightUnitStatus;
   guestName?: string;
+  /**
+   * The unit's own status is not sellable (anything but available/occupied) —
+   * the same rule the hotel terminal's "ไม่พร้อมขาย" uses. A dirty room with a
+   * guest arriving today is `arriving` AND notReady (FIND-16).
+   */
+  notReady?: boolean;
+  /** Closed / maintenance unit that still holds a booking not yet checked in — needs a room move. */
+  bookedButBlocked?: boolean;
 }
 
 export interface TonightGroup {
@@ -55,7 +63,13 @@ export interface TonightBoard {
   line: ProductLine;
   date: string;
   groups: TonightGroup[];
-  summary: Record<TonightUnitStatus, number> & { total: number };
+  summary: Record<TonightUnitStatus, number> & {
+    total: number;
+    /** Units whose own status is not sellable — matches the hotel terminal. */
+    notReady: number;
+    /** Closed / maintenance units that still hold a booking not yet checked in tonight. */
+    bookedButBlocked: number;
+  };
   activity: TonightActivity[];
 }
 
@@ -69,7 +83,39 @@ const emptySummary = (): TonightBoard['summary'] => ({
   dirty: 0,
   blocked: 0,
   total: 0,
+  notReady: 0,
+  bookedButBlocked: 0,
 });
+
+/** Same rule as the hotel terminal's summarizeRooms(): only available/occupied are "ready". */
+export function isUnitNotReady(unitStatus: string): boolean {
+  const s = (unitStatus || '').toLowerCase();
+  return s !== 'available' && s !== 'occupied';
+}
+
+/** Count one unit into the board summary and return its chip. */
+function tally(
+  summary: TonightBoard['summary'],
+  unit: { id: string; code: string; physical: string },
+  stay: StayLike | undefined,
+  todayStart: Date,
+): TonightUnit {
+  const status = resolveTonightStatus(unit.physical, stay, todayStart);
+  const notReady = isUnitNotReady(unit.physical);
+  summary[status] += 1;
+  summary.total += 1;
+  if (notReady) summary.notReady += 1;
+  const bookedButBlocked = status === 'blocked' && !!stay && stay.status !== 'checked_in';
+  if (bookedButBlocked) summary.bookedButBlocked += 1;
+  return {
+    id: unit.id,
+    code: unit.code,
+    status,
+    guestName: stay?.guestName,
+    ...(notReady ? { notReady } : {}),
+    ...(bookedButBlocked ? { bookedButBlocked } : {}),
+  };
+}
 
 /** Natural sort so A2 < A10. */
 const natural = (a: string, b: string) => a.localeCompare(b, 'th', { numeric: true, sensitivity: 'base' });
@@ -265,10 +311,8 @@ export class TonightBoardService {
         });
       }
       const stay = stayByPitch.get(p.id);
-      const status = resolveTonightStatus(p.status, stay, todayStart);
-      summary[status] += 1;
-      summary.total += 1;
-      groupMap.get(key)!.units.push({ id: p.id, code: p.code, status, guestName: stay?.guestName });
+      const unit = tally(summary, { id: p.id, code: p.code, physical: p.status }, stay, todayStart);
+      groupMap.get(key)!.units.push(unit);
     }
 
     const groups = [...groupMap.values()]
@@ -381,10 +425,13 @@ export class TonightBoardService {
       const floor = r.floor || 1;
       if (!groupMap.has(floor)) groupMap.set(floor, { key: `floor-${floor}`, label: `ชั้น ${floor}`, units: [] });
       const stay = stayByRoom.get(r.id);
-      const status = resolveTonightStatus(r.status, stay, todayStart);
-      summary[status] += 1;
-      summary.total += 1;
-      groupMap.get(floor)!.units.push({ id: r.id, code: r.number, status, guestName: stay?.guestName });
+      const unit = tally(
+        summary,
+        { id: r.id, code: r.number, physical: r.status },
+        stay,
+        todayStart,
+      );
+      groupMap.get(floor)!.units.push(unit);
     }
     const groups = [...groupMap.entries()]
       .sort(([a], [b]) => a - b)

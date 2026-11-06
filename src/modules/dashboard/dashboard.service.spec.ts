@@ -52,7 +52,32 @@ interface Counts {
   occupiedYesterday?: number;
   arrivals?: number;
   departures?: number;
+  /** Bookings the FIND-15 estimate reads (findMany) */
+  stays?: Stay[];
 }
+
+interface Stay {
+  status: string;
+  checkIn: Date;
+  checkOut: Date;
+  totalPrice: number;
+  roomSubtotal?: number | null;
+  discountAmount?: number | null;
+}
+
+/** Arrival / departure the way the booking form stores them: midnight UTC of the date. */
+const stay = (
+  checkIn: string,
+  checkOut: string,
+  totalPrice: number,
+  extra: Partial<Stay> = {},
+): Stay => ({
+  status: 'checked_in',
+  checkIn: new Date(`${checkIn}T00:00:00.000Z`),
+  checkOut: new Date(`${checkOut}T00:00:00.000Z`),
+  totalPrice,
+  ...extra,
+});
 
 function makeService(rows: LedgerRow[], counts: Counts = {}) {
   const {
@@ -61,6 +86,7 @@ function makeService(rows: LedgerRow[], counts: Counts = {}) {
     occupiedYesterday = 0,
     arrivals = 0,
     departures = 0,
+    stays = [],
   } = counts;
 
   const bookingCount = jest.fn(async ({ where }: { where: Record<string, any> }) => {
@@ -76,6 +102,9 @@ function makeService(rows: LedgerRow[], counts: Counts = {}) {
     booking: {
       count: bookingCount,
       aggregate: jest.fn(async () => ({ _sum: { numberOfGuests: 0 } })),
+      findMany: jest.fn(async ({ where }: { where: { status: { in: string[] } } }) =>
+        stays.filter((st) => where.status.in.includes(st.status)),
+      ),
     },
   } as unknown as PrismaService;
 
@@ -184,5 +213,67 @@ describe('DashboardService.getMetrics', () => {
 
     expect(metrics.todayRevenue).toBe(0);
     expect(revenue.totalsOfMany).not.toHaveBeenCalled();
+  });
+  it('ตัวหาร Occupancy ตัดห้องซ่อม (maintenance) ออกด้วย ให้ตรงกับระบบโรงแรม (FIND-16)', async () => {
+    const { service } = makeService([]);
+
+    await service.getMetrics(TENANT, PROPERTY);
+
+    const roomCount = (service as unknown as { prisma: { room: { count: jest.Mock } } }).prisma.room.count;
+    expect(roomCount.mock.calls[0][0].where.status).toEqual({ notIn: ['maintenance', 'out_of_order'] });
+  });
+
+  describe('FIND-15 (b): card estimate from in-house stays — nothing is posted', () => {
+    it('spreads each stay over its nights; ledger room revenue at checkout is not counted twice', async () => {
+      const { service } = makeService(
+        // checkout this morning recognised 9,000 room + 600 minibar today
+        [roomRow('bk-1', 9000, TODAY), extraRow('bk-1', 600, TODAY)],
+        {
+          totalRooms: 10,
+          stays: [
+            stay('2026-08-15', '2026-08-19', 10000), // 4 nights → 2,500 tonight
+            stay('2026-08-17', '2026-08-18', 3000, { roomSubtotal: 3200, discountAmount: 200 }), // 3,000
+            stay('2026-08-14', '2026-08-17', 6000), // leaves today → not tonight
+          ],
+        },
+      );
+
+      const metrics = await service.getMetrics(TENANT, PROPERTY);
+
+      expect(metrics.estimatedRoomNights).toBe(2);
+      expect(metrics.estimatedRevenueToday).toBe(600 + 2500 + 3000);
+      expect(metrics.estimatedAdr).toBe(2750);
+      expect(metrics.estimatedRevpar).toBe(550);
+      // the ledger figures stay as they are
+      expect(metrics.todayRevenue).toBe(9600);
+      expect(metrics.adr).toBe(9000);
+    });
+
+    it('compares with last night, including stays that have since checked out', async () => {
+      const { service } = makeService([], {
+        stays: [
+          stay('2026-08-15', '2026-08-19', 8000), // 2,000 both nights
+          stay('2026-08-16', '2026-08-17', 2000, { status: 'checked_out' }), // last night only
+        ],
+      });
+
+      const metrics = await service.getMetrics(TENANT, PROPERTY);
+
+      expect(metrics.estimatedAdr).toBe(2000);
+      expect(metrics.estimatedRevenueToday).toBe(2000);
+      // last night 4,000 over 2 nights → ADR 2,000; revenue 4,000 → 2,000 = −50%
+      expect(metrics.estimatedAdrTrend).toBe(0);
+      expect(metrics.estimatedRevenueTrend).toBe(-50);
+    });
+
+    it('no stays → zeros, not NaN', async () => {
+      const { service } = makeService([], { totalRooms: 0 });
+      const metrics = await service.getMetrics(TENANT, PROPERTY);
+      expect(metrics).toMatchObject({
+        estimatedAdr: 0,
+        estimatedRevpar: 0,
+        estimatedRevenueToday: 0,
+      });
+    });
   });
 });

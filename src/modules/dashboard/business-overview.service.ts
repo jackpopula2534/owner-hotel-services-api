@@ -1,4 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { UNBOOKABLE_ROOM_STATUSES } from '../../common/availability/availability.util';
+import { TonightBoardService } from './tonight-board.service';
 import { RevenueSourceModule } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AddonService, ProductSystem } from '../addons/addon.service';
@@ -178,6 +180,7 @@ export class BusinessOverviewService {
     private readonly prisma: PrismaService,
     private readonly addonService: AddonService,
     private readonly revenue: RevenueQueryService,
+    private readonly tonight: TonightBoardService,
   ) {}
 
   async getBusinessOverview(tenantId?: string, propertyId?: string): Promise<BusinessOverview> {
@@ -418,7 +421,9 @@ export class BusinessOverviewService {
     // with the revenue report by a whole stay's length.
     const [totalRooms, occupied, arrivals, departures, toClean, pendingPayments] = await Promise.all(
       [
-        this.prisma.room.count({ where: { ...scope, status: { not: 'out_of_order' } } }),
+        this.prisma.room.count({
+          where: { ...scope, status: { notIn: [...UNBOOKABLE_ROOM_STATUSES] } },
+        }),
         this.prisma.booking.count({
           where: {
             ...scope,
@@ -747,6 +752,14 @@ export class BusinessOverviewService {
       }),
     ]);
 
+    // FIND-17: "x / y · ว่าง z" must read like the tonight map on the same
+    // page — closed pitches are not sellable, and a pitch with a guest
+    // arriving (or being cleaned) is not vacant. Take the map's own tally
+    // rather than re-deriving it here.
+    const board =
+      pitches > 0 ? await this.tonight.getBoard(tenantId, { line: 'CAMP', limit: 1 }) : null;
+    const tonight = board?.summary;
+
     const openItems = arrivals + unpaid;
 
     return {
@@ -758,6 +771,17 @@ export class BusinessOverviewService {
         { key: 'staying', value: staying, format: 'number' },
         { key: 'arrivals', value: arrivals, format: 'number' },
         { key: 'unpaidReservations', value: unpaid, format: 'number' },
+        {
+          key: 'sellablePitches',
+          value: tonight ? tonight.total - tonight.blocked : pitches,
+          format: 'number',
+        },
+        { key: 'stayingTonight', value: tonight ? tonight.occupied : staying, format: 'number' },
+        {
+          key: 'vacantPitches',
+          value: tonight ? tonight.available : Math.max(0, pitches - staying),
+          format: 'number',
+        },
       ],
     };
   }

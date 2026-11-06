@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { UNBOOKABLE_ROOM_STATUSES } from '../../common/availability/availability.util';
 import { RevenueSourceModule, RevenueType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RevenueFilter, RevenueQueryService } from '../revenue/revenue-query.service';
@@ -45,6 +46,58 @@ interface MetricsResponse {
   arrivalsToday: number;
   departuresToday: number;
   inHouseGuests: number;
+  /**
+   * FIND-15 — card-only estimate, nothing is posted. The ledger recognises room
+   * revenue at checkout, so the ledger-based figures above read ฿0 on most days.
+   * These spread each in-house stay's room price evenly over its nights:
+   * revenue = today's non-room ledger revenue + tonight's room nights.
+   */
+  estimatedRevenueToday: number;
+  estimatedRevenueTrend: number;
+  estimatedAdr: number;
+  estimatedAdrTrend: number;
+  estimatedRevpar: number;
+  /** Room nights the estimate is built from (stays in-house tonight). */
+  estimatedRoomNights: number;
+}
+
+interface StayPriceLike {
+  checkIn: Date;
+  checkOut: Date;
+  totalPrice: unknown;
+  roomSubtotal?: unknown;
+  discountAmount?: unknown;
+}
+
+const num = (v: unknown): number => {
+  const n = Number(v ?? 0);
+  return Number.isFinite(n) ? n : 0;
+};
+
+/** Nights between two Bangkok calendar dates (YYYY-MM-DD). */
+const nightsBetween = (from: string, to: string): number =>
+  Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS);
+
+/**
+ * One night of a stay's room price: (roomSubtotal ?? totalPrice) − discount,
+ * spread evenly over its Bangkok-calendar nights. Same base the ledger later
+ * recognises as ROOM at checkout.
+ */
+export function nightlyRoomRate(stay: StayPriceLike): number {
+  const nights = Math.max(
+    1,
+    nightsBetween(toBangkokDate(stay.checkIn), toBangkokDate(stay.checkOut)),
+  );
+  const base = stay.roomSubtotal != null ? num(stay.roomSubtotal) : num(stay.totalPrice);
+  return Math.max(0, base - num(stay.discountAmount)) / nights;
+}
+
+/** The stay sleeps in the house on the night of `night` (Bangkok date). */
+export function staysNight(
+  stay: Pick<StayPriceLike, 'checkIn' | 'checkOut'>,
+  night: string,
+): boolean {
+  return toBangkokDate(stay.checkIn) <= night && toBangkokDate(stay.checkOut) > night;
 }
 
 interface TimelineEvent {
@@ -92,6 +145,18 @@ interface ActivityItem {
 interface ActivityFeedResponse {
   activities: ActivityItem[];
 }
+
+const EMPTY_ESTIMATE = {
+  estimatedRevenueToday: 0,
+  estimatedRevenueTrend: 0,
+  estimatedAdr: 0,
+  estimatedAdrTrend: 0,
+  estimatedRevpar: 0,
+  estimatedRoomNights: 0,
+};
+
+const pctChange = (now: number, before: number): number =>
+  before > 0 ? Math.round(((now - before) / before) * 100) : 0;
 
 @Injectable()
 export class DashboardService {
@@ -231,6 +296,7 @@ export class DashboardService {
         arrivalsToday: 0,
         departuresToday: 0,
         inHouseGuests: 0,
+        ...EMPTY_ESTIMATE,
       };
     }
 
@@ -243,7 +309,7 @@ export class DashboardService {
       if (propertyId) whereBase.propertyId = propertyId;
 
       const totalRooms = await this.prisma.room.count({
-        where: { ...whereBase, status: { not: 'out_of_order' } },
+        where: { ...whereBase, status: { notIn: [...UNBOOKABLE_ROOM_STATUSES] } },
       });
 
       const occupiedBookings = await this.prisma.booking.count({
@@ -320,6 +386,29 @@ export class DashboardService {
 
       const revpar = totalRooms > 0 ? Math.round(todayRooms.net / totalRooms) : 0;
 
+      // FIND-15 (b): estimate from the stays sleeping here tonight / last night.
+      const [tonightNights, lastNight] = await Promise.all([
+        this.roomNights(whereBase, ['checked_in'], todayDate),
+        this.roomNights(whereBase, ['checked_in', 'checked_out'], yesterdayDate),
+      ]);
+      const estimatedRevenueToday = round2(
+        todayTotals.net - todayRooms.net + tonightNights.revenue,
+      );
+      const estimatedRevenueYesterday =
+        yesterdayTotals.net - yesterdayRooms.net + lastNight.revenue;
+      const estimatedAdr =
+        tonightNights.count > 0 ? Math.round(tonightNights.revenue / tonightNights.count) : 0;
+      const estimatedAdrYesterday =
+        lastNight.count > 0 ? Math.round(lastNight.revenue / lastNight.count) : 0;
+      const estimate = {
+        estimatedRevenueToday,
+        estimatedRevenueTrend: pctChange(estimatedRevenueToday, estimatedRevenueYesterday),
+        estimatedAdr,
+        estimatedAdrTrend: pctChange(estimatedAdr, estimatedAdrYesterday),
+        estimatedRevpar: totalRooms > 0 ? Math.round(tonightNights.revenue / totalRooms) : 0,
+        estimatedRoomNights: tonightNights.count,
+      };
+
       const arrivalsToday = await this.prisma.booking.count({
         where: {
           ...whereBase,
@@ -368,6 +457,7 @@ export class DashboardService {
         arrivalsToday,
         departuresToday,
         inHouseGuests,
+        ...estimate,
       };
     } catch (error: unknown) {
       this.logger.error(
@@ -387,8 +477,39 @@ export class DashboardService {
         arrivalsToday: 0,
         departuresToday: 0,
         inHouseGuests: 0,
+        ...EMPTY_ESTIMATE,
       };
     }
+  }
+
+  /**
+   * Stays that sleep in the house on the night of `night` (Bangkok date —
+   * arrived on/before it, leaving after it) and their room price for that night.
+   */
+  private async roomNights(
+    whereBase: Record<string, unknown>,
+    statuses: string[],
+    night: string,
+  ): Promise<{ count: number; revenue: number }> {
+    const { start, end } = bangkokDayRange(night);
+    const candidates = await this.prisma.booking.findMany({
+      where: {
+        ...whereBase,
+        status: { in: statuses },
+        checkIn: { lt: end },
+        checkOut: { gte: start },
+      },
+      select: {
+        checkIn: true,
+        checkOut: true,
+        totalPrice: true,
+        roomSubtotal: true,
+        discountAmount: true,
+      },
+    });
+    const stays = candidates.filter((stay) => staysNight(stay, night));
+    const revenue = stays.reduce((sum, stay) => sum + nightlyRoomRate(stay), 0);
+    return { count: stays.length, revenue: round2(revenue) };
   }
 
   async getTimeline(tenantId?: string, propertyId?: string): Promise<TimelineResponse> {

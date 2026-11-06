@@ -91,3 +91,44 @@ describe('TonightBoardService (camp)', () => {
     expect(board.activity[1]).toMatchObject({ kind: 'booked' });
   });
 });
+
+describe('TonightBoardService (hotel) — not-ready rooms match the hotel terminal (FIND-16)', () => {
+  const room = (id: string, number: string, status: string) => ({ id, number, status, floor: 2 });
+  const stay = (roomId: string, status: string) => ({
+    roomId, status, checkIn: d('2026-09-28T00:00:00Z'), checkOut: d('2026-09-30T00:00:00Z'),
+    guest: { firstName: 'Beam', lastName: null },
+  });
+
+  const prisma = {
+    room: {
+      count: jest.fn().mockResolvedValue(5),
+      findMany: jest.fn().mockResolvedValue([
+        room('r1', '201', 'available'),
+        room('r2', '202', 'occupied'),
+        room('r3', '203', 'dirty'), // guest arriving today, room not cleaned yet
+        room('r4', '204', 'dirty'),
+        room('r5', '407', 'maintenance'), // still holds a booking for tonight
+      ]),
+    },
+    campPitch: { count: jest.fn().mockResolvedValue(0) },
+    booking: {
+      findMany: jest
+        .fn()
+        .mockResolvedValueOnce([stay('r2', 'checked_in'), stay('r3', 'confirmed'), stay('r5', 'confirmed')])
+        .mockResolvedValueOnce([]),
+    },
+  };
+
+  it('flags a dirty room with an arrival as not ready and counts bookings stuck in blocked rooms', async () => {
+    const svc = new TonightBoardService(prisma as never);
+    const board = await svc.getBoard('t1', { line: 'HOTEL', now: NOW });
+
+    const units = Object.fromEntries(board.groups[0].units.map((u) => [u.code, u]));
+    expect(units['203']).toMatchObject({ status: 'arriving', notReady: true });
+    expect(units['201'].notReady).toBeUndefined();
+    expect(units['407']).toMatchObject({ status: 'blocked', bookedButBlocked: true });
+    expect(units['203'].bookedButBlocked).toBeUndefined();
+    // terminal: everything but available/occupied → 203, 204, 407
+    expect(board.summary).toMatchObject({ total: 5, notReady: 3, dirty: 1, blocked: 1, arriving: 1, bookedButBlocked: 1 });
+  });
+});

@@ -4,6 +4,7 @@ import { BusinessOverviewService, OverviewModuleCode } from './business-overview
 import { PrismaService } from '../../prisma/prisma.service';
 import { AddonService } from '../addons/addon.service';
 import { RevenueQueryService } from '../revenue/revenue-query.service';
+import { TonightBoardService } from './tonight-board.service';
 import {
   LedgerRow,
   RevenueQueryStub,
@@ -106,6 +107,18 @@ describe('BusinessOverviewService', () => {
   let prisma: ReturnType<typeof makePrismaMock>;
   let addons: { getActiveAddons: jest.Mock; getTenantSystem: jest.Mock };
   let revenue: RevenueQueryStub;
+  const tonightSummary = {
+    available: 0,
+    occupied: 0,
+    arriving: 0,
+    reserved: 0,
+    dirty: 0,
+    blocked: 0,
+    total: 0,
+    notReady: 0,
+    bookedButBlocked: 0,
+  };
+  const tonight = { getBoard: jest.fn(async () => ({ summary: { ...tonightSummary } })) };
 
   const codes = (modules: Array<{ code: OverviewModuleCode }>) => modules.map((m) => m.code);
   const tile = <T extends { code: OverviewModuleCode }>(
@@ -122,6 +135,7 @@ describe('BusinessOverviewService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: AddonService, useValue: addons },
         { provide: RevenueQueryService, useValue: revenue },
+        { provide: TonightBoardService, useValue: tonight },
       ],
     }).compile();
     service = module.get(BusinessOverviewService);
@@ -208,7 +222,10 @@ describe('BusinessOverviewService', () => {
 
     const overview = await overviewAtNoon();
 
-    expect(tile(overview.modules, 'HOTEL')).toMatchObject({ entitlement: 'lapsed', revenueToday: 900 });
+    expect(tile(overview.modules, 'HOTEL')).toMatchObject({
+      entitlement: 'lapsed',
+      revenueToday: 900,
+    });
     expect(overview.revenue.today).toBe(900);
   });
 
@@ -448,9 +465,7 @@ describe('BusinessOverviewService', () => {
 
     const bound = revenue.byModule.mock.calls
       .map(([filter]) => filter)
-      .filter((filter) =>
-        [filter.sourceModule].flat().includes(RevenueSourceModule.HOTEL),
-      );
+      .filter((filter) => [filter.sourceModule].flat().includes(RevenueSourceModule.HOTEL));
     expect(bound.length).toBeGreaterThan(0);
     for (const filter of bound) expect(filter.propertyId).toBe(PROPERTY_ID);
   });
@@ -460,9 +475,7 @@ describe('BusinessOverviewService', () => {
 
     const wide = revenue.byModule.mock.calls
       .map(([filter]) => filter)
-      .filter((filter) =>
-        [filter.sourceModule].flat().includes(RevenueSourceModule.RETAIL),
-      );
+      .filter((filter) => [filter.sourceModule].flat().includes(RevenueSourceModule.RETAIL));
     expect(wide.length).toBeGreaterThan(0);
     for (const filter of wide) {
       expect(filter.propertyId).toBeUndefined();
@@ -490,6 +503,30 @@ describe('BusinessOverviewService', () => {
       value: 12,
       format: 'number',
     });
+  });
+
+  it('camp tile reads like the tonight map: closed pitches out, arrivals not vacant (FIND-17)', async () => {
+    prisma.campPitch.count.mockResolvedValue(30);
+    addons.getActiveAddons.mockResolvedValue([addonRow('CAMP_MODULE')]);
+    tonight.getBoard.mockResolvedValueOnce({
+      summary: {
+        ...tonightSummary,
+        occupied: 2,
+        arriving: 1,
+        available: 26,
+        blocked: 1,
+        total: 30,
+      },
+    });
+    await withLedger([]);
+
+    const metrics = tile((await overviewAtNoon()).modules, 'CAMP_MODULE')?.metrics ?? [];
+    const value = (key: string) => metrics.find((m) => m.key === key)?.value;
+
+    expect(tonight.getBoard).toHaveBeenCalledWith(TENANT_ID, { line: 'CAMP', limit: 1 });
+    expect(value('sellablePitches')).toBe(29);
+    expect(value('stayingTonight')).toBe(2);
+    expect(value('vacantPitches')).toBe(26);
   });
 
   // ─── Windows ─────────────────────────────────────────────────────────────
