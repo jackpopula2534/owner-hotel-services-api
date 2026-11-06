@@ -30,12 +30,24 @@ import { Throttle } from '@nestjs/throttler';
 import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 import { AuthErrors } from './auth-errors';
 import { TerminalRefreshCookieInterceptor } from './terminal-refresh-cookie.interceptor';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Roles, UserRole } from '../../common/decorators/roles.decorator';
 import {
   type SessionContext,
   clearTerminalRefreshCookie,
   readCookie,
   refreshCookieName,
 } from './terminal-refresh-cookie';
+
+/**
+ * ใครออก launch token ของ Terminal ได้ — ชุดเดียวกับ ADMIN_SSO_ROLES ฝั่งหน้าเว็บ
+ *
+ * token พวกนี้ "ยกระดับ" role (procurement_manager / warehouse_manager / accounting_manager /
+ * hr_manager / hotel_manager + permissions เต็ม) ถ้าไม่กั้นตรงนี้ แม่บ้านที่ล็อกอินระบบหลัก
+ * ยิง POST /auth/accounting-launch ตรง ๆ ก็ได้ session ผู้จัดการบัญชี (ปุ่มที่ซ่อนบนหน้าเว็บไม่ใช่ด่าน)
+ * pos-launch ไม่อยู่ในชุดนี้เพราะ token ถือ role เดิมของผู้เรียก ไม่ได้ยกระดับ
+ */
+const TERMINAL_SSO_LAUNCHERS: UserRole[] = ['platform_admin', 'tenant_admin', 'admin', 'manager'];
 
 @ApiTags('auth')
 @Controller({ path: 'auth', version: '1' })
@@ -430,7 +442,8 @@ export class AuthController {
   }
 
   @Post('accounting-launch')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...TERMINAL_SSO_LAUNCHERS)
   @ApiBearerAuth('JWT-auth')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 30, ttl: 60 } })
@@ -513,7 +526,8 @@ export class AuthController {
   }
 
   @Post('hr-launch')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...TERMINAL_SSO_LAUNCHERS)
   @ApiBearerAuth('JWT-auth')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 30, ttl: 60 } })
@@ -667,7 +681,8 @@ export class AuthController {
   // ─── Purchasing Sub-System Deep-link Launch ──────────────────────────────────
 
   @Post('purchasing-launch')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...TERMINAL_SSO_LAUNCHERS)
   @ApiBearerAuth('JWT-auth')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 30, ttl: 60 } })
@@ -708,7 +723,8 @@ export class AuthController {
   // ─── Warehouse Sub-System Deep-link Launch ───────────────────────────────────
 
   @Post('warehouse-launch')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...TERMINAL_SSO_LAUNCHERS)
   @ApiBearerAuth('JWT-auth')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 30, ttl: 60 } })
@@ -747,7 +763,8 @@ export class AuthController {
   // ─── Hotel Management Terminal Deep-link Launch ─────────────────────────────
 
   @Post('hotel-terminal-launch')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...TERMINAL_SSO_LAUNCHERS)
   @ApiBearerAuth('JWT-auth')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 30, ttl: 60 } })
