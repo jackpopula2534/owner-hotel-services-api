@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
+import { PlatformAdminGuard } from '../common/guards/platform-admin.guard';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ImpersonationService, ImpersonationScope } from './impersonation.service';
@@ -12,6 +13,7 @@ import { ImpersonationService, ImpersonationScope } from './impersonation.servic
 export class ImpersonationController {
   constructor(private readonly service: ImpersonationService) {}
 
+  @UseGuards(PlatformAdminGuard) // audit 2026-11-09
   @Post()
   @ApiOperation({ summary: 'Start an impersonation session for a tenant' })
   async start(
@@ -43,6 +45,7 @@ export class ImpersonationController {
     return { success: true };
   }
 
+  @UseGuards(PlatformAdminGuard) // audit 2026-11-09
   @Get()
   @ApiOperation({ summary: 'List recent impersonation sessions' })
   async list(

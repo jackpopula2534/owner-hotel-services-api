@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Get,
@@ -32,6 +33,8 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @ApiTags('hr / payroll policy')
 @ApiBearerAuth('JWT-auth')
+// HR Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('hr')
 @Controller({ path: 'hr/payroll-policies', version: '1' })
 @UseGuards(JwtAuthGuard, HrAddonGuard, RolesGuard)
 export class HrPayrollPolicyController {

@@ -1,3 +1,4 @@
+import { AllowSystems } from '../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Get,
@@ -228,6 +229,7 @@ export class TenantsController {
    * - Tenant Admin/User: เห็นเฉพาะโรงแรมของตัวเอง
    * รองรับ search, filter, pagination
    */
+  @AllowSystems('hotel-terminal') // H1 allow-list (report walk 2026-11-09)
   @Get('hotels')
   @Roles(
     'platform_admin',
@@ -261,6 +263,7 @@ export class TenantsController {
    * - Tenant Admin/User: ดูได้เฉพาะโรงแรมของตัวเอง
    * รวมข้อมูล: status, subscription, plan, features, invoices, alerts, permissions
    */
+  @AllowSystems('hotel-terminal') // H1 allow-list (report walk 2026-11-09)
   @Get('hotels/:id')
   @Roles(
     'platform_admin',

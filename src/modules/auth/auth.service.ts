@@ -17,6 +17,7 @@ import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { CreatePosUserDto } from './dto/create-pos-user.dto';
 import { PosLaunchDto } from './dto/pos-launch.dto';
 import { AuthErrors } from './auth-errors';
+import { isTerminalAccountRole, mainSessionScope } from '../tenant-users/terminal-registry';
 import * as bcrypt from 'bcrypt';
 import { randomBytes, randomUUID } from 'crypto';
 import { Prisma } from '@prisma/client';
@@ -374,25 +375,7 @@ export class AuthService {
     }
 
     // ── System Access Control ────────────────────────────────────────────────
-    // Validate that this user is allowed to log into the requested system
-    const allowedSystemsRaw = (user as any).allowedSystems as string | undefined;
-    if (allowedSystemsRaw) {
-      try {
-        const allowed: string[] = JSON.parse(allowedSystemsRaw);
-        if (!allowed.includes(systemContext)) {
-          this.logger.warn(
-            `Login blocked: ${email} not authorized for system=${systemContext} (allowed=${allowed.join(',')})`,
-          );
-          throw AuthErrors.notAuthorizedForSystem(systemContext);
-        }
-      } catch (e) {
-        if (e instanceof UnauthorizedException) throw e;
-        // JSON parse error — allow through (DB migration may not have run yet)
-        this.logger.warn(
-          `Could not parse allowedSystems for user ${user.id}: ${allowedSystemsRaw}`,
-        );
-      }
-    }
+    this.assertSystemAllowed(user, systemContext);
     // ────────────────────────────────────────────────────────────────────────
 
     const isPasswordValid = await bcrypt.compare(password, user.password);
@@ -462,7 +445,49 @@ export class AuthService {
       }
     }
 
+    // Same system gate as login(): a 2FA-enabled frontline account must not be
+    // able to finish a `main` login that /auth/login itself would have refused.
+    this.assertSystemAllowed(user, systemContext);
+
     return this.buildLoginResponse(user, systemContext, deviceInfo);
+  }
+
+  /**
+   * Validate that `user` may open `systemContext` (users.allowedSystems).
+   * Shared by login() and completeLoginWith2FA() so both paths enforce it.
+   */
+  private assertSystemAllowed(
+    user: { id: string; email: string; role?: string; allowedSystems?: string | null },
+    systemContext: string,
+  ): void {
+    // Owner Console belongs to the owner only: any terminal role (frontline or
+    // manager-level) is refused on `main` even if stale data still lists it.
+    // …unless they also hold a Camp / Retail / CRM grant: those terminals live on
+    // the main session, so they sign in here and get a token scoped to them (H1.2).
+    if (
+      systemContext === 'main' &&
+      isTerminalAccountRole((user as any).role) &&
+      !mainSessionScope((user as any).role, (user as any).allowedSystems)
+    ) {
+      this.logger.warn(`Login blocked: ${user.email} role=${(user as any).role} is terminal-only (main)`);
+      throw AuthErrors.notAuthorizedForSystem('main');
+    }
+    const allowedSystemsRaw = (user as any).allowedSystems as string | null | undefined;
+    if (!allowedSystemsRaw) return;
+    let allowed: string[];
+    try {
+      allowed = JSON.parse(allowedSystemsRaw);
+    } catch {
+      // JSON parse error — allow through (DB migration may not have run yet)
+      this.logger.warn(`Could not parse allowedSystems for user ${user.id}: ${allowedSystemsRaw}`);
+      return;
+    }
+    if (!Array.isArray(allowed) || !allowed.includes(systemContext)) {
+      this.logger.warn(
+        `Login blocked: ${user.email} not authorized for system=${systemContext} (allowed=${String(allowed)})`,
+      );
+      throw AuthErrors.notAuthorizedForSystem(systemContext as any);
+    }
   }
 
   /**
@@ -708,6 +733,10 @@ export class AuthService {
         ...warehouseFields,
         ...hotelTerminalFields,
         ...hrTerminalFields,
+        // H1.2 — Camp / Retail / CRM scope of a main-session token (web routes by it)
+        ...(systemContext === 'main'
+          ? { terminals: mainSessionScope(user.role, (user as any).allowedSystems) }
+          : {}),
       },
       property: defaultProperty ?? null,
     };
@@ -1736,6 +1765,22 @@ export class AuthService {
       | 'accounting'
       | 'hr' = 'main',
   ) {
+    // H1.2 — Camp / Retail / CRM staff sign in on the main session; scope their
+    // token to those terminals. Done here so every path (login, refresh, 2FA,
+    // launch) mints the same scope — a refresh can never widen it back to `main`.
+    let terminals: string[] | null = null;
+    if (systemContext === 'main' && userType === 'user') {
+      // No catch on purpose: if the scope can't be read, sign-in fails rather than
+      // minting an unscoped (full main) token — fail closed.
+      const account: unknown = await this.prisma.user.findFirst({
+        where: { id },
+        select: { role: true, allowedSystems: true } as any,
+      });
+      terminals = account
+        ? mainSessionScope((account as any).role, (account as any).allowedSystems)
+        : null;
+    }
+
     const payload = {
       sub: id,
       email,
@@ -1744,6 +1789,7 @@ export class AuthService {
       isPlatformAdmin: userType === 'admin',
       // Embed systemContext in the access token so guards can check it without a DB round-trip
       systemContext,
+      ...(terminals ? { terminals } : {}),
     };
 
     // Generate access token (short-lived)

@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Get,
@@ -28,6 +29,8 @@ import { ResolveQRDto } from './dto/resolve-qr.dto';
 @ApiTags('Inventory QR')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
+// Warehouse Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('warehouse', 'retail')
 @Controller('inventory')
 export class QRController {
   constructor(private readonly qrService: QRService) {}

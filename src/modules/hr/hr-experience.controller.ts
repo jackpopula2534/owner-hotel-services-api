@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { HrSelfServiceService } from './hr-self-service.service';
@@ -10,6 +11,8 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @ApiTags('hr / self-service')
 @ApiBearerAuth('JWT-auth')
+// HR Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('hr')
 @Controller({ path: 'hr/self-service', version: '1' })
 @UseGuards(JwtAuthGuard, HrAddonGuard, RolesGuard)
 export class HrSelfServiceController {
@@ -42,6 +45,8 @@ export class HrSelfServiceController {
 
 @ApiTags('hr / analytics')
 @ApiBearerAuth('JWT-auth')
+// HR Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('hr')
 @Controller({ path: 'hr/analytics', version: '1' })
 @UseGuards(JwtAuthGuard, HrAddonGuard, RolesGuard)
 export class HrAnalyticsController {

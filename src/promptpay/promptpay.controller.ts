@@ -1,3 +1,4 @@
+import { AllowSystems } from '../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Post,
@@ -29,6 +30,8 @@ import {
 } from './dto/promptpay.dto';
 
 @ApiTags('PromptPay Payment')
+// Hotel Terminal (PromptPay QR at front desk) — H1 allow-list, audit 2026-11-09
+@AllowSystems('hotel-terminal', 'camp-terminal', 'retail')
 @Controller('payments/promptpay')
 export class PromptPayController {
   constructor(private readonly promptPayService: PromptPayService) {}

@@ -33,6 +33,8 @@ import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 
 @ApiTags('Add-ons')
 @ApiBearerAuth()
+// Hotel Terminal (add-on status) — H1 allow-list, audit 2026-11-09
+@AllowSystems('hotel-terminal', 'hr', 'accounting', 'procurement', 'warehouse', 'camp-terminal', 'retail', 'crm')
 @Controller('addons')
 export class AddonController {
   constructor(private readonly addonService: AddonService) {}

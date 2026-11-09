@@ -66,16 +66,16 @@ describe('OnboardingController', () => {
       expect(result).toEqual(mockOnboardingResult);
     });
 
-    it('should register a new hotel with custom trial days', async () => {
-      const dto: CreateTenantDto = {
-        name: 'Test Hotel',
-      };
+    // audit 2026-11-09 M2 — the public sign-up used to honour `trialDays` from the
+    // body (`trialDays: 36500` = 100-year free trial). Trial length is server policy.
+    it('ignores a client-supplied trial length (server policy = 14 days)', async () => {
+      const dto = { name: 'Test Hotel', trialDays: 36500 } as CreateTenantDto;
 
       mockOnboardingService.registerHotel.mockResolvedValue(mockOnboardingResult);
 
-      await controller.registerHotel(dto, 30);
+      await controller.registerHotel(dto);
 
-      expect(service.registerHotel).toHaveBeenCalledWith(dto, 30, 'HOTEL');
+      expect(service.registerHotel).toHaveBeenCalledWith(dto, 14, 'HOTEL');
     });
 
     it('should register a campground on the CAMP product line', async () => {
@@ -85,7 +85,7 @@ describe('OnboardingController', () => {
 
       mockOnboardingService.registerHotel.mockResolvedValue(mockOnboardingResult);
 
-      await controller.registerHotel(dto, 14, 'camp');
+      await controller.registerHotel(dto, 'camp');
 
       expect(service.registerHotel).toHaveBeenCalledWith(dto, 14, 'CAMP');
     });
@@ -97,7 +97,7 @@ describe('OnboardingController', () => {
 
       mockOnboardingService.registerHotel.mockResolvedValue(mockOnboardingResult);
 
-      await controller.registerHotel(dto, 14, 'spaceship');
+      await controller.registerHotel(dto, 'spaceship');
 
       expect(service.registerHotel).toHaveBeenCalledWith(dto, 14, 'HOTEL');
     });

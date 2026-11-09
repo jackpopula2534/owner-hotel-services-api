@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Get,
@@ -22,6 +23,8 @@ import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 
 @ApiTags('Inventory - Room Type Templates')
 @ApiBearerAuth()
+// Warehouse Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('warehouse')
 @Controller({ path: 'inventory/room-type-templates', version: '1' })
 @UseGuards(JwtAuthGuard, AddonGuard)
 @RequireAddon('INVENTORY_MODULE')

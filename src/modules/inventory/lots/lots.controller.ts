@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Get,
@@ -29,6 +30,8 @@ import { QuarantineLotDto, ReleaseLotDto, DisposeLotDto } from './dto/quarantine
 @ApiTags('Inventory Lots')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
+// Warehouse Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('warehouse')
 @Controller('inventory/lots')
 export class LotsController {
   constructor(private readonly lotsService: LotsService) {}
@@ -101,6 +104,8 @@ export class LotsController {
 @ApiTags('Inventory Items')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
+// Warehouse Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('warehouse')
 @Controller('inventory/items')
 export class ItemLotsController {
   constructor(private readonly lotsService: LotsService) {}

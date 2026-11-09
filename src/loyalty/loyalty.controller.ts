@@ -1,3 +1,4 @@
+import { AllowSystems } from '../common/decorators/allow-systems.decorator';
 import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { LoyaltyService } from './loyalty.service';
@@ -14,6 +15,8 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 
 @ApiTags('loyalty')
 @ApiBearerAuth('JWT-auth')
+// CRM Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('crm')
 @Controller()
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class LoyaltyController {
@@ -22,7 +25,16 @@ export class LoyaltyController {
   // Tenant-level default account (legacy endpoint)
   @Get('loyalty/points')
   @ApiOperation({ summary: 'Get tenant default loyalty point balance' })
-  @Roles('admin', 'manager', 'tenant_admin', 'platform_admin', 'staff', 'user')
+  @Roles(
+    'admin',
+    'manager',
+    'tenant_admin',
+    'platform_admin',
+    'staff',
+    'user',
+    'crm_manager',
+    'crm_agent',
+  )
   async getPoints(@CurrentUser() user: { tenantId: string }) {
     return this.loyaltyService.getPoints(user.tenantId);
   }

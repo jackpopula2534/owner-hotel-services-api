@@ -1,11 +1,13 @@
 import { Controller, Delete, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { PlatformAdminGuard } from '../common/guards/platform-admin.guard';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { QueueMonitorService } from './queue-monitor.service';
 
 @ApiTags('Admin / Queue Monitor')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+// Platform-admin only — was reachable by any logged-in tenant user (audit 2026-11-09)
+@UseGuards(JwtAuthGuard, PlatformAdminGuard)
 @Controller({ path: 'admin/queues', version: '1' })
 export class QueueMonitorController {
   constructor(private readonly service: QueueMonitorService) {}

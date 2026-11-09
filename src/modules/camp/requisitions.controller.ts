@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 import {
   Body,
   Controller,
@@ -31,6 +32,8 @@ interface AuthUser {
 
 @ApiTags('camp-requisitions')
 @ApiBearerAuth('JWT-auth')
+// Camp Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('camp-terminal')
 @Controller({ path: 'camp/requisitions', version: '1' })
 @UseGuards(JwtAuthGuard, RolesGuard, AddonGuard)
 @RequireAddon('CAMP_MODULE')

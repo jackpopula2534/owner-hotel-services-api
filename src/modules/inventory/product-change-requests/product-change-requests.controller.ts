@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import {
   Body,
   Controller,
@@ -75,6 +76,8 @@ const ok = <T>(data: T): Envelope<T> => ({ success: true, data });
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, AddonGuard)
 @RequireAddon('INVENTORY_MODULE')
+// Procurement Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('procurement', 'warehouse')
 @Controller({ path: 'inventory/product-change-requests', version: '1' })
 export class ProductChangeRequestsController {
   constructor(

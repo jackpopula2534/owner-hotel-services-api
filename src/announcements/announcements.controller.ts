@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { PlatformAdminGuard } from '../common/guards/platform-admin.guard';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AnnouncementsService, CreateAnnouncementInput } from './announcements.service';
@@ -12,6 +13,7 @@ export class AnnouncementsController {
   constructor(private readonly service: AnnouncementsService) {}
 
   // ── Admin ──
+  @UseGuards(PlatformAdminGuard) // audit 2026-11-09
   @Post('admin')
   @ApiOperation({ summary: '[Admin] Create announcement / broadcast' })
   async create(@CurrentUser() user: any, @Body() body: CreateAnnouncementInput) {
@@ -21,12 +23,14 @@ export class AnnouncementsController {
     });
   }
 
+  @UseGuards(PlatformAdminGuard) // audit 2026-11-09
   @Get('admin')
   @ApiOperation({ summary: '[Admin] List all announcements' })
   async listAll(@Query('activeOnly') activeOnly?: string) {
     return this.service.list({ activeOnly: activeOnly === 'true' });
   }
 
+  @UseGuards(PlatformAdminGuard) // audit 2026-11-09
   @Patch('admin/:id/expire')
   @ApiOperation({ summary: '[Admin] Expire (hide) an announcement immediately' })
   async expire(@Param('id') id: string) {

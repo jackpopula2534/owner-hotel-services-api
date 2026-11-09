@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 import { CheckInDto, HandOverRoomDto } from './dto/check-in.dto';
 import {
   Controller,
@@ -32,6 +33,8 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @ApiTags('bookings')
 @ApiBearerAuth('JWT-auth')
+// Hotel Terminal (bookings + folio) — H1 allow-list, audit 2026-11-09
+@AllowSystems('hotel-terminal')
 @Controller('bookings')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class BookingsController {

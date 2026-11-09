@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import {
   BadRequestException,
   Controller,
@@ -88,6 +89,8 @@ const slipFileFilter = (
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, AddonGuard)
 @RequireAddon('INVENTORY_MODULE')
+// Procurement Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('procurement', 'warehouse')
 @Controller({ path: 'inventory/goods-receives', version: '1' })
 export class GoodsReceivesController {
   constructor(

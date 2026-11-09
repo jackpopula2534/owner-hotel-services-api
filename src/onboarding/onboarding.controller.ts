@@ -7,6 +7,9 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AcceptDpaDto } from './dto/accept-dpa.dto';
 
+/** Free-trial length for self-service sign-up. Server policy — not client input. */
+export const ONBOARDING_TRIAL_DAYS = 14;
+
 @Controller('onboarding')
 @SkipSubscriptionCheck()
 export class OnboardingController {
@@ -19,12 +22,14 @@ export class OnboardingController {
   @Post('register')
   async registerHotel(
     @Body() createTenantDto: CreateTenantDto,
-    @Body('trialDays') trialDays?: number,
     @Body('system') system?: string,
   ) {
+    // Trial length is a server-side policy, never a client choice: this route is
+    // public, and `trialDays: 36500` used to buy a 100-year free trial
+    // (audit 2026-11-09 M2). Platform admins extend trials via admin-approval.
     return this.onboardingService.registerHotel(
       createTenantDto,
-      trialDays || 14,
+      ONBOARDING_TRIAL_DAYS,
       system?.toUpperCase() === 'CAMP' ? 'CAMP' : 'HOTEL',
     );
   }

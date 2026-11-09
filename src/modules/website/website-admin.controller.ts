@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 import {
   BadRequestException,
   Body,
@@ -60,6 +61,8 @@ const MAX_UPLOAD_FILES = 10;
  */
 @ApiTags('website')
 @ApiBearerAuth('JWT-auth')
+// Hotel Terminal (website builder) — H1 allow-list, audit 2026-11-09
+@AllowSystems('hotel-terminal', 'camp-terminal')
 @Controller({ path: 'website' })
 @UseGuards(JwtAuthGuard, RolesGuard, AddonGuard)
 @RequireAddon(WEBSITE_ADDON_CODE)

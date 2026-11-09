@@ -64,6 +64,8 @@ interface MulterFile {
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, AddonGuard)
 @RequireAddon('INVENTORY_MODULE')
+// Procurement Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('procurement', 'warehouse', 'retail')
 @Controller({ path: 'inventory/items', version: '1' })
 export class ItemsController {
   constructor(

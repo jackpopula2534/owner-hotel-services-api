@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 import { Controller, Get, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
@@ -16,6 +17,8 @@ interface AuthenticatedCaller {
 @ApiTags('Sub Systems')
 @ApiBearerAuth('JWT-auth')
 @UseGuards(JwtAuthGuard)
+// Hotel Terminal (readiness) — H1 allow-list, audit 2026-11-09
+@AllowSystems('hotel-terminal', 'camp-terminal', 'retail', 'crm')
 @Controller({ path: 'sub-systems', version: '1' })
 export class SubSystemsController {
   constructor(private readonly service: SubSystemsService) {}

@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import { Controller, Get, Post, Body, Param, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { PeriodCloseService } from './period-close.service';
@@ -10,6 +11,8 @@ import { RequireAddon } from '@/common/decorators/require-addon.decorator';
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, AddonGuard)
 @RequireAddon('COST_ACCOUNTING_MODULE')
+// Accounting Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('accounting')
 @Controller({ path: 'cost-accounting/period-close', version: '1' })
 export class PeriodCloseController {
   constructor(private readonly periodCloseService: PeriodCloseService) {}

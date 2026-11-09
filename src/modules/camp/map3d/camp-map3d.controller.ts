@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import {
   BadRequestException,
   Body,
@@ -73,6 +74,8 @@ function requireTenant(user: CampUser): string {
  */
 @ApiTags('camp-map3d')
 @ApiBearerAuth('JWT-auth')
+// Camp Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('camp-terminal')
 @Controller({ path: 'camp/campgrounds/:id/map3d', version: '1' })
 @UseGuards(JwtAuthGuard, RolesGuard, AddonGuard)
 @RequireAddon('CAMP_MODULE')

@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ActivityService } from './activity.service';
@@ -9,6 +10,8 @@ import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 
 @ApiTags('crm/activities')
 @ApiBearerAuth('JWT-auth')
+// CRM Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('crm')
 @Controller({ path: 'crm/activities' })
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class ActivityController {

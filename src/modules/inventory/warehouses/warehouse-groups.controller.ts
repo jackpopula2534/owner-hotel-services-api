@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import {
   Body,
   Controller,
@@ -33,6 +34,8 @@ const GROUP_MANAGERS: UserRole[] = [
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard, AddonGuard)
 @RequireAddon('INVENTORY_MODULE')
+// Procurement Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('procurement', 'warehouse', 'retail')
 @Controller({ path: 'inventory/warehouse-groups', version: '1' })
 export class WarehouseGroupsController {
   constructor(private readonly groups: WarehouseGroupsService) {}

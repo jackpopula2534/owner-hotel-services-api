@@ -1,0 +1,21 @@
+# H1 complete — test run 2026-11-09T09:45:54Z (each suite run on its own; VM is too small for one parallel run)
+src/common/guards/system.guard.spec.ts  Tests: 33 passed, 33 total
+src/common/guards/hotel-terminal-allowlist.spec.ts  Tests: 12 passed, 12 total
+src/common/guards/terminal-allowlists.spec.ts  Tests: 20 passed, 20 total
+src/common/guards/manager-write-roles.spec.ts  Tests: 11 passed, 11 total
+src/common/guards/roles.guard.spec.ts  Tests: 12 passed, 12 total
+src/common/guards/platform-admin-routes.spec.ts  Tests: 9 passed, 9 total
+src/modules/tenant-users/main-session-scope.spec.ts  Tests: 9 passed, 9 total
+src/modules/tenant-users/stale-main.spec.ts  Tests: 6 passed, 6 total
+src/modules/tenant-users/tenant-users.service.spec.ts  Tests: 60 passed, 60 total
+src/modules/auth/auth.service.system-gate.spec.ts  Tests: 14 passed, 14 total
+src/modules/auth/auth.service.spec.ts  Tests: 25 passed, 25 total
+src/modules/auth/strategies/jwt.strategy.spec.ts  Tests: 17 passed, 17 total
+src/modules/auth/auth.service.launch-exchange.spec.ts  Tests: 28 passed, 28 total
+src/loyalty/loyalty.controller.spec.ts  Tests: 3 passed, 3 total
+src/subscriptions/subscriptions.service.spec.ts  Tests: 7 passed, 7 total
+
+# frontend (owner-hotel-services)
+__tests__/unit/auth/ownerConsoleAccess.test.ts  Tests: 62 passed, 62 total
+
+# known failures, not from this work: addon.guard.spec, data-retention.service.spec (failing before), auth.controller.launch-roles.spec (bcrypt native binary: invalid ELF header in the VM)

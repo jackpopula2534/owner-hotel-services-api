@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import { Controller, Get, Query, UseGuards, Req, Version } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
@@ -7,6 +8,8 @@ import { DashboardWidgetsService } from './dashboard-widgets.service';
 import { QueryDashboardWidgetsDto } from './dto/query-dashboard-widgets.dto';
 
 @ApiTags('Cost Accounting - Dashboard Widgets')
+// Accounting Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('accounting')
 @Controller({ path: 'cost-accounting/dashboard', version: '1' })
 @UseGuards(JwtAuthGuard, AddonGuard)
 @RequireAddon('COST_ACCOUNTING_MODULE')

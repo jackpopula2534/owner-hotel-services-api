@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import { Controller, Get, Post, Query, UseGuards, ParseIntPipe } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { LedgerService } from './ledger.service';
@@ -21,6 +22,8 @@ interface JwtPayload {
 @UseGuards(JwtAuthGuard, AddonGuard, RolesGuard)
 @AccountingAccess(ACCOUNTING_WRITE_ROLES)
 @RequireAddon('ACCOUNTING_MODULE')
+// Accounting Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('accounting')
 @Controller({ path: 'accounting/ledger', version: '1' })
 export class LedgerController {
   constructor(private readonly service: LedgerService) {}

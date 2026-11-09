@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 import { BadRequestException, Body, Controller, Get, Param, Put, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -38,6 +39,8 @@ function requireTenant(user: HotelUser): string {
  */
 @ApiTags('hotel-map3d')
 @ApiBearerAuth('JWT-auth')
+// Hotel Terminal (3D map / monitor) — H1 allow-list, audit 2026-11-09
+@AllowSystems('hotel-terminal')
 @Controller({ path: 'properties/:propertyId/map3d', version: '1' })
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class HotelMap3dController {

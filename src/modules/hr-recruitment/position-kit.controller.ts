@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 import { Controller, Get, Put, Body, Param, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiParam, ApiResponse } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
@@ -13,6 +14,8 @@ type AuthUser = { tenantId?: string; id?: string };
 
 @ApiTags('hr / recruitment — position equipment kits')
 @ApiBearerAuth('JWT-auth')
+// HR Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('hr')
 @Controller({ path: 'hr/recruitment/position-kits', version: '1' })
 @UseGuards(JwtAuthGuard, HrAddonGuard, RolesGuard)
 export class PositionKitController {

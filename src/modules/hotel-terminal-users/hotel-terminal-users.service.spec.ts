@@ -174,44 +174,22 @@ describe('HotelTerminalUsersService.listImportableEmployees', () => {
     expect(callArg.where.OR.length).toBeGreaterThanOrEqual(4);
   });
 
-  it('falls back to a UserTenant-linked tenant when the primary tenant is empty', async () => {
-    // Primary count → 0; fallback count → 54.
-    prisma.employee.count.mockResolvedValueOnce(0).mockResolvedValueOnce(54);
-    // UserTenant memberships → caller is also linked to "tenant-other".
+  // audit 2026-11-09 M3 — used to fall back to a sibling tenant via UserTenant +
+  // unscoped raw SQL. Employees now only ever come from the caller's own tenant.
+  it('never falls back to another tenant when the primary tenant is empty', async () => {
+    prisma.employee.count.mockResolvedValueOnce(0);
     prisma.userTenant.findMany.mockResolvedValueOnce([{ tenantId: 'tenant-other' }]);
     prisma.$queryRawUnsafe.mockResolvedValueOnce([{ tenantId: 'tenant-other', cnt: 54 }]);
-    // findMany on the resolved tenant returns one row from the page.
-    prisma.employee.findMany.mockResolvedValueOnce([
-      {
-        id: 'e2',
-        firstName: 'มาลี',
-        lastName: 'รักษ์ดี',
-        email: 'malee@mountain.hotel',
-        employeeCode: 'PM-0004',
-        department: 'ฝ่ายต้อนรับ',
-        position: 'Front Desk Agent',
-        propertyId: 'prop-1',
-        status: 'Active',
-      },
-    ]);
 
-    const res = await service.listImportableEmployees({
-      userId: 'user-1',
-      tenantId: 'tenant-mountain',
-    });
+    const res = await service.listImportableEmployees({ userId: 'user-1', tenantId: 'tenant-mountain' });
 
-    expect(prisma.userTenant.findMany).toHaveBeenCalledWith({
-      where: { userId: 'user-1' },
-      select: { tenantId: true },
-    });
-    expect(prisma.employee.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ tenantId: 'tenant-other' }),
-      }),
-    );
-    expect(res.data).toHaveLength(1);
-    expect(res.data[0]).toMatchObject({ id: 'e2', alreadyLinked: false });
-    expect(res.meta).toMatchObject({ total: 54, page: 1, limit: 20 });
+    expect(prisma.userTenant.findMany).not.toHaveBeenCalled();
+    expect(prisma.$queryRawUnsafe).not.toHaveBeenCalled();
+    for (const call of prisma.employee.findMany.mock.calls) {
+      expect(call[0].where.tenantId).toBe('tenant-mountain');
+    }
+    expect(res.data).toEqual([]);
+    expect(res.meta).toMatchObject({ total: 0, page: 1, limit: 20 });
   });
 
   it('filters out terminated/resigned/inactive employees case-insensitively', async () => {
@@ -287,26 +265,18 @@ describe('HotelTerminalUsersService.listImportableEmployees', () => {
     expect(res.data[0].alreadyLinked).toBe(true);
   });
 
-  it('returns an empty list with a diagnostic envelope when nothing matches', async () => {
-    // Primary count: empty. UserTenant fallback: empty too.
-    prisma.employee.count
-      .mockResolvedValueOnce(0) // primary
-      .mockResolvedValueOnce(54); // diagnostic global probe
-    prisma.userTenant.findMany.mockResolvedValueOnce([]);
+  // audit 2026-11-09 M3 — the empty-list "diagnostic" leaked the platform-wide
+  // employee count and other tenants' IDs + headcounts.
+  it('an empty list carries no cross-tenant diagnostic', async () => {
+    prisma.employee.count.mockResolvedValueOnce(0).mockResolvedValueOnce(54);
     prisma.$queryRawUnsafe.mockResolvedValueOnce([{ tenantId: 'tenant-other', cnt: 54 }]);
 
-    const res = await service.listImportableEmployees({
-      userId: 'user-1',
-      tenantId: 'tenant-mountain',
-    });
+    const res = await service.listImportableEmployees({ userId: 'user-1', tenantId: 'tenant-mountain' });
 
     expect(res.data).toEqual([]);
-    expect(res.meta.diagnostic).toMatchObject({
-      reason: 'no_employees_for_tenant',
-      primaryTenantId: 'tenant-mountain',
-      globalEmployeeCount: 54,
-      tenantsWithEmployees: [{ tenantId: 'tenant-other', count: 54 }],
-    });
+    expect((res.meta as Record<string, unknown>).diagnostic).toBeUndefined();
+    expect(JSON.stringify(res)).not.toContain('tenant-other');
+    expect(prisma.$queryRawUnsafe).not.toHaveBeenCalled();
   });
 
   it('reports no_tenant_in_token when caller has no tenantId', async () => {

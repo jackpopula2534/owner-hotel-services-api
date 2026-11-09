@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import {
   Body,
   Controller,
@@ -55,6 +56,8 @@ const PROMO_MANAGERS: UserRole[] = [
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard, AddonGuard)
 @RequireAddon('INVENTORY_MODULE')
+// Warehouse Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('warehouse', 'retail')
 @Controller({ path: 'inventory/retail/promotions', version: '1' })
 export class RetailPromotionsController {
   constructor(
@@ -213,6 +216,8 @@ export class RetailPromotionsController {
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, AddonGuard)
 @RequireAddon('INVENTORY_MODULE')
+// Warehouse Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('warehouse', 'retail')
 @Controller({ path: 'inventory/retail/members', version: '1' })
 export class RetailMembersController {
   constructor(

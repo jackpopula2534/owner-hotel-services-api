@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Get,
@@ -32,6 +33,8 @@ import { CreateHrDepartmentWorkPolicyDto } from './dto/create-hr-department-work
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, HrAddonGuard, RolesGuard)
 @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
+// HR Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('hr')
 @Controller({ path: 'hr/master-data', version: '1' })
 export class HrMasterDataController {
   constructor(private readonly hrMasterDataService: HrMasterDataService) {}

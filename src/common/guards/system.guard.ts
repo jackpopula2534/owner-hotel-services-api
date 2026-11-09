@@ -46,10 +46,52 @@ import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
  * เพิ่มระบบใหม่: ไล่ endpoint ที่ frontend ของระบบนั้นเรียก → ติด `@AllowSystems`
  * ให้ครบ → ค่อยเติมชื่อลง set นี้
  */
-const ENFORCED_SYSTEMS: ReadonlySet<SystemContext> = new Set<SystemContext>(['pos']);
+const ALL_SYSTEMS: ReadonlySet<string> = new Set([
+  'main', 'pos', 'procurement', 'warehouse', 'hotel-terminal', 'accounting', 'hr',
+  'camp-terminal', 'retail', 'crm',
+]);
+
+function systemsFromEnv(name: string, fallback: SystemContext[]): ReadonlySet<SystemContext> {
+  const raw = process.env[name];
+  if (raw === undefined) return new Set(fallback);
+  return new Set(
+    raw
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s): s is SystemContext => ALL_SYSTEMS.has(s) && s !== 'main'),
+  );
+}
+
+/**
+ * H1 (audit 2026-11-09): rolled out one terminal at a time.
+ *  - ENFORCED: default deny — only @AllowSystems(...) endpoints.
+ *  - REPORT:   allowed through, but every call outside the allow-list is logged
+ *              (and, outside production, appended to logs/system-guard-report.jsonl)
+ *              so the list can be completed before the terminal is enforced.
+ * Override per environment with SYSTEM_GUARD_ENFORCE / SYSTEM_GUARD_REPORT (comma lists).
+ */
+export const ENFORCED_SYSTEMS: ReadonlySet<SystemContext> = systemsFromEnv('SYSTEM_GUARD_ENFORCE', [
+  'pos',
+  // each allow-list completed by a report-mode walk of every page (2026-11-09)
+  'hotel-terminal',
+  'hr',
+  'accounting',
+  'procurement',
+  'warehouse',
+  // main-session terminals on a scoped token (H1.2) — walked 2026-11-09
+  'retail',
+  'crm',
+]);
+export const REPORT_SYSTEMS: ReadonlySet<SystemContext> = systemsFromEnv('SYSTEM_GUARD_REPORT', [
+  // not walkable yet: no tenant with the CAMP product in the QA data — move to
+  // ENFORCE after a full report-mode walk of /camp-terminal
+  'camp-terminal',
+]);
 
 interface SystemClaims {
   systemContext?: SystemContext;
+  /** H1.2 — a main-session token scoped to Camp / Retail / CRM */
+  terminals?: SystemContext[];
   posLaunch?: boolean;
   isPlatformAdmin?: boolean;
 }
@@ -62,6 +104,9 @@ const SYSTEM_NAMES: Record<SystemContext, string> = {
   'hotel-terminal': 'Hotel Management Terminal',
   accounting: 'Accounting System',
   hr: 'HR Terminal',
+  'camp-terminal': 'Campground Terminal',
+  retail: 'Retail POS',
+  crm: 'CRM Terminal',
 };
 
 @Injectable()
@@ -98,25 +143,66 @@ export class SystemGuard implements CanActivate {
       ? 'pos'
       : (claims.systemContext ?? 'main');
 
-    if (!ENFORCED_SYSTEMS.has(effectiveSystem)) return true;
+    // A scoped main-session token (Camp / Retail / CRM staff) acts as its terminals.
+    const scoped =
+      effectiveSystem === 'main' && Array.isArray(claims.terminals) && claims.terminals.length > 0
+        ? claims.terminals.filter((t): t is SystemContext => ALL_SYSTEMS.has(t) && t !== 'main')
+        : null;
+    const systems: SystemContext[] = scoped && scoped.length > 0 ? scoped : [effectiveSystem];
 
+    const enforced = systems.some((s) => ENFORCED_SYSTEMS.has(s));
+    const reported = !enforced && systems.some((s) => REPORT_SYSTEMS.has(s));
+    if (!enforced && !reported) return true;
+
+    // Merge handler + class: a handler tagged @AllowSystems('pos') inside a class
+    // tagged @AllowSystems('hotel-terminal') must stay open to both.
     const allowedSystems =
-      this.reflector.getAllAndOverride<SystemContext[]>(ALLOW_SYSTEMS_KEY, [
+      this.reflector.getAllAndMerge<SystemContext[]>(ALLOW_SYSTEMS_KEY, [
         context.getHandler(),
         context.getClass(),
       ]) ?? [];
 
-    if (allowedSystems.includes(effectiveSystem)) return true;
+    if (systems.some((s) => allowedSystems.includes(s))) return true;
+
+    if (reported) {
+      this.report(context, systems.join('+') as SystemContext);
+      return true;
+    }
 
     throw new ForbiddenException({
       code: 'WRONG_SYSTEM_CONTEXT',
-      message: `This endpoint is not part of the ${SYSTEM_NAMES[effectiveSystem]}. Please log in via the correct system.`,
+      message: `This endpoint is not part of the ${SYSTEM_NAMES[systems[0]] ?? systems[0]}. Please log in via the correct system.`,
       // Under `details` so `AllExceptionsFilter` forwards it — the filter emits
       // only { code, message, details } and the browser needs this field to tell
       // "wrong terminal, log in again" from "right terminal, endpoint out of
       // reach". Any other spelling reaches the client as a bare 403.
-      details: { currentSystem: effectiveSystem },
+      details: { currentSystem: systems[0] },
     });
+  }
+
+  private readonly reported = new Set<string>();
+
+  /** Log (once per route) a call a reported terminal makes outside its allow-list. */
+  private report(context: ExecutionContext, system: SystemContext): void {
+    const req = context.switchToHttp().getRequest<{ method?: string; route?: { path?: string } }>();
+    const route = `${req?.method ?? '?'} ${req?.route?.path ?? '?'}`;
+    const key = `${system} ${route}`;
+    if (this.reported.has(key)) return;
+    this.reported.add(key);
+    // eslint-disable-next-line no-console
+    console.warn(`[SystemGuard:report] ${system} → ${route} (not in @AllowSystems — would be 403 when enforced)`);
+    if (process.env.NODE_ENV === 'production' || process.env.JEST_WORKER_ID) return;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const fs = require('fs') as typeof import('fs');
+      fs.mkdirSync('logs', { recursive: true });
+      fs.appendFileSync(
+        'logs/system-guard-report.jsonl',
+        JSON.stringify({ at: new Date().toISOString(), system, route }) + '\n',
+      );
+    } catch {
+      /* reporting must never break a request */
+    }
   }
 
   /** อ่าน claim ที่เกี่ยวกับระบบจาก bearer token โดยไม่ยุ่งกับการ authenticate */
@@ -135,3 +221,7 @@ export class SystemGuard implements CanActivate {
     }
   }
 }
+
+// rollout notes: docs/security/2026-11-09-access-and-tenant-isolation-audit.md (H1)
+
+// H1.2: scoped main-session tokens (camp / retail / crm) — see terminal-registry mainSessionScope

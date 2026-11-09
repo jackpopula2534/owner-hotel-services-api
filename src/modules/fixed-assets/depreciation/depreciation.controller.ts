@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import { Controller, Get, Post, Body, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { DepreciationService } from './depreciation.service';
@@ -35,6 +36,8 @@ interface JwtPayload {
 @UseGuards(JwtAuthGuard, AddonGuard, RolesGuard)
 @AccountingAccess(ACCOUNTING_WRITE_ROLES)
 @RequireAddon('ACCOUNTING_MODULE')
+// Accounting Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('accounting')
 @Controller({ path: 'accounting/depreciation', version: '1' })
 export class DepreciationController {
   constructor(private readonly service: DepreciationService) {}

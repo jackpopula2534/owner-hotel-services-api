@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Get,
@@ -38,6 +39,8 @@ const APPROVER_ROLES = [
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard, AddonGuard)
 @RequireAddon('INVENTORY_MODULE')
+// Procurement Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('procurement', 'warehouse')
 @Controller({ path: 'inventory/price-comparisons', version: '1' })
 export class PriceComparisonsController {
   constructor(private readonly priceComparisonsService: PriceComparisonsService) {}

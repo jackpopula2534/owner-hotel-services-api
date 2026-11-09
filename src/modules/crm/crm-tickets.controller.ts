@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 import {
   Body,
   Controller,
@@ -26,6 +27,8 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @ApiTags('crm/tickets')
 @ApiBearerAuth('JWT-auth')
+// CRM Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('crm')
 @Controller({ path: 'crm/tickets' })
 @UseGuards(JwtAuthGuard, RolesGuard, AddonGuard)
 @RequireAddon('CRM_MODULE')

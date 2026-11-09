@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Get,
@@ -24,6 +25,8 @@ import { RequireAddon } from '@/common/decorators/require-addon.decorator';
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, AddonGuard)
 @RequireAddon('INVENTORY_MODULE')
+// Warehouse Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('warehouse')
 @Controller({ path: 'inventory/stock-movements', version: '1' })
 export class StockMovementsController {
   constructor(private readonly stockMovementsService: StockMovementsService) {}

@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { PlatformAdminGuard } from '../common/guards/platform-admin.guard';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { DataExportService, ExportKind } from './data-export.service';
@@ -36,6 +37,7 @@ export class DataExportController {
   }
 
   // ── Admin endpoints ──
+  @UseGuards(PlatformAdminGuard) // audit 2026-11-09
   @Get('admin')
   @ApiOperation({ summary: '[Admin] List export requests across tenants' })
   async listAll(

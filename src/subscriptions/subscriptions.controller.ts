@@ -3,6 +3,7 @@ import { SubscriptionsService } from './subscriptions.service';
 import { SkipSubscriptionCheck } from '../common/decorators/skip-subscription-check.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { PlatformAdminGuard } from '../common/guards/platform-admin.guard';
+import { AllowSystems } from '../common/decorators/allow-systems.decorator';
 import { CreateSubscriptionDto } from './dto/create-subscription.dto';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
 
@@ -45,7 +46,9 @@ export class SubscriptionsController {
     return this.subscriptionsService.findOne(id);
   }
 
+  // The main-session terminals read their own plan for feature gating (H1.2).
   @Get('tenant/:tenantId')
+  @AllowSystems('crm', 'retail', 'camp-terminal')
   findByTenantId(@Param('tenantId') tenantId: string) {
     return this.subscriptionsService.findByTenantId(tenantId);
   }

@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Get,
@@ -24,6 +25,8 @@ import { assertCanWriteItemSuppliers } from '../../product-change-requests/produ
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, AddonGuard)
 @RequireAddon('INVENTORY_MODULE')
+// Procurement Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('procurement', 'warehouse')
 @Controller({ path: 'inventory/item-suppliers', version: '1' })
 export class ItemSuppliersController {
   constructor(private readonly itemSuppliersService: ItemSuppliersService) {}

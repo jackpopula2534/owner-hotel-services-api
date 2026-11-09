@@ -1,11 +1,13 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { PlatformAdminGuard } from '../common/guards/platform-admin.guard';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { SaasAnalyticsService } from './saas-analytics.service';
 
 @ApiTags('Admin / SaaS Analytics')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+// Platform-admin only — was reachable by any logged-in tenant user (audit 2026-11-09)
+@UseGuards(JwtAuthGuard, PlatformAdminGuard)
 @Controller({ path: 'admin/analytics', version: '1' })
 export class AdminAnalyticsController {
   constructor(private readonly analytics: SaasAnalyticsService) {}

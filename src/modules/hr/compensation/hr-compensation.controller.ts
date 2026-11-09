@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import {
   Body,
   Controller,
@@ -29,6 +30,8 @@ type AuthUser = { tenantId?: string; id?: string; role?: string };
 
 @ApiTags('hr / compensation')
 @ApiBearerAuth('JWT-auth')
+// HR Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('hr')
 @Controller({ path: 'hr/compensation-changes', version: '1' })
 @UseGuards(JwtAuthGuard, HrAddonGuard, RolesGuard)
 export class HrCompensationController {

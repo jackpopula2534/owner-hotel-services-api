@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { PlatformAdminGuard } from '../common/guards/platform-admin.guard';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
@@ -20,30 +21,35 @@ export class CouponsController {
   constructor(private readonly couponsService: CouponsService) {}
 
   // ── Admin endpoints ──
+  @UseGuards(PlatformAdminGuard) // audit 2026-11-09
   @Post('admin')
   @ApiOperation({ summary: '[Admin] Create a coupon' })
   async create(@Body() body: CreateCouponInput) {
     return this.couponsService.create(body);
   }
 
+  @UseGuards(PlatformAdminGuard) // audit 2026-11-09
   @Get('admin')
   @ApiOperation({ summary: '[Admin] List coupons' })
   async list(@Query('activeOnly') activeOnly?: string) {
     return this.couponsService.list({ activeOnly: activeOnly === 'true' });
   }
 
+  @UseGuards(PlatformAdminGuard) // audit 2026-11-09
   @Patch('admin/:id/deactivate')
   @ApiOperation({ summary: '[Admin] Deactivate a coupon' })
   async deactivate(@Param('id') id: string) {
     return this.couponsService.deactivate(id);
   }
 
+  @UseGuards(PlatformAdminGuard) // audit 2026-11-09
   @Patch('admin/:id')
   @ApiOperation({ summary: '[Admin] Update an existing coupon' })
   async update(@Param('id') id: string, @Body() body: UpdateCouponInput) {
     return this.couponsService.update(id, body);
   }
 
+  @UseGuards(PlatformAdminGuard) // audit 2026-11-09
   @Get('admin/:id/stats')
   @ApiOperation({ summary: '[Admin] Coupon redemption stats' })
   async stats(@Param('id') id: string) {

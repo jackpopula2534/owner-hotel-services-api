@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Get,
@@ -40,6 +41,8 @@ interface MulterFile {
 
 @ApiTags('rooms')
 @ApiBearerAuth('JWT-auth')
+// Hotel Terminal (rooms) — H1 allow-list, audit 2026-11-09
+@AllowSystems('hotel-terminal')
 @Controller({ path: 'rooms', version: '1' })
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class RoomsController {

@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import { Controller, Get, Post, Body, Query, UseGuards, Req, Version } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
@@ -8,6 +9,8 @@ import { KpiSnapshotsService } from './kpi-snapshots.service';
 import { QueryKpiSnapshotDto, GenerateDailySnapshotDto } from './dto/query-kpi-snapshot.dto';
 
 @ApiTags('Cost Accounting - KPI Snapshots')
+// Accounting Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('accounting')
 @Controller({ path: 'cost-accounting/kpi-snapshots', version: '1' })
 @UseGuards(JwtAuthGuard, AddonGuard)
 @RequireAddon('COST_ACCOUNTING_MODULE')

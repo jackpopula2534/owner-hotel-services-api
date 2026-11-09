@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Get,
@@ -47,6 +48,8 @@ interface InspectTaskDto {
 
 @ApiTags('Housekeeping')
 @ApiBearerAuth()
+// Hotel Terminal (housekeeping) — H1 allow-list, audit 2026-11-09
+@AllowSystems('hotel-terminal')
 @Controller({ path: 'housekeeping/tasks', version: '1' })
 @UseGuards(JwtAuthGuard)
 export class HousekeepingController {

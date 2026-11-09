@@ -1,0 +1,71 @@
+PASS src/modules/hotel-terminal-users/hotel-terminal-users.service.spec.ts (5.916 s)
+  HotelTerminalUsersService.listImportableEmployees
+    ✓ returns importable employees from the primary tenant when seeded (8 ms)
+    ✓ honours page + limit query params (1 ms)
+    ✓ passes search and department filters into the WHERE clause
+    ✓ never falls back to another tenant when the primary tenant is empty (1 ms)
+    ✓ filters out terminated/resigned/inactive employees case-insensitively (1 ms)
+    ✓ marks employees whose email already exists as a user as alreadyLinked (1 ms)
+    ✓ an empty list carries no cross-tenant diagnostic
+    ✓ reports no_tenant_in_token when caller has no tenantId
+    ✓ still accepts a bare tenantId string for backwards compatibility (1 ms)
+    listImportableEmployeeDepartments
+      ✓ returns distinct, non-empty department names for the resolved tenant (1 ms)
+
+PASS src/onboarding/onboarding.service.spec.ts
+  OnboardingService
+    ✓ should be defined (1 ms)
+    registerHotel
+      ✓ should register a new hotel with trial subscription (4 ms)
+      ✓ should throw when free trial plan is not found (7 ms)
+    getTrialStatus
+      ✓ should return trial status with days remaining (1 ms)
+      ✓ should return expired trial status
+      ✓ should throw error if tenant not found (1 ms)
+    getProgress
+      ✓ should return existing steps
+      ✓ should initialize default steps if none exist (1 ms)
+    updateStep
+      ✓ should update step to completed (1 ms)
+      ✓ should update step to incomplete
+    DPA acceptance
+      ✓ should return accepted DPA status (1 ms)
+      ✓ should accept DPA for tenant and user (1 ms)
+      ✓ should reject DPA acceptance when checkbox is false (2 ms)
+
+PASS src/onboarding/onboarding.controller.spec.ts
+  OnboardingController
+    ✓ should be defined (2 ms)
+    registerHotel
+      ✓ should register a new hotel with default trial days (1 ms)
+      ✓ ignores a client-supplied trial length (server policy = 14 days) (1 ms)
+      ✓ should register a campground on the CAMP product line
+      ✓ should fall back to HOTEL for an unknown system (1 ms)
+    getTrialStatus
+      ✓ should return trial status for a tenant
+    getProgress
+      ✓ should return onboarding progress for authenticated user (1 ms)
+    updateStep
+      ✓ should update onboarding step
+
+PASS src/modules/restaurant/order/__tests__/qr-guest.spec.ts
+  qr-guest-token
+    ✓ round-trips for the same restaurant + tenant
+    ✓ rejects another restaurant / tenant
+    ✓ rejects an expired token (1 ms)
+    ✓ rejects a forged / tampered token and a wrong secret
+    ✓ phoneLast4 ignores formatting
+  OrderService — public guest lookup / QR order
+    ✓ queries by EXACT first + last name, never `contains`
+    ✓ matches only when the phone last 4 also match, and never returns the guest id
+    ✓ ambiguous match (same name + last 4) reveals nothing (1 ms)
+    ✓ rejects partial input (the old 2-character name search)
+    ✓ a raw guestId on the public order is ignored — no guest lookup, no discount
+    ✓ a forged guestToken is refused
+    ✓ a valid guestToken resolves the guest
+
+Test Suites: 4 passed, 4 total
+Tests:       43 passed, 43 total
+Snapshots:   0 total
+Time:        7.941 s, estimated 8 s
+Ran all test suites matching /src\/modules\/hotel-terminal-users|src\/modules\/restaurant\/order\/__tests__\/qr-guest.spec.ts|src\/onboarding/i.

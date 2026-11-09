@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
@@ -22,6 +23,8 @@ interface JwtPayload {
 @UseGuards(JwtAuthGuard, AddonGuard, RolesGuard)
 @AccountingAccess(AR_WRITE_ROLES)
 @RequireAddon('ACCOUNTING_MODULE')
+// Accounting Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('accounting')
 @Controller({ path: 'accounting/ar-statements', version: '1' })
 export class ArStatementsController {
   constructor(private readonly service: ArStatementsService) {}

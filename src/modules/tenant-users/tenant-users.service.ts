@@ -34,8 +34,8 @@ import { SubscriptionsService } from '../../subscriptions/subscriptions.service'
 import {
   ADMIN_LIKE_ROLES,
   OWNER_ROLES,
-  MANAGER_LEVEL_ROLES,
   TERMINAL_KEYS,
+  computeAllowedSystems,
   TERMINAL_REGISTRY,
   defaultPermissionsFor,
   getTerminal,
@@ -797,7 +797,10 @@ export class TenantUsersService {
         ? grants
         : [
             ...existing
-              .filter((r) => !wanted.has(r.terminal as TerminalKey) && isTerminalKey(r.terminal))
+              .filter(
+                (r) =>
+                  !r.revokedAt && !wanted.has(r.terminal as TerminalKey) && isTerminalKey(r.terminal),
+              )
               .map((r) => ({
                 terminal: r.terminal as TerminalKey,
                 role: r.role,
@@ -808,12 +811,8 @@ export class TenantUsersService {
             ...grants,
           ];
 
-    // `main` (dashboard หลัก) ให้เฉพาะ: บัญชีที่มีอยู่แล้ว หรือถือบทบาทระดับหัวหน้า
-    // ใน Terminal ใดก็ได้ — พนักงานหน้างานเข้าได้แค่ Terminal ของตน (ไม่เคยถอด main ที่มีอยู่)
-    const previousSystems = this.parseStringArray(user.allowedSystems);
-    const grantsMain =
-      previousSystems.includes('main') || effective.some((g) => MANAGER_LEVEL_ROLES.has(g.role));
-    const allowedSystems = [...(grantsMain ? ['main'] : []), ...effective.map((g) => g.terminal)];
+    // คำนวณ `main` ใหม่ทุกครั้งจากสิทธิ์ปัจจุบัน — ไม่อ้างค่าเดิม (กัน main ค้าง)
+    const allowedSystems = computeAllowedSystems(user.role, effective);
 
     const data: Prisma.UserUpdateInput = { allowedSystems: JSON.stringify(allowedSystems) };
     if (!ADMIN_LIKE_ROLES.has(user.role) && effective.length > 0) {

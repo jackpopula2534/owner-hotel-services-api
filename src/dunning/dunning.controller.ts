@@ -1,11 +1,13 @@
 import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { PlatformAdminGuard } from '../common/guards/platform-admin.guard';
 import { JwtAuthGuard } from '../modules/auth/guards/jwt-auth.guard';
 import { DunningService } from './dunning.service';
 
 @ApiTags('Admin / Dunning')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+// Platform-admin only — was reachable by any logged-in tenant user (audit 2026-11-09)
+@UseGuards(JwtAuthGuard, PlatformAdminGuard)
 @Controller({ path: 'admin/dunning', version: '1' })
 export class DunningController {
   constructor(private readonly dunningService: DunningService) {}

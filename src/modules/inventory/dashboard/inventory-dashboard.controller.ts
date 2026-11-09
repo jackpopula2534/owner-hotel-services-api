@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import { Controller, Get, Query, UseGuards, Request, Res } from '@nestjs/common';
 import { Response } from 'express';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
@@ -8,6 +9,8 @@ import { InventoryLotStatus } from '@prisma/client';
 @ApiTags('Inventory Dashboard')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
+// Warehouse Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('warehouse')
 @Controller('inventory/dashboard')
 export class InventoryDashboardController {
   constructor(private readonly prisma: PrismaService) {}
@@ -69,6 +72,8 @@ export class InventoryDashboardController {
 @ApiTags('Inventory Reports')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
+// Warehouse Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('warehouse')
 @Controller('inventory/reports')
 export class InventoryReportsController {
   constructor(private readonly prisma: PrismaService) {}

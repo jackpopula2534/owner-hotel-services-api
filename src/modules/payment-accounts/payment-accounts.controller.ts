@@ -1,3 +1,7 @@
+import { MANAGER_WRITE_ROLES } from '../../common/constants/manager-write-roles';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 import {
   BadRequestException,
   Body,
@@ -45,7 +49,9 @@ interface JwtUser {
 
 @ApiTags('Payment Accounts')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+// Hotel Terminal (payment setup check / take payment) — H1 allow-list, audit 2026-11-09
+@AllowSystems('hotel-terminal', 'camp-terminal')
 @Controller('payment-accounts')
 export class PaymentAccountsController {
   constructor(
@@ -82,6 +88,7 @@ export class PaymentAccountsController {
   // ─── Upload QR image ─────────────────────────────────────────────────────
   // ขั้นแรกของการสร้างบัญชี kind=qr_image: อัปโหลดรูปก่อน แล้วส่ง url ที่ได้ไปกับ POST /
   @Post('qr-image')
+  @Roles(...MANAGER_WRITE_ROLES) // H1.3 — managers only
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Upload a static QR image (for kind=qr_image)' })
   @ApiConsumes('multipart/form-data')
@@ -132,6 +139,7 @@ export class PaymentAccountsController {
 
   // ─── Create ──────────────────────────────────────────────────────────────
   @Post()
+  @Roles(...MANAGER_WRITE_ROLES) // H1.3 — managers only
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create a payment account' })
   @ApiResponse({ status: 201 })
@@ -147,6 +155,7 @@ export class PaymentAccountsController {
 
   // ─── Update ──────────────────────────────────────────────────────────────
   @Patch(':id')
+  @Roles(...MANAGER_WRITE_ROLES) // H1.3 — managers only
   @ApiOperation({ summary: 'Update a payment account' })
   @ApiResponse({ status: 200 })
   async update(
@@ -162,6 +171,7 @@ export class PaymentAccountsController {
 
   // ─── Set default ─────────────────────────────────────────────────────────
   @Patch(':id/set-default')
+  @Roles(...MANAGER_WRITE_ROLES) // H1.3 — managers only
   @ApiOperation({ summary: 'Mark this account as the default for its kind' })
   @ApiResponse({ status: 200 })
   async setDefault(
@@ -176,6 +186,7 @@ export class PaymentAccountsController {
 
   // ─── Delete ──────────────────────────────────────────────────────────────
   @Delete(':id')
+  @Roles(...MANAGER_WRITE_ROLES) // H1.3 — managers only
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete a payment account' })
   @ApiResponse({ status: 200 })

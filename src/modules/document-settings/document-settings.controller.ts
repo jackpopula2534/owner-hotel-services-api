@@ -45,6 +45,8 @@ interface AuthUser {
 @ApiTags('Document Settings')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
+// document numbering / print settings — H1 allow-list, audit 2026-11-09
+@AllowSystems('accounting', 'procurement')
 @Controller('document-settings')
 export class DocumentSettingsController {
   constructor(

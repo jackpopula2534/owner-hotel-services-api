@@ -47,6 +47,8 @@ function getCallerContext(req: Request, user: CallerUser) {
 
 @ApiTags('users')
 @ApiBearerAuth('JWT-auth')
+// Hotel Terminal (profile / me) — H1 allow-list, audit 2026-11-09
+@AllowSystems('hotel-terminal', 'hr', 'accounting', 'procurement', 'warehouse', 'camp-terminal', 'retail', 'crm')
 @Controller({ path: 'users', version: '1' })
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class UsersController {

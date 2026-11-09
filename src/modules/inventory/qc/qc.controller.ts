@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Get,
@@ -36,6 +37,8 @@ import {
 @ApiTags('Inventory QC')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
+// Procurement Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('procurement', 'warehouse')
 @Controller('inventory/qc')
 export class QCController {
   constructor(

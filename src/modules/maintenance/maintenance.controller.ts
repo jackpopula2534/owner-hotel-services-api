@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Get,
@@ -28,6 +29,8 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @ApiTags('Maintenance')
 @ApiBearerAuth()
+// Hotel Terminal (maintenance) — H1 allow-list, audit 2026-11-09
+@AllowSystems('hotel-terminal')
 @Controller({ path: 'maintenance/tasks', version: '1' })
 @UseGuards(JwtAuthGuard)
 export class MaintenanceController {

@@ -7,7 +7,11 @@ export type SystemContext =
   | 'warehouse'
   | 'hotel-terminal'
   | 'accounting'
-  | 'hr';
+  | 'hr'
+  // main-session terminals (scoped main tokens — JWT claim `terminals`, H1.2)
+  | 'camp-terminal'
+  | 'retail'
+  | 'crm';
 
 export const ALLOW_SYSTEMS_KEY = 'allow_systems';
 

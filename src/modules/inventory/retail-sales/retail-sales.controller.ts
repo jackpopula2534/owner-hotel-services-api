@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import {
   Body,
   Controller,
@@ -33,6 +34,8 @@ const VOID_APPROVERS: UserRole[] = ['tenant_admin', 'admin', 'manager', 'warehou
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, AddonGuard)
 @RequireAddon('INVENTORY_MODULE')
+// Warehouse Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('warehouse', 'retail')
 @Controller({ path: 'inventory/retail/sales', version: '1' })
 export class RetailSalesController {
   constructor(

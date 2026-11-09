@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -15,6 +16,8 @@ interface CurrentUserType {
 
 @ApiTags('Dashboard')
 @ApiBearerAuth('JWT-auth')
+// Hotel Terminal (front-desk board data) — H1 allow-list, audit 2026-11-09
+@AllowSystems('hotel-terminal')
 @Controller({ path: 'dashboard', version: '1' })
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class DashboardController {

@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Get,
@@ -43,6 +44,8 @@ const APPLICATION_UPLOAD_KINDS = ['resume', 'photo', 'document'] as const;
 
 @ApiTags('hr / recruitment — job posting')
 @ApiBearerAuth('JWT-auth')
+// HR Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('hr')
 @Controller({ path: 'hr/manpower-requests/:manpowerRequestId/job-posting', version: '1' })
 @UseGuards(JwtAuthGuard, HrAddonGuard, RolesGuard)
 export class JobPostingController {

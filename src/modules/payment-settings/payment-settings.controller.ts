@@ -45,6 +45,8 @@ interface JwtUser {
 @ApiTags('Payment Settings')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
+// Hotel Terminal (payment setup check) — H1 allow-list, audit 2026-11-09
+@AllowSystems('hotel-terminal', 'camp-terminal')
 @Controller('payment-settings')
 export class PaymentSettingsController {
   constructor(

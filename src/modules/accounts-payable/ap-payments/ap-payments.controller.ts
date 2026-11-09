@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import { withPaginationMeta } from '@/common/utils/pagination.util';
 import {
   Controller,
@@ -58,6 +59,8 @@ interface JwtPayload {
 @UseGuards(JwtAuthGuard, AddonGuard, RolesGuard)
 @AccountingAccess(AP_WRITE_ROLES)
 @RequireAddon('ACCOUNTING_MODULE')
+// Accounting Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('accounting')
 @Controller({ path: 'accounting/ap-payments', version: '1' })
 export class ApPaymentsController {
   constructor(private readonly service: ApPaymentsService) {}

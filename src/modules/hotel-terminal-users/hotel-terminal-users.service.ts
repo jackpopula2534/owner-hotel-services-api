@@ -719,52 +719,14 @@ export class HotelTerminalUsersService {
     const ORDER_BY = [{ firstName: 'asc' as const }, { lastName: 'asc' as const }];
 
     // Step 1 — count + page from the primary tenant.
-    let resolvedTenantId = primaryTenantId;
-    let total = await this.prisma.employee.count({
+    const resolvedTenantId = primaryTenantId;
+    const total = await this.prisma.employee.count({
       where: buildWhere(primaryTenantId),
     });
 
-    // Step 2 — if no rows match in the primary tenant AND we are not under an
-    // active filter (search/department empty), try the UserTenant fallback so
-    // freshly-onboarded admins still see employees from a sibling tenant.
-    if (total === 0 && !search && !department && caller.userId) {
-      try {
-        const memberships = await (this.prisma as any).userTenant.findMany({
-          where: { userId: caller.userId },
-          select: { tenantId: true },
-        });
-        const otherTenantIds = memberships
-          .map((m: { tenantId: string }) => m.tenantId)
-          .filter((id: string) => id && id !== primaryTenantId);
-
-        if (otherTenantIds.length > 0) {
-          const counts = (await this.prisma.$queryRawUnsafe(
-            `SELECT tenantId, COUNT(*) AS cnt FROM employees
-             WHERE tenantId IN (${otherTenantIds.map(() => '?').join(',')})
-             GROUP BY tenantId
-             ORDER BY cnt DESC LIMIT 1`,
-            ...otherTenantIds,
-          )) as Array<{ tenantId: string; cnt: number | bigint }>;
-
-          if (counts.length > 0 && Number(counts[0].cnt) > 0) {
-            resolvedTenantId = counts[0].tenantId;
-            this.logger.warn(
-              `[hotel-terminal] No employees for primary tenant=${primaryTenantId}. ` +
-                `Falling back to UserTenant member tenant=${resolvedTenantId}.`,
-            );
-            total = await this.prisma.employee.count({
-              where: buildWhere(resolvedTenantId),
-            });
-          }
-        }
-      } catch (err) {
-        this.logger.error(
-          `[hotel-terminal] UserTenant fallback failed: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        );
-      }
-    }
+    // (audit 2026-11-09 M3) The old "Step 2" fell back to a sibling tenant from
+    // UserTenant when this tenant had no employees, using unscoped raw SQL —
+    // employees are only ever listed from the caller's own tenant now.
 
     // Step 3 — page the actual rows from the resolved tenant.
     const employees = total
@@ -821,39 +783,9 @@ export class HotelTerminalUsersService {
 
     const totalPages = Math.max(1, Math.ceil(total / limit));
 
-    // Diagnostic envelope: only attached when the response is empty AND the
-    // user is on page 1 with no filters (so we don't spam the diagnostic
-    // probe on every paginated request).
-    let diagnostic = undefined;
-    if (data.length === 0 && page === 1 && !search && !department) {
-      let globalEmployeeCount: number | null = null;
-      let tenantsWithEmployees: Array<{ tenantId: string; count: number }> = [];
-      try {
-        globalEmployeeCount = await this.prisma.employee.count();
-        const rows = (await this.prisma.$queryRawUnsafe(
-          `SELECT tenantId, COUNT(*) AS cnt FROM employees
-           WHERE tenantId IS NOT NULL GROUP BY tenantId ORDER BY cnt DESC LIMIT 5`,
-        )) as Array<{ tenantId: string; cnt: number | bigint }>;
-        tenantsWithEmployees = rows.map((r) => ({
-          tenantId: r.tenantId,
-          count: Number(r.cnt),
-        }));
-      } catch (err) {
-        this.logger.error(
-          `[hotel-terminal] Diagnostic probe failed: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        );
-      }
-      diagnostic = {
-        reason: globalEmployeeCount === 0 ? 'no_employees_in_database' : 'no_employees_for_tenant',
-        primaryTenantId,
-        resolvedTenantId,
-        globalEmployeeCount,
-        tenantsWithEmployees,
-        statusFilteredOut: employees.length - filtered.length,
-      };
-    }
+    // (audit 2026-11-09 M3) The "diagnostic" envelope returned the platform-wide
+    // employee count and the top-5 tenant IDs with their headcounts (unscoped raw
+    // SQL) to any caller with an empty list. Removed — nothing cross-tenant leaves.
 
     return {
       success: true,
@@ -863,7 +795,6 @@ export class HotelTerminalUsersService {
         limit,
         total,
         totalPages,
-        ...(diagnostic ? { diagnostic } : {}),
       },
     };
   }
@@ -879,33 +810,7 @@ export class HotelTerminalUsersService {
   }): Promise<{ success: true; data: string[] }> {
     if (!caller.tenantId) return { success: true, data: [] };
 
-    // Pick the same tenant as listImportableEmployees would (primary first,
-    // fallback to a UserTenant sibling when the primary has no rows).
-    let resolvedTenantId = caller.tenantId;
-    const primaryCount = await this.prisma.employee.count({
-      where: { tenantId: resolvedTenantId },
-    });
-    if (primaryCount === 0 && caller.userId) {
-      const memberships = await (this.prisma as any).userTenant.findMany({
-        where: { userId: caller.userId },
-        select: { tenantId: true },
-      });
-      const otherTenantIds = memberships
-        .map((m: { tenantId: string }) => m.tenantId)
-        .filter((id: string) => id && id !== caller.tenantId);
-      if (otherTenantIds.length > 0) {
-        const counts = (await this.prisma.$queryRawUnsafe(
-          `SELECT tenantId, COUNT(*) AS cnt FROM employees
-           WHERE tenantId IN (${otherTenantIds.map(() => '?').join(',')})
-           GROUP BY tenantId ORDER BY cnt DESC LIMIT 1`,
-          ...otherTenantIds,
-        )) as Array<{ tenantId: string; cnt: number | bigint }>;
-        if (counts.length > 0 && Number(counts[0].cnt) > 0) {
-          resolvedTenantId = counts[0].tenantId;
-        }
-      }
-    }
-
+    const resolvedTenantId = caller.tenantId; // own tenant only (audit 2026-11-09 M3)
     const rows = await this.prisma.employee.findMany({
       where: { tenantId: resolvedTenantId, department: { not: null } },
       select: { department: true },

@@ -1,3 +1,4 @@
+import { phoneLast4, signQrGuestToken, verifyQrGuestToken } from './qr-guest-token';
 import {
   Injectable,
   NotFoundException,
@@ -1162,49 +1163,49 @@ export class OrderService {
 
   async lookupGuest(
     restaurantId: string,
-    query: string,
+    input: { firstName: string; lastName: string; phoneLast4: string },
   ): Promise<{
     matched: boolean;
-    guest?: { id: string; firstName: string; lastName: string; isVip: boolean };
+    guest?: { firstName: string; lastName: string; isVip: boolean };
+    guestToken?: string;
   }> {
-    const normalizedQuery = query.trim();
-    if (normalizedQuery.length < 2) {
-      throw new BadRequestException('Guest lookup requires at least 2 characters');
+    const firstName = input.firstName?.trim() ?? '';
+    const lastName = input.lastName?.trim() ?? '';
+    const last4 = (input.phoneLast4 ?? '').trim();
+    if (!firstName || !lastName || !/^\d{4}$/.test(last4)) {
+      throw new BadRequestException('firstName, lastName and phoneLast4 (4 digits) are required');
     }
 
     const restaurant = await this.prisma.restaurant.findFirst({
       where: { id: restaurantId },
+      select: { id: true, tenantId: true },
     });
-
-    if (!restaurant) {
+    if (!restaurant || !restaurant.tenantId) {
       throw new NotFoundException('Restaurant not found');
     }
+    const tenantId = restaurant.tenantId;
 
-    const tenantId = restaurant.tenantId ?? '';
-
-    const guest = await this.prisma.guest.findFirst({
-      where: {
-        tenantId,
-        OR: [
-          { firstName: { contains: normalizedQuery } },
-          { lastName: { contains: normalizedQuery } },
-        ],
-      },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        isVip: true,
-      },
+    // Exact name (MySQL default collation = case-insensitive) — never `contains`.
+    const candidates = await this.prisma.guest.findMany({
+      where: { tenantId, firstName, lastName },
+      select: { id: true, firstName: true, lastName: true, isVip: true, phone: true },
+      take: 20,
     });
+    const hits = candidates.filter((g) => phoneLast4(g.phone) === last4);
 
-    if (!guest) {
+    // No match, or ambiguous (two guests share name + last 4) → same answer, no hints.
+    if (hits.length !== 1) {
       return { matched: false };
     }
-
+    const guest = hits[0];
+    const guestToken = signQrGuestToken(
+      { guestId: guest.id, restaurantId: restaurant.id, tenantId },
+      this.configService.getOrThrow<string>('JWT_SECRET'),
+    );
     return {
       matched: true,
-      guest,
+      guest: { firstName: guest.firstName, lastName: guest.lastName, isVip: guest.isVip },
+      guestToken,
     };
   }
 
@@ -1242,6 +1243,9 @@ export class OrderService {
     tableId: string,
     dto: {
       guestName?: string;
+      /** From lookupGuest — proves the guest identified themselves. */
+      guestToken?: string;
+      /** Ignored since audit 2026-11-09 M1 (was trusted blindly → anyone got the guest discount). */
       guestId?: string;
       items: { menuItemId: string; quantity: number; notes?: string }[];
     },
@@ -1265,13 +1269,24 @@ export class OrderService {
     let guestName = dto.guestName;
     let guestIdForOrder: string | undefined;
 
-    if (dto.guestId) {
+    const verified = dto.guestToken
+      ? verifyQrGuestToken(
+          dto.guestToken,
+          { restaurantId, tenantId },
+          this.configService.getOrThrow<string>('JWT_SECRET'),
+        )
+      : null;
+    if (dto.guestToken && !verified) {
+      throw new BadRequestException('Guest verification expired — please identify again');
+    }
+
+    if (verified) {
       const guest = await this.prisma.guest.findFirst({
-        where: { id: dto.guestId, tenantId },
+        where: { id: verified.guestId, tenantId },
       });
 
       if (!guest) {
-        throw new NotFoundException(`Guest with ID ${dto.guestId} not found`);
+        throw new NotFoundException('Guest not found');
       }
 
       guestName = `${guest.firstName} ${guest.lastName}`;

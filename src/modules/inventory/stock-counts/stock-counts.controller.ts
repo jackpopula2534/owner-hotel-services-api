@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Get,
@@ -32,6 +33,8 @@ interface JwtPayload {
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, AddonGuard)
 @RequireAddon('INVENTORY_MODULE')
+// Warehouse Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('warehouse')
 @Controller({ path: 'inventory/stock-counts', version: '1' })
 export class StockCountsController {
   constructor(private readonly stockCountsService: StockCountsService) {}

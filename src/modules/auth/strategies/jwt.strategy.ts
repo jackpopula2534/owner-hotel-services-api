@@ -75,6 +75,16 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         }
 
         // ดึงข้อมูล status ของ tenant เพิ่มเติม เพื่อเอามาใส่ใน user.tenant_status/tenantStatus
+        // The token's tenant must be the account's tenant (audit 2026-11-09).
+        // A token minted without a tenantId (e.g. the old open impersonation
+        // endpoint) ran with no tenant scope at all — every service that trusts
+        // `user.tenantId` then queried `where: { tenantId: undefined }` = all
+        // tenants. Switching tenant rewrites users.tenantId, so the DB is the
+        // source of truth; a stale or tenant-less token must sign in again.
+        if ((payload.tenantId ?? null) !== (user.tenantId ?? null)) {
+          throw new UnauthorizedException('Session tenant mismatch — please sign in again');
+        }
+
         if (user.tenantId) {
           const tenant = await this.prisma.tenants.findUnique({
             where: { id: user.tenantId },

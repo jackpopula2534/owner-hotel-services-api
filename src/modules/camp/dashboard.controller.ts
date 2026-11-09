@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CampDashboardService } from './dashboard.service';
@@ -12,6 +13,8 @@ import { CAMP_READ_ROLES } from './camp-roles';
 
 @ApiTags('camp-dashboard')
 @ApiBearerAuth('JWT-auth')
+// Camp Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('camp-terminal')
 @Controller({ path: 'camp/dashboard', version: '1' })
 @UseGuards(JwtAuthGuard, RolesGuard, AddonGuard)
 @RequireAddon('CAMP_MODULE')

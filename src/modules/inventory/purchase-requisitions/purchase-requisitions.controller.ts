@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Get,
@@ -24,6 +25,8 @@ import { QueryPurchaseRequisitionDto } from './dto/query-purchase-requisition.dt
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, AddonGuard)
 @RequireAddon('INVENTORY_MODULE')
+// Procurement Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('procurement', 'warehouse')
 @Controller({ path: 'inventory/purchase-requisitions', version: '1' })
 export class PurchaseRequisitionsController {
   constructor(private readonly purchaseRequisitionsService: PurchaseRequisitionsService) {}

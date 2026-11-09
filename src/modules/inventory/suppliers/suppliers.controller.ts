@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Get,
@@ -36,6 +37,8 @@ const SUPPLIER_MANAGERS = [
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard, AddonGuard)
 @RequireAddon('INVENTORY_MODULE')
+// Procurement Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('procurement', 'warehouse')
 @Controller({ path: 'inventory/suppliers', version: '1' })
 export class SuppliersController {
   constructor(private readonly suppliersService: SuppliersService) {}

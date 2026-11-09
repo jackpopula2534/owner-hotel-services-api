@@ -1,0 +1,49 @@
+PASS src/common/guards/hotel-terminal-allowlist.spec.ts (6.783 s)
+  Hotel Terminal allow-list (SystemGuard enforced)
+    ✓ [Function BookingsController] is fully reachable from the Hotel Terminal (2 ms)
+    ✓ [Function RoomsController] is fully reachable from the Hotel Terminal
+    ✓ [Function GuestsController] is fully reachable from the Hotel Terminal
+    ✓ [Function HousekeepingController] is fully reachable from the Hotel Terminal
+    ✓ [Function ChartOfAccountsController] is NOT reachable from the Hotel Terminal (1 ms)
+    ✓ [Function ArInvoicesController] is NOT reachable from the Hotel Terminal
+    ✓ [Function TenantUsersController] is NOT reachable from the Hotel Terminal
+    ✓ [Function PurchaseOrdersController] is NOT reachable from the Hotel Terminal
+    ✓ [Function HrController] is NOT reachable from the Hotel Terminal (1 ms)
+    ✓ [Function CostBudgetsController] is NOT reachable from the Hotel Terminal
+    ✓ staff: only the list (roster) is reachable — not create / update / delete
+    ✓ tenants: only the two "hotels" reads are reachable
+
+PASS src/common/guards/system.guard.spec.ts
+  SystemGuard
+    a POS token stays inside the POS
+      ✓ reaches an endpoint that allows pos (1 ms)
+      ✓ is blocked from an endpoint with no @AllowSystems — this is the default (14 ms)
+      ✓ is blocked from an endpoint that allows only another sub-system
+      ✓ reports WRONG_SYSTEM_CONTEXT and the system it came from
+      ✓ a posLaunch deep-link token counts as pos even with no systemContext claim
+    everything else passes through
+      ✓ a main-dashboard token reaches an undecorated endpoint
+      ✓ a token with no systemContext claim is treated as main
+      ✓ a platform admin is not scoped to any terminal
+      ✓ a sub-system not yet in ENFORCED_SYSTEMS is untouched
+      ✓ a public route is skipped before the token is even read
+      ✓ a websocket handler has no bearer token to read
+    it does not authenticate — JwtAuthGuard does
+      ✓ passes a request with no Authorization header through to JwtAuthGuard
+      ✓ passes a non-bearer Authorization header through
+      ✓ passes an expired or forged token through
+    report mode (hr / accounting / procurement / warehouse while their allow-lists are completed)
+      ✓ lets a reported terminal through but logs the route once
+      ✓ does not log a route that is on the allow-list
+    a Hotel Terminal token stays inside the Hotel Terminal
+      ✓ reaches an endpoint tagged hotel-terminal
+      ✓ is blocked from an untagged endpoint (e.g. chart of accounts, tenant users)
+      ✓ is blocked from an endpoint tagged only for pos
+    class + handler @AllowSystems are merged
+      ✓ a handler tagged pos inside a class tagged hotel-terminal is open to both
+
+Test Suites: 2 passed, 2 total
+Tests:       32 passed, 32 total
+Snapshots:   0 total
+Time:        7.212 s
+Ran all test suites matching /src\/common\/guards\/system.guard.spec.ts|src\/common\/guards\/hotel-terminal-allowlist.spec.ts/i.

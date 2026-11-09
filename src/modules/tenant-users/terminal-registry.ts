@@ -456,7 +456,8 @@ export const ADMIN_LIKE_ROLES: ReadonlySet<string> = new Set([
 export const OWNER_ROLES: ReadonlySet<string> = new Set(['tenant_admin']);
 
 /**
- * บทบาทระดับหัวหน้าของแต่ละ Terminal — ได้สิทธิ์ `main` (เข้า dashboard หลัก) ด้วย
+ * บทบาทระดับหัวหน้าของแต่ละ Terminal
+ * (ตั้งแต่ 2026-11-09 ไม่ได้ `main` แล้ว — Owner Console เป็นของเจ้าของเท่านั้น)
  * พนักงานหน้างานทั่วไป (เสิร์ฟ / แม่บ้าน / คลัง / เสมียน) เข้าได้เฉพาะ Terminal ของตน
  * ตามนโยบายเดิมของ POS (`POS_ONLY_ROLES`) และจัดซื้อ (เฉพาะ procurement_manager ได้ main)
  */
@@ -471,3 +472,85 @@ export const MANAGER_LEVEL_ROLES: ReadonlySet<string> = new Set([
   'hr_manager',
   'crm_manager',
 ]);
+
+/**
+ * บทบาทของบัญชี (`users.role`) ที่เข้า Owner Console (`main`) ได้
+ * — เจ้าของ tenant และผู้ดูแลแพลตฟอร์มเท่านั้น
+ */
+export const MAIN_BY_ACCOUNT_ROLES: ReadonlySet<string> = new Set([
+  'tenant_admin',
+  'admin',
+  'platform_admin',
+]);
+
+/**
+ * คำนวณ `users.allowedSystems` ใหม่ทั้งชุดจากสิทธิ์ที่มีผลอยู่ตอนนี้
+ *
+ * นโยบาย (2026-11-09): Owner Console (`main`) เป็นของเจ้าของเท่านั้น
+ * พนักงานทุกระดับ — รวมผู้จัดการ Terminal (hotel_manager, hr_manager, …) —
+ * เข้าได้เฉพาะระบบย่อยที่ได้รับสิทธิ์ ผู้จัดการที่เข้า Owner Console ได้เห็นเมนูเจ้าของครบ
+ * แต่ API ส่วนใหญ่ตอบ "Access denied" (ต้องเป็น tenant_admin / manager)
+ *
+ * ห้ามอ้างอิงค่า allowedSystems เดิม — เคยทำแบบนั้นแล้ว `main` ค้างตลอดไป
+ */
+/**
+ * Terminals that have no login of their own and run on the main session
+ * (frontend: /camp-terminal, /retail, /crm-terminal all sign in at /login).
+ * Their users need `main` to sign in at all; the web keeps them out of the
+ * Owner Console (/dashboard) and sends them to their terminal instead.
+ * TODO(H1): give these terminals their own systemContext so `main` can be owner-only.
+ */
+export const MAIN_SESSION_TERMINALS: ReadonlySet<string> = new Set(['camp-terminal', 'retail', 'crm']);
+
+export function computeAllowedSystems(
+  accountRole: string,
+  grants: ReadonlyArray<{ terminal: string; role: string }>,
+): string[] {
+  const grantsMain =
+    MAIN_BY_ACCOUNT_ROLES.has(accountRole) || grants.some((g) => MAIN_SESSION_TERMINALS.has(g.terminal));
+  const terminals = [...new Set(grants.map((g) => g.terminal))];
+  return [...(grantsMain ? ['main'] : []), ...terminals];
+}
+
+/**
+ * บทบาทบัญชีที่เป็น "บทบาทของ Terminal" — ห้ามล็อกอิน Owner Console (`main`)
+ * ไม่ว่า allowedSystems จะมีอะไร (กันข้อมูลเก่าที่ยังมี `main` ค้าง)
+ *
+ * ยกเว้น `manager` (ชื่อชนกับผู้จัดการ dashboard รุ่นเก่า — อยู่ใน ADMIN_LIKE_ROLES)
+ * และ `receptionist` (บัญชี dashboard รุ่นเก่าใช้ชื่อนี้) — ให้ allowedSystems ตัดสินตามเดิม
+ * ต้องตรงกับ `lib/utils/terminalOnlyRoles.ts` ฝั่งเว็บ
+ */
+const MAIN_ROLE_EXCEPTIONS = new Set(['manager', 'receptionist']);
+export function isTerminalAccountRole(role: string | null | undefined): boolean {
+  if (!role || MAIN_BY_ACCOUNT_ROLES.has(role) || ADMIN_LIKE_ROLES.has(role)) return false;
+  if (MAIN_ROLE_EXCEPTIONS.has(role)) return false;
+  // Roles of main-session terminals (camp / retail / crm) must sign in at /login.
+  if ([...MAIN_SESSION_TERMINALS].some((k) => isRoleOfTerminal(k, role))) return false;
+  return TERMINAL_KEYS.some((k) => isRoleOfTerminal(k, role));
+}
+
+/**
+ * H1.2 (audit 2026-11-09) — Camp / Retail / CRM have no login of their own and
+ * run on the main session. Their staff still sign in at /login, but the token is
+ * scoped to their terminals (JWT claim `terminals`) and SystemGuard treats it like
+ * a terminal token — it no longer opens the whole API the way an owner's does.
+ *
+ * Returns the terminals to scope to, or null for an ordinary (unscoped) main session.
+ */
+export function mainSessionScope(
+  accountRole: string | null | undefined,
+  allowedSystemsRaw: string | null | undefined,
+): string[] | null {
+  if (!accountRole || MAIN_BY_ACCOUNT_ROLES.has(accountRole) || ADMIN_LIKE_ROLES.has(accountRole)) return null;
+  const roleTerminals = [...MAIN_SESSION_TERMINALS].filter((k) => isRoleOfTerminal(k, accountRole));
+  let granted: string[] = [];
+  try {
+    const parsed = JSON.parse(allowedSystemsRaw ?? '[]');
+    if (Array.isArray(parsed)) granted = parsed.filter((x): x is string => MAIN_SESSION_TERMINALS.has(x));
+  } catch {
+    /* fall back to the role's own terminal */
+  }
+  const scope = [...new Set([...roleTerminals, ...granted])];
+  // No camp / retail / crm role or grant → an ordinary (legacy) main session.
+  return scope.length > 0 ? scope : null;
+}

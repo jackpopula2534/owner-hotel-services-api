@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 import {
   Body,
   Controller,
@@ -42,6 +43,8 @@ const ADMIN_ROLES = new Set([
 @ApiTags('Accounting - Users')
 @ApiBearerAuth('JWT-auth')
 @UseGuards(JwtAuthGuard)
+// Accounting Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('accounting')
 @Controller({ path: 'accounting/users', version: '1' })
 export class AccountingUsersController {
   constructor(private readonly service: AccountingUsersService) {}

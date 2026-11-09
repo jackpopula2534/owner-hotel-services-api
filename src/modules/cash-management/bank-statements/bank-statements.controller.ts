@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import {
   Body,
   Controller,
@@ -41,6 +42,8 @@ interface JwtPayload {
 @UseGuards(JwtAuthGuard, AddonGuard, RolesGuard)
 @AccountingAccess(ACCOUNTING_WRITE_ROLES)
 @RequireAddon('ACCOUNTING_MODULE')
+// Accounting Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('accounting')
 @Controller({ path: 'accounting/bank-statements', version: '1' })
 export class BankStatementsController {
   constructor(private readonly service: BankStatementsService) {}

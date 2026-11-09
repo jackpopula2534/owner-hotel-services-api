@@ -218,7 +218,9 @@ describe('TenantUsersService', () => {
 
       const update = prisma.user.update.mock.calls[0][0];
       expect(update.where).toEqual({ id: 'u-1' });
-      expect(JSON.parse(update.data.allowedSystems)).toEqual(['main', 'accounting', 'warehouse']);
+      // waiter → accountant + receiver: no manager-level grant, so the stale "main"
+      // the account carried must be dropped (BUG 2026-11-09: main stuck forever).
+      expect(JSON.parse(update.data.allowedSystems)).toEqual(['accounting', 'warehouse']);
       expect(update.data.role).toBe('accountant');
       expect(JSON.parse(update.data.warehousePermissions)).toEqual(
         DEFAULT_WAREHOUSE_PERMISSIONS.receiver,
@@ -246,7 +248,7 @@ describe('TenantUsersService', () => {
       expect(update.data.role).toBeUndefined();
     });
 
-    it('grants "main" when any effective grant is a manager-level role', async () => {
+    it('does NOT grant "main" for a manager-level terminal role (Owner Console = owner only)', async () => {
       prisma.user.findFirst.mockResolvedValue(
         makeUser({ id: 'u-3', role: 'waiter', allowedSystems: '["pos"]' }),
       );
@@ -256,7 +258,7 @@ describe('TenantUsersService', () => {
         ACTOR,
       );
       const update = prisma.user.update.mock.calls[0][0];
-      expect(JSON.parse(update.data.allowedSystems)).toEqual(['main', 'hotel-terminal']);
+      expect(JSON.parse(update.data.allowedSystems)).toEqual(['hotel-terminal']);
     });
 
     it('rejects a role that does not belong to the terminal', async () => {
@@ -265,6 +267,151 @@ describe('TenantUsersService', () => {
         service.replaceAccess('u-1', [{ terminal: 'hr', role: 'waiter' }], ACTOR),
       ).rejects.toThrow(/waiter/);
       expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── Owner Console ("main") access — regression 2026-11-09 ─────────────────
+  // A POS·waiter created from the users wizard could still sign in to the Owner
+  // Console: "main" was only ever added, never recomputed, so any account that
+  // once held a manager-level role kept it after being demoted.
+
+  describe('Owner Console access (main) is recomputed on every write', () => {
+    const lastAllowed = () =>
+      JSON.parse(prisma.user.update.mock.calls.at(-1)![0].data.allowedSystems);
+
+    it('a new POS·waiter account gets ["pos"] only', async () => {
+      prisma.user.create.mockResolvedValue(
+        makeUser({ id: 'new-1', role: 'waiter', allowedSystems: '[]' }),
+      );
+      prisma.user.findFirst
+        .mockResolvedValueOnce(null) // email not taken
+        .mockResolvedValue(makeUser({ id: 'new-1', role: 'waiter', allowedSystems: '["pos"]' }));
+      await service.create(
+        {
+          email: 'waiter@hotel.test',
+          firstName: 'W',
+          lastName: 'T',
+          grants: [{ terminal: 'pos', role: 'waiter' }],
+          password: 'Password123!',
+        } as any,
+        ACTOR,
+      );
+      expect(lastAllowed()).toEqual(['pos']);
+    });
+
+    it('drops a stale "main" when a former manager is demoted to waiter', async () => {
+      prisma.user.findFirst.mockResolvedValue(
+        makeUser({ role: 'hotel_manager', allowedSystems: '["main","hotel-terminal","pos"]' }),
+      );
+      await service.replaceAccess('u-1', [{ terminal: 'pos', role: 'waiter' }], ACTOR);
+      expect(lastAllowed()).toEqual(['pos']);
+    });
+
+    it.each([
+      ['front_desk', 'hotel-terminal'],
+      ['housekeeper', 'hotel-terminal'],
+      ['chef', 'pos'],
+      ['cashier', 'pos'],
+      ['buyer', 'procurement'],
+      ['inventory_clerk', 'warehouse'],
+      ['accountant', 'accounting'],
+      ['hr_officer', 'hr'],
+    ])('frontline role %s on %s never gets "main"', async (role, terminal) => {
+      prisma.user.findFirst.mockResolvedValue(makeUser({ role: 'waiter', allowedSystems: '["main","pos"]' }));
+      await service.replaceAccess('u-1', [{ terminal: terminal as any, role }], ACTOR);
+      expect(lastAllowed()).not.toContain('main');
+      expect(lastAllowed()).toEqual([terminal]);
+    });
+
+    it('a manager-level grant does not bring "main" back', async () => {
+      prisma.user.findFirst.mockResolvedValue(makeUser({ role: 'waiter', allowedSystems: '["pos"]' }));
+      await service.replaceAccess(
+        'u-1',
+        [
+          { terminal: 'pos', role: 'waiter' },
+          { terminal: 'hr', role: 'hr_manager' },
+        ],
+        ACTOR,
+      );
+      expect(lastAllowed()).toEqual(['pos', 'hr']);
+    });
+
+    it.each([
+      ['hotel_manager', 'hotel-terminal'],
+      ['procurement_manager', 'procurement'],
+      ['warehouse_manager', 'warehouse'],
+      ['chief_accountant', 'accounting'],
+      ['hr_manager', 'hr'],
+    ])('manager-level role %s on %s goes to its terminal only', async (role, terminal) => {
+      prisma.user.findFirst.mockResolvedValue(
+        makeUser({ role, allowedSystems: `["main","${terminal}"]` }),
+      );
+      await service.replaceAccess('u-1', [{ terminal: terminal as any, role }], ACTOR);
+      expect(lastAllowed()).toEqual([terminal]);
+    });
+  });
+
+  describe('isTerminalAccountRole()', () => {
+    const { isTerminalAccountRole } = jest.requireActual('./terminal-registry');
+    it.each(['waiter', 'chef', 'front_desk', 'hotel_manager', 'hr_manager', 'buyer', 'procurement_manager', 'chief_accountant'])(
+      '%s is a terminal role',
+      (r) => expect(isTerminalAccountRole(r)).toBe(true),
+    );
+    it.each(['camp_manager', 'camp_staff', 'retail_manager', 'retail_cashier', 'crm_manager', 'crm_agent'])(
+      '%s signs in at /login (main-session terminal) — not a terminal-only role',
+      (r) => expect(isTerminalAccountRole(r)).toBe(false),
+    );
+    it.each(['tenant_admin', 'admin', 'platform_admin', 'manager', 'receptionist', 'staff', null])(
+      '%s is not',
+      (r) => expect(isTerminalAccountRole(r)).toBe(false),
+    );
+  });
+
+  describe('main-session terminals (camp / retail / crm) — regression 2026-11-09', () => {
+    const { computeAllowedSystems } = jest.requireActual('./terminal-registry');
+    it.each([
+      ['camp-terminal', 'camp_staff'],
+      ['camp-terminal', 'camp_manager'],
+      ['retail', 'retail_cashier'],
+      ['crm', 'crm_agent'],
+    ])('%s:%s keeps "main" — that terminal has no login of its own', (terminal, role) => {
+      expect(computeAllowedSystems(role, [{ terminal, role }])).toEqual(['main', terminal]);
+    });
+  });
+
+  describe('computeAllowedSystems()', () => {
+    // imported lazily so the describe stays self-contained
+    const { computeAllowedSystems } = jest.requireActual('./terminal-registry');
+
+    it('owner / admin accounts always get main', () => {
+      expect(computeAllowedSystems('tenant_admin', [])).toEqual(['main']);
+      expect(computeAllowedSystems('admin', [{ terminal: 'pos', role: 'waiter' }])).toEqual([
+        'main',
+        'pos',
+      ]);
+    });
+
+    it('manager-level terminal roles get terminals only', () => {
+      expect(
+        computeAllowedSystems('hotel_manager', [{ terminal: 'hotel-terminal', role: 'hotel_manager' }]),
+      ).toEqual(['hotel-terminal']);
+    });
+
+    it('frontline account with no manager grant gets terminals only', () => {
+      expect(computeAllowedSystems('waiter', [{ terminal: 'pos', role: 'waiter' }])).toEqual(['pos']);
+    });
+
+    it('does not trust the account role "waiter" to carry main from history', () => {
+      expect(computeAllowedSystems('waiter', [])).toEqual([]);
+    });
+
+    it('de-duplicates terminals', () => {
+      expect(
+        computeAllowedSystems('chef', [
+          { terminal: 'pos', role: 'chef' },
+          { terminal: 'pos', role: 'chef' },
+        ]),
+      ).toEqual(['pos']);
     });
   });
 
@@ -403,7 +550,8 @@ describe('TenantUsersService', () => {
       expect(res.data.updated).toBe(1);
       const update = prisma.user.update.mock.calls[0][0];
       expect(update.where).toEqual({ id: 'u-9' });
-      expect(JSON.parse(update.data.allowedSystems)).toEqual(['main', 'pos', 'hr']);
+      // waiter + hr_viewer are both frontline → the stale "main" is dropped
+      expect(JSON.parse(update.data.allowedSystems)).toEqual(['pos', 'hr']);
     });
 
     it('suspend requires a reason and stores suspendedAt/By/Reason', async () => {

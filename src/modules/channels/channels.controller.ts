@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Get,
@@ -21,6 +22,8 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @ApiTags('channels')
 @ApiBearerAuth('JWT-auth')
+// Hotel Terminal (OTA channels) — H1 allow-list, audit 2026-11-09
+@AllowSystems('hotel-terminal')
 @Controller({ path: 'channels', version: '1' })
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class ChannelsController {

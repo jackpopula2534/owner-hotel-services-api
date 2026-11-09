@@ -1,3 +1,7 @@
+import { MANAGER_WRITE_ROLES } from '../../common/constants/manager-write-roles';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Post,
@@ -60,6 +64,8 @@ function getStaffId(req: Request & { user?: JwtUser }): string {
 }
 
 @ApiTags('Messaging')
+// Hotel Terminal (inbox + channel settings) — H1 allow-list, audit 2026-11-09
+@AllowSystems('hotel-terminal', 'camp-terminal')
 @Controller('messaging')
 export class MessagingController {
   private readonly logger = new Logger(MessagingController.name);
@@ -260,7 +266,8 @@ export class MessagingController {
   }
 
   @Post('integrations/line')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...MANAGER_WRITE_ROLES) // H1.3 — managers only
   @ApiBearerAuth()
   @ApiOperation({ summary: 'เชื่อมต่อ LINE OA — validate token + ตั้ง webhook อัตโนมัติ' })
   @ApiResponse({ status: 201, description: 'Connected' })
@@ -272,7 +279,8 @@ export class MessagingController {
   }
 
   @Post('integrations/facebook')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...MANAGER_WRITE_ROLES) // H1.3 — managers only
   @ApiBearerAuth()
   @ApiOperation({ summary: 'เชื่อมต่อ Facebook Page — validate token + subscribe เพจเข้า webhook' })
   @ApiResponse({ status: 201, description: 'Connected' })
@@ -284,7 +292,8 @@ export class MessagingController {
   }
 
   @Post('integrations/:channel/test')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...MANAGER_WRITE_ROLES) // H1.3 — managers only
   @ApiBearerAuth()
   @ApiOperation({ summary: 'ทดสอบสุขภาพการเชื่อมต่อช่องทาง (re-validate)' })
   @ApiParam({ name: 'channel', enum: ['LINE', 'FACEBOOK', 'INSTAGRAM'] })
@@ -299,7 +308,8 @@ export class MessagingController {
   }
 
   @Delete('integrations/:channel')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...MANAGER_WRITE_ROLES) // H1.3 — managers only
   @ApiBearerAuth()
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'ยกเลิกการเชื่อมต่อช่องทาง — ลบ credential' })
@@ -339,7 +349,8 @@ export class MessagingController {
   }
 
   @Post('auto-reply-templates')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...MANAGER_WRITE_ROLES) // H1.3 — managers only
   @ApiBearerAuth()
   @ApiOperation({ summary: 'สร้าง template auto-reply ใหม่' })
   @ApiResponse({ status: 201, description: 'Created' })
@@ -350,7 +361,8 @@ export class MessagingController {
   }
 
   @Patch('auto-reply-templates/:id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...MANAGER_WRITE_ROLES) // H1.3 — managers only
   @ApiBearerAuth()
   @ApiOperation({ summary: 'แก้ไข template auto-reply' })
   @ApiResponse({ status: 200, description: 'Updated' })
@@ -366,7 +378,8 @@ export class MessagingController {
   }
 
   @Delete('auto-reply-templates/:id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...MANAGER_WRITE_ROLES) // H1.3 — managers only
   @ApiBearerAuth()
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'ลบ template auto-reply' })

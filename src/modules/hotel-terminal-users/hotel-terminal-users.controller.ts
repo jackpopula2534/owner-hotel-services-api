@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 import {
   Body,
   Controller,
@@ -43,6 +44,8 @@ const ADMIN_ROLES = new Set([
 @ApiTags('Hotel Terminal - Users')
 @ApiBearerAuth('JWT-auth')
 @UseGuards(JwtAuthGuard)
+// Hotel Terminal (staff roster) — H1 allow-list, audit 2026-11-09
+@AllowSystems('hotel-terminal')
 @Controller({ path: 'hotel-terminal/users', version: '1' })
 export class HotelTerminalUsersController {
   constructor(private readonly service: HotelTerminalUsersService) {}

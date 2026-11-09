@@ -1,0 +1,155 @@
+PASS src/modules/tenant-users/stale-main.spec.ts (5.485 s)
+  stripStaleMain (data fix for 2026-11-09 Owner Console leak)
+    ✓ strips main from a demoted POS·waiter (2 ms)
+    ✓ strips main from a manager-level account too (Owner Console = owner only)
+    ✓ never touches owners
+    ✓ skips legacy accounts with no user_terminal_access rows
+    ✓ only removes main — keeps other legacy entries
+    ✓ ignores malformed allowedSystems
+
+PASS src/modules/auth/auth.service.system-gate.spec.ts
+  AuthService — system gate (Owner Console vs terminals)
+    ✓ refuses a POS-only account on /auth/login (main) (4 ms)
+    ✓ still lets the same account into the POS (1 ms)
+    ✓ refuses before checking the password (no oracle for the wrong system) (15 ms)
+    ✓ refuses to complete a 2FA login into main for a POS-only account (1 ms)
+    ✓ completes a 2FA login into the system the account is allowed (1 ms)
+    ✓ refuses a hotel_manager on main even when stale data still lists "main" (1 ms)
+    ✓ lets the same hotel_manager into the Hotel Management Terminal
+    ✓ keeps legacy dashboard "manager" accounts working (allowedSystems decides)
+    ✓ lets an owner with main through (1 ms)
+
+PASS src/modules/tenant-users/tenant-users.service.spec.ts
+  TenantUsersService
+    read-through fallback (no user_terminal_access rows)
+      ✓ derives grants from allowedSystems + role + legacy permission columns (2 ms)
+      ✓ falls back to the role default permissions when no legacy blob exists (1 ms)
+      ✓ prefers user_terminal_access rows over legacy columns when they exist (1 ms)
+    replaceAccess → users.allowedSystems sync
+      ✓ rewrites allowedSystems, primary role and legacy columns; revokes missing terminals (2 ms)
+      ✓ never adds "main" back when it was absent, and keeps admin-ish roles intact (1 ms)
+      ✓ does NOT grant "main" for a manager-level terminal role (Owner Console = owner only)
+      ✓ rejects a role that does not belong to the terminal (17 ms)
+    Owner Console access (main) is recomputed on every write
+      ✓ a new POS·waiter account gets ["pos"] only (1 ms)
+      ✓ drops a stale "main" when a former manager is demoted to waiter (1 ms)
+      ✓ frontline role front_desk on hotel-terminal never gets "main"
+      ✓ frontline role housekeeper on hotel-terminal never gets "main" (1 ms)
+      ✓ frontline role chef on pos never gets "main" (1 ms)
+      ✓ frontline role cashier on pos never gets "main"
+      ✓ frontline role buyer on procurement never gets "main" (1 ms)
+      ✓ frontline role inventory_clerk on warehouse never gets "main" (1 ms)
+      ✓ frontline role accountant on accounting never gets "main"
+      ✓ frontline role hr_officer on hr never gets "main" (1 ms)
+      ✓ a manager-level grant does not bring "main" back
+      ✓ manager-level role hotel_manager on hotel-terminal goes to its terminal only (1 ms)
+      ✓ manager-level role camp_manager on camp-terminal goes to its terminal only (1 ms)
+      ✓ manager-level role procurement_manager on procurement goes to its terminal only
+      ✓ manager-level role warehouse_manager on warehouse goes to its terminal only (1 ms)
+      ✓ manager-level role chief_accountant on accounting goes to its terminal only
+      ✓ manager-level role hr_manager on hr goes to its terminal only (1 ms)
+    isTerminalAccountRole()
+      ✓ waiter is a terminal role
+      ✓ chef is a terminal role (1 ms)
+      ✓ front_desk is a terminal role
+      ✓ hotel_manager is a terminal role
+      ✓ hr_manager is a terminal role
+      ✓ buyer is a terminal role (1 ms)
+      ✓ procurement_manager is a terminal role
+      ✓ chief_accountant is a terminal role (4 ms)
+      ✓ tenant_admin is not (1 ms)
+      ✓ admin is not
+      ✓ platform_admin is not
+      ✓ manager is not (1 ms)
+      ✓ receptionist is not
+      ✓ staff is not (1 ms)
+      ✓ null is not
+    computeAllowedSystems()
+      ✓ owner / admin accounts always get main (1 ms)
+      ✓ manager-level terminal roles get terminals only
+      ✓ frontline account with no manager grant gets terminals only (1 ms)
+      ✓ does not trust the account role "waiter" to carry main from history
+      ✓ de-duplicates terminals (1 ms)
+    seat limit
+      ✓ throws SEAT_LIMIT_REACHED when active users already fill plans.max_users
+      ✓ creates the user (with a generated password) when a seat is free (1 ms)
+      ✓ ignores the limit when the plan has no max_users (1 ms)
+    owner protection
+      ✓ refuses to suspend / delete / edit access of a tenant_admin (1 ms)
+      ✓ refuses to let callers suspend themselves
+      ✓ skips owners silently in bulk-access instead of failing the batch (1 ms)
+      ✓ suspend requires a reason and stores suspendedAt/By/Reason (1 ms)
+
+PASS src/modules/auth/auth.service.spec.ts
+  AuthService
+    ✓ should be defined (2 ms)
+    register
+      ✓ should register a new user successfully (1 ms)
+      ✓ should throw ConflictException if user already exists (18 ms)
+    loginAdmin
+      ✓ should login admin successfully (Admin table) (1 ms)
+      ✓ should throw UnauthorizedException if admin not found (1 ms)
+      ✓ should throw UnauthorizedException if admin is inactive (1 ms)
+      ✓ should throw UnauthorizedException if password is invalid
+    login
+      ✓ should login user successfully (User table) (1 ms)
+      ✓ should throw UnauthorizedException if user not found (1 ms)
+      ✓ should throw UnauthorizedException if user is inactive
+      ✓ should throw UnauthorizedException if password is invalid (1 ms)
+      ✓ should block platform_admin from login via /auth/login
+      ✓ should block admin from login via /auth/login (1 ms)
+    refreshToken
+      ✓ should refresh token successfully (1 ms)
+      ✓ should throw UnauthorizedException if token not found
+      ✓ should throw UnauthorizedException if token is expired (1 ms)
+      ✓ should throw UnauthorizedException if token is revoked
+    logout
+      ✓ should revoke specific refresh token (1 ms)
+      ✓ should revoke all refresh tokens for user (1 ms)
+    lastLoginAt bookkeeping
+      ✓ stamps the date and IP when a user signs in
+      ✓ keeps the previous IP when the request has none (1 ms)
+      ✓ stamps every terminal login, not just the main dashboard (4 ms)
+      ✓ stamps a platform admin on the Admin table (1 ms)
+      ✓ does not move the date when a token is refreshed
+      ✓ completes the login even if the stamp write fails (1 ms)
+
+PASS src/modules/hotel-terminal-users/hotel-terminal-users.service.spec.ts
+  HotelTerminalUsersService.listImportableEmployees
+    ✓ returns importable employees from the primary tenant when seeded (1 ms)
+    ✓ honours page + limit query params
+    ✓ passes search and department filters into the WHERE clause (1 ms)
+    ✓ falls back to a UserTenant-linked tenant when the primary tenant is empty (5 ms)
+    ✓ filters out terminated/resigned/inactive employees case-insensitively
+    ✓ marks employees whose email already exists as a user as alreadyLinked (1 ms)
+    ✓ returns an empty list with a diagnostic envelope when nothing matches
+    ✓ reports no_tenant_in_token when caller has no tenantId
+    ✓ still accepts a bare tenantId string for backwards compatibility
+    listImportableEmployeeDepartments
+      ✓ returns distinct, non-empty department names for the resolved tenant
+
+PASS src/common/guards/system.guard.spec.ts
+  SystemGuard
+    a POS token stays inside the POS
+      ✓ reaches an endpoint that allows pos
+      ✓ is blocked from an endpoint with no @AllowSystems — this is the default (5 ms)
+      ✓ is blocked from an endpoint that allows only another sub-system
+      ✓ reports WRONG_SYSTEM_CONTEXT and the system it came from (1 ms)
+      ✓ a posLaunch deep-link token counts as pos even with no systemContext claim
+    everything else passes through
+      ✓ a main-dashboard token reaches an undecorated endpoint
+      ✓ a token with no systemContext claim is treated as main
+      ✓ a platform admin is not scoped to any terminal
+      ✓ a sub-system not yet in ENFORCED_SYSTEMS is untouched
+      ✓ a public route is skipped before the token is even read
+      ✓ a websocket handler has no bearer token to read
+    it does not authenticate — JwtAuthGuard does
+      ✓ passes a request with no Authorization header through to JwtAuthGuard
+      ✓ passes a non-bearer Authorization header through (1 ms)
+      ✓ passes an expired or forged token through
+
+Test Suites: 6 passed, 6 total
+Tests:       115 passed, 115 total
+Snapshots:   0 total
+Time:        8.571 s, estimated 9 s
+Ran all test suites matching /src\/modules\/tenant-users|src\/modules\/auth\/auth.service.system-gate.spec.ts|src\/modules\/auth\/auth.service.spec.ts|src\/common\/guards\/system.guard.spec.ts|src\/modules\/hotel-terminal-users/i.

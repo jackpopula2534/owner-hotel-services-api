@@ -14,6 +14,8 @@ type AuthedReq = { user: { id: string; tenantId: string } };
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, AddonGuard)
 @RequireAddon('INVENTORY_MODULE')
+// Warehouse Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('warehouse', 'retail')
 @Controller({ path: 'inventory/retail/products', version: '1' })
 export class RetailProductsController {
   constructor(private readonly retailProductsService: RetailProductsService) {}

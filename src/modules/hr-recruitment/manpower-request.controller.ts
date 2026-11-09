@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Get,
@@ -56,6 +57,8 @@ type AuthUser = { tenantId?: string; id?: string };
 
 @ApiTags('hr / recruitment — manpower requests')
 @ApiBearerAuth('JWT-auth')
+// HR Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('hr')
 @Controller({ path: 'hr/manpower-requests', version: '1' })
 @UseGuards(JwtAuthGuard, HrAddonGuard, RolesGuard)
 export class ManpowerRequestController {
@@ -353,6 +356,8 @@ export class ManpowerRequestController {
 
 @ApiTags('hr / recruitment — equipment requests')
 @ApiBearerAuth('JWT-auth')
+// HR Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('hr')
 @Controller({ path: 'hr/equipment-requests', version: '1' })
 @UseGuards(JwtAuthGuard, HrAddonGuard, RolesGuard)
 export class EquipmentRequestController {

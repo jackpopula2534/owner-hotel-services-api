@@ -152,6 +152,36 @@ describe('JwtStrategy', () => {
       });
     });
 
+    // audit 2026-11-09 — a token without (or with another) tenantId ran with no
+    // tenant scope: services querying `where: { tenantId: undefined }` saw every tenant.
+    it('rejects a token whose tenantId is missing while the account has a tenant', async () => {
+      userFindUnique.mockResolvedValue({ id: 'u', status: 'active', expiresAt: null, tenantId: 't-1' });
+      await expect(strategy.validate({ sub: 'u', role: 'waiter' })).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
+    });
+
+    it('rejects a token for another tenant than the account (stale after switch / forged)', async () => {
+      userFindUnique.mockResolvedValue({ id: 'u', status: 'active', expiresAt: null, tenantId: 't-1' });
+      await expect(
+        strategy.validate({ sub: 'u', role: 'tenant_admin', tenantId: 't-2' }),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+
+    it('rejects the old impersonation token shape (tenant_id, no tenantId)', async () => {
+      userFindUnique.mockResolvedValue({ id: 'u', status: 'active', expiresAt: null, tenantId: 't-1' });
+      await expect(
+        strategy.validate({ sub: 'u', tenant_id: 't-1', impersonation_session_id: 's', impersonation_scope: 'read_only' }),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+
+    it('accepts a token whose tenantId matches the account', async () => {
+      userFindUnique.mockResolvedValue({ id: 'u', status: 'active', expiresAt: null, tenantId: 't-1' });
+      tenantsFindUnique.mockResolvedValue({ status: 'active' });
+      const res = await strategy.validate({ sub: 'u', role: 'tenant_admin', tenantId: 't-1' });
+      expect(res.tenantId).toBe('t-1');
+    });
+
     it('throws when user is not found in DB', async () => {
       userFindUnique.mockResolvedValue(null);
       await expect(strategy.validate({ sub: 'ghost-user' })).rejects.toThrow(UnauthorizedException);
