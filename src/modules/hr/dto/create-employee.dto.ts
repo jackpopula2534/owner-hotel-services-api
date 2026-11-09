@@ -6,8 +6,10 @@ import {
   IsDateString,
   IsNumber,
   IsArray,
+  IsBoolean,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 
 export class CreateEmployeeDto {
   @ApiProperty({ example: 'John' })
@@ -24,6 +26,11 @@ export class CreateEmployeeDto {
   @IsString()
   @IsOptional()
   nickname?: string;
+
+  @ApiPropertyOptional({ description: 'URL หรือ data URL รูปโปรไฟล์พนักงาน' })
+  @IsString()
+  @IsOptional()
+  profileImage?: string;
 
   @ApiProperty({ example: 'john.doe@hotel.com' })
   @IsEmail()
@@ -171,6 +178,9 @@ export class CreateEmployeeDto {
   })
   @IsArray()
   @IsOptional()
+  // ระบุ element type เป็น Object — กัน enableImplicitConversion แปลง object ในแต่ละ
+  // รายการเป็น [] (JSON freeform ที่ไม่มี nested DTO type ให้ class-transformer อ้างอิง)
+  @Type(() => Object)
   educations?: Record<string, unknown>[];
 
   @ApiPropertyOptional({
@@ -181,6 +191,7 @@ export class CreateEmployeeDto {
   })
   @IsArray()
   @IsOptional()
+  @Type(() => Object)
   workExperiences?: Record<string, unknown>[];
 
   @ApiPropertyOptional({
@@ -189,5 +200,23 @@ export class CreateEmployeeDto {
   })
   @IsArray()
   @IsOptional()
+  @Type(() => Object)
   emergencyContacts?: Record<string, unknown>[];
+
+  // ─── PDPA Consent Fields ─────────────────────────────────────────────────
+  @ApiPropertyOptional({
+    description: 'PDPA consent given by employee (required for create)',
+    example: true,
+  })
+  @IsBoolean()
+  @IsOptional()
+  consentGiven?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'PDPA consent policy version at time of consent',
+    example: '1.0',
+  })
+  @IsString()
+  @IsOptional()
+  consentVersion?: string;
 }

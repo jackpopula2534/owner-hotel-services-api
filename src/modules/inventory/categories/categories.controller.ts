@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Get,
@@ -30,9 +31,13 @@ interface JwtPayload {
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, AddonGuard)
 @RequireAddon('INVENTORY_MODULE')
+// Procurement Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('procurement', 'warehouse', 'retail')
 @Controller({ path: 'inventory/categories', version: '1' })
 export class CategoriesController {
   constructor(private readonly categoriesService: CategoriesService) {}
+
+  @AllowSystems('hr') // HR equipment issuance picks item categories (report walk 2026-11-09)
 
   @Get()
   @ApiOperation({ summary: 'Get all active categories in tree structure (max 3 levels)' })
@@ -68,7 +73,9 @@ export class CategoriesController {
       },
     },
   })
-  async findAll(@CurrentUser() user: JwtPayload): Promise<{ success: boolean; data: CategoryWithChildren[] }> {
+  async findAll(
+    @CurrentUser() user: JwtPayload,
+  ): Promise<{ success: boolean; data: CategoryWithChildren[] }> {
     const data = await this.categoriesService.findAll(user.tenantId);
     return { success: true, data };
   }

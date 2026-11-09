@@ -4,23 +4,49 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import { AppModule } from './app.module';
-import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { Hotel3dDemoSeeder } from './seeder/hotel-3d-demo.seeder';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
+import { resolveSameSite } from './modules/auth/terminal-refresh-cookie';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    // Enable rawBody so LINE Messaging webhook can verify HMAC-SHA256 signature
+    rawBody: true,
+  });
 
-  // Ensure uploads directory exists
-  const uploadsPath = join(process.cwd(), 'uploads');
-  if (!existsSync(uploadsPath)) {
-    mkdirSync(uploadsPath, { recursive: true });
+  // Serve local uploads only when using the local storage driver.
+  // On production (STORAGE_DRIVER=s3) files live on object storage (R2/S3) and
+  // are served from the bucket's public URL — no local disk serving needed.
+  const storageDriver = process.env.STORAGE_DRIVER || 'local';
+  if (storageDriver !== 's3') {
+    const uploadsPath = join(process.cwd(), 'uploads');
+    if (!existsSync(uploadsPath)) {
+      mkdirSync(uploadsPath, { recursive: true });
+    }
+    app.useStaticAssets(uploadsPath, {
+      prefix: '/uploads',
+      // static ถูก mount ก่อน enableCors — ไฟล์ใน uploads เปิดสาธารณะอยู่แล้ว แต่ WebGL
+      // (ฉาก 3D ของลาน) โหลดรูปเป็น texture ข้าม origin ได้ต่อเมื่อมี CORS header
+      setHeaders: (res) => res.setHeader('Access-Control-Allow-Origin', '*'),
+    });
+    logger.log('Serving local uploads at /uploads (STORAGE_DRIVER=local)');
+  } else {
+    logger.log('STORAGE_DRIVER=s3 — uploads served from object storage');
   }
 
-  // Serve static files from uploads directory
-  app.useStaticAssets(uploadsPath, { prefix: '/uploads' });
+  // Increase body parser limit to 10 MB to support QC submissions that include
+  // base64-encoded photos (up to 5 images) and inspector signature data URLs.
+  // Default Express limit is 100 kb — far too small for image payloads.
+  //
+  // ใช้ app.useBodyParser (ไม่ใช่ app.use(json())) เพื่อให้ rawBody ยังถูกเก็บไว้ —
+  // จำเป็นสำหรับ verify HMAC signature ของ webhook (LINE x-line-signature,
+  // Facebook x-hub-signature-256). app.use(json()) จะแทน parser ของ Nest ทำให้
+  // req.rawBody เป็น undefined และ signature check ถูกข้ามแบบเงียบ ๆ
+  app.useBodyParser('json', { limit: '10mb' });
+  app.useBodyParser('urlencoded', { limit: '10mb', extended: true });
 
   // Global validation pipe
   app.useGlobalPipes(
@@ -34,8 +60,8 @@ async function bootstrap() {
     }),
   );
 
-  // Global exception filter
-  app.useGlobalFilters(new AllExceptionsFilter());
+  // Global exception filter is registered as a DI provider in AppModule
+  // (APP_FILTER) so it can inject I18nService and localise per-request errors.
 
   // Global interceptors
   app.useGlobalInterceptors(new LoggingInterceptor(), new TransformInterceptor());
@@ -49,12 +75,34 @@ async function bootstrap() {
 
   logger.log('CORS allowed origins: ' + allowedOrigins.join(', '));
 
+  // httpOnly refresh cookie (ss_rt_<context>): must reach /auth/refresh from the web app.
+  const refreshSameSite = resolveSameSite();
+  logger.log(
+    `Refresh cookie SameSite=${refreshSameSite}` +
+      (process.env.REFRESH_COOKIE_SAMESITE ? ' (REFRESH_COOKIE_SAMESITE)' : ' (auto: FRONTEND_URL vs APP_BASE_URL)'),
+  );
+  if (refreshSameSite === 'none') {
+    logger.warn(
+      'Web app and API are on different sites — refresh cookie is SameSite=None; Secure. ' +
+        'Browsers that block third-party cookies (Safari, Chrome with 3P cookies off) will sign users out on reload; ' +
+        'prefer hosting the API on a subdomain of the app (app.example.com + api.example.com).',
+    );
+  }
+
+  // เว็บโรงแรม <slug>.<WEBSITE_ROOT_DOMAIN> เรียก /public/sites/* (ฟอร์มคำขอจอง) — dev ใช้ <slug>.localhost
+  const escapeRe = (v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const siteRoot = process.env.WEBSITE_ROOT_DOMAIN?.trim();
+  const siteOriginPatterns: RegExp[] = [
+    ...(siteRoot ? [new RegExp(`^https://[a-z0-9-]{3,40}\\.${escapeRe(siteRoot)}$`)] : []),
+    ...(process.env.NODE_ENV !== 'production' ? [/^http:\/\/[a-z0-9-]{3,40}\.localhost(:\d+)?$/] : []),
+  ];
+
   app.enableCors({
     origin: (origin, callback) => {
       // Allow requests with no origin (like mobile apps, curl, Postman)
       if (!origin) return callback(null, true);
 
-      if (allowedOrigins.includes(origin)) {
+      if (allowedOrigins.includes(origin) || siteOriginPatterns.some((re) => re.test(origin))) {
         callback(null, true);
       } else {
         logger.warn('CORS blocked origin: ' + origin);
@@ -74,29 +122,41 @@ async function bootstrap() {
     defaultVersion: '1',
   });
 
-  // Swagger/OpenAPI documentation
-  const config = new DocumentBuilder()
-    .setTitle('Hotel Services API')
-    .setDescription('Hotel Management System API Documentation')
-    .setVersion('1.0')
-    .addBearerAuth(
-      {
-        type: 'http',
-        scheme: 'bearer',
-        bearerFormat: 'JWT',
-        name: 'JWT',
-        description: 'Enter JWT token',
-        in: 'header',
-      },
-      'JWT-auth',
-    )
-    .build();
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api/docs', app, document);
-
   const port = process.env.PORT || 9011;
+
+  // Swagger/OpenAPI documentation — disabled on production to avoid exposing API schema
+  if (process.env.NODE_ENV !== 'production') {
+    const config = new DocumentBuilder()
+      .setTitle('Hotel Services API')
+      .setDescription('Hotel Management System API Documentation')
+      .setVersion('1.0')
+      .addBearerAuth(
+        {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+          name: 'JWT',
+          description: 'Enter JWT token',
+          in: 'header',
+        },
+        'JWT-auth',
+      )
+      .build();
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('api/docs', app, document);
+    logger.log(`Swagger documentation: http://localhost:${port}/api/docs`);
+  }
+
   await app.listen(port);
   logger.log(`Application is running on: http://localhost:${port}`);
-  logger.log(`Swagger documentation: http://localhost:${port}/api/docs`);
+
+  // dev เท่านั้น: เติมข้อมูลเดโม Monitor ห้องพัก 3D ให้เป็น "วันนี้" (วันละครั้ง ไม่บล็อกการสตาร์ต)
+  // ปิดได้ด้วย HOTEL_3D_DEMO_AUTOSEED=false
+  if (process.env.NODE_ENV !== 'production' && process.env.HOTEL_3D_DEMO_AUTOSEED !== 'false') {
+    app
+      .get(Hotel3dDemoSeeder)
+      .seedDaily()
+      .catch((e: Error) => logger.warn(`Hotel 3D demo seed skipped: ${e.message}`));
+  }
 }
 bootstrap();

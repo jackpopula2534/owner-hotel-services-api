@@ -88,7 +88,7 @@ describe('NotificationsController', () => {
 
       const result = await controller.markAllAsRead(mockUser);
 
-      expect(service.markAllAsRead).toHaveBeenCalledWith('user-1');
+      expect(service.markAllAsRead).toHaveBeenCalledWith('user-1', undefined);
       expect(result).toEqual(mockResult);
     });
   });

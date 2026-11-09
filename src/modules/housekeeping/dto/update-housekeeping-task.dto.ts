@@ -6,9 +6,39 @@ export enum HousekeepingTaskStatus {
   IN_PROGRESS = 'in_progress',
   COMPLETED = 'completed',
   INSPECTED = 'inspected',
+  CANCELLED = 'cancelled',
 }
 
 export class UpdateHousekeepingTaskDto {
+  @ApiProperty({
+    description: 'Task type (daily, checkout, deep, turndown, inspection)',
+    example: 'deep',
+    required: false,
+  })
+  @IsString()
+  @IsOptional()
+  type?: string;
+
+  @ApiProperty({
+    description: 'Task priority (low, medium, high, urgent)',
+    example: 'high',
+    required: false,
+  })
+  @IsString()
+  @IsOptional()
+  priority?: string;
+
+  @ApiProperty({
+    description: 'Estimated duration in minutes',
+    example: 45,
+    required: false,
+  })
+  @IsNumber()
+  @Min(5)
+  @Max(480)
+  @IsOptional()
+  estimatedDuration?: number;
+
   @ApiProperty({
     description: 'Task status',
     enum: HousekeepingTaskStatus,

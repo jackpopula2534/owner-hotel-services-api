@@ -6,6 +6,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { BANGKOK_OFFSET_MS, toBusinessDate } from '../../common/utils/bangkok-day.util';
 import { CheckInDto, CheckOutDto, CreateHrAttendanceDto } from './dto/create-hr-attendance.dto';
 
 @Injectable()
@@ -77,12 +78,69 @@ export class HrAttendanceService {
             lastName: true,
             employeeCode: true,
             department: true,
+            propertyId: true,
           },
         },
       },
     });
     if (!record) throw new NotFoundException(`Attendance record ${id} not found`);
     return record;
+  }
+
+  // ─── Shift-aware helpers (P1-04) ───────────────────────────────────────────
+
+  /** Default late grace in minutes when a policy/shift does not override it. */
+  private static readonly LATE_GRACE_MINUTES = 15;
+  /** Fallback scheduled start when no shift roster exists for the day. */
+  private static readonly DEFAULT_START = '09:00';
+
+  /** Resolve the planned shift for an employee on a date (roster + override). */
+  private async resolveShift(employeeId: string, date: Date, tenantId: string) {
+    const assignment = await (this.prisma as any).hrShiftAssignment.findFirst({
+      where: { employeeId, date, tenantId },
+      include: { shiftType: true },
+    });
+    if (!assignment) return null;
+    const startTime = assignment.startTime ?? assignment.shiftType?.startTime ?? null;
+    const endTime = assignment.endTime ?? assignment.shiftType?.endTime ?? null;
+    const breakMinutes = assignment.shiftType?.breakMinutes ?? 0;
+    return { assignment, startTime, endTime, breakMinutes, isDayOff: assignment.isDayOff };
+  }
+
+  /** Is the date a non-working calendar day (holiday) for this tenant/property? */
+  private async isHoliday(date: Date, tenantId: string, propertyId?: string | null) {
+    const entry = await (this.prisma as any).hrWorkCalendar.findFirst({
+      where: {
+        tenantId,
+        date,
+        isWorkingDay: false,
+        OR: [{ propertyId: null }, ...(propertyId ? [{ propertyId }] : [])],
+      },
+    });
+    return Boolean(entry);
+  }
+
+  /**
+   * Combine a business date (UTC midnight of a Bangkok day) with a Bangkok-clock
+   * HH:mm into the real instant — e.g. 09:00 on 2026-11-02 → 2026-11-02T02:00Z.
+   */
+  private atTime(date: Date, hhmm: string): Date {
+    const [h, m] = hhmm.split(':').map((n) => parseInt(n, 10));
+    return new Date(date.getTime() + ((h || 0) * 60 + (m || 0)) * 60_000 - BANGKOK_OFFSET_MS);
+  }
+
+  /** Planned working minutes for a shift (end − start − break), default 480. */
+  private plannedWorkMinutes(
+    date: Date,
+    startTime: string | null,
+    endTime: string | null,
+    breakMinutes: number,
+  ): number {
+    if (!startTime || !endTime) return 8 * 60;
+    let diff =
+      (this.atTime(date, endTime).getTime() - this.atTime(date, startTime).getTime()) / 60_000;
+    if (diff <= 0) diff += 24 * 60; // overnight shift
+    return Math.max(0, Math.round(diff) - breakMinutes);
   }
 
   // ─── Check-in / Check-out ────────────────────────────────────────────────────
@@ -95,12 +153,12 @@ export class HrAttendanceService {
 
     const now = new Date();
     const checkIn = dto.checkIn ? new Date(dto.checkIn) : now;
-    const dateOnly = new Date(checkIn);
-    dateOnly.setUTCHours(0, 0, 0, 0);
+    // วันทำงานตามเวลาไทย — เข้างาน 06:30 น. (= 23:30 UTC เมื่อวาน) ต้องลงเป็นวันนี้
+    const dateOnly = toBusinessDate(checkIn);
 
     // Guard: prevent duplicate check-in for the same day
-    const existing = await (this.prisma as any).hrAttendance.findUnique({
-      where: { employeeId_date: { employeeId: dto.employeeId, date: dateOnly } },
+    const existing = await (this.prisma as any).hrAttendance.findFirst({
+      where: { employeeId: dto.employeeId, date: dateOnly },
     });
     if (existing) {
       throw new ConflictException(
@@ -108,9 +166,12 @@ export class HrAttendanceService {
       );
     }
 
-    // Determine status: if check-in after 09:00 → late
-    const lateThresholdHour = 9;
-    const status = checkIn.getUTCHours() >= lateThresholdHour ? 'late' : 'present';
+    // Determine status against the rostered shift instead of a hardcoded hour.
+    const shift = await this.resolveShift(dto.employeeId, dateOnly, tenantId);
+    const scheduledStart = shift?.startTime ?? HrAttendanceService.DEFAULT_START;
+    const graceMs = HrAttendanceService.LATE_GRACE_MINUTES * 60_000;
+    const startBoundary = this.atTime(dateOnly, scheduledStart).getTime() + graceMs;
+    const status = shift?.isDayOff || checkIn.getTime() <= startBoundary ? 'present' : 'late';
 
     const record = await (this.prisma as any).hrAttendance.create({
       data: {
@@ -127,7 +188,8 @@ export class HrAttendanceService {
     });
 
     this.logger.log(
-      `Check-in: Employee ${dto.employeeId} at ${checkIn.toISOString()} (status: ${status})`,
+      `Check-in: Employee ${dto.employeeId} at ${checkIn.toISOString()} ` +
+        `(status: ${status}, scheduledStart: ${scheduledStart})`,
     );
     return record;
   }
@@ -150,8 +212,29 @@ export class HrAttendanceService {
     }
 
     const totalMinutes = Math.floor((checkOut.getTime() - checkInTime.getTime()) / 60_000);
-    const workMinutes = Math.min(totalMinutes, 8 * 60); // cap regular at 8h
-    const overtimeMinutes = Math.max(0, totalMinutes - 8 * 60);
+
+    // Regular vs OT split is driven by the rostered shift length, not a fixed 8h.
+    // Day-off / holiday work counts entirely as overtime.
+    const dateOnly = new Date(record.date);
+    dateOnly.setUTCHours(0, 0, 0, 0);
+    const shift = await this.resolveShift(record.employeeId, dateOnly, tenantId);
+    const holiday = await this.isHoliday(dateOnly, tenantId, record.employee?.propertyId);
+
+    let workMinutes: number;
+    let overtimeMinutes: number;
+    if (shift?.isDayOff || holiday) {
+      workMinutes = 0;
+      overtimeMinutes = totalMinutes;
+    } else {
+      const planned = this.plannedWorkMinutes(
+        dateOnly,
+        shift?.startTime ?? null,
+        shift?.endTime ?? null,
+        shift?.breakMinutes ?? 0,
+      );
+      workMinutes = Math.min(totalMinutes, planned);
+      overtimeMinutes = Math.max(0, totalMinutes - planned);
+    }
 
     const updated = await (this.prisma as any).hrAttendance.update({
       where: { id },

@@ -1,0 +1,399 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1700 1280" role="img" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">
+  <title>StaySync CRM Sub-System Plug-in Architecture</title>
+  <desc>Workflow showing how the new CRM Terminal plugs into existing StaySync sub-systems (Hotel, POS, KDS, Procurement, Warehouse, Accounting), the four CRM pillars (Guest 360, Marketing Automation, Sales Pipeline, Customer Service), data integrations and outbound channels.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748B"/>
+    </marker>
+    <marker id="arrow-new" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#10B981"/>
+    </marker>
+    <marker id="arrow-event" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8B5CF6"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1700" height="1280" fill="#FAFAFB"/>
+
+  <!-- ============ TITLE ============ -->
+  <text x="850" y="42" text-anchor="middle" font-size="26" font-weight="700" fill="#0F172A">CRM Sub-System Plug-in Architecture</text>
+  <text x="850" y="68" text-anchor="middle" font-size="14" fill="#64748B">StaySync — เพิ่ม CRM Terminal เข้ามาในระบบ Sub-Systems (SSO) พร้อม Integration กับโมดูลเดิม</text>
+
+  <!-- ============ LAYER 1: EXTERNAL TOUCHPOINTS ============ -->
+  <text x="40" y="110" font-size="12" font-weight="700" fill="#64748B" letter-spacing="2">① TOUCHPOINTS — ช่องทางลูกค้า</text>
+  <g>
+    <!-- Booking.com / OTA -->
+    <rect x="40" y="125" width="200" height="60" rx="8" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <text x="140" y="150" text-anchor="middle" font-size="13" font-weight="600" fill="#0F172A">OTA Channels</text>
+    <text x="140" y="170" text-anchor="middle" font-size="11" fill="#64748B">Booking.com · Agoda · Expedia</text>
+
+    <!-- Website / Mobile -->
+    <rect x="260" y="125" width="200" height="60" rx="8" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <text x="360" y="150" text-anchor="middle" font-size="13" font-weight="600" fill="#0F172A">Web / Mobile Booking</text>
+    <text x="360" y="170" text-anchor="middle" font-size="11" fill="#64748B">Direct Booking Engine</text>
+
+    <!-- Walk-in / Front Desk -->
+    <rect x="480" y="125" width="200" height="60" rx="8" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <text x="580" y="150" text-anchor="middle" font-size="13" font-weight="600" fill="#0F172A">Walk-in / Front Desk</text>
+    <text x="580" y="170" text-anchor="middle" font-size="11" fill="#64748B">Manual Check-in</text>
+
+    <!-- LINE OA -->
+    <rect x="700" y="125" width="200" height="60" rx="8" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <text x="800" y="150" text-anchor="middle" font-size="13" font-weight="600" fill="#0F172A">LINE OA / Messenger</text>
+    <text x="800" y="170" text-anchor="middle" font-size="11" fill="#64748B">Chat &amp; Booking Inquiries</text>
+
+    <!-- Email -->
+    <rect x="920" y="125" width="200" height="60" rx="8" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <text x="1020" y="150" text-anchor="middle" font-size="13" font-weight="600" fill="#0F172A">Email Inbox</text>
+    <text x="1020" y="170" text-anchor="middle" font-size="11" fill="#64748B">Inquiries · Confirmations</text>
+
+    <!-- Corporate / Travel Agent -->
+    <rect x="1140" y="125" width="200" height="60" rx="8" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <text x="1240" y="150" text-anchor="middle" font-size="13" font-weight="600" fill="#0F172A">Corporate / TA</text>
+    <text x="1240" y="170" text-anchor="middle" font-size="11" fill="#64748B">B2B Contracts · Groups</text>
+
+    <!-- Review Platforms -->
+    <rect x="1360" y="125" width="200" height="60" rx="8" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <text x="1460" y="150" text-anchor="middle" font-size="13" font-weight="600" fill="#0F172A">Review Platforms</text>
+    <text x="1460" y="170" text-anchor="middle" font-size="11" fill="#64748B">Google · TripAdvisor</text>
+  </g>
+
+  <!-- ============ LAYER 2: SUB-SYSTEMS BAR (SSO) ============ -->
+  <text x="40" y="225" font-size="12" font-weight="700" fill="#64748B" letter-spacing="2">② SUB-SYSTEMS LAYER — Terminal Apps (Login แยก / SSO จากระบบหลัก)</text>
+
+  <!-- Container -->
+  <rect x="40" y="240" width="1620" height="120" rx="12" fill="#F1F5F9" stroke="#CBD5E1" stroke-dasharray="4 3"/>
+
+  <!-- Hotel Management Terminal (existing) -->
+  <g>
+    <rect x="60" y="260" width="200" height="85" rx="10" fill="#FFFFFF" stroke="#D946EF" stroke-width="2"/>
+    <circle cx="90" cy="290" r="14" fill="#D946EF"/>
+    <text x="90" y="295" text-anchor="middle" font-size="13" font-weight="700" fill="#FFFFFF">H</text>
+    <text x="115" y="288" font-size="12" font-weight="700" fill="#0F172A">Hotel Mgmt</text>
+    <text x="115" y="304" font-size="10" fill="#64748B">Front Desk · Rooms</text>
+    <text x="115" y="318" font-size="10" fill="#64748B">Bookings · Housekeeping</text>
+    <text x="115" y="335" font-size="9" fill="#94A3B8">existing</text>
+  </g>
+
+  <!-- Restaurant POS (existing) -->
+  <g>
+    <rect x="280" y="260" width="180" height="85" rx="10" fill="#FFFFFF" stroke="#F97316" stroke-width="2"/>
+    <circle cx="310" cy="290" r="14" fill="#F97316"/>
+    <text x="310" y="295" text-anchor="middle" font-size="13" font-weight="700" fill="#FFFFFF">R</text>
+    <text x="335" y="288" font-size="12" font-weight="700" fill="#0F172A">Restaurant POS</text>
+    <text x="335" y="304" font-size="10" fill="#64748B">Orders · Tables</text>
+    <text x="335" y="318" font-size="10" fill="#64748B">Payments</text>
+    <text x="335" y="335" font-size="9" fill="#94A3B8">existing</text>
+  </g>
+
+  <!-- KDS (existing) -->
+  <g>
+    <rect x="480" y="260" width="160" height="85" rx="10" fill="#FFFFFF" stroke="#FB923C" stroke-width="2"/>
+    <circle cx="510" cy="290" r="14" fill="#FB923C"/>
+    <text x="510" y="295" text-anchor="middle" font-size="13" font-weight="700" fill="#FFFFFF">K</text>
+    <text x="535" y="288" font-size="12" font-weight="700" fill="#0F172A">Kitchen Display</text>
+    <text x="535" y="304" font-size="10" fill="#64748B">KDS · Station</text>
+    <text x="535" y="335" font-size="9" fill="#94A3B8">existing</text>
+  </g>
+
+  <!-- Procurement (existing) -->
+  <g>
+    <rect x="660" y="260" width="160" height="85" rx="10" fill="#FFFFFF" stroke="#3B82F6" stroke-width="2"/>
+    <circle cx="690" cy="290" r="14" fill="#3B82F6"/>
+    <text x="690" y="295" text-anchor="middle" font-size="13" font-weight="700" fill="#FFFFFF">P</text>
+    <text x="715" y="288" font-size="12" font-weight="700" fill="#0F172A">Procurement</text>
+    <text x="715" y="304" font-size="10" fill="#64748B">PR · RFQ · PO</text>
+    <text x="715" y="335" font-size="9" fill="#94A3B8">existing</text>
+  </g>
+
+  <!-- Warehouse (existing) -->
+  <g>
+    <rect x="840" y="260" width="160" height="85" rx="10" fill="#FFFFFF" stroke="#14B8A6" stroke-width="2"/>
+    <circle cx="870" cy="290" r="14" fill="#14B8A6"/>
+    <text x="870" y="295" text-anchor="middle" font-size="13" font-weight="700" fill="#FFFFFF">W</text>
+    <text x="895" y="288" font-size="12" font-weight="700" fill="#0F172A">Warehouse</text>
+    <text x="895" y="304" font-size="10" fill="#64748B">Stock · GR · QC</text>
+    <text x="895" y="335" font-size="9" fill="#94A3B8">existing</text>
+  </g>
+
+  <!-- Accounting (existing) -->
+  <g>
+    <rect x="1020" y="260" width="160" height="85" rx="10" fill="#FFFFFF" stroke="#4F46E5" stroke-width="2"/>
+    <circle cx="1050" cy="290" r="14" fill="#4F46E5"/>
+    <text x="1050" y="295" text-anchor="middle" font-size="13" font-weight="700" fill="#FFFFFF">A</text>
+    <text x="1075" y="288" font-size="12" font-weight="700" fill="#0F172A">Accounting</text>
+    <text x="1075" y="304" font-size="10" fill="#64748B">GL · AR · AP</text>
+    <text x="1075" y="335" font-size="9" fill="#94A3B8">existing</text>
+  </g>
+
+  <!-- ===== NEW CRM Terminal ===== -->
+  <g>
+    <rect x="1200" y="252" width="440" height="100" rx="12" fill="#ECFDF5" stroke="#10B981" stroke-width="3"/>
+    <circle cx="1240" cy="295" r="20" fill="#10B981"/>
+    <text x="1240" y="301" text-anchor="middle" font-size="16" font-weight="700" fill="#FFFFFF">C</text>
+    <text x="1275" y="288" font-size="15" font-weight="700" fill="#065F46">CRM Terminal</text>
+    <text x="1275" y="306" font-size="11" fill="#047857">Customer Relationship Management</text>
+    <text x="1275" y="322" font-size="10" fill="#059669">Guest 360 · Campaigns · Sales · Service Desk</text>
+    <rect x="1565" y="262" width="62" height="20" rx="10" fill="#10B981"/>
+    <text x="1596" y="276" text-anchor="middle" font-size="10" font-weight="700" fill="#FFFFFF">NEW</text>
+    <text x="1275" y="342" font-size="10" font-style="italic" fill="#10B981">+ Login แยก / SSO · Role-based access</text>
+  </g>
+
+  <!-- ============ LAYER 3: CRM INTERNAL MODULES ============ -->
+  <text x="40" y="400" font-size="12" font-weight="700" fill="#64748B" letter-spacing="2">③ CRM MODULE — 4 Pillars</text>
+
+  <rect x="40" y="415" width="1620" height="180" rx="12" fill="#FFFFFF" stroke="#10B981" stroke-width="1.5" stroke-dasharray="6 4"/>
+
+  <!-- Pillar 1: Guest 360 -->
+  <g>
+    <rect x="70" y="440" width="370" height="140" rx="10" fill="#F0FDF4" stroke="#10B981"/>
+    <text x="90" y="468" font-size="14" font-weight="700" fill="#065F46">🧑 Guest 360°</text>
+    <text x="90" y="486" font-size="11" fill="#047857">โปรไฟล์ลูกค้าแบบ Unified</text>
+    <line x1="90" y1="495" x2="420" y2="495" stroke="#A7F3D0"/>
+    <text x="90" y="513" font-size="11" fill="#0F172A">• Profile · Preferences · Tags</text>
+    <text x="90" y="530" font-size="11" fill="#0F172A">• Stay History · Spend Analytics</text>
+    <text x="90" y="547" font-size="11" fill="#0F172A">• PDPA Consent · GDPR Export</text>
+    <text x="90" y="564" font-size="11" fill="#0F172A">• Segmentation (RFM · VIP Tier)</text>
+  </g>
+
+  <!-- Pillar 2: Marketing Automation -->
+  <g>
+    <rect x="460" y="440" width="370" height="140" rx="10" fill="#F0FDF4" stroke="#10B981"/>
+    <text x="480" y="468" font-size="14" font-weight="700" fill="#065F46">📣 Marketing Automation</text>
+    <text x="480" y="486" font-size="11" fill="#047857">Campaign &amp; Lifecycle Flow</text>
+    <line x1="480" y1="495" x2="810" y2="495" stroke="#A7F3D0"/>
+    <text x="480" y="513" font-size="11" fill="#0F172A">• Email · LINE · SMS · Push Campaign</text>
+    <text x="480" y="530" font-size="11" fill="#0F172A">• Pre-stay / Post-stay Journeys</text>
+    <text x="480" y="547" font-size="11" fill="#0F172A">• Promotion Codes · A/B Testing</text>
+    <text x="480" y="564" font-size="11" fill="#0F172A">• Loyalty Trigger · Birthday Offer</text>
+  </g>
+
+  <!-- Pillar 3: Sales Pipeline -->
+  <g>
+    <rect x="850" y="440" width="370" height="140" rx="10" fill="#F0FDF4" stroke="#10B981"/>
+    <text x="870" y="468" font-size="14" font-weight="700" fill="#065F46">💼 Sales Pipeline</text>
+    <text x="870" y="486" font-size="11" fill="#047857">Corporate &amp; Group Sales</text>
+    <line x1="870" y1="495" x2="1200" y2="495" stroke="#A7F3D0"/>
+    <text x="870" y="513" font-size="11" fill="#0F172A">• Leads · Accounts · Contacts</text>
+    <text x="870" y="530" font-size="11" fill="#0F172A">• Deals · Stages · Forecasting</text>
+    <text x="870" y="547" font-size="11" fill="#0F172A">• Group Booking Quote → Block</text>
+    <text x="870" y="564" font-size="11" fill="#0F172A">• Contract Rates · Commission</text>
+  </g>
+
+  <!-- Pillar 4: Customer Service -->
+  <g>
+    <rect x="1240" y="440" width="390" height="140" rx="10" fill="#F0FDF4" stroke="#10B981"/>
+    <text x="1260" y="468" font-size="14" font-weight="700" fill="#065F46">🎧 Customer Service</text>
+    <text x="1260" y="486" font-size="11" fill="#047857">Tickets · Feedback · SLA</text>
+    <line x1="1260" y1="495" x2="1610" y2="495" stroke="#A7F3D0"/>
+    <text x="1260" y="513" font-size="11" fill="#0F172A">• Ticket Workflow (Open → Closed)</text>
+    <text x="1260" y="530" font-size="11" fill="#0F172A">• Feedback Loop (Review · NPS · CSAT)</text>
+    <text x="1260" y="547" font-size="11" fill="#0F172A">• Auto-Reply (LINE / Messenger AI)</text>
+    <text x="1260" y="564" font-size="11" fill="#0F172A">• SLA Alerts · Escalation Rules</text>
+  </g>
+
+  <!-- ============ LAYER 4: INTEGRATION / EVENT BUS ============ -->
+  <text x="40" y="630" font-size="12" font-weight="700" fill="#64748B" letter-spacing="2">④ INTEGRATION LAYER — Event Bus + Shared API Gateway</text>
+
+  <rect x="40" y="645" width="1620" height="70" rx="10" fill="#FAF5FF" stroke="#8B5CF6" stroke-width="1.5"/>
+  <text x="60" y="675" font-size="13" font-weight="700" fill="#6D28D9">⚡ NestJS Event Emitter + Bull Queue (Redis) + Socket.IO</text>
+  <text x="60" y="697" font-size="11" fill="#7C3AED">booking.created · booking.checked_in · booking.checked_out · folio.paid · review.submitted · ticket.opened · campaign.scheduled · loyalty.points_earned · guest.consent_updated</text>
+
+  <!-- ============ LAYER 5: EXISTING MODULES / DOMAINS ============ -->
+  <text x="40" y="755" font-size="12" font-weight="700" fill="#64748B" letter-spacing="2">⑤ EXISTING DOMAIN MODULES — สิ่งที่ CRM ต่อ Integrate</text>
+
+  <g>
+    <!-- Guests Module -->
+    <rect x="40" y="775" width="180" height="90" rx="10" fill="#FFFFFF" stroke="#94A3B8" stroke-width="1.5"/>
+    <text x="55" y="800" font-size="13" font-weight="700" fill="#0F172A">guests</text>
+    <text x="55" y="817" font-size="10" fill="#64748B">Guest profile · PDPA</text>
+    <text x="55" y="831" font-size="10" fill="#64748B">VIP flags · consent</text>
+    <rect x="55" y="843" width="62" height="16" rx="8" fill="#E0E7FF"/>
+    <text x="86" y="855" text-anchor="middle" font-size="9" font-weight="700" fill="#4338CA">enriched</text>
+  </g>
+
+  <g>
+    <!-- Bookings Module -->
+    <rect x="235" y="775" width="180" height="90" rx="10" fill="#FFFFFF" stroke="#94A3B8" stroke-width="1.5"/>
+    <text x="250" y="800" font-size="13" font-weight="700" fill="#0F172A">bookings</text>
+    <text x="250" y="817" font-size="10" fill="#64748B">Reservations · check-in</text>
+    <text x="250" y="831" font-size="10" fill="#64748B">scheduledCheckIn/Out</text>
+    <rect x="250" y="843" width="78" height="16" rx="8" fill="#DCFCE7"/>
+    <text x="289" y="855" text-anchor="middle" font-size="9" font-weight="700" fill="#15803D">event source</text>
+  </g>
+
+  <g>
+    <!-- Reviews -->
+    <rect x="430" y="775" width="180" height="90" rx="10" fill="#FFFFFF" stroke="#94A3B8" stroke-width="1.5"/>
+    <text x="445" y="800" font-size="13" font-weight="700" fill="#0F172A">reviews</text>
+    <text x="445" y="817" font-size="10" fill="#64748B">Guest reviews · rating</text>
+    <text x="445" y="831" font-size="10" fill="#64748B">sentiment input</text>
+    <rect x="445" y="843" width="78" height="16" rx="8" fill="#DCFCE7"/>
+    <text x="484" y="855" text-anchor="middle" font-size="9" font-weight="700" fill="#15803D">event source</text>
+  </g>
+
+  <g>
+    <!-- Messaging -->
+    <rect x="625" y="775" width="180" height="90" rx="10" fill="#FFFFFF" stroke="#94A3B8" stroke-width="1.5"/>
+    <text x="640" y="800" font-size="13" font-weight="700" fill="#0F172A">messaging</text>
+    <text x="640" y="817" font-size="10" fill="#64748B">LINE · FB · Auto-reply</text>
+    <text x="640" y="831" font-size="10" fill="#64748B">Conversation/Message</text>
+    <rect x="640" y="843" width="78" height="16" rx="8" fill="#FEF3C7"/>
+    <text x="679" y="855" text-anchor="middle" font-size="9" font-weight="700" fill="#B45309">bidirectional</text>
+  </g>
+
+  <g>
+    <!-- Loyalty (NEW MODULE) -->
+    <rect x="820" y="775" width="180" height="90" rx="10" fill="#ECFDF5" stroke="#10B981" stroke-width="2" stroke-dasharray="4 3"/>
+    <text x="835" y="800" font-size="13" font-weight="700" fill="#065F46">loyalty 🆕</text>
+    <text x="835" y="817" font-size="10" fill="#047857">Tier · Points · Reward</text>
+    <text x="835" y="831" font-size="10" fill="#047857">Redemption rules</text>
+    <rect x="835" y="843" width="74" height="16" rx="8" fill="#A7F3D0"/>
+    <text x="872" y="855" text-anchor="middle" font-size="9" font-weight="700" fill="#065F46">new module</text>
+  </g>
+
+  <g>
+    <!-- Promotions (NEW MODULE) -->
+    <rect x="1015" y="775" width="180" height="90" rx="10" fill="#ECFDF5" stroke="#10B981" stroke-width="2" stroke-dasharray="4 3"/>
+    <text x="1030" y="800" font-size="13" font-weight="700" fill="#065F46">promotions 🆕</text>
+    <text x="1030" y="817" font-size="10" fill="#047857">Campaign · Coupon code</text>
+    <text x="1030" y="831" font-size="10" fill="#047857">Discount rules</text>
+    <rect x="1030" y="843" width="74" height="16" rx="8" fill="#A7F3D0"/>
+    <text x="1067" y="855" text-anchor="middle" font-size="9" font-weight="700" fill="#065F46">new module</text>
+  </g>
+
+  <g>
+    <!-- Notifications -->
+    <rect x="1210" y="775" width="220" height="90" rx="10" fill="#FFFFFF" stroke="#94A3B8" stroke-width="1.5"/>
+    <text x="1225" y="800" font-size="13" font-weight="700" fill="#0F172A">notifications + push</text>
+    <text x="1225" y="817" font-size="10" fill="#64748B">Email · LINE Notify · FCM</text>
+    <text x="1225" y="831" font-size="10" fill="#64748B">Notification model</text>
+    <rect x="1225" y="843" width="68" height="16" rx="8" fill="#FCE7F3"/>
+    <text x="1259" y="855" text-anchor="middle" font-size="9" font-weight="700" fill="#9D174D">outbound</text>
+  </g>
+
+  <g>
+    <!-- Analytics & Reports -->
+    <rect x="1445" y="775" width="200" height="90" rx="10" fill="#FFFFFF" stroke="#94A3B8" stroke-width="1.5"/>
+    <text x="1460" y="800" font-size="13" font-weight="700" fill="#0F172A">analytics + reports</text>
+    <text x="1460" y="817" font-size="10" fill="#64748B">AnalyticsEvent · dashboard</text>
+    <text x="1460" y="831" font-size="10" fill="#64748B">RFM · funnel · cohort</text>
+    <rect x="1460" y="843" width="62" height="16" rx="8" fill="#FCE7F3"/>
+    <text x="1491" y="855" text-anchor="middle" font-size="9" font-weight="700" fill="#9D174D">outbound</text>
+  </g>
+
+  <!-- ============ LAYER 6: DATA LAYER ============ -->
+  <text x="40" y="905" font-size="12" font-weight="700" fill="#64748B" letter-spacing="2">⑥ DATA LAYER — Shared Prisma (MySQL) · Multi-tenant</text>
+
+  <rect x="40" y="920" width="1620" height="60" rx="10" fill="#1E293B"/>
+  <text x="60" y="950" font-size="13" font-weight="700" fill="#F1F5F9">🗄️ Prisma Schema (hotel_services_db) — shared models</text>
+  <text x="60" y="968" font-size="10" fill="#CBD5E1">Guest · Booking · Review · Conversation · Notification · AnalyticsEvent · OpMarketingCampaign · + NEW: CrmContact · CrmLead · CrmDeal · CrmTicket · LoyaltyAccount · LoyaltyTransaction · Campaign · CampaignAudience · CampaignDelivery · CommunicationLog</text>
+
+  <!-- ============ LAYER 7: OUTBOUND CHANNELS ============ -->
+  <text x="40" y="1015" font-size="12" font-weight="700" fill="#64748B" letter-spacing="2">⑦ OUTBOUND CHANNELS — ส่งข้อความออกจาก Campaign / Service</text>
+
+  <g>
+    <rect x="40" y="1030" width="380" height="60" rx="10" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <text x="60" y="1055" font-size="13" font-weight="700" fill="#0F172A">📧 Email (Handlebars Template)</text>
+    <text x="60" y="1075" font-size="10" fill="#64748B">@nestjs-modules/mailer · pre-stay · post-stay · campaign · receipt</text>
+  </g>
+  <g>
+    <rect x="440" y="1030" width="380" height="60" rx="10" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <text x="460" y="1055" font-size="13" font-weight="700" fill="#0F172A">💬 LINE OA / Messenger</text>
+    <text x="460" y="1075" font-size="10" fill="#64748B">LINE Notify · Flex Messages · Auto-reply templates (existing)</text>
+  </g>
+  <g>
+    <rect x="840" y="1030" width="380" height="60" rx="10" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <text x="860" y="1055" font-size="13" font-weight="700" fill="#0F172A">📱 Firebase Push (Mobile)</text>
+    <text x="860" y="1075" font-size="10" fill="#64748B">FCM · in-app notification · booking reminder · loyalty alert</text>
+  </g>
+  <g>
+    <rect x="1240" y="1030" width="380" height="60" rx="10" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <text x="1260" y="1055" font-size="13" font-weight="700" fill="#0F172A">📨 SMS Gateway</text>
+    <text x="1260" y="1075" font-size="10" fill="#64748B">OTP · check-in reminder · payment confirmation</text>
+  </g>
+
+  <!-- ============ ARROWS / FLOW ============ -->
+  <!-- Touchpoints → Sub-systems (multi-line down arrow) -->
+  <g stroke="#CBD5E1" stroke-width="1.5" fill="none">
+    <line x1="140" y1="186" x2="140" y2="238" marker-end="url(#arrow)"/>
+    <line x1="360" y1="186" x2="360" y2="238" marker-end="url(#arrow)"/>
+    <line x1="580" y1="186" x2="580" y2="238" marker-end="url(#arrow)"/>
+    <line x1="800" y1="186" x2="800" y2="238" marker-end="url(#arrow)"/>
+    <line x1="1020" y1="186" x2="1020" y2="238" marker-end="url(#arrow)"/>
+    <line x1="1240" y1="186" x2="1240" y2="238" marker-end="url(#arrow)"/>
+    <line x1="1460" y1="186" x2="1460" y2="238" marker-end="url(#arrow)"/>
+  </g>
+
+  <!-- Sub-systems → CRM Module (highlight new) -->
+  <g stroke="#10B981" stroke-width="2" fill="none">
+    <line x1="1420" y1="354" x2="1420" y2="413" marker-end="url(#arrow-new)"/>
+  </g>
+  <text x="1430" y="385" font-size="10" font-weight="700" fill="#10B981">opens</text>
+
+  <!-- CRM modules → Event Bus -->
+  <g stroke="#8B5CF6" stroke-width="1.5" fill="none">
+    <line x1="255" y1="582" x2="255" y2="643" marker-end="url(#arrow-event)"/>
+    <line x1="645" y1="582" x2="645" y2="643" marker-end="url(#arrow-event)"/>
+    <line x1="1035" y1="582" x2="1035" y2="643" marker-end="url(#arrow-event)"/>
+    <line x1="1435" y1="582" x2="1435" y2="643" marker-end="url(#arrow-event)"/>
+  </g>
+
+  <!-- Event Bus → Existing modules -->
+  <g stroke="#8B5CF6" stroke-width="1.5" fill="none">
+    <line x1="130" y1="717" x2="130" y2="773" marker-end="url(#arrow-event)"/>
+    <line x1="325" y1="717" x2="325" y2="773" marker-end="url(#arrow-event)"/>
+    <line x1="520" y1="717" x2="520" y2="773" marker-end="url(#arrow-event)"/>
+    <line x1="715" y1="717" x2="715" y2="773" marker-end="url(#arrow-event)"/>
+    <line x1="910" y1="717" x2="910" y2="773" marker-end="url(#arrow-event)"/>
+    <line x1="1105" y1="717" x2="1105" y2="773" marker-end="url(#arrow-event)"/>
+    <line x1="1320" y1="717" x2="1320" y2="773" marker-end="url(#arrow-event)"/>
+    <line x1="1545" y1="717" x2="1545" y2="773" marker-end="url(#arrow-event)"/>
+  </g>
+
+  <!-- Existing modules → Data Layer -->
+  <g stroke="#64748B" stroke-width="1.5" fill="none" stroke-dasharray="3 3">
+    <line x1="130" y1="867" x2="130" y2="918" marker-end="url(#arrow)"/>
+    <line x1="850" y1="867" x2="850" y2="918" marker-end="url(#arrow)"/>
+    <line x1="1545" y1="867" x2="1545" y2="918" marker-end="url(#arrow)"/>
+  </g>
+
+  <!-- Notifications → Outbound Channels -->
+  <g stroke="#EC4899" stroke-width="1.5" fill="none">
+    <line x1="1320" y1="867" x2="230" y2="1028" marker-end="url(#arrow)" stroke-opacity="0.5"/>
+    <line x1="1320" y1="867" x2="630" y2="1028" marker-end="url(#arrow)" stroke-opacity="0.6"/>
+    <line x1="1320" y1="867" x2="1030" y2="1028" marker-end="url(#arrow)" stroke-opacity="0.7"/>
+    <line x1="1320" y1="867" x2="1430" y2="1028" marker-end="url(#arrow)" stroke-opacity="0.8"/>
+  </g>
+
+  <!-- ============ LEGEND ============ -->
+  <g transform="translate(40, 1130)">
+    <text x="0" y="0" font-size="12" font-weight="700" fill="#64748B" letter-spacing="2">LEGEND</text>
+    <rect x="0" y="15" width="14" height="14" rx="3" fill="#FFFFFF" stroke="#94A3B8"/>
+    <text x="22" y="26" font-size="11" fill="#0F172A">Existing module / sub-system</text>
+
+    <rect x="220" y="15" width="14" height="14" rx="3" fill="#ECFDF5" stroke="#10B981" stroke-width="2"/>
+    <text x="242" y="26" font-size="11" fill="#0F172A">NEW — CRM Terminal + new modules</text>
+
+    <rect x="510" y="15" width="14" height="14" rx="3" fill="#FAF5FF" stroke="#8B5CF6"/>
+    <text x="532" y="26" font-size="11" fill="#0F172A">Event Bus (NestJS Event Emitter)</text>
+
+    <line x1="780" y1="22" x2="810" y2="22" stroke="#10B981" stroke-width="2" marker-end="url(#arrow-new)"/>
+    <text x="818" y="26" font-size="11" fill="#0F172A">Plug-in flow</text>
+
+    <line x1="920" y1="22" x2="950" y2="22" stroke="#8B5CF6" stroke-width="1.5" marker-end="url(#arrow-event)"/>
+    <text x="958" y="26" font-size="11" fill="#0F172A">Domain event</text>
+
+    <line x1="1060" y1="22" x2="1090" y2="22" stroke="#64748B" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#arrow)"/>
+    <text x="1098" y="26" font-size="11" fill="#0F172A">Data persistence (Prisma)</text>
+
+    <line x1="1300" y1="22" x2="1330" y2="22" stroke="#EC4899" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <text x="1338" y="26" font-size="11" fill="#0F172A">Outbound delivery</text>
+  </g>
+
+  <!-- Footer -->
+  <text x="850" y="1220" text-anchor="middle" font-size="11" fill="#94A3B8">StaySync — CRM Plug-in Architecture · NestJS 10 + Prisma (MySQL) + Redis/Bull + Socket.IO · multi-tenant aware</text>
+  <text x="850" y="1240" text-anchor="middle" font-size="10" fill="#CBD5E1">Generated 2026-05-28 — for owner-hotel-services-api</text>
+</svg>

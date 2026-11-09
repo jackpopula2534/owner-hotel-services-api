@@ -1,5 +1,13 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@/prisma/prisma.service';
+import { daysOfMonth, round2 } from '@/common/utils/bangkok-day.util';
+import { RevenueQueryService } from '@/modules/revenue/revenue-query.service';
+import { menuItemCosts } from '../shared/menu-item-cost';
+import { menuItemSales } from '../shared/menu-item-sales';
+import { percentOf } from '../shared/percent';
+import { revenueByCostCenter } from '../shared/revenue-by-cost-center';
+import { occupiedRoomNights } from '../shared/room-nights';
+import { roomRevenueByType } from '../shared/room-revenue-by-type';
 
 interface DepartmentPnLItem {
   name: string;
@@ -11,6 +19,34 @@ interface DepartmentPnLItem {
   totalCost: number;
   netProfit: number;
   margin: number;
+}
+
+/**
+ * เงินในสมุดที่ยังไม่มีศูนย์ต้นทุนรองรับ — ลง P&L รายแผนกไม่ได้แต่ยังอยู่ในยอดพาดหัว
+ *
+ * ต้องส่งออกไปให้หน้าจอบอกผู้ใช้ ไม่งั้นผลบวกของแถวไม่เท่ายอดรวมโดยไม่มีคำอธิบาย
+ * (และ tenant ที่ยังไม่ได้สร้างศูนย์ต้นทุนเลยจะเห็นแค่ "ไม่มีข้อมูล" ทั้งที่ขายได้)
+ */
+interface UnmappedRevenueItem {
+  segment: string;
+  /** ประเภทศูนย์ต้นทุนที่ต้องสร้างเพื่อให้เงินก้อนนี้ลงแผนกได้ */
+  expectedCostCenterType: string;
+  revenue: number;
+}
+
+interface DepartmentPnLReport {
+  period: string;
+  departments: DepartmentPnLItem[];
+  /** รวมเงินที่ยังไม่มีแผนกรองรับ — `totals.revenue` − ผลบวกรายได้ของทุกแถว */
+  unmappedRevenue: number;
+  /** รายละเอียดว่าเป็นเงินของแผนกไหนและต้องสร้างศูนย์ต้นทุนประเภทใด */
+  unmapped: UnmappedRevenueItem[];
+  totals: {
+    revenue: number;
+    totalCost: number;
+    grossProfit: number;
+    netOperatingIncome: number;
+  };
 }
 
 interface RoomCostItem {
@@ -47,9 +83,18 @@ interface BudgetVarianceItem {
 export class CostReportsService {
   private readonly logger = new Logger(CostReportsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly revenue: RevenueQueryService,
+  ) {}
 
   private parsePeriod(period: string): { year: number; month: number } {
+    // ไม่ส่ง `period` มาเลยก็ต้องได้ 400 เหมือนส่งมาผิดรูปแบบ ของเดิมเรียก
+    // `.split()` บน undefined ทันที ผู้เรียกจึงได้ 500 พร้อมข้อความภายในของ V8
+    if (typeof period !== 'string') {
+      throw new BadRequestException('Invalid period format. Use YYYY-MM');
+    }
+
     // Format: YYYY-MM
     const [yearStr, monthStr] = period.split('-');
     const year = parseInt(yearStr, 10);
@@ -62,7 +107,11 @@ export class CostReportsService {
     return { year, month };
   }
 
-  async getDepartmentPnL(tenantId: string, propertyId: string, period: string) {
+  async getDepartmentPnL(
+    tenantId: string,
+    propertyId: string,
+    period: string,
+  ): Promise<DepartmentPnLReport> {
     const { year, month } = this.parsePeriod(period);
 
     // Try to get closed period first
@@ -79,10 +128,18 @@ export class CostReportsService {
       },
     });
 
+    // ชื่อและประเภทของศูนย์ต้นทุน ใช้ร่วมกันทั้งงวดที่ปิดแล้วและงวดสด เพื่อให้สองทาง
+    // แสดงผลเหมือนกัน ของเดิมทางที่ปิดแล้วเอา `costCenterId` (uuid) มาใส่ช่องชื่อ
+    const centers = await this.prisma.costCenter.findMany({
+      where: { tenantId, propertyId },
+      select: { id: true, name: true, type: true },
+    });
+    const centerById = new Map(centers.map((center) => [center.id, center]));
+
     if (closedPeriod) {
       const departments: DepartmentPnLItem[] = closedPeriod.departmentPnLs.map((d) => ({
-        name: d.costCenterId,
-        type: 'DEPARTMENT',
+        name: centerById.get(d.costCenterId)?.name ?? d.costCenterId,
+        type: centerById.get(d.costCenterId)?.type ?? 'DEPARTMENT',
         revenue: Number(d.revenue),
         materialCost: Number(d.materialCost),
         laborCost: Number(d.laborCost),
@@ -99,9 +156,16 @@ export class CostReportsService {
         Number(closedPeriod.totalOverhead) +
         Number(closedPeriod.totalOtherCost);
 
+      // งวดที่ปิดแล้วเก็บเฉพาะแถวรายแผนก ไม่ได้เก็บว่าเงินที่ลงแผนกไม่ได้เป็นของแผนกใด
+      // — บอกได้แค่ส่วนต่าง แต่ต้องบอก ไม่งั้นผลบวกไม่เท่ายอดพาดหัวแบบไร้คำอธิบาย
+      const mappedRevenue = round2(departments.reduce((sum, d) => sum + d.revenue, 0));
+      const unmappedRevenue = round2(Math.max(0, periodTotalRevenue - mappedRevenue));
+
       return {
         period: `${year}-${String(month).padStart(2, '0')}`,
         departments,
+        unmappedRevenue,
+        unmapped: [],
         totals: {
           revenue: periodTotalRevenue,
           totalCost: periodTotalCost,
@@ -111,23 +175,30 @@ export class CostReportsService {
       };
     }
 
-    // Calculate live from cost entries
-    const costEntries = await this.prisma.costEntry.findMany({
-      where: {
+    // งวดที่ยังไม่ปิด — ต้นทุนจาก cost_entries รายได้จากสมุดกลาง ด้วยตัวช่วยตัวเดียว
+    // กับตอนปิดงวด ตัวเลขจึงไม่กระโดดในวันที่บัญชีกดปิด
+    const periodStr = `${year}-${String(month).padStart(2, '0')}`;
+    const monthDays = daysOfMonth(periodStr);
+    const [costEntries, revenueByCenter] = await Promise.all([
+      this.prisma.costEntry.findMany({
+        where: { tenantId, propertyId, period: periodStr, status: 'posted' },
+        include: {
+          costCenter: { select: { id: true, name: true, type: true } },
+          costType: { select: { id: true, category: true } },
+        },
+      }),
+      revenueByCostCenter(this.prisma, this.revenue, {
         tenantId,
         propertyId,
-        period: `${year}-${String(month).padStart(2, '0')}`,
-        status: 'posted',
-      },
-      include: {
-        costCenter: { select: { id: true, name: true } },
-        costType: { select: { id: true, category: true } },
-      },
-    });
+        from: monthDays[0],
+        to: monthDays[monthDays.length - 1],
+      }),
+    ]);
 
+    // จัดกลุ่มด้วย id ไม่ใช่ชื่อ — ชื่อซ้ำกันได้และผู้ใช้แก้ได้ตลอดเวลา
     const costByCenterMap = new Map<string, Map<string, number>>();
     costEntries.forEach((entry) => {
-      const centerKey = entry.costCenter.name;
+      const centerKey = entry.costCenterId;
       if (!costByCenterMap.has(centerKey)) {
         costByCenterMap.set(centerKey, new Map());
       }
@@ -137,23 +208,28 @@ export class CostReportsService {
     });
 
     const departments: DepartmentPnLItem[] = [];
-    let totalRevenue = 0;
     let totalMaterialCost = 0;
     let totalLaborCost = 0;
     let totalOverheadCost = 0;
+    let totalOtherCost = 0;
 
-    for (const [costCenter, typeMap] of costByCenterMap) {
-      let centerRevenue = 0;
+    // แผนกที่มีรายได้แต่ยังไม่มีต้นทุนก็ต้องมีแถว ไม่งั้นแผนกที่ทำเงินได้จะหายไปเลย
+    const centerIds = new Set<string>([
+      ...costByCenterMap.keys(),
+      ...revenueByCenter.byCostCenter.keys(),
+    ]);
+
+    for (const centerId of centerIds) {
+      const typeMap = costByCenterMap.get(centerId) ?? new Map<string, number>();
+      // รายได้มาจากสมุด แถว REVENUE ใน cost_entries ถูกข้าม (จะนับซ้ำ)
+      const centerRevenue = revenueByCenter.byCostCenter.get(centerId) ?? 0;
       let centerMaterial = 0;
       let centerLabor = 0;
       let centerOverhead = 0;
       let centerOther = 0;
 
       for (const [costType, amount] of typeMap) {
-        if (costType === 'REVENUE') {
-          centerRevenue += amount;
-          totalRevenue += amount;
-        } else if (costType === 'MATERIAL') {
+        if (costType === 'MATERIAL') {
           centerMaterial += amount;
           totalMaterialCost += amount;
         } else if (costType === 'LABOR') {
@@ -162,18 +238,20 @@ export class CostReportsService {
         } else if (costType === 'OVERHEAD') {
           centerOverhead += amount;
           totalOverheadCost += amount;
-        } else {
+        } else if (costType !== 'REVENUE') {
           centerOther += amount;
+          totalOtherCost += amount;
         }
       }
 
       const centerTotalCost = centerMaterial + centerLabor + centerOverhead + centerOther;
       const centerNetProfit = centerRevenue - centerTotalCost;
-      const centerMargin = centerRevenue > 0 ? (centerNetProfit / centerRevenue) * 100 : 0;
+      const centerMargin = percentOf(centerNetProfit, centerRevenue);
 
+      const center = centerById.get(centerId);
       departments.push({
-        name: costCenter,
-        type: costCenter === 'ROOMS' ? 'ROOMS' : 'OVERHEAD',
+        name: center?.name ?? centerId,
+        type: center?.type ?? 'DEPARTMENT',
         revenue: centerRevenue,
         materialCost: centerMaterial,
         laborCost: centerLabor,
@@ -184,11 +262,24 @@ export class CostReportsService {
       });
     }
 
-    const totalCost = totalMaterialCost + totalLaborCost + totalOverheadCost;
+    // `totalOtherCost` เคยตกหล่นจากยอดรวมของงวดสด ทั้งที่ถูกนับอยู่ใน totalCost ของ
+    // แต่ละแผนก และงวดที่ปิดแล้วก็รวมไว้ — สองทางจึงเคยได้ยอดรวมไม่เท่ากัน
+    const totalCost = totalMaterialCost + totalLaborCost + totalOverheadCost + totalOtherCost;
+    // ยอดพาดหัวเป็นยอดของสมุด (รวมเงินที่ยังไม่มีศูนย์ต้นทุนรองรับ) ตรงกับทุกหน้าจอ
+    const totalRevenue = revenueByCenter.total;
+    // เงินที่ไม่มีศูนย์ต้นทุนของแผนกนั้นรองรับ ส่งออกไปให้หน้าจอชี้ทางแก้ได้
+    const unmapped: UnmappedRevenueItem[] = revenueByCenter.unmapped.map((orphan) => ({
+      segment: orphan.segment,
+      expectedCostCenterType: orphan.expectedCostCenterType,
+      revenue: orphan.revenue,
+    }));
+    const unmappedRevenue = round2(unmapped.reduce((sum, orphan) => sum + orphan.revenue, 0));
 
     return {
-      period: `${year}-${String(month).padStart(2, '0')}`,
+      period: periodStr,
       departments,
+      unmappedRevenue,
+      unmapped,
       totals: {
         revenue: totalRevenue,
         totalCost,
@@ -266,55 +357,36 @@ export class CostReportsService {
     } else {
       try {
         // Calculate live from bookings
-        const property = await this.prisma.property.findUnique({
-          where: { id: propertyId },
+        // findFirst (NOT findUnique): Property is tenant-scoped and the
+        // tenant-scope middleware rejects findUnique on scoped models.
+        const property = await this.prisma.property.findFirst({
+          where: { id: propertyId, tenantId },
         });
 
         if (property) {
-          const roomCount = await this.prisma.room.count({ where: { propertyId } });
-          const totalRoomCount = roomCount || 1;
-          const daysInMonth = new Date(year, month, 0).getDate();
-          const totalRoomNights = totalRoomCount * daysInMonth;
+          const periodStr = `${year}-${String(month).padStart(2, '0')}`;
 
-          const bookings = await this.prisma.booking.findMany({
-            where: {
-              propertyId,
-              tenantId,
-              scheduledCheckIn: {
-                gte: new Date(year, month - 1, 1),
-                lt: new Date(year, month, 1),
-              },
-            },
-            include: { room: true },
+          // อัตราเข้าพักเป็นตัวเลขปฏิบัติการ — นับจากใบจองที่กำหนดเข้าพักในเดือนนี้
+          // ตามเดิม ไม่ใช่จากใบที่รับรู้รายได้แล้ว ไม่งั้นเดือนที่ยังไม่จบจะดูว่างเปล่า
+          // เพราะแขกที่ยังไม่เช็คเอาต์ยังไม่มีแถวในสมุด
+          //
+          // ใช้ตัวช่วยตัวเดียวกับตอนปิดงวด ด้วยเหตุผลเดียวกับตัวเงิน: สองทางนี้เคยนับ
+          // คนละแบบ ตัวเลขจึงเปลี่ยนตอนงวดถูกปิด
+          occupancy = await occupiedRoomNights(this.prisma, {
+            tenantId,
+            propertyId,
+            period: periodStr,
           });
 
-          const roomTypeMap = new Map<string, any>();
-          let occupiedNights = 0;
-
-          bookings.forEach((booking) => {
-            const roomType = booking.room?.type || 'Unknown';
-            if (!roomTypeMap.has(roomType)) {
-              roomTypeMap.set(roomType, {
-                nights: 0,
-                revenue: 0,
-              });
-            }
-            const data = roomTypeMap.get(roomType)!;
-            const nights = Math.ceil(
-              (new Date(booking.scheduledCheckOut).getTime() -
-                new Date(booking.scheduledCheckIn).getTime()) /
-                (1000 * 60 * 60 * 24),
-            );
-            data.nights += nights;
-            data.revenue += Number(booking.totalPrice) || 0;
-            occupiedNights += nights;
+          // ตัวเงินรายประเภทห้องมาจากสมุดรายได้ ด้วยตัวช่วยตัวเดียวกับตอนปิดงวด
+          // ตัวเลขบนหน้าจอนี้จึงไม่กระโดดตอนงวดถูกปิด
+          const monthDays = daysOfMonth(periodStr);
+          const roomTypeMap = await roomRevenueByType(this.prisma, this.revenue, {
+            tenantId,
+            propertyId,
+            from: monthDays[0],
+            to: monthDays[monthDays.length - 1],
           });
-
-          occupancy = {
-            rate: totalRoomNights > 0 ? (occupiedNights / totalRoomNights) * 100 : 0,
-            totalNights: totalRoomNights,
-            occupiedNights,
-          };
 
           let totalRevenue = 0;
           const totalCost = 0;
@@ -324,8 +396,7 @@ export class CostReportsService {
             const revenuePerNight = data.nights > 0 ? data.revenue / data.nights : 0;
             const costPerNight = 0;
             const profit = (revenuePerNight - costPerNight) * data.nights;
-            const margin =
-              revenuePerNight > 0 ? ((revenuePerNight - costPerNight) / revenuePerNight) * 100 : 0;
+            const margin = percentOf(revenuePerNight - costPerNight, revenuePerNight);
 
             byRoomType.push({
               roomType,
@@ -343,14 +414,14 @@ export class CostReportsService {
           }
 
           if (byRoomType.length > 0) {
+            // หารด้วยคืนของ "ใบที่รับรู้รายได้แล้ว" ชุดเดียวกับตัวตั้ง ไม่ใช่คืนที่
+            // จองไว้ทั้งเดือน (ซึ่งรวมใบที่ยังไม่เช็คเอาต์และยังไม่มีเงินในสมุด)
+            const recognisedNights = byRoomType.reduce((sum, r) => sum + r.nights, 0);
             averages = {
-              avgRevenuePerNight: occupiedNights > 0 ? totalRevenue / occupiedNights : 0,
+              avgRevenuePerNight: recognisedNights > 0 ? totalRevenue / recognisedNights : 0,
               avgCostPerNight: 0,
-              avgProfit: occupiedNights > 0 ? totalProfit / occupiedNights : 0,
-              avgMargin:
-                byRoomType.length > 0
-                  ? byRoomType.reduce((sum, r) => sum + r.margin, 0) / byRoomType.length
-                  : 0,
+              avgProfit: recognisedNights > 0 ? totalProfit / recognisedNights : 0,
+              avgMargin: byRoomType.reduce((sum, r) => sum + r.margin, 0) / byRoomType.length,
             };
           }
         }
@@ -369,6 +440,7 @@ export class CostReportsService {
 
   async getFoodCostReport(tenantId: string, propertyId: string, period: string) {
     const { year, month } = this.parsePeriod(period);
+    const periodStr = `${year}-${String(month).padStart(2, '0')}`;
 
     // Check if period is closed
     const closedPeriod = await this.prisma.periodClose.findFirst({
@@ -398,83 +470,67 @@ export class CostReportsService {
         revenue: Number(a.totalRevenue),
         ingredientCost: Number(a.ingredientCost),
         foodCostPercent: Number(a.foodCostPercent),
-        profitPerUnit: Number(a.sellingPrice) - Number(a.costPerUnit),
+        profitPerUnit: round2(Number(a.sellingPrice) - Number(a.costPerUnit)),
       }));
 
-      const totalRevenue = closedPeriod.foodCostAnalyses.reduce(
-        (sum, a) => sum + Number(a.totalRevenue),
-        0,
+      const totalRevenue = round2(
+        closedPeriod.foodCostAnalyses.reduce((sum, a) => sum + Number(a.totalRevenue), 0),
       );
-      const totalCost = closedPeriod.foodCostAnalyses.reduce(
-        (sum, a) => sum + Number(a.ingredientCost),
-        0,
+      const totalCost = round2(
+        closedPeriod.foodCostAnalyses.reduce((sum, a) => sum + Number(a.ingredientCost), 0),
       );
 
       overview = {
         totalRevenue,
         totalIngredientCost: totalCost,
-        avgFoodCostPercent: totalRevenue > 0 ? (totalCost / totalRevenue) * 100 : 0,
+        // ปัดแบบเดียวกับทางสด ไม่งั้นตัวเลขขยับตอนงวดถูกปิดทั้งที่ข้อมูลเท่าเดิม
+        avgFoodCostPercent: percentOf(totalCost, totalRevenue),
       };
     } else {
       try {
-        // Order model uses restaurantId (no propertyId directly) — filter via restaurant
-        const restaurants = await this.prisma.restaurant.findMany({
-          where: { propertyId, tenantId },
-          select: { id: true },
-        });
-        const restaurantIds = restaurants.map((r) => r.id);
-
-        const orders = await this.prisma.order.findMany({
-          where: {
-            restaurantId: { in: restaurantIds },
-            createdAt: {
-              gte: new Date(year, month - 1, 1),
-              lt: new Date(year, month, 1),
-            },
-          },
-          include: { items: true },
+        // ตัวช่วยชุดเดียวกับตอนปิดงวด ตัวเลขบนหน้าจอนี้จึงไม่กระโดดตอนงวดถูกปิด
+        //
+        // ของเดิมกวาด `order` ทุกใบที่ `createdAt` อยู่ในเดือนตามเวลาเครื่อง โดยไม่ดู
+        // สถานะบิล คิดยอดจากราคาหน้าเมนูก่อนหักส่วนลด และตรึงต้นทุนวัตถุดิบไว้ที่ 0
+        // — ทั้งสามอย่างถูกแก้พร้อมกันในเฟส 4 เพราะแก้แยกกันไม่ได้: ต้นทุนจริงที่หาร
+        // ด้วยยอดก่อนหักส่วนลดก็ยังให้ food cost % ที่ผิดอยู่ดี
+        const monthDays = daysOfMonth(periodStr);
+        const sales = await menuItemSales(this.prisma, this.revenue, {
+          tenantId,
+          propertyId,
+          from: monthDays[0],
+          to: monthDays[monthDays.length - 1],
         });
 
-        const menuItemMap = new Map<string, any>();
+        const costs = await menuItemCosts(this.prisma, tenantId, [...sales.keys()]);
+
         let totalRevenue = 0;
-        const totalCost = 0;
+        let totalCost = 0;
 
-        orders.forEach((order) => {
-          order.items.forEach((item) => {
-            const key = item.menuItemId;
-            if (!menuItemMap.has(key)) {
-              menuItemMap.set(key, {
-                qty: 0,
-                revenue: 0,
-                cost: 0,
-              });
-            }
-            const data = menuItemMap.get(key)!;
-            data.qty += item.quantity;
-            const lineRevenue = Number(item.unitPrice) * item.quantity;
-            data.revenue += lineRevenue;
-            totalRevenue += lineRevenue;
-          });
-        });
-
-        for (const [menuItemId, data] of menuItemMap) {
-          const foodCostPercent = data.revenue > 0 ? (data.cost / data.revenue) * 100 : 0;
-          const costPerUnit = data.qty > 0 ? data.cost / data.qty : 0;
+        for (const [menuItemId, data] of sales) {
+          const costed = costs.get(menuItemId);
+          const costPerUnit = costed?.costPerUnit ?? 0;
+          const ingredientCost = round2(costPerUnit * data.qty);
+          const sellingPrice = data.qty > 0 ? data.revenue / data.qty : 0;
 
           byMenuItem.push({
-            menuItemName: menuItemId,
+            // ชื่อจานจริง ของเดิมส่ง id ออกไปให้หน้าจอแสดงเป็นชื่อ
+            menuItemName: costed?.name ?? menuItemId,
             qtySold: data.qty,
             revenue: data.revenue,
-            ingredientCost: data.cost,
-            foodCostPercent,
-            profitPerUnit: data.qty > 0 ? data.revenue / data.qty - costPerUnit : 0,
+            ingredientCost,
+            foodCostPercent: percentOf(ingredientCost, data.revenue),
+            profitPerUnit: round2(sellingPrice - costPerUnit),
           });
+
+          totalRevenue = round2(totalRevenue + data.revenue);
+          totalCost = round2(totalCost + ingredientCost);
         }
 
         overview = {
           totalRevenue,
           totalIngredientCost: totalCost,
-          avgFoodCostPercent: totalRevenue > 0 ? (totalCost / totalRevenue) * 100 : 0,
+          avgFoodCostPercent: percentOf(totalCost, totalRevenue),
         };
       } catch (error) {
         this.logger.warn(`Could not calculate food cost report: ${error}`);
@@ -484,7 +540,7 @@ export class CostReportsService {
     const alertItems = byMenuItem.filter((item) => item.foodCostPercent > 35);
 
     return {
-      period: `${year}-${String(month).padStart(2, '0')}`,
+      period: periodStr,
       overview,
       byMenuItem,
       alertItems,

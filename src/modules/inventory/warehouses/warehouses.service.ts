@@ -8,11 +8,16 @@ import {
 import { PrismaService } from '@/prisma/prisma.service';
 import { CreateWarehouseDto, WarehouseType } from './dto/create-warehouse.dto';
 import { UpdateWarehouseDto } from './dto/update-warehouse.dto';
+import { isVisibleOnChannel, WarehouseChannel } from './warehouse-channel';
 
 interface FindAllOptions {
   propertyId?: string;
   type?: WarehouseType;
+  /** แสดงเฉพาะคลังที่ระบบนี้มองเห็น (ตามกลุ่มคลัง) */
+  channel?: WarehouseChannel;
 }
+
+const GROUP_SELECT = { select: { id: true, name: true, code: true, channels: true, isActive: true } };
 
 @Injectable()
 export class WarehousesService {
@@ -38,9 +43,10 @@ export class WarehousesService {
         where.type = options.type;
       }
 
-      return await this.prisma.warehouse.findMany({
+      const rows = await this.prisma.warehouse.findMany({
         where,
         include: {
+          group: GROUP_SELECT,
           _count: {
             select: {
               warehouseStocks: true,
@@ -51,6 +57,14 @@ export class WarehousesService {
           createdAt: 'desc',
         },
       });
+      const channel = options?.channel;
+      if (!channel) return rows;
+      // คลังของแถมไม่ใช่คลังขาย — ไม่โชว์ใน POS ไม่ว่าจะอยู่กลุ่มไหน
+      return rows.filter(
+        (w) =>
+          isVisibleOnChannel(w.group, channel) &&
+          !(channel === 'POS' && w.type === WarehouseType.PROMOTION),
+      );
     } catch (error) {
       this.logger.error(`Error finding warehouses: ${error.message}`, error.stack);
       throw error;
@@ -62,9 +76,11 @@ export class WarehousesService {
    */
   async findOne(id: string, tenantId: string): Promise<any> {
     try {
-      const warehouse = await this.prisma.warehouse.findUnique({
-        where: { id },
+      // Tenant-scoped model: use findFirst with tenantId (findUnique is blocked by TenantScope)
+      const warehouse = await this.prisma.warehouse.findFirst({
+        where: { id, tenantId },
         include: {
+          group: GROUP_SELECT,
           _count: {
             select: {
               warehouseStocks: true,
@@ -74,10 +90,6 @@ export class WarehousesService {
       });
 
       if (!warehouse) {
-        throw new NotFoundException(`Warehouse with ID ${id} not found`);
-      }
-
-      if (warehouse.tenantId !== tenantId) {
         throw new NotFoundException(`Warehouse with ID ${id} not found`);
       }
 
@@ -116,14 +128,16 @@ export class WarehousesService {
         );
       }
 
-      // Validate propertyId exists
-      const property = await this.prisma.property.findUnique({
-        where: { id: dto.propertyId },
+      // Validate propertyId exists (tenant-scoped: findFirst with tenantId)
+      const property = await this.prisma.property.findFirst({
+        where: { id: dto.propertyId, tenantId },
       });
 
-      if (!property || property.tenantId !== tenantId) {
+      if (!property) {
         throw new BadRequestException('Invalid propertyId');
       }
+
+      if (dto.groupId) await this.assertGroupOwned(dto.groupId, tenantId);
 
       // If isDefault is true, unset other defaults for this property
       if (dto.isDefault) {
@@ -149,6 +163,7 @@ export class WarehousesService {
           type: dto.type || WarehouseType.GENERAL,
           location: dto.location || null,
           isDefault: dto.isDefault || false,
+          groupId: dto.groupId ?? null,
         },
         include: {
           _count: {
@@ -193,16 +208,18 @@ export class WarehousesService {
         }
       }
 
-      // If propertyId is being changed, validate it
+      // If propertyId is being changed, validate it (tenant-scoped: findFirst with tenantId)
       if (dto.propertyId && dto.propertyId !== warehouse.propertyId) {
-        const property = await this.prisma.property.findUnique({
-          where: { id: dto.propertyId },
+        const property = await this.prisma.property.findFirst({
+          where: { id: dto.propertyId, tenantId },
         });
 
-        if (!property || property.tenantId !== tenantId) {
+        if (!property) {
           throw new BadRequestException('Invalid propertyId');
         }
       }
+
+      if (dto.groupId) await this.assertGroupOwned(dto.groupId, tenantId);
 
       // Handle isDefault toggle
       const propertyId = dto.propertyId || warehouse.propertyId;
@@ -230,6 +247,7 @@ export class WarehousesService {
           ...(dto.type && { type: dto.type }),
           ...(dto.location !== undefined && { location: dto.location }),
           ...(dto.isDefault !== undefined && { isDefault: dto.isDefault }),
+          ...(dto.groupId !== undefined && { groupId: dto.groupId }),
         },
         include: {
           _count: {
@@ -274,5 +292,13 @@ export class WarehousesService {
       this.logger.error(`Error deleting warehouse ${id}: ${error.message}`, error.stack);
       throw error;
     }
+  }
+
+  private async assertGroupOwned(groupId: string, tenantId: string): Promise<void> {
+    const group = await this.prisma.warehouseGroup.findFirst({
+      where: { id: groupId, tenantId },
+      select: { id: true },
+    });
+    if (!group) throw new BadRequestException('ไม่พบกลุ่มคลังนี้');
   }
 }

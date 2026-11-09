@@ -1,3 +1,4 @@
+import { AllowSystems } from '../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Get,
@@ -9,12 +10,14 @@ import {
   Query,
   UseGuards,
   ForbiddenException,
+  UseInterceptors,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { randomBytes } from 'crypto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { TerminalRefreshCookieInterceptor } from '../modules/auth/terminal-refresh-cookie.interceptor';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -23,6 +26,7 @@ import { TenantsService, TenantWithUserRole } from './tenants.service';
 import { HotelDetailService } from './hotel-detail.service';
 import { HotelManagementService } from './hotel-management.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { TenantContextService } from '../common/tenant/tenant-context.service';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { CreateHotelDto } from './dto/create-hotel.dto';
@@ -34,6 +38,8 @@ import { InviteUserDto } from './dto/invite-user.dto';
 @ApiTags('tenants')
 @ApiBearerAuth('JWT-auth')
 @Controller({ path: 'tenants', version: '1' })
+// POST /tenants/switch mints a new main-dashboard refresh token → ss_rt_main cookie.
+@UseInterceptors(TerminalRefreshCookieInterceptor)
 @SkipSubscriptionCheck()
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class TenantsController {
@@ -42,6 +48,7 @@ export class TenantsController {
     private readonly hotelDetailService: HotelDetailService,
     private readonly hotelManagementService: HotelManagementService,
     private readonly prisma: PrismaService,
+    private readonly tenantContext: TenantContextService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
   ) {}
@@ -75,7 +82,17 @@ export class TenantsController {
    * Get all companies/tenants for the current user
    */
   @Get('my-companies')
-  @Roles('tenant_admin', 'admin', 'manager', 'hr', 'receptionist', 'staff', 'user')
+  @Roles(
+    'tenant_admin',
+    'admin',
+    'manager',
+    'hr',
+    'receptionist',
+    'staff',
+    'user',
+    'hotel_manager',
+    'front_desk',
+  )
   @ApiOperation({ summary: 'Get all tenants accessible to the current user' })
   @ApiResponse({
     status: 200,
@@ -98,7 +115,17 @@ export class TenantsController {
    * Switch the current user's active tenant
    */
   @Post('switch')
-  @Roles('tenant_admin', 'admin', 'manager', 'hr', 'receptionist', 'staff', 'user')
+  @Roles(
+    'tenant_admin',
+    'admin',
+    'manager',
+    'hr',
+    'receptionist',
+    'staff',
+    'user',
+    'hotel_manager',
+    'front_desk',
+  )
   @ApiOperation({ summary: 'Switch the current active tenant' })
   @ApiResponse({
     status: 200,
@@ -202,6 +229,7 @@ export class TenantsController {
    * - Tenant Admin/User: เห็นเฉพาะโรงแรมของตัวเอง
    * รองรับ search, filter, pagination
    */
+  @AllowSystems('hotel-terminal') // H1 allow-list (report walk 2026-11-09)
   @Get('hotels')
   @Roles(
     'platform_admin',
@@ -212,6 +240,8 @@ export class TenantsController {
     'receptionist',
     'staff',
     'user',
+    'hotel_manager',
+    'front_desk',
   )
   getHotelList(
     @Query() query: HotelListQueryDto,
@@ -233,6 +263,7 @@ export class TenantsController {
    * - Tenant Admin/User: ดูได้เฉพาะโรงแรมของตัวเอง
    * รวมข้อมูล: status, subscription, plan, features, invoices, alerts, permissions
    */
+  @AllowSystems('hotel-terminal') // H1 allow-list (report walk 2026-11-09)
   @Get('hotels/:id')
   @Roles(
     'platform_admin',
@@ -243,6 +274,8 @@ export class TenantsController {
     'receptionist',
     'staff',
     'user',
+    'hotel_manager',
+    'front_desk',
   )
   async getHotelDetail(
     @Param('id') id: string,
@@ -259,10 +292,17 @@ export class TenantsController {
     // We resolve (b) → tenantId by looking up the property table first.
     let resolvedTenantId = id;
 
-    const property = await this.prisma.property.findUnique({
-      where: { id },
-      select: { tenantId: true },
-    });
+    // Cross-tenant resolution: the property may belong to a tenant the caller
+    // reaches via user_tenants, not their active scope. Look it up unscoped
+    // (findFirst — findUnique is blocked on scoped models); access is still
+    // verified by Check 1/2 below before any data is returned.
+    const property = await this.tenantContext.runUnscoped(
+      async () =>
+        await this.prisma.property.findFirst({
+          where: { id },
+          select: { tenantId: true },
+        }),
+    );
     if (property?.tenantId) {
       resolvedTenantId = property.tenantId;
     }
@@ -272,11 +312,18 @@ export class TenantsController {
       return this.hotelDetailService.getHotelDetail(resolvedTenantId);
     }
 
-    // Check 2: Multi-tenant support — user might belong to this tenant via user_tenants table
-    if (user?.userId) {
-      const userTenant = await this.prisma.userTenant.findFirst({
-        where: { userId: user.userId, tenantId: resolvedTenantId },
-      });
+    // Check 2: Multi-tenant support — user might belong to this tenant via user_tenants table.
+    // The membership row lives in another tenant than the active scope → read it unscoped
+    // (scoped, the TenantScope middleware rejects the mismatched tenantId with a 500).
+    const userId = user?.userId;
+    if (userId) {
+      const userTenant = await this.tenantContext.runUnscoped(
+        async () =>
+          await this.prisma.userTenant.findFirst({
+            where: { userId, tenantId: resolvedTenantId },
+            select: { id: true },
+          }),
+      );
       if (userTenant) {
         return this.hotelDetailService.getHotelDetail(resolvedTenantId);
       }
@@ -305,6 +352,8 @@ export class TenantsController {
     'receptionist',
     'staff',
     'user',
+    'hotel_manager',
+    'front_desk',
   )
   findAll(@CurrentUser() user: { tenantId?: string; role?: string }) {
     // Platform admin เห็นทั้งหมด, คนอื่นเห็นแค่ tenant ตัวเอง
@@ -327,6 +376,8 @@ export class TenantsController {
     'receptionist',
     'staff',
     'user',
+    'hotel_manager',
+    'front_desk',
   )
   getHotelDetailLegacy(
     @Param('id') id: string,
@@ -349,6 +400,8 @@ export class TenantsController {
     'receptionist',
     'staff',
     'user',
+    'hotel_manager',
+    'front_desk',
   )
   findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string; role?: string }) {
     // Platform admin ดูได้ทุก tenant, คนอื่นดูได้แค่ tenant ตัวเอง
@@ -358,10 +411,27 @@ export class TenantsController {
     return this.tenantsService.findOne(id);
   }
 
+  /**
+   * แก้ไขข้อมูลกิจการ
+   * - Platform Admin: แก้ได้ทุก tenant (รวม status / trialEndsAt)
+   * - Tenant Admin: ต้องเป็น owner/admin ของ tenant นั้น (ตรวจจาก user_tenants)
+   *   และแก้ได้เฉพาะฟิลด์โปรไฟล์กิจการ — ดู TenantsService.update
+   */
   @Patch(':id')
   @Roles('platform_admin', 'tenant_admin')
-  update(@Param('id') id: string, @Body() updateTenantDto: UpdateTenantDto) {
-    return this.tenantsService.update(id, updateTenantDto);
+  @ApiOperation({ summary: 'Update tenant/company profile' })
+  update(
+    @Param('id') id: string,
+    @Body() updateTenantDto: UpdateTenantDto,
+    @CurrentUser()
+    user: { userId?: string; role?: string; tenantId?: string; isPlatformAdmin?: boolean },
+  ) {
+    return this.tenantsService.update(id, updateTenantDto, {
+      userId: user?.userId,
+      role: user?.role,
+      tenantId: user?.tenantId,
+      isPlatformAdmin: user?.isPlatformAdmin,
+    });
   }
 
   @Delete(':id')

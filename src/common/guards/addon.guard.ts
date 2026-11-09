@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Injectable,
   Logger,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { AddonCode, AddonService } from '@/modules/addons/addon.service';
@@ -20,6 +21,9 @@ import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
  * Behavior:
  *  - If endpoint has no @RequireAddon() → allow (not an add-on gated route)
  *  - If endpoint is @Public() → allow
+ *  - If the add-on belongs to the OTHER business line (hotel vs campground)
+ *    → 403, before any bypass: no tenant may reach a module their line does
+ *    not sell, however they are subscribed
  *  - If tenant is on TRIAL → allow full access (matches UI "Full Access" trial)
  *  - If tenant has the required add-on active → allow
  *  - Otherwise → 403 with structured error body for frontend upgrade redirect
@@ -63,27 +67,69 @@ export class AddonGuard implements CanActivate {
 
     // 3) Extract tenant from JWT (populated by JwtAuthGuard)
     const request = context.switchToHttp().getRequest<{
-      user?: { tenantId?: string; role?: string };
+      user?: { tenantId?: string; role?: string; isPlatformAdmin?: boolean };
     }>();
     const tenantId = request.user?.tenantId;
 
     if (!tenantId) {
-      this.logger.warn(`AddonGuard: tenantId missing in JWT payload — denying access`);
-      throw new ForbiddenException({
-        code: `${requiredAddon}_REQUIRED`,
-        message: `This feature requires an active add-on subscription.`,
-        addon: requiredAddon,
-        upgradeUrl: '/billing/addons',
+      // tenantId missing → the JWT is stale or was issued before onboarding completed.
+      // Return 401 so the frontend's token-refresh interceptor kicks in and
+      // prompts a re-login — NOT 403, which would show a misleading "no permission" toast.
+      this.logger.warn(
+        `AddonGuard: tenantId missing in JWT for user — returning 401 to trigger re-login`,
+      );
+      throw new UnauthorizedException({
+        code: 'TENANT_MISSING',
+        message: 'Session expired or account setup incomplete. Please log in again.',
       });
     }
 
-    // 4) Platform admins bypass add-on checks
+    // 4) Product line first — before every bypass below. A module that belongs
+    // to the other business line (a hotel tenant reaching CampSync, or the
+    // reverse) must be unreachable full stop: not for a tenant "admin" user,
+    // not during a trial. Both of those bypass the entitlement check further
+    // down, so putting this check after them would leave the door open.
+    // Only platform users, who operate across tenants, are exempt.
+    const isPlatformUser =
+      request.user?.isPlatformAdmin === true || request.user?.role === 'platform_admin';
+
+    if (!isPlatformUser) {
+      const allowedForLine = await this.addonService.isAddonAllowedForTenant(
+        tenantId,
+        requiredAddon,
+      );
+      if (!allowedForLine) {
+        this.logger.warn(
+          `Tenant ${tenantId} attempted access to ${requiredAddon}-gated endpoint ` +
+            `"${context.getHandler().name}" from the other product line`,
+        );
+        throw new ForbiddenException({
+          code: `${requiredAddon}_WRONG_PRODUCT_LINE`,
+          message: `โมดูลนี้เป็นของอีกสายธุรกิจหนึ่ง — แผนปัจจุบันของคุณใช้งานไม่ได้`,
+          addon: requiredAddon,
+        });
+      }
+    }
+
+    // 5) Platform admins and dedicated procurement roles bypass add-on checks.
+    // Procurement users (procurement_manager, buyer, approver, receiver) authenticate
+    // via /auth/purchasing/login specifically to use the inventory/procurement system,
+    // so gating them behind a per-tenant addon check is incorrect — their access
+    // is governed by role-based guards on each endpoint instead.
     const role = request.user?.role ?? '';
-    if (role === 'platform_admin' || role === 'super_admin' || role === 'admin') {
+    const BYPASS_ROLES = [
+      'platform_admin',
+      'admin',
+      'procurement_manager',
+      'buyer',
+      'approver',
+      'receiver',
+    ];
+    if (BYPASS_ROLES.includes(role)) {
       return true;
     }
 
-    // 5) Trial tenants get full access
+    // 6) Trial tenants get full access
     const subscription = await this.prisma.subscriptions.findFirst({
       where: { tenant_id: tenantId },
       select: { status: true },
@@ -94,7 +140,7 @@ export class AddonGuard implements CanActivate {
       return true;
     }
 
-    // 6) Paid tenants: enforce add-on check
+    // 7) Paid tenants: enforce add-on check
     const hasAddon = await this.addonService.hasActiveAddon(tenantId, requiredAddon);
 
     if (!hasAddon) {

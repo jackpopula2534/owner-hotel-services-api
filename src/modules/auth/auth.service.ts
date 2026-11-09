@@ -5,6 +5,7 @@ import {
   BadRequestException,
   Logger,
 } from '@nestjs/common';
+import { assertSubSystemReady } from '../sub-systems/sub-system-readiness';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -15,8 +16,99 @@ import { RegisterDto } from './dto/register.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { CreatePosUserDto } from './dto/create-pos-user.dto';
 import { PosLaunchDto } from './dto/pos-launch.dto';
+import { AuthErrors } from './auth-errors';
+import { isTerminalAccountRole, mainSessionScope } from '../tenant-users/terminal-registry';
 import * as bcrypt from 'bcrypt';
-import { randomBytes } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
+import { Prisma } from '@prisma/client';
+
+// Default permissions granted to a hotel_manager when launching the Hotel
+// Management Terminal via SSO. Front-desk / housekeeper / maintenance staff
+// receive a narrower set stored on the user record (hotelTerminalPermissions).
+const HOTEL_MANAGER_PERMISSIONS = [
+  'property.view',
+  'property.manage',
+  'rooms.view',
+  'rooms.manage',
+  'frontdesk.view',
+  'frontdesk.manage',
+  'bookings.view',
+  'bookings.manage',
+  'guests.view',
+  'guests.manage',
+  'housekeeping.view',
+  'housekeeping.manage',
+  'maintenance.view',
+  'maintenance.manage',
+];
+
+const ACCOUNTING_MANAGER_PERMISSIONS = [
+  'coa.view',
+  'coa.manage',
+  'journal.view',
+  'journal.manage',
+  'journal.post',
+  'ar.view',
+  'ar.manage',
+  'ap.view',
+  'ap.manage',
+  'ap.approve',
+  'ledger.view',
+  'audit.run',
+  'audit.view',
+  'cash.view',
+  'cash.manage',
+  'asset.view',
+  'asset.manage',
+  'report.accounting',
+];
+
+const HR_MANAGER_PERMISSIONS = [
+  'employee.view',
+  'employee.manage',
+  'attendance.view',
+  'attendance.manage',
+  'leave.view',
+  'leave.approve',
+  'payroll.view',
+  'payroll.run',
+  'payroll.approve',
+  'kpi.view',
+  'kpi.manage',
+  'evaluation.view',
+  'evaluation.manage',
+  'report.view',
+  'report.export',
+  'user.manage',
+];
+
+/**
+ * Claims carried by the short-lived deep-link launch tokens minted by the
+ * `/auth/<system>-launch` endpoints. Only `sub` is common to all of them —
+ * everything else is whatever that particular terminal needs on open.
+ */
+interface LaunchTokenClaims {
+  /** Always 'launch' — JwtStrategy refuses any typed token as a bearer. */
+  type?: string;
+  /** One-time id: recorded in consumed_launch_tokens on exchange. */
+  jti?: string;
+  exp?: number;
+  sub?: string;
+  email?: string;
+  role?: string;
+  tenantId?: string;
+  permissions?: string[];
+  posLaunch?: boolean;
+  purchasingLaunch?: boolean;
+  hotelTerminalLaunch?: boolean;
+  warehouseLaunch?: boolean;
+  accountingLaunch?: boolean;
+  hrLaunch?: boolean;
+  restaurantId?: string | null;
+  tableId?: string | null;
+  propertyId?: string | null;
+  propertyName?: string | null;
+}
 
 @Injectable()
 export class AuthService {
@@ -36,6 +128,7 @@ export class AuthService {
   ) {
     const { email, password, firstName, lastName, hotelName, hotelAddress, hotelPhone } =
       registerDto;
+    const system = registerDto.system ?? 'HOTEL';
 
     // Check if user already exists
     const existingUser = await this.prisma.user.findUnique({
@@ -43,7 +136,8 @@ export class AuthService {
     });
 
     if (existingUser) {
-      throw new ConflictException('User with this email already exists');
+      this.logger.warn(`Register failed: email ${email} already exists`);
+      throw AuthErrors.emailAlreadyExists(email);
     }
 
     // Hash password
@@ -71,7 +165,7 @@ export class AuthService {
 
     // Auto-create Tenant + Trial Subscription (Step 2 & 3 of registration flow)
     let onboardingResult = null;
-    const tenantName = hotelName || `${firstName}'s Hotel`;
+    const tenantName = hotelName || `${firstName}'s ${system === 'CAMP' ? 'Campground' : 'Hotel'}`;
 
     try {
       onboardingResult = await this.onboardingService.registerHotel(
@@ -82,6 +176,7 @@ export class AuthService {
           email: email,
         },
         14, // 14-day trial
+        system, // decides which free-trial plan is granted (FREE vs CAMP_FREE)
       );
 
       // Link user to the newly created tenant
@@ -124,6 +219,10 @@ export class AuthService {
       deviceInfo,
     );
 
+    // Registration hands back a live session, so the owner is signed in from this
+    // moment — without this the brand-new account reads "never signed in".
+    await this.recordLogin('user', user.id, deviceInfo);
+
     // Send welcome email (async, non-blocking)
     this.emailEventsService
       .onUserRegistered({
@@ -147,6 +246,8 @@ export class AuthService {
             subscriptionId: onboardingResult.subscription.id,
             trialEndsAt: onboardingResult.trialEndsAt,
             message: onboardingResult.message,
+            system: onboardingResult.system,
+            plan: onboardingResult.plan,
             property: onboardingResult.property
               ? {
                   id: onboardingResult.property.id,
@@ -167,16 +268,19 @@ export class AuthService {
     });
 
     if (!admin) {
-      throw new UnauthorizedException('Invalid credentials');
+      this.logger.warn(`Admin login failed: no admin with email ${email}`);
+      throw AuthErrors.invalidCredentials();
     }
 
     if (admin.status !== 'active') {
-      throw new UnauthorizedException('Admin account is suspended or inactive');
+      this.logger.warn(`Admin login blocked: ${email} status=${admin.status}`);
+      throw AuthErrors.accountSuspended();
     }
 
     const isPasswordValid = await bcrypt.compare(password, admin.password);
     if (!isPasswordValid) {
-      throw new UnauthorizedException('Invalid credentials');
+      this.logger.warn(`Admin login failed: bad password for ${email}`);
+      throw AuthErrors.invalidCredentials();
     }
 
     const tokens = await this.generateTokens(
@@ -188,6 +292,8 @@ export class AuthService {
       deviceInfo,
     );
 
+    await this.recordLogin('admin', admin.id, deviceInfo);
+
     return {
       ...tokens,
       user: {
@@ -197,17 +303,26 @@ export class AuthService {
         lastName: admin.lastName,
         role: admin.role,
         isPlatformAdmin: true,
+        // null/empty array => admin can access every menu
+        menuAccess: ((admin as { menuAccess?: unknown }).menuAccess as string[] | null) ?? null,
       },
     };
   }
 
   // Roles ที่ห้ามเข้าผ่าน /auth/login (ต้องใช้ /auth/admin/login เท่านั้น)
-  private readonly ADMIN_ONLY_ROLES = ['platform_admin', 'super_admin', 'admin'];
+  private readonly ADMIN_ONLY_ROLES = ['platform_admin', 'admin'];
 
   async login(
     loginDto: LoginDto,
     deviceInfo?: { ipAddress?: string; userAgent?: string },
-    systemContext: 'main' | 'pos' = 'main',
+    systemContext:
+      | 'main'
+      | 'pos'
+      | 'procurement'
+      | 'warehouse'
+      | 'hotel-terminal'
+      | 'accounting'
+      | 'hr' = 'main',
   ) {
     const { email, password } = loginDto;
 
@@ -216,48 +331,251 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new UnauthorizedException('Invalid credentials');
+      this.logger.warn(`Login failed: no user with email ${email}`);
+      throw AuthErrors.invalidCredentials();
+    }
+
+    // ── Lifecycle gate ────────────────────────────────────────────────────────
+    // ถ้า expiresAt ผ่านไปแล้ว → ตั้ง status = expired ทันที (lazy-expire)
+    // as any: Prisma type อาจยังไม่ sync หลัง schema migration
+    const userExpiresAt = (user as any).expiresAt as Date | null | undefined;
+    if (userExpiresAt && userExpiresAt.getTime() <= Date.now() && user.status !== 'expired') {
+      try {
+        await this.prisma.user.update({
+          where: { id: user.id },
+          data: { status: 'expired' },
+        });
+        user.status = 'expired';
+      } catch (err) {
+        this.logger.warn(
+          `Failed to lazy-expire user ${user.id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
 
     if (user.status !== 'active') {
-      throw new UnauthorizedException('User account is suspended or inactive');
-    }
-
-    // บล็อก admin-level roles จากการ login ผ่าน /auth/login
-    if (this.ADMIN_ONLY_ROLES.includes(user.role)) {
-      throw new UnauthorizedException(
-        'Admin accounts cannot login through this endpoint. Use /api/v1/auth/admin/login instead.',
-      );
-    }
-
-    // ── System Access Control ────────────────────────────────────────────────
-    // Validate that this user is allowed to log into the requested system
-    const allowedSystemsRaw = (user as any).allowedSystems as string | undefined;
-    if (allowedSystemsRaw) {
-      try {
-        const allowed: string[] = JSON.parse(allowedSystemsRaw);
-        if (!allowed.includes(systemContext)) {
-          throw new UnauthorizedException(
-            systemContext === 'pos'
-              ? 'This account is not authorized to access the POS system. Please use a POS staff account.'
-              : 'This account is not authorized to access the management dashboard.',
-          );
-        }
-      } catch (e) {
-        if (e instanceof UnauthorizedException) throw e;
-        // JSON parse error — allow through (DB migration may not have run yet)
-        this.logger.warn(
-          `Could not parse allowedSystems for user ${user.id}: ${allowedSystemsRaw}`,
-        );
+      this.logger.warn(`Login blocked: ${email} status=${user.status}`);
+      switch (user.status) {
+        case 'suspended':
+          throw AuthErrors.accountSuspended();
+        case 'expired':
+          throw AuthErrors.accountExpired();
+        case 'inactive':
+          throw AuthErrors.accountInactive();
+        default:
+          throw AuthErrors.accountNotActive();
       }
     }
     // ────────────────────────────────────────────────────────────────────────
 
-    const isPasswordValid = await bcrypt.compare(password, user.password);
-    if (!isPasswordValid) {
-      throw new UnauthorizedException('Invalid credentials');
+    // บล็อก admin-level roles จากการ login ผ่าน /auth/login
+    if (this.ADMIN_ONLY_ROLES.includes(user.role)) {
+      this.logger.warn(`Login blocked: ${email} is admin-level role=${user.role}`);
+      throw AuthErrors.adminEndpointOnly();
     }
 
+    // ── System Access Control ────────────────────────────────────────────────
+    this.assertSystemAllowed(user, systemContext);
+    // ────────────────────────────────────────────────────────────────────────
+
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (!isPasswordValid) {
+      this.logger.warn(`Login failed: bad password for ${email}`);
+      throw AuthErrors.invalidCredentials();
+    }
+
+    // ── Two-Factor Authentication gate ────────────────────────────────────────
+    // If the user has 2FA enabled, do NOT issue session tokens yet. Instead
+    // return a short-lived tempToken; the client must call POST /auth/2fa/validate
+    // (or /verify-backup) with this token + a TOTP/backup code to complete login.
+    const twoFactor = await this.prisma.user2FASettings
+      .findUnique({ where: { userId: user.id } })
+      .catch(() => null);
+
+    if (twoFactor?.isEnabled) {
+      const tempToken = this.generateTempToken(user.id, user.email, systemContext);
+      this.logger.log(`Login requires 2FA for user ${user.id}`);
+      return {
+        requires2FA: true,
+        tempToken,
+        email: user.email,
+      };
+    }
+    // ──────────────────────────────────────────────────────────────────────────
+
+    return this.buildLoginResponse(user, systemContext, deviceInfo);
+  }
+
+  /**
+   * Complete a login that was gated by 2FA. Called after the TOTP / backup code
+   * has been verified. Re-loads the user, runs the same lifecycle + system-access
+   * checks as login(), then issues real session tokens.
+   */
+  async completeLoginWith2FA(
+    userId: string,
+    systemContext:
+      | 'main'
+      | 'pos'
+      | 'procurement'
+      | 'warehouse'
+      | 'hotel-terminal'
+      | 'accounting'
+      | 'hr' = 'main',
+    deviceInfo?: { ipAddress?: string; userAgent?: string },
+  ) {
+    // findFirst (not findUnique): `User` is tenant-scoped. findUnique is rejected
+    // by the TenantScope middleware when a tenant context is active; findFirst
+    // lets the middleware inject tenantId (and is a no-op when no context is set).
+    const user = await this.prisma.user.findFirst({ where: { id: userId } });
+    if (!user) {
+      throw AuthErrors.invalidCredentials();
+    }
+
+    if (user.status !== 'active') {
+      this.logger.warn(`2FA login blocked: ${user.email} status=${user.status}`);
+      switch (user.status) {
+        case 'suspended':
+          throw AuthErrors.accountSuspended();
+        case 'expired':
+          throw AuthErrors.accountExpired();
+        case 'inactive':
+          throw AuthErrors.accountInactive();
+        default:
+          throw AuthErrors.accountNotActive();
+      }
+    }
+
+    // Same system gate as login(): a 2FA-enabled frontline account must not be
+    // able to finish a `main` login that /auth/login itself would have refused.
+    this.assertSystemAllowed(user, systemContext);
+
+    return this.buildLoginResponse(user, systemContext, deviceInfo);
+  }
+
+  /**
+   * Validate that `user` may open `systemContext` (users.allowedSystems).
+   * Shared by login() and completeLoginWith2FA() so both paths enforce it.
+   */
+  private assertSystemAllowed(
+    user: { id: string; email: string; role?: string; allowedSystems?: string | null },
+    systemContext: string,
+  ): void {
+    // Owner Console belongs to the owner only: any terminal role (frontline or
+    // manager-level) is refused on `main` even if stale data still lists it.
+    // …unless they also hold a Camp / Retail / CRM grant: those terminals live on
+    // the main session, so they sign in here and get a token scoped to them (H1.2).
+    if (
+      systemContext === 'main' &&
+      isTerminalAccountRole((user as any).role) &&
+      !mainSessionScope((user as any).role, (user as any).allowedSystems)
+    ) {
+      this.logger.warn(`Login blocked: ${user.email} role=${(user as any).role} is terminal-only (main)`);
+      throw AuthErrors.notAuthorizedForSystem('main');
+    }
+    const allowedSystemsRaw = (user as any).allowedSystems as string | null | undefined;
+    if (!allowedSystemsRaw) return;
+    let allowed: string[];
+    try {
+      allowed = JSON.parse(allowedSystemsRaw);
+    } catch {
+      // JSON parse error — allow through (DB migration may not have run yet)
+      this.logger.warn(`Could not parse allowedSystems for user ${user.id}: ${allowedSystemsRaw}`);
+      return;
+    }
+    if (!Array.isArray(allowed) || !allowed.includes(systemContext)) {
+      this.logger.warn(
+        `Login blocked: ${user.email} not authorized for system=${systemContext} (allowed=${String(allowed)})`,
+      );
+      throw AuthErrors.notAuthorizedForSystem(systemContext as any);
+    }
+  }
+
+  /**
+   * Stamp "last seen" on the account that just authenticated.
+   *
+   * Every read path (admin user list, POS staff list, the per-terminal user
+   * services) already surfaces `lastLoginAt`, but nothing ever wrote it — so the
+   * column stayed NULL for every account and the console showed "ยังไม่เคยเข้าระบบ"
+   * next to people who log in daily.
+   *
+   * Only credential logins land here. Refreshing a token, exchanging a launch
+   * deep-link, or an admin impersonating someone are not the account holder
+   * signing in and must not move this date.
+   *
+   * Failure is swallowed on purpose: a bookkeeping write must never be the reason
+   * a valid login is rejected.
+   */
+  private async recordLogin(
+    account: 'user' | 'admin',
+    id: string,
+    deviceInfo?: { ipAddress?: string; userAgent?: string },
+  ): Promise<void> {
+    const data = {
+      lastLoginAt: new Date(),
+      // `req.ip` is undefined behind some proxies; keep whatever was there before
+      // rather than blanking a known address with an unknown one.
+      ...(deviceInfo?.ipAddress ? { lastLoginIp: deviceInfo.ipAddress } : {}),
+    };
+
+    try {
+      if (account === 'admin') {
+        await this.prisma.admin.update({ where: { id }, data });
+      } else {
+        await this.prisma.user.update({ where: { id }, data });
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Could not stamp lastLoginAt on ${account} ${id}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
+  /**
+   * Role to place in the token for a terminal login: the `user_terminal_access`
+   * grant for (userId, systemContext) when one exists, otherwise `users.role`.
+   * Never throws — a missing table (pre-migration) or any DB hiccup falls back
+   * to the legacy role so login keeps working.
+   */
+  private async resolveTerminalRole(
+    userId: string,
+    systemContext: string,
+    fallbackRole: string,
+  ): Promise<string> {
+    if (!systemContext || systemContext === 'main') return fallbackRole;
+    try {
+      const grant = await (this.prisma as any).userTerminalAccess?.findFirst({
+        where: { userId, terminal: systemContext, revokedAt: null },
+        select: { role: true },
+      });
+      return grant?.role || fallbackRole;
+    } catch (error) {
+      this.logger.warn(
+        `resolveTerminalRole fallback for user=${userId} system=${systemContext}: ${
+          (error as Error)?.message ?? error
+        }`,
+      );
+      return fallbackRole;
+    }
+  }
+
+  /**
+   * Build the full login success payload (tokens + user object + property) for a
+   * validated user. Shared by login() and completeLoginWith2FA().
+   */
+  private async buildLoginResponse(
+    user: any,
+    systemContext:
+      | 'main'
+      | 'pos'
+      | 'procurement'
+      | 'warehouse'
+      | 'hotel-terminal'
+      | 'accounting'
+      | 'hr',
+    deviceInfo?: { ipAddress?: string; userAgent?: string },
+  ) {
     // Determine tenantId: prefer user.tenantId, fallback to default from UserTenant table
     let tenantId = user.tenantId ?? undefined;
     if (!tenantId) {
@@ -276,15 +594,26 @@ export class AuthService {
       }
     }
 
+    // ── Effective role per terminal ────────────────────────────────────────
+    // `users.role` is a single string, but one person may hold a different
+    // role on each terminal (user_terminal_access). When logging into a
+    // terminal, the role in the JWT/response is the one granted for THAT
+    // terminal; `users.role` stays the dashboard role and the fallback.
+    const effectiveRole = await this.resolveTerminalRole(user.id, systemContext, user.role);
+
     const tokens = await this.generateTokens(
       user.id,
       user.email,
-      user.role,
+      effectiveRole,
       tenantId,
       'user',
       deviceInfo,
       systemContext,
     );
+
+    // Every credential login for every system funnels through here — main
+    // dashboard, all six terminals, and the 2FA completion path.
+    await this.recordLogin('user', user.id, deviceInfo);
 
     // Resolve default property for this tenant so frontend has the correct propertyId
     let defaultProperty: { id: string; name: string; code: string } | undefined;
@@ -299,6 +628,95 @@ export class AuthService {
       }
     }
 
+    // ── Procurement-specific fields ─────────────────────────────────────────
+    // Include extra procurement metadata when logging in via the purchasing terminal
+    const procurementFields =
+      systemContext === 'procurement'
+        ? {
+            employeeId: (user as any).employeeId ?? null,
+            approvalLimit:
+              (user as any).approvalLimit != null ? Number((user as any).approvalLimit) : null,
+            permissions: (() => {
+              try {
+                const raw = (user as any).procurementPermissions;
+                return raw ? JSON.parse(raw) : [];
+              } catch {
+                return [];
+              }
+            })(),
+            propertyId: defaultProperty?.id ?? null,
+            propertyName: defaultProperty?.name ?? null,
+          }
+        : {};
+
+    // ── Warehouse-specific fields ───────────────────────────────────────────
+    // Include warehouse metadata when logging in via the warehouse terminal
+    const warehouseFields =
+      systemContext === 'warehouse'
+        ? {
+            employeeId: (user as any).employeeId ?? null,
+            warehouseIds: (() => {
+              try {
+                const raw = (user as any).warehouseIds;
+                return raw ? JSON.parse(raw) : [];
+              } catch {
+                return [];
+              }
+            })(),
+            permissions: (() => {
+              try {
+                const raw = (user as any).warehousePermissions;
+                return raw ? JSON.parse(raw) : [];
+              } catch {
+                return [];
+              }
+            })(),
+            propertyId: defaultProperty?.id ?? null,
+            propertyName: defaultProperty?.name ?? null,
+          }
+        : {};
+
+    // ── Hotel Terminal–specific fields ──────────────────────────────────────
+    // Include hotel terminal metadata (permissions, property linkage) when
+    // logging in via /auth/hotel-terminal/login.
+    const hotelTerminalFields =
+      systemContext === 'hotel-terminal'
+        ? {
+            employeeId: (user as any).employeeId ?? null,
+            permissions: (() => {
+              try {
+                const raw = (user as any).hotelTerminalPermissions;
+                return raw ? JSON.parse(raw) : HOTEL_MANAGER_PERMISSIONS;
+              } catch {
+                return HOTEL_MANAGER_PERMISSIONS;
+              }
+            })(),
+            propertyId: defaultProperty?.id ?? null,
+            propertyName: defaultProperty?.name ?? null,
+          }
+        : {};
+
+    // ── HR Terminal–specific fields ─────────────────────────────────────────
+    // Include HR metadata (permissions, property linkage) when logging in via
+    // /auth/hr/login. Permissions reuse the warehousePermissions column
+    // (same convention as accounting-users / hr-terminal-users).
+    const hrTerminalFields =
+      systemContext === 'hr'
+        ? {
+            employeeId: (user as any).employeeId ?? null,
+            permissions: (() => {
+              try {
+                const raw = (user as any).warehousePermissions;
+                return raw ? JSON.parse(raw) : HR_MANAGER_PERMISSIONS;
+              } catch {
+                return HR_MANAGER_PERMISSIONS;
+              }
+            })(),
+            propertyId: defaultProperty?.id ?? null,
+            propertyName: defaultProperty?.name ?? null,
+          }
+        : {};
+
     return {
       ...tokens,
       user: {
@@ -306,17 +724,34 @@ export class AuthService {
         email: user.email,
         firstName: user.firstName,
         lastName: user.lastName,
-        role: user.role,
+        avatarUrl: user.avatarUrl ?? null,
+        role: effectiveRole,
         tenantId: tenantId,
         defaultPropertyId: defaultProperty?.id ?? null,
         isPlatformAdmin: false,
+        ...procurementFields,
+        ...warehouseFields,
+        ...hotelTerminalFields,
+        ...hrTerminalFields,
+        // H1.2 — Camp / Retail / CRM scope of a main-session token (web routes by it)
+        ...(systemContext === 'main'
+          ? { terminals: mainSessionScope(user.role, (user as any).allowedSystems) }
+          : {}),
       },
       property: defaultProperty ?? null,
     };
   }
 
-  async refreshToken(refreshTokenDto: RefreshTokenDto) {
+  /**
+   * @param expectedContext set when the token came from a terminal's httpOnly
+   *   cookie: the row must belong to that terminal, so one terminal's cookie can
+   *   never be replayed as another system's session.
+   */
+  async refreshToken(refreshTokenDto: RefreshTokenDto, expectedContext?: string) {
     const { refreshToken } = refreshTokenDto;
+    if (!refreshToken) {
+      throw AuthErrors.refreshTokenInvalid();
+    }
 
     // Find refresh token in database
     const tokenRecord = await this.prisma.refreshToken.findUnique({
@@ -328,7 +763,14 @@ export class AuthService {
     });
 
     if (!tokenRecord) {
-      throw new UnauthorizedException('Invalid refresh token');
+      throw AuthErrors.refreshTokenInvalid();
+    }
+
+    if (
+      expectedContext &&
+      (tokenRecord as { systemContext?: string }).systemContext !== expectedContext
+    ) {
+      throw AuthErrors.refreshTokenInvalid();
     }
 
     // Check if token is expired
@@ -337,17 +779,17 @@ export class AuthService {
       await this.prisma.refreshToken.delete({
         where: { id: tokenRecord.id },
       });
-      throw new UnauthorizedException('Refresh token expired');
+      throw AuthErrors.refreshTokenExpired();
     }
 
     // Check if token is revoked
     if (tokenRecord.revokedAt) {
-      throw new UnauthorizedException('Refresh token has been revoked');
+      throw AuthErrors.refreshTokenRevoked();
     }
 
     const account = tokenRecord.admin || tokenRecord.user;
     if (!account) {
-      throw new UnauthorizedException('Account not found');
+      throw AuthErrors.accountNotFound();
     }
 
     const userType = tokenRecord.adminId ? 'admin' : 'user';
@@ -374,7 +816,15 @@ export class AuthService {
     }
 
     // Carry forward the systemContext from the original token
-    const systemContext = ((tokenRecord as any).systemContext as 'main' | 'pos') ?? 'main';
+    const systemContext =
+      ((tokenRecord as any).systemContext as
+        | 'main'
+        | 'pos'
+        | 'procurement'
+        | 'warehouse'
+        | 'hotel-terminal'
+        | 'accounting'
+        | 'hr') ?? 'main';
 
     // Generate new tokens
     const tokens = await this.generateTokens(
@@ -414,7 +864,18 @@ export class AuthService {
     };
   }
 
-  async logout(userIdOrAdminId: string, refreshToken?: string, systemContext?: 'main' | 'pos') {
+  async logout(
+    userIdOrAdminId: string,
+    refreshToken?: string,
+    systemContext?:
+      | 'main'
+      | 'pos'
+      | 'procurement'
+      | 'warehouse'
+      | 'hotel-terminal'
+      | 'accounting'
+      | 'hr',
+  ) {
     if (refreshToken) {
       // Revoke the specific refresh token
       // If systemContext provided, also filter by it (prevents cross-system token revocation)
@@ -483,7 +944,7 @@ export class AuthService {
     });
 
     if (!resetRecord || resetRecord.expiresAt < new Date()) {
-      throw new BadRequestException('Invalid or expired reset token');
+      throw AuthErrors.resetTokenInvalid();
     }
 
     // Hash new password
@@ -515,7 +976,7 @@ export class AuthService {
       where: { email: dto.email },
     });
     if (existing) {
-      throw new ConflictException(`A user with email "${dto.email}" already exists`);
+      throw AuthErrors.emailAlreadyExists(dto.email);
     }
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
@@ -638,6 +1099,14 @@ export class AuthService {
     if (!restaurant) {
       throw new BadRequestException('Restaurant not found or does not belong to your account');
     }
+    // POS กับ KDS ใช้ endpoint นี้ร่วมกัน แต่ความพร้อมไม่เท่ากัน: จอครัวไม่ต้องมีเมนู
+    // (เช็ค 'pos' ตายตัวทำให้ KDS ของร้านใหม่โดน 409 NO_MENU ทั้งที่การ์ดขึ้น "พร้อมใช้งาน")
+    const target = dto.target ?? 'pos';
+    await assertSubSystemReady(
+      this.prisma,
+      caller.tenantId,
+      target === 'kitchen' ? 'pos-kitchen' : 'pos',
+    );
 
     const payload = {
       sub: caller.userId,
@@ -653,9 +1122,12 @@ export class AuthService {
     };
 
     // Short-lived token — 5 minutes only
-    const token = this.jwtService.sign(payload, { expiresIn: '5m' });
+    const token = this.signLaunchToken(payload);
 
-    const posUrl = `/pos?token=${token}&restaurantId=${dto.restaurantId}${dto.tableId ? `&tableId=${dto.tableId}` : ''}`;
+    const posUrl =
+      target === 'kitchen'
+        ? `/pos/kitchen?token=${token}&restaurantId=${dto.restaurantId}`
+        : `/pos?token=${token}&restaurantId=${dto.restaurantId}${dto.tableId ? `&tableId=${dto.tableId}` : ''}`;
 
     this.logger.log(
       `POS launch token generated for restaurant "${restaurant.name}" by user ${caller.userId}`,
@@ -667,7 +1139,524 @@ export class AuthService {
     };
   }
 
+  /** The tenant's default property (isDefault first, then oldest). */
+  private async resolveDefaultProperty(
+    tenantId: string | null | undefined,
+  ): Promise<{ id: string; name: string } | null> {
+    if (!tenantId) return null;
+    return this.prisma.property.findFirst({
+      where: { tenantId },
+      orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+      select: { id: true, name: true },
+    });
+  }
+
+  /**
+   * Sign a 5-minute deep-link launch token.
+   *
+   * `type: 'launch'` makes JwtStrategy refuse it as a bearer token — it carries
+   * the elevated terminal role (procurement_manager, hotel_manager…) and must
+   * only ever be traded, never used. `jti` makes it single-use: the exchange
+   * records it, so a link copied from the address bar, history or a proxy log
+   * cannot be traded for a second session within those five minutes.
+   */
+  private signLaunchToken(payload: Record<string, unknown>): string {
+    return this.jwtService.sign(
+      { ...payload, type: 'launch', jti: randomUUID() },
+      { expiresIn: '5m' },
+    );
+  }
+
+  /** Mark a launch token as spent. False when it was spent already. */
+  private async consumeLaunchToken(claims: LaunchTokenClaims): Promise<boolean> {
+    const expiresAt = new Date((claims.exp ?? Math.floor(Date.now() / 1000) + 300) * 1000);
+    try {
+      await this.prisma.consumedLaunchToken.create({
+        data: { jti: claims.jti as string, userId: claims.sub ?? null, expiresAt },
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        return false;
+      }
+      throw error;
+    }
+    // Spent ids are only needed until the token would have expired anyway.
+    void this.prisma.consumedLaunchToken
+      .deleteMany({ where: { expiresAt: { lt: new Date() } } })
+      .catch(() => undefined);
+    return true;
+  }
+
+  /**
+   * Front half of every "trade the deep-link token for a session" call.
+   *
+   * A launch token lives 5 minutes and carries no refresh token, so a terminal
+   * that kept it *as* its session went dead a few minutes in: every poll started
+   * to 401 and the staff were thrown back to the login screen. The dashboard has
+   * already authorised the hand-off (each /auth/*-launch endpoint needs a live
+   * session), so all that is left here is to prove the token really is a launch
+   * token of the expected kind and that the account is still usable.
+   */
+  private async openLaunchToken(
+    token: string,
+    claimFlag:
+      | 'posLaunch'
+      | 'purchasingLaunch'
+      | 'hotelTerminalLaunch'
+      | 'warehouseLaunch'
+      | 'accountingLaunch'
+      | 'hrLaunch',
+    systemLabel: string,
+  ): Promise<{ claims: LaunchTokenClaims; user: any }> {
+    let claims: LaunchTokenClaims;
+    try {
+      claims = this.jwtService.verify(token);
+    } catch {
+      // Expired or tampered with — the manager just needs to press the button again.
+      throw new UnauthorizedException(`${systemLabel} launch link is invalid or has expired`);
+    }
+
+    // Refuse an ordinary access token: only the matching launch claim qualifies,
+    // so a POS link can never be traded for a purchasing session and vice versa.
+    if (!claims?.[claimFlag] || !claims.sub || claims.type !== 'launch' || !claims.jti) {
+      this.logger.warn(
+        `${systemLabel} launch exchange rejected: token is not a ${claimFlag} token`,
+      );
+      throw new UnauthorizedException(`${systemLabel} launch link is invalid or has expired`);
+    }
+
+    // Single-use: whoever trades the link first gets the session; a replay of
+    // the same URL within its five minutes gets nothing (FIND-04).
+    if (!(await this.consumeLaunchToken(claims))) {
+      this.logger.warn(
+        `${systemLabel} launch exchange rejected: token ${claims.jti} was already used (user ${claims.sub})`,
+      );
+      throw new UnauthorizedException(`${systemLabel} launch link has already been used`);
+    }
+
+    // findFirst (not findUnique): `User` is tenant-scoped — see completeLoginWith2FA.
+    const user = await this.prisma.user.findFirst({ where: { id: claims.sub } });
+    if (!user) {
+      throw AuthErrors.accountNotFound();
+    }
+
+    // The account may have been suspended in the 5 minutes since the link was made.
+    if (user.status !== 'active') {
+      this.logger.warn(
+        `${systemLabel} launch exchange blocked: ${user.email} status=${user.status}`,
+      );
+      switch (user.status) {
+        case 'suspended':
+          throw AuthErrors.accountSuspended();
+        case 'expired':
+          throw AuthErrors.accountExpired();
+        case 'inactive':
+          throw AuthErrors.accountInactive();
+        default:
+          throw AuthErrors.accountNotActive();
+      }
+    }
+
+    return { claims, user };
+  }
+
+  /**
+   * Trade a deep-link launch token for a real POS session.
+   *
+   * The dashboard already checked the restaurant belongs to the caller's tenant
+   * when it minted the link, so this mints the same session /auth/pos/login
+   * would and hands back the restaurant/table the link pointed at.
+   */
+  async exchangePosLaunchToken(
+    token: string,
+    deviceInfo?: { ipAddress?: string; userAgent?: string },
+  ) {
+    const { claims, user } = await this.openLaunchToken(token, 'posLaunch', 'POS');
+
+    const session = await this.buildLoginResponse(user, 'pos', deviceInfo);
+
+    this.logger.log(`POS launch token exchanged for a session by user ${user.id}`);
+
+    return {
+      ...session,
+      restaurantId: claims.restaurantId ?? null,
+      tableId: claims.tableId ?? null,
+    };
+  }
+
   // ────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Generate a short-lived launch token so a manager can open the Purchasing
+   * terminal pre-authenticated: /purchasing?token=<jwt>
+   */
+  async generatePurchasingLaunchToken(
+    caller: { userId: string; email: string; role: string; tenantId: string },
+    originIp?: string,
+  ) {
+    // Default property, same as the other terminals (FIND-05: these two had none).
+    const property = await this.resolveDefaultProperty(caller.tenantId);
+    const payload = {
+      sub: caller.userId,
+      email: caller.email,
+      role: 'procurement_manager',
+      tenantId: caller.tenantId,
+      purchasingLaunch: true,
+      firstName: null,
+      lastName: null,
+      propertyId: property?.id ?? null,
+      propertyName: property?.name ?? null,
+      permissions: [
+        'pr.create',
+        'pr.view',
+        'pr.approve',
+        'rfq.create',
+        'rfq.view',
+        'quote.compare',
+        'po.create',
+        'po.view',
+        'po.approve',
+        'supplier.view',
+        'supplier.manage',
+        // รับของ/QC (grn.create, qc.inspect) เป็นงานฝั่งคลัง — จัดซื้อดูได้อย่างเดียว
+        'grn.view',
+        'qc.view',
+        'report.view',
+        'user.manage',
+        'approval-flow.manage',
+      ],
+      originIp: originIp ?? null,
+    };
+    const token = this.signLaunchToken(payload);
+    const launchUrl = `/purchasing?token=${token}`;
+    this.logger.log(`Purchasing launch token generated by user ${caller.userId}`);
+    return { success: true, data: { token, launchUrl, expiresIn: 300 } };
+  }
+
+  /**
+   * Trade a purchasing deep-link token for a real procurement session.
+   *
+   * Same fix as the POS: the terminal used to keep the 5-minute launch token as
+   * its session and died once it expired. It now gets access + refresh tagged
+   * systemContext="procurement", which /auth/refresh can renew all day.
+   *
+   * The launch token also *elevates* the caller to procurement_manager with the
+   * full permission set, and the purchasing shell reads exactly those two fields
+   * to decide which menu items to show. So they are carried over onto the
+   * returned user — but only there. The access token itself is minted from the
+   * account's real role, like every other session, because /auth/refresh rebuilds
+   * tokens from the database and would drop a forged role at the first renewal
+   * anyway. In practice this changes nothing for the tenant admins and managers
+   * who open the terminal (every procurement route already accepts those roles);
+   * an account below that level now gets menus its token cannot actually use,
+   * instead of a genuinely elevated token.
+   */
+  async exchangePurchasingLaunchToken(
+    token: string,
+    deviceInfo?: { ipAddress?: string; userAgent?: string },
+  ) {
+    const { claims, user } = await this.openLaunchToken(token, 'purchasingLaunch', 'Purchasing');
+
+    const session = await this.buildLoginResponse(user, 'procurement', deviceInfo);
+
+    this.logger.log(`Purchasing launch token exchanged for a session by user ${user.id}`);
+
+    return {
+      ...session,
+      user: {
+        ...session.user,
+        role: claims.role ?? session.user.role,
+        permissions: claims.permissions?.length
+          ? claims.permissions
+          : ((session.user as { permissions?: string[] }).permissions ?? []),
+        propertyId:
+          (session.user as { propertyId?: string | null }).propertyId ??
+          claims.propertyId ??
+          session.user.defaultPropertyId ??
+          null,
+      },
+    };
+  }
+
+  /**
+   * Generate a short-lived launch token so a manager can open the Warehouse
+   * terminal pre-authenticated: /inventory?token=<jwt>
+   */
+  async generateWarehouseLaunchToken(
+    caller: { userId: string; email: string; role: string; tenantId: string },
+    originIp?: string,
+  ) {
+    // Default property, same as the other terminals (FIND-05: these two had none).
+    const property = await this.resolveDefaultProperty(caller.tenantId);
+    const payload = {
+      sub: caller.userId,
+      email: caller.email,
+      role: 'warehouse_manager',
+      tenantId: caller.tenantId,
+      warehouseLaunch: true,
+      firstName: null,
+      lastName: null,
+      propertyId: property?.id ?? null,
+      propertyName: property?.name ?? null,
+      permissions: [
+        'item.view',
+        'item.manage',
+        'warehouse.view',
+        'warehouse.manage',
+        'gr.create',
+        'gr.view',
+        'gr.receive',
+        'movement.create',
+        'movement.view',
+        'qc.inspect',
+        'qc.view',
+        'lot.manage',
+        'lot.view',
+        'stock.view',
+        'stock.adjust',
+        'stock.count',
+        'report.view',
+        'forecast.view',
+        'user.manage',
+      ],
+      originIp: originIp ?? null,
+    };
+    const token = this.signLaunchToken(payload);
+    const launchUrl = `/inventory?token=${token}`;
+    this.logger.log(`Warehouse launch token generated by user ${caller.userId}`);
+    return { success: true, data: { token, launchUrl, expiresIn: 300 } };
+  }
+
+  /**
+   * Generate a short-lived launch token so a manager can open the Hotel
+   * Management Terminal pre-authenticated: /hotel-terminal?token=<jwt>
+   *
+   * The user is logged in as `hotel_manager` (highest level) and receives the
+   * full permission set so they can navigate every menu item.
+   */
+  async generateHotelTerminalLaunchToken(
+    caller: { userId: string; email: string; role: string; tenantId: string },
+    originIp?: string,
+  ) {
+    await assertSubSystemReady(this.prisma, caller.tenantId, 'hotel-terminal');
+
+    // Resolve default property so the terminal header can show "Property: ..."
+    let property: { id: string; name: string } | null = null;
+    if (caller.tenantId) {
+      property = await this.prisma.property.findFirst({
+        where: { tenantId: caller.tenantId },
+        orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+        select: { id: true, name: true },
+      });
+    }
+
+    const payload = {
+      sub: caller.userId,
+      email: caller.email,
+      role: 'hotel_manager',
+      tenantId: caller.tenantId,
+      hotelTerminalLaunch: true,
+      firstName: null,
+      lastName: null,
+      propertyId: property?.id ?? null,
+      propertyName: property?.name ?? null,
+      permissions: HOTEL_MANAGER_PERMISSIONS,
+      originIp: originIp ?? null,
+    };
+    const token = this.signLaunchToken(payload);
+    const launchUrl = `/hotel-terminal?token=${token}`;
+    this.logger.log(`Hotel Terminal launch token generated by user ${caller.userId}`);
+    return { success: true, data: { token, launchUrl, expiresIn: 300 } };
+  }
+
+  /**
+   * Trade a hotel-terminal deep-link token for a real terminal session.
+   *
+   * Mirrors exchangePurchasingLaunchToken — see the note there on why the role
+   * and permissions the link granted ride along on the user object while the
+   * access token is minted from the account's real role. The property the link
+   * resolved is passed through so the terminal header keeps showing it even if
+   * the tenant's default property changes mid-session.
+   */
+  async exchangeHotelTerminalLaunchToken(
+    token: string,
+    deviceInfo?: { ipAddress?: string; userAgent?: string },
+  ) {
+    const { claims, user } = await this.openLaunchToken(
+      token,
+      'hotelTerminalLaunch',
+      'Hotel Terminal',
+    );
+
+    const session = await this.buildLoginResponse(user, 'hotel-terminal', deviceInfo);
+    const sessionUser = session.user as {
+      permissions?: string[];
+      propertyId?: string | null;
+      propertyName?: string | null;
+    };
+
+    this.logger.log(`Hotel Terminal launch token exchanged for a session by user ${user.id}`);
+
+    return {
+      ...session,
+      user: {
+        ...session.user,
+        role: claims.role ?? session.user.role,
+        permissions: claims.permissions?.length
+          ? claims.permissions
+          : (sessionUser.permissions ?? HOTEL_MANAGER_PERMISSIONS),
+        propertyId: sessionUser.propertyId ?? claims.propertyId ?? null,
+        propertyName: sessionUser.propertyName ?? claims.propertyName ?? null,
+      },
+    };
+  }
+
+  /**
+   * Trade a warehouse / accounting / HR deep-link token for a real session.
+   *
+   * Same hand-off as the purchasing exchange (see the note there): the access
+   * token is minted from the account's real role, while the manager role,
+   * permission set and property the link granted ride along on the returned
+   * user — the terminal shells gate their menus on exactly those fields.
+   */
+  private async exchangeManagerLaunchToken(
+    token: string,
+    claimFlag: 'warehouseLaunch' | 'accountingLaunch' | 'hrLaunch',
+    systemContext: 'warehouse' | 'accounting' | 'hr',
+    systemLabel: string,
+    deviceInfo?: { ipAddress?: string; userAgent?: string },
+  ) {
+    const { claims, user } = await this.openLaunchToken(token, claimFlag, systemLabel);
+
+    const session = await this.buildLoginResponse(user, systemContext, deviceInfo);
+    const sessionUser = session.user as {
+      permissions?: string[];
+      propertyId?: string | null;
+      propertyName?: string | null;
+    };
+
+    this.logger.log(`${systemLabel} launch token exchanged for a session by user ${user.id}`);
+
+    return {
+      ...session,
+      user: {
+        ...session.user,
+        role: claims.role ?? session.user.role,
+        permissions: claims.permissions?.length
+          ? claims.permissions
+          : (sessionUser.permissions ?? []),
+        propertyId: sessionUser.propertyId ?? claims.propertyId ?? session.user.defaultPropertyId,
+        propertyName: sessionUser.propertyName ?? claims.propertyName ?? null,
+      },
+    };
+  }
+
+  async exchangeWarehouseLaunchToken(
+    token: string,
+    deviceInfo?: { ipAddress?: string; userAgent?: string },
+  ) {
+    return this.exchangeManagerLaunchToken(
+      token,
+      'warehouseLaunch',
+      'warehouse',
+      'Warehouse',
+      deviceInfo,
+    );
+  }
+
+  async exchangeAccountingLaunchToken(
+    token: string,
+    deviceInfo?: { ipAddress?: string; userAgent?: string },
+  ) {
+    return this.exchangeManagerLaunchToken(
+      token,
+      'accountingLaunch',
+      'accounting',
+      'Accounting',
+      deviceInfo,
+    );
+  }
+
+  async exchangeHrLaunchToken(
+    token: string,
+    deviceInfo?: { ipAddress?: string; userAgent?: string },
+  ) {
+    return this.exchangeManagerLaunchToken(token, 'hrLaunch', 'hr', 'HR', deviceInfo);
+  }
+
+  /**
+   * Generate a short-lived launch token for Accounting terminal: /accounting?token=<jwt>
+   */
+  async generateAccountingLaunchToken(
+    caller: { userId: string; email: string; role: string; tenantId: string },
+    originIp?: string,
+  ) {
+    // Resolve default property
+    let property: { id: string; name: string } | null = null;
+    if (caller.tenantId) {
+      property = await this.prisma.property.findFirst({
+        where: { tenantId: caller.tenantId },
+        orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+        select: { id: true, name: true },
+      });
+    }
+
+    const payload = {
+      sub: caller.userId,
+      email: caller.email,
+      role: 'accounting_manager',
+      tenantId: caller.tenantId,
+      accountingLaunch: true,
+      firstName: null,
+      lastName: null,
+      propertyId: property?.id ?? null,
+      propertyName: property?.name ?? null,
+      permissions: ACCOUNTING_MANAGER_PERMISSIONS,
+      originIp: originIp ?? null,
+      systemContext: 'accounting',
+    };
+    const token = this.signLaunchToken(payload);
+    const launchUrl = `/accounting?token=${token}`;
+    this.logger.log(`Accounting launch token generated by user ${caller.userId}`);
+    return { success: true, data: { token, launchUrl, expiresIn: 300 } };
+  }
+
+  /**
+   * Generate a short-lived launch token for HR terminal: /hr?token=<jwt>
+   */
+  async generateHrLaunchToken(
+    caller: { userId: string; email: string; role: string; tenantId: string },
+    originIp?: string,
+  ) {
+    // Resolve default property
+    let property: { id: string; name: string } | null = null;
+    if (caller.tenantId) {
+      property = await this.prisma.property.findFirst({
+        where: { tenantId: caller.tenantId },
+        orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+        select: { id: true, name: true },
+      });
+    }
+
+    const payload = {
+      sub: caller.userId,
+      email: caller.email,
+      role: 'hr_manager',
+      tenantId: caller.tenantId,
+      hrLaunch: true,
+      firstName: null,
+      lastName: null,
+      propertyId: property?.id ?? null,
+      propertyName: property?.name ?? null,
+      permissions: HR_MANAGER_PERMISSIONS,
+      originIp: originIp ?? null,
+      systemContext: 'hr',
+    };
+    const token = this.signLaunchToken(payload);
+    const launchUrl = `/hr?token=${token}`;
+    this.logger.log(`HR launch token generated by user ${caller.userId}`);
+    return { success: true, data: { token, launchUrl, expiresIn: 300 } };
+  }
 
   // ── Device fingerprint interface ─────────────────────────────────────────
   private parseDeviceType(userAgent: string): string {
@@ -695,6 +1684,71 @@ export class AuthService {
     return 'Unknown Device';
   }
 
+  /**
+   * Sign a short-lived (5 min) temporary token used to bridge the gap between
+   * password verification and 2FA code verification. Carries systemContext so
+   * the completed login lands in the right system.
+   */
+  private generateTempToken(
+    userId: string,
+    email: string,
+    systemContext:
+      | 'main'
+      | 'pos'
+      | 'procurement'
+      | 'warehouse'
+      | 'hotel-terminal'
+      | 'accounting'
+      | 'hr',
+  ): string {
+    return this.jwtService.sign(
+      { sub: userId, email, type: '2fa_pending', systemContext },
+      { expiresIn: '5m' },
+    );
+  }
+
+  /**
+   * Verify a 2fa_pending temp token. Returns the embedded claims or null.
+   */
+  verifyTempToken(token: string): {
+    userId: string;
+    email: string;
+    systemContext:
+      | 'main'
+      | 'pos'
+      | 'procurement'
+      | 'warehouse'
+      | 'hotel-terminal'
+      | 'accounting'
+      | 'hr';
+  } | null {
+    try {
+      const payload = this.jwtService.verify(token) as {
+        sub: string;
+        email: string;
+        type?: string;
+        systemContext?:
+          | 'main'
+          | 'pos'
+          | 'procurement'
+          | 'warehouse'
+          | 'hotel-terminal'
+          | 'accounting'
+          | 'hr';
+      };
+      if (payload.type !== '2fa_pending') {
+        return null;
+      }
+      return {
+        userId: payload.sub,
+        email: payload.email,
+        systemContext: payload.systemContext ?? 'main',
+      };
+    } catch {
+      return null;
+    }
+  }
+
   private async generateTokens(
     id: string,
     email: string,
@@ -702,8 +1756,31 @@ export class AuthService {
     tenantId?: string,
     userType: 'admin' | 'user' = 'user',
     deviceInfo?: { ipAddress?: string; userAgent?: string },
-    systemContext: 'main' | 'pos' = 'main',
+    systemContext:
+      | 'main'
+      | 'pos'
+      | 'procurement'
+      | 'warehouse'
+      | 'hotel-terminal'
+      | 'accounting'
+      | 'hr' = 'main',
   ) {
+    // H1.2 — Camp / Retail / CRM staff sign in on the main session; scope their
+    // token to those terminals. Done here so every path (login, refresh, 2FA,
+    // launch) mints the same scope — a refresh can never widen it back to `main`.
+    let terminals: string[] | null = null;
+    if (systemContext === 'main' && userType === 'user') {
+      // No catch on purpose: if the scope can't be read, sign-in fails rather than
+      // minting an unscoped (full main) token — fail closed.
+      const account: unknown = await this.prisma.user.findFirst({
+        where: { id },
+        select: { role: true, allowedSystems: true } as any,
+      });
+      terminals = account
+        ? mainSessionScope((account as any).role, (account as any).allowedSystems)
+        : null;
+    }
+
     const payload = {
       sub: id,
       email,
@@ -712,6 +1789,7 @@ export class AuthService {
       isPlatformAdmin: userType === 'admin',
       // Embed systemContext in the access token so guards can check it without a DB round-trip
       systemContext,
+      ...(terminals ? { terminals } : {}),
     };
 
     // Generate access token (short-lived)
@@ -762,7 +1840,7 @@ export class AuthService {
         );
       }
 
-      throw new BadRequestException('Could not create session. Please try again later.');
+      throw AuthErrors.sessionCreateFailed();
     }
 
     // Decode the access token to extract the exact expiration timestamp

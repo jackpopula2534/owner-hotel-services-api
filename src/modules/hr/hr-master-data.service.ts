@@ -8,6 +8,7 @@ import { CreateHrLeaveTypeDto } from './dto/create-hr-leave-type.dto';
 import { CreateHrShiftTypeDto } from './dto/create-hr-shift-type.dto';
 import { CreateHrAllowanceTypeDto } from './dto/create-hr-allowance-type.dto';
 import { CreateHrDeductionTypeDto } from './dto/create-hr-deduction-type.dto';
+import { CreateHrDepartmentWorkPolicyDto } from './dto/create-hr-department-work-policy.dto';
 
 @Injectable()
 export class HrMasterDataService {
@@ -17,6 +18,17 @@ export class HrMasterDataService {
 
   // ─── DEPARTMENTS ─────────────────────────────────────────────────────────────
 
+  /** annualPersonnelBudget เป็น Decimal → ส่งออกเป็น number (null คงเดิม) ให้หน้าบ้านคำนวณได้ตรง ๆ */
+  private serializeDepartment<T extends { annualPersonnelBudget?: unknown }>(
+    department: T,
+  ): Omit<T, 'annualPersonnelBudget'> & { annualPersonnelBudget: number | null } {
+    const raw = department.annualPersonnelBudget;
+    return {
+      ...department,
+      annualPersonnelBudget: raw === null || raw === undefined ? null : Number(raw),
+    };
+  }
+
   async findAllDepartments(tenantId: string) {
     const departments = await this.prisma.hrDepartment.findMany({
       where: { tenantId },
@@ -25,6 +37,7 @@ export class HrMasterDataService {
           where: { isActive: true },
           orderBy: { sortOrder: 'asc' },
         },
+        costCenter: { select: { id: true, name: true, code: true } },
         _count: { select: { employees: true } },
       },
       orderBy: { sortOrder: 'asc' },
@@ -32,7 +45,7 @@ export class HrMasterDataService {
 
     return {
       success: true,
-      data: departments,
+      data: departments.map((d) => this.serializeDepartment(d)),
       meta: { total: departments.length },
     };
   }
@@ -50,12 +63,12 @@ export class HrMasterDataService {
       throw new NotFoundException(`Department with ID ${id} not found`);
     }
 
-    return { success: true, data: department };
+    return { success: true, data: this.serializeDepartment(department) };
   }
 
   async createDepartment(tenantId: string, dto: CreateHrDepartmentDto) {
-    const existing = await this.prisma.hrDepartment.findUnique({
-      where: { tenantId_code: { tenantId, code: dto.code.toUpperCase() } },
+    const existing = await this.prisma.hrDepartment.findFirst({
+      where: { tenantId, code: dto.code.toUpperCase() },
     });
 
     if (existing) {
@@ -73,7 +86,7 @@ export class HrMasterDataService {
     this.logger.log(
       `Created department: ${department.name} (${department.code}) for tenant ${tenantId}`,
     );
-    return { success: true, data: department };
+    return { success: true, data: this.serializeDepartment(department) };
   }
 
   async updateDepartment(tenantId: string, id: string, dto: UpdateHrDepartmentDto) {
@@ -86,8 +99,8 @@ export class HrMasterDataService {
     }
 
     if (dto.code && dto.code.toUpperCase() !== department.code) {
-      const codeConflict = await this.prisma.hrDepartment.findUnique({
-        where: { tenantId_code: { tenantId, code: dto.code.toUpperCase() } },
+      const codeConflict = await this.prisma.hrDepartment.findFirst({
+        where: { tenantId, code: dto.code.toUpperCase() },
       });
       if (codeConflict) {
         throw new ConflictException(`Department code '${dto.code}' already exists`);
@@ -99,7 +112,7 @@ export class HrMasterDataService {
       data: { ...dto, ...(dto.code && { code: dto.code.toUpperCase() }) },
     });
 
-    return { success: true, data: updated };
+    return { success: true, data: this.serializeDepartment(updated) };
   }
 
   async removeDepartment(tenantId: string, id: string) {
@@ -237,8 +250,8 @@ export class HrMasterDataService {
   }
 
   async createLeaveType(tenantId: string, dto: CreateHrLeaveTypeDto) {
-    const existing = await this.prisma.hrLeaveType.findUnique({
-      where: { tenantId_code: { tenantId, code: dto.code.toUpperCase() } },
+    const existing = await this.prisma.hrLeaveType.findFirst({
+      where: { tenantId, code: dto.code.toUpperCase() },
     });
     if (existing) {
       throw new ConflictException(`Leave type code '${dto.code}' already exists`);
@@ -281,8 +294,8 @@ export class HrMasterDataService {
   }
 
   async createShiftType(tenantId: string, dto: CreateHrShiftTypeDto) {
-    const existing = await this.prisma.hrShiftType.findUnique({
-      where: { tenantId_code: { tenantId, code: dto.code.toUpperCase() } },
+    const existing = await this.prisma.hrShiftType.findFirst({
+      where: { tenantId, code: dto.code.toUpperCase() },
     });
     if (existing) {
       throw new ConflictException(`Shift type code '${dto.code}' already exists`);
@@ -325,8 +338,8 @@ export class HrMasterDataService {
   }
 
   async createAllowanceType(tenantId: string, dto: CreateHrAllowanceTypeDto) {
-    const existing = await this.prisma.hrAllowanceType.findUnique({
-      where: { tenantId_code: { tenantId, code: dto.code.toUpperCase() } },
+    const existing = await this.prisma.hrAllowanceType.findFirst({
+      where: { tenantId, code: dto.code.toUpperCase() },
     });
     if (existing) {
       throw new ConflictException(`Allowance type code '${dto.code}' already exists`);
@@ -369,8 +382,8 @@ export class HrMasterDataService {
   }
 
   async createDeductionType(tenantId: string, dto: CreateHrDeductionTypeDto) {
-    const existing = await this.prisma.hrDeductionType.findUnique({
-      where: { tenantId_code: { tenantId, code: dto.code.toUpperCase() } },
+    const existing = await this.prisma.hrDeductionType.findFirst({
+      where: { tenantId, code: dto.code.toUpperCase() },
     });
     if (existing) {
       throw new ConflictException(`Deduction type code '${dto.code}' already exists`);
@@ -404,9 +417,119 @@ export class HrMasterDataService {
 
   // ─── SUMMARY (get all master data at once) ───────────────────────────────────
 
+  // ─── DEPARTMENT WORK POLICIES (รูปแบบการทำงาน/วันหยุดต่อแผนก) ──────────────────
+
+  /** ปรับ offDays ให้สอดคล้องกับ pattern (preset จะ override ค่าที่ส่งมา) */
+  private resolveWorkPolicyDays(
+    pattern: string,
+    offDays?: number[],
+  ): { offDays: number[]; enforceDefault: boolean } {
+    switch (pattern) {
+      case 'MON_FRI':
+        return { offDays: [0, 6], enforceDefault: true };
+      case 'MON_SAT':
+        return { offDays: [0], enforceDefault: true };
+      case 'FLEXIBLE':
+        return { offDays: [], enforceDefault: false };
+      case 'CUSTOM':
+      default: {
+        const cleaned = Array.from(
+          new Set((offDays ?? []).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6)),
+        ).sort((a, b) => a - b);
+        return { offDays: cleaned, enforceDefault: true };
+      }
+    }
+  }
+
+  async findAllWorkPolicies(tenantId: string) {
+    const policies = await (this.prisma as any).hrDepartmentWorkPolicy.findMany({
+      where: { tenantId },
+      include: { department: { select: { id: true, name: true, code: true, color: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
+    return { success: true, data: policies, meta: { total: policies.length } };
+  }
+
+  async createWorkPolicy(tenantId: string, dto: CreateHrDepartmentWorkPolicyDto) {
+    const department = await this.prisma.hrDepartment.findFirst({
+      where: { id: dto.departmentId, tenantId },
+    });
+    if (!department) {
+      throw new NotFoundException(`Department ${dto.departmentId} not found`);
+    }
+
+    const { offDays, enforceDefault } = this.resolveWorkPolicyDays(dto.pattern, dto.offDays);
+    const data = {
+      pattern: dto.pattern,
+      offDays,
+      enforceOffDays: dto.enforceOffDays ?? enforceDefault,
+      defaultShiftTypeId: dto.defaultShiftTypeId ?? null,
+      note: dto.note ?? null,
+      isActive: dto.isActive ?? true,
+    };
+
+    // upsert ตามแผนก (หนึ่งแผนกมีได้นโยบายเดียว)
+    const policy = await (this.prisma as any).hrDepartmentWorkPolicy.upsert({
+      where: { departmentId: dto.departmentId },
+      create: { tenantId, departmentId: dto.departmentId, ...data },
+      update: data,
+      include: { department: { select: { id: true, name: true, code: true, color: true } } },
+    });
+
+    this.logger.log(`Work policy set for department ${dto.departmentId} (${dto.pattern})`);
+    return { success: true, data: policy };
+  }
+
+  async updateWorkPolicy(
+    tenantId: string,
+    id: string,
+    dto: Partial<CreateHrDepartmentWorkPolicyDto>,
+  ) {
+    const existing = await (this.prisma as any).hrDepartmentWorkPolicy.findFirst({
+      where: { id, tenantId },
+    });
+    if (!existing) throw new NotFoundException(`Work policy ${id} not found`);
+
+    const pattern = dto.pattern ?? existing.pattern;
+    const { offDays, enforceDefault } = this.resolveWorkPolicyDays(
+      pattern,
+      dto.offDays ?? (Array.isArray(existing.offDays) ? existing.offDays : []),
+    );
+
+    const updated = await (this.prisma as any).hrDepartmentWorkPolicy.update({
+      where: { id },
+      data: {
+        pattern,
+        offDays,
+        enforceOffDays: dto.enforceOffDays ?? (dto.pattern ? enforceDefault : existing.enforceOffDays),
+        ...(dto.defaultShiftTypeId !== undefined && { defaultShiftTypeId: dto.defaultShiftTypeId }),
+        ...(dto.note !== undefined && { note: dto.note }),
+        ...(dto.isActive !== undefined && { isActive: dto.isActive }),
+      },
+      include: { department: { select: { id: true, name: true, code: true, color: true } } },
+    });
+    return { success: true, data: updated };
+  }
+
+  async removeWorkPolicy(tenantId: string, id: string) {
+    const existing = await (this.prisma as any).hrDepartmentWorkPolicy.findFirst({
+      where: { id, tenantId },
+    });
+    if (!existing) throw new NotFoundException(`Work policy ${id} not found`);
+    await (this.prisma as any).hrDepartmentWorkPolicy.delete({ where: { id } });
+    return { success: true, message: 'Work policy deleted successfully' };
+  }
+
   async getSummary(tenantId: string) {
-    const [departments, positions, leaveTypes, shiftTypes, allowanceTypes, deductionTypes] =
-      await Promise.all([
+    const [
+      departments,
+      positions,
+      leaveTypes,
+      shiftTypes,
+      allowanceTypes,
+      deductionTypes,
+      workPolicies,
+    ] = await Promise.all([
         this.prisma.hrDepartment.findMany({
           where: { tenantId, isActive: true },
           include: { _count: { select: { employees: true } } },
@@ -433,11 +556,24 @@ export class HrMasterDataService {
           where: { tenantId, isActive: true },
           orderBy: { sortOrder: 'asc' },
         }),
+        (this.prisma as any).hrDepartmentWorkPolicy.findMany({
+          where: { tenantId },
+          include: { department: { select: { id: true, name: true, code: true, color: true } } },
+          orderBy: { createdAt: 'asc' },
+        }),
       ]);
 
     return {
       success: true,
-      data: { departments, positions, leaveTypes, shiftTypes, allowanceTypes, deductionTypes },
+      data: {
+        departments,
+        positions,
+        leaveTypes,
+        shiftTypes,
+        allowanceTypes,
+        deductionTypes,
+        workPolicies,
+      },
     };
   }
 
@@ -903,8 +1039,8 @@ export class HrMasterDataService {
 
     // ─── Upsert Departments + Positions ────────────────────────────────────────
     for (const deptTpl of departmentTemplates) {
-      const existing = await this.prisma.hrDepartment.findUnique({
-        where: { tenantId_code: { tenantId, code: deptTpl.code } },
+      const existing = await this.prisma.hrDepartment.findFirst({
+        where: { tenantId, code: deptTpl.code },
       });
 
       if (existing) {
@@ -936,8 +1072,8 @@ export class HrMasterDataService {
 
     // ─── Upsert Leave Types ────────────────────────────────────────────────────
     for (const lt of leaveTypeTemplates) {
-      const existing = await this.prisma.hrLeaveType.findUnique({
-        where: { tenantId_code: { tenantId, code: lt.code } },
+      const existing = await this.prisma.hrLeaveType.findFirst({
+        where: { tenantId, code: lt.code },
       });
       if (existing) {
         skipped.leaveTypes++;
@@ -949,8 +1085,8 @@ export class HrMasterDataService {
 
     // ─── Upsert Shift Types ────────────────────────────────────────────────────
     for (const st of shiftTypeTemplates) {
-      const existing = await this.prisma.hrShiftType.findUnique({
-        where: { tenantId_code: { tenantId, code: st.code } },
+      const existing = await this.prisma.hrShiftType.findFirst({
+        where: { tenantId, code: st.code },
       });
       if (existing) {
         skipped.shiftTypes++;
@@ -962,8 +1098,8 @@ export class HrMasterDataService {
 
     // ─── Upsert Allowance Types ────────────────────────────────────────────────
     for (const at of allowanceTypeTemplates) {
-      const existing = await this.prisma.hrAllowanceType.findUnique({
-        where: { tenantId_code: { tenantId, code: at.code } },
+      const existing = await this.prisma.hrAllowanceType.findFirst({
+        where: { tenantId, code: at.code },
       });
       if (existing) {
         skipped.allowanceTypes++;
@@ -975,8 +1111,8 @@ export class HrMasterDataService {
 
     // ─── Upsert Deduction Types ────────────────────────────────────────────────
     for (const dt of deductionTypeTemplates) {
-      const existing = await this.prisma.hrDeductionType.findUnique({
-        where: { tenantId_code: { tenantId, code: dt.code } },
+      const existing = await this.prisma.hrDeductionType.findFirst({
+        where: { tenantId, code: dt.code },
       });
       if (existing) {
         skipped.deductionTypes++;

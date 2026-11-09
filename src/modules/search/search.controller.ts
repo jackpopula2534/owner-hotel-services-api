@@ -44,7 +44,17 @@ export class SearchController {
   constructor(private readonly searchService: SearchService) {}
 
   @Get('global')
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'receptionist', 'staff', 'user')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'receptionist',
+    'staff',
+    'user',
+    'hotel_manager',
+    'front_desk',
+  )
   @ApiOperation({ summary: 'Global search across guests, bookings, rooms' })
   @ApiQuery({
     name: 'q',

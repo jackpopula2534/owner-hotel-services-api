@@ -12,10 +12,39 @@ import {
   ValidateNested,
   IsUUID,
   IsNumber,
+  IsDateString,
+  ArrayMinSize,
+  ArrayMaxSize,
+  ValidateIf,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
 // ─── QC Template DTOs ─────────────────────────────────────────────────────────
+
+/**
+ * Pass condition payload for NUMERIC checklist items.
+ *
+ * Kept as its own class so the global ValidationPipe with
+ * `whitelist + forbidNonWhitelisted` can validate the nested object instead
+ * of silently stripping it (or worse, rejecting unknown shapes 400-style).
+ */
+export class PassConditionDto {
+  @ApiProperty({ enum: ['eq', 'lte', 'gte', 'range'] })
+  @IsEnum(['eq', 'lte', 'gte', 'range'])
+  op: 'eq' | 'lte' | 'gte' | 'range';
+
+  // Single number (op = eq/lte/gte) is allowed — see ValidateIf below.
+  @ApiPropertyOptional({ description: 'Threshold for eq/lte/gte', type: Number })
+  @ValidateIf((o: PassConditionDto) => o.op !== 'range')
+  @IsNumber()
+  // Number range tuple [min, max] for op = range.
+  @ValidateIf((o: PassConditionDto) => o.op === 'range')
+  @IsArray()
+  @ArrayMinSize(2)
+  @ArrayMaxSize(2)
+  @IsNumber({}, { each: true })
+  value: number | [number, number];
+}
 
 export class CreateChecklistItemDto {
   @ApiProperty({ description: 'Checklist item label', example: 'สี/กลิ่นปกติ' })
@@ -33,14 +62,40 @@ export class CreateChecklistItemDto {
   @IsBoolean()
   required?: boolean = true;
 
-  @ApiPropertyOptional({ description: 'Pass condition for NUMERIC type (e.g. { op: "lte", value: 4 })' })
+  @ApiPropertyOptional({
+    description: 'Pass condition for NUMERIC type (e.g. { op: "lte", value: 4 })',
+    type: PassConditionDto,
+  })
   @IsOptional()
-  passCondition?: { op: 'eq' | 'lte' | 'gte' | 'range'; value: number | [number, number] };
+  @ValidateNested()
+  @Type(() => PassConditionDto)
+  passCondition?: PassConditionDto;
 
-  @ApiProperty({ description: 'Display order index' })
+  @ApiPropertyOptional({ description: 'Display order index', default: 0 })
+  @IsOptional()
   @IsInt()
   @Min(0)
-  orderIndex: number;
+  orderIndex?: number = 0;
+
+  @ApiPropertyOptional({
+    description: 'วิธีตรวจ — แสดงใต้คำถาม',
+    example: 'เสียบเทอร์โมมิเตอร์ที่ชิ้นกลางกล่อง',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  description?: string;
+
+  @ApiPropertyOptional({ description: 'หน่วยของค่าตัวเลข (NUMERIC)', example: '°C' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  unit?: string;
+
+  @ApiPropertyOptional({ description: 'ไม่ผ่านแล้วต้องระบุสิ่งที่พบ', default: false })
+  @IsOptional()
+  @IsBoolean()
+  requireNoteOnFail?: boolean;
 }
 
 export class CreateQCTemplateDto {
@@ -54,17 +109,23 @@ export class CreateQCTemplateDto {
   @IsEnum(['CATEGORY', 'ITEM'])
   appliesTo: 'CATEGORY' | 'ITEM';
 
+  // categoryId is mandatory when appliesTo=CATEGORY, otherwise must be absent.
   @ApiPropertyOptional({ description: 'Category ID (required when appliesTo=CATEGORY)' })
+  @ValidateIf((o: CreateQCTemplateDto) => o.appliesTo === 'CATEGORY')
+  @IsUUID('4', { message: 'categoryId ต้องเป็น UUID v4' })
+  @ValidateIf((o: CreateQCTemplateDto) => o.appliesTo !== 'CATEGORY')
   @IsOptional()
-  @IsString()
   categoryId?: string;
 
+  // itemId is mandatory when appliesTo=ITEM, otherwise must be absent.
   @ApiPropertyOptional({ description: 'Item ID (required when appliesTo=ITEM)' })
+  @ValidateIf((o: CreateQCTemplateDto) => o.appliesTo === 'ITEM')
+  @IsUUID('4', { message: 'itemId ต้องเป็น UUID v4' })
+  @ValidateIf((o: CreateQCTemplateDto) => o.appliesTo !== 'ITEM')
   @IsOptional()
-  @IsString()
   itemId?: string;
 
-  @ApiPropertyOptional({ description: 'Checklist items' })
+  @ApiPropertyOptional({ description: 'Checklist items', type: [CreateChecklistItemDto] })
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
@@ -72,17 +133,56 @@ export class CreateQCTemplateDto {
   checklistItems?: CreateChecklistItemDto[];
 }
 
+/**
+ * Full update DTO for PATCH /inventory/qc/templates/:id
+ *
+ * Previously only contained `name` and `isActive`, which caused the global
+ * ValidationPipe (forbidNonWhitelisted: true) to reject any payload that
+ * included `appliesTo`, `categoryId`, `itemId`, or `checklistItems`.
+ * All editable fields are now whitelisted here.
+ */
 export class UpdateQCTemplateDto {
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'Template name' })
   @IsOptional()
   @IsString()
   @MaxLength(100)
   name?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'Whether template is active' })
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @ApiPropertyOptional({ description: 'Applies to CATEGORY or ITEM', enum: ['CATEGORY', 'ITEM'] })
+  @IsOptional()
+  @IsEnum(['CATEGORY', 'ITEM'])
+  appliesTo?: 'CATEGORY' | 'ITEM';
+
+  // categoryId is required when appliesTo=CATEGORY, otherwise optional/absent.
+  @ApiPropertyOptional({ description: 'Category ID (required when appliesTo=CATEGORY)' })
+  @ValidateIf((o: UpdateQCTemplateDto) => o.appliesTo === 'CATEGORY')
+  @IsUUID('4', { message: 'categoryId ต้องเป็น UUID v4' })
+  @ValidateIf((o: UpdateQCTemplateDto) => o.appliesTo !== 'CATEGORY')
+  @IsOptional()
+  categoryId?: string;
+
+  // itemId is required when appliesTo=ITEM, otherwise optional/absent.
+  @ApiPropertyOptional({ description: 'Item ID (required when appliesTo=ITEM)' })
+  @ValidateIf((o: UpdateQCTemplateDto) => o.appliesTo === 'ITEM')
+  @IsUUID('4', { message: 'itemId ต้องเป็น UUID v4' })
+  @ValidateIf((o: UpdateQCTemplateDto) => o.appliesTo !== 'ITEM')
+  @IsOptional()
+  itemId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Replacement checklist items (replaces all existing)',
+    type: [CreateChecklistItemDto],
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateChecklistItemDto)
+  checklistItems?: CreateChecklistItemDto[];
 }
 
 // ─── QC Record DTOs ───────────────────────────────────────────────────────────
@@ -138,6 +238,12 @@ export class SubmitQCResultDto {
   @ApiProperty({ description: 'Whether this item passed' })
   @IsBoolean()
   passed: boolean;
+
+  @ApiPropertyOptional({ description: 'สิ่งที่ผู้ตรวจพบในข้อนี้' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  note?: string;
 }
 
 export class SubmitQCRecordDto {
@@ -168,6 +274,16 @@ export class QueryQCRecordDto {
   @IsOptional()
   @IsString()
   goodsReceiveId?: string;
+
+  @ApiPropertyOptional({ description: 'Filter from date (ISO date string e.g. 2026-01-01)' })
+  @IsOptional()
+  @IsDateString()
+  from?: string;
+
+  @ApiPropertyOptional({ description: 'Filter to date (ISO date string e.g. 2026-04-30)' })
+  @IsOptional()
+  @IsDateString()
+  to?: string;
 
   @ApiPropertyOptional({ default: 1 })
   @IsOptional()

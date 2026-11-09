@@ -1,7 +1,14 @@
-import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
+import { verifyHmacSha256 } from '../webhooks/webhook-signature.util';
 import * as QRCode from 'qrcode';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -10,8 +17,10 @@ import {
   TransactionQueryDto,
   WebhookPaymentDto,
   RefundRequestDto,
-  PromptPayType,
 } from './dto/promptpay.dto';
+import { isInvoiceSettled } from '../common/billing/invoice-settlement';
+import { AddonService } from '../modules/addons/addon.service';
+import { grantAddonPurchaseForInvoice } from '../modules/addon-purchases/addon-purchase-grant';
 
 @Injectable()
 export class PromptPayService {
@@ -22,18 +31,33 @@ export class PromptPayService {
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
     private readonly emailService: EmailService,
+    private readonly addonService: AddonService,
   ) {
     this.promptpayId = this.configService.get<string>('PROMPTPAY_ID', '');
     if (!this.promptpayId) {
       this.logger.warn('PROMPTPAY_ID not configured');
     }
+
+    // M3: surface a misconfiguration at startup rather than only failing closed
+    // at runtime. Without the secret, production webhooks are rejected (401) and
+    // payments silently stop reconciling — make that loud at boot.
+    const isProduction = this.configService.get<string>('NODE_ENV', 'development') === 'production';
+    if (isProduction && !this.configService.get<string>('PROMPTPAY_WEBHOOK_SECRET', '')) {
+      this.logger.error(
+        'PROMPTPAY_WEBHOOK_SECRET is not set in production — all PromptPay webhooks will be REJECTED. Set it before going live.',
+      );
+    }
   }
 
   /**
    * Generate PromptPay QR Code
+   *
+   * Priority สำหรับเลือก PromptPay ID:
+   *   1. dto.promptpayId — ที่ frontend ส่งมา (เลือกจาก PaymentAccount default)
+   *   2. this.promptpayId — fallback ไปค่า PROMPTPAY_ID จาก env config
    */
   async generateQRCode(dto: GenerateQRCodeDto): Promise<QRCodeResponseDto> {
-    const promptpayId = this.promptpayId;
+    const promptpayId = dto.promptpayId?.trim() || this.promptpayId;
 
     if (!promptpayId) {
       throw new BadRequestException('PromptPay ID not configured');
@@ -60,7 +84,7 @@ export class PromptPayService {
     });
 
     // Save transaction to database
-    const transaction = await this.prisma.promptPayTransaction.create({
+    await this.prisma.promptPayTransaction.create({
       data: {
         transactionRef,
         tenantId: dto.tenantId,
@@ -258,8 +282,18 @@ export class PromptPayService {
   /**
    * Handle payment webhook from bank/payment provider
    */
-  async handleWebhook(dto: WebhookPaymentDto): Promise<{ success: boolean; message: string }> {
+  async handleWebhook(
+    dto: WebhookPaymentDto,
+    rawBody?: Buffer | string,
+    signature?: string,
+  ): Promise<{ success: boolean; message: string }> {
     this.logger.log(`Received webhook for transaction: ${dto.transactionRef}`);
+
+    // SALES-01: verify the gateway's HMAC-SHA256 signature BEFORE trusting
+    // anything in the payload. Without this, anyone could POST a forged
+    // {transactionRef,status:paid} and mark invoices paid / activate a
+    // subscription for free.
+    this.assertValidWebhookSignature(rawBody, signature);
 
     if (!dto.transactionRef) {
       this.logger.warn('Webhook received without transaction reference');
@@ -280,9 +314,11 @@ export class PromptPayService {
       return { success: false, message: 'Transaction already processed' };
     }
 
-    // Update transaction status
-    const updatedTransaction = await this.prisma.promptPayTransaction.update({
-      where: { id: transaction.id },
+    // Atomically "claim" the transaction: only one concurrent webhook can flip
+    // pending → paid. updateMany with a status guard prevents the race where
+    // two callbacks both pass the check above and both run side-effects.
+    const claim = await this.prisma.promptPayTransaction.updateMany({
+      where: { id: transaction.id, status: 'pending' },
       data: {
         status: 'paid',
         paidAt: dto.paidAt ? new Date(dto.paidAt) : new Date(),
@@ -291,13 +327,26 @@ export class PromptPayService {
       },
     });
 
+    if (claim.count === 0) {
+      this.logger.warn(`Transaction already processed (race): ${dto.transactionRef}`);
+      return { success: false, message: 'Transaction already processed' };
+    }
+
+    const updatedTransaction = await this.prisma.promptPayTransaction.findUniqueOrThrow({
+      where: { id: transaction.id },
+    });
+
     // Update related booking/invoice status
     if (transaction.bookingId) {
       await this.updateBookingPaymentStatus(transaction.bookingId);
     }
 
     if (transaction.invoiceId) {
-      await this.updateInvoicePaymentStatus(transaction.invoiceId, Number(transaction.amount));
+      await this.updateInvoicePaymentStatus(
+        transaction.invoiceId,
+        Number(transaction.amount),
+        transaction.tenantId,
+      );
     }
 
     // Send payment receipt email
@@ -305,6 +354,40 @@ export class PromptPayService {
 
     this.logger.log(`Transaction ${dto.transactionRef} marked as paid`);
     return { success: true, message: 'Payment processed successfully' };
+  }
+
+  /**
+   * Verify the inbound webhook HMAC signature. Fail-closed:
+   *   • secret configured  → signature MUST match the raw body, else 401
+   *   • secret missing in production → reject (never trust unsigned money events)
+   *   • secret missing in dev/test  → warn and allow (local testing convenience)
+   */
+  private assertValidWebhookSignature(
+    rawBody: Buffer | string | undefined,
+    signature: string | undefined,
+  ): void {
+    const secret = this.configService.get<string>('PROMPTPAY_WEBHOOK_SECRET', '');
+    const isProduction = this.configService.get<string>('NODE_ENV', 'development') === 'production';
+
+    if (!secret) {
+      if (isProduction) {
+        this.logger.error('PROMPTPAY_WEBHOOK_SECRET not configured — rejecting webhook');
+        throw new UnauthorizedException('Webhook verification not configured');
+      }
+      this.logger.warn(
+        'PROMPTPAY_WEBHOOK_SECRET not set — skipping signature check (non-production only)',
+      );
+      return;
+    }
+
+    if (rawBody === undefined) {
+      throw new UnauthorizedException('Webhook raw body unavailable for verification');
+    }
+
+    if (!verifyHmacSha256(rawBody, signature, secret)) {
+      this.logger.warn('PromptPay webhook signature verification failed');
+      throw new UnauthorizedException('Invalid webhook signature');
+    }
   }
 
   /**
@@ -337,7 +420,11 @@ export class PromptPayService {
     }
 
     if (transaction.invoiceId) {
-      await this.updateInvoicePaymentStatus(transaction.invoiceId, Number(transaction.amount));
+      await this.updateInvoicePaymentStatus(
+        transaction.invoiceId,
+        Number(transaction.amount),
+        transaction.tenantId,
+      );
     }
 
     // Send receipt email
@@ -516,7 +603,9 @@ export class PromptPayService {
 
     // Create refund record in payment_refunds table
     // This is a placeholder - actual implementation depends on payment gateway
-    this.logger.log(`Processing refund for ${dto.transactionRef}, amount: ${refundAmount}`);
+    this.logger.log(
+      `Processing refund for ${dto.transactionRef}, amount: ${refundAmount} (by admin ${adminId})`,
+    );
 
     await this.prisma.promptPayTransaction.update({
       where: { id: transaction.id },
@@ -558,11 +647,17 @@ export class PromptPayService {
    * Update invoice payment status and related booking after PromptPay payment
    * Handles both subscription invoices and booking-related invoices
    */
-  private async updateInvoicePaymentStatus(invoiceId: string, amount: number): Promise<void> {
+  private async updateInvoicePaymentStatus(
+    invoiceId: string,
+    amount: number,
+    tenantId: string | null,
+  ): Promise<void> {
     try {
-      // Get invoice to check for booking_id
-      const invoice = await this.prisma.invoices.findUnique({
-        where: { id: invoiceId },
+      // Get invoice to check for booking_id.
+      // findFirst (NOT findUnique) with the tenant filter — `invoices` is
+      // tenant-scoped and the TenantScope guard rejects findUnique.
+      const invoice = await this.prisma.invoices.findFirst({
+        where: { id: invoiceId, tenant_id: tenantId },
       });
 
       if (!invoice) {
@@ -578,6 +673,7 @@ export class PromptPayService {
           id: uuidv4(),
           payment_no: paymentNo,
           invoice_id: invoiceId,
+          tenant_id: invoice.tenant_id,
           amount,
           method: 'qr',
           status: 'approved',
@@ -585,13 +681,37 @@ export class PromptPayService {
         },
       });
 
-      // Update invoice status
-      await this.prisma.invoices.update({
-        where: { id: invoiceId },
-        data: { status: 'paid' },
-      });
-
-      this.logger.log(`Invoice ${invoiceId} marked as paid`);
+      // ปิดใบเมื่อยอดอนุมัติครบเท่านั้น — QR มัดจำจากหน้าเว็บ ≠ ชำระครบ และยอด QR มาจาก
+      // client ได้ (generate-qr) จึงห้ามให้ QR ยอดต่ำปิดใบแจ้งหนี้/เปิดสิทธิ์ add-on ฟรี
+      const settled = isInvoiceSettled(
+        invoice,
+        await this.prisma.payments.findMany({
+          where: { invoice_id: invoiceId, status: 'approved' },
+          select: { amount: true },
+        }),
+      );
+      if (settled) {
+        // ปิดใบ + เปิดสิทธิ์ add-on (ซื้อแบบชำระทันที) ใน transaction เดียว — ล้มก็ไม่ค้างครึ่งทาง
+        const granted = await this.prisma.$transaction(async (tx) => {
+          await tx.invoices.update({
+            where: { id: invoiceId },
+            data: { status: 'paid' },
+          });
+          return grantAddonPurchaseForInvoice(tx, invoiceId, tenantId);
+        });
+        this.logger.log(`Invoice ${invoiceId} marked as paid`);
+        if (granted && tenantId) {
+          this.logger.log(
+            `Add-on ${granted.addonCode} granted via PromptPay until ${granted.periodEnd.toISOString()}`,
+          );
+          // หลัง commit — ไม่งั้น read พร้อมกันอุ่น cache จากข้อมูลที่ยังไม่ commit
+          await this.addonService.invalidateAddonCache(tenantId).catch((err: Error) => {
+            this.logger.error(`Failed to invalidate addon cache: ${err.message}`);
+          });
+        }
+      } else {
+        this.logger.log(`Invoice ${invoiceId} received ${amount} — balance still outstanding`);
+      }
 
       // If invoice is linked to a booking, update booking status to confirmed
       if (invoice.booking_id) {

@@ -1,16 +1,19 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '@/prisma/prisma.service';
-import { AddonService } from '@/modules/addons/addon.service';
+import { IntegrationsService } from '@/modules/integrations/integrations.service';
 import {
   COST_EVENTS,
   StockMovementCreatedEvent,
   BookingCheckoutCompletedEvent,
+  RecruitmentBudgetReservedEvent,
+  RecruitmentSalaryCommittedEvent,
 } from './cost-accounting.events';
 
 /**
  * Listens for events and auto-posts cost entries to the Cost Accounting module.
- * Only runs if tenant has COST_ACCOUNTING_MODULE addon active.
+ * Each handler is gated by the tenant's Integration Hub connection setting
+ * (which itself requires the relevant add-ons to be active).
  *
  * Key mappings:
  * - Stock movement (housekeeping) → MATERIAL cost to ROOMS cost center
@@ -25,7 +28,7 @@ export class CostEventListener {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly addonService: AddonService,
+    private readonly integrationsService: IntegrationsService,
   ) {}
 
   /**
@@ -35,11 +38,11 @@ export class CostEventListener {
   @OnEvent(COST_EVENTS.STOCK_MOVEMENT_CREATED, { async: true })
   async handleStockMovement(event: StockMovementCreatedEvent): Promise<void> {
     try {
-      const hasAddon = await this.addonService.hasActiveAddon(
+      const connected = await this.integrationsService.isEnabled(
         event.tenantId,
-        'COST_ACCOUNTING_MODULE',
+        'inventory-costaccounting-posting',
       );
-      if (!hasAddon) return;
+      if (!connected) return;
 
       // Only GOODS_ISSUE represents consumption (cost)
       if (event.type !== 'GOODS_ISSUE') return;
@@ -50,21 +53,18 @@ export class CostEventListener {
         `Auto-posting cost entry: movement=${event.movementId}, cost=${event.totalCost}`,
       );
 
-      // Determine cost center based on reference type
-      const costCenterCode = this.mapReferenceToCostCenter(event.referenceType);
-      const costCenter = await this.prisma.costCenter.findFirst({
-        where: {
-          tenantId: event.tenantId,
-          propertyId: event.propertyId,
-          code: costCenterCode,
-          isActive: true,
-        },
-        select: { id: true },
-      });
+      // Determine cost center: department-owned (HrDepartment.costCenterId) first,
+      // then the static reference-type mapping
+      const costCenter = await this.resolveCostCenter(
+        event.tenantId,
+        event.propertyId,
+        event.referenceType,
+        event.departmentId ?? null,
+      );
 
       if (!costCenter) {
         this.logger.warn(
-          `No cost center "${costCenterCode}" found for property ${event.propertyId} — skipping`,
+          `No cost center resolved for property ${event.propertyId} (ref: ${event.referenceType ?? '-'}) — skipping`,
         );
         return;
       }
@@ -109,7 +109,7 @@ export class CostEventListener {
       });
 
       this.logger.log(
-        `Cost entry posted: ${event.totalCost} THB to ${costCenterCode}/${costTypeCode}`,
+        `Cost entry posted: ${event.totalCost} THB to ${costCenter.id}/${costTypeCode}`,
       );
     } catch (error) {
       this.logger.error(
@@ -125,11 +125,11 @@ export class CostEventListener {
   @OnEvent(COST_EVENTS.BOOKING_CHECKOUT_COMPLETED, { async: true })
   async handleBookingCheckout(event: BookingCheckoutCompletedEvent): Promise<void> {
     try {
-      const hasAddon = await this.addonService.hasActiveAddon(
+      const connected = await this.integrationsService.isEnabled(
         event.tenantId,
-        'COST_ACCOUNTING_MODULE',
+        'booking-costaccounting-checkout',
       );
-      if (!hasAddon) return;
+      if (!connected) return;
 
       if (event.totalPrice <= 0) return;
 
@@ -194,6 +194,199 @@ export class CostEventListener {
   }
 
   /**
+   * Stage 2: recruitment budget fully approved → reserve salary budget for the
+   * requesting department (CostBudget upsert on CT-SAL for the current period)
+   */
+  @OnEvent(COST_EVENTS.RECRUITMENT_BUDGET_RESERVED, { async: true })
+  async handleBudgetReserved(event: RecruitmentBudgetReservedEvent): Promise<void> {
+    try {
+      const connected = await this.integrationsService.isEnabled(
+        event.tenantId,
+        'hr-costaccounting-recruitment',
+      );
+      if (!connected) return;
+      if (event.budgetTotal <= 0) return;
+
+      const target = await this.resolveRecruitmentTarget(event.tenantId, event.propertyId, event.departmentId);
+      if (!target) {
+        this.logger.warn(`No cost center resolved for recruitment budget ${event.requestNo} — skipping`);
+        return;
+      }
+      const costType = await this.prisma.costType.findFirst({
+        where: { tenantId: event.tenantId, code: 'CT-SAL', isActive: true },
+        select: { id: true },
+      });
+      if (!costType) {
+        this.logger.warn(`No cost type "CT-SAL" found for tenant ${event.tenantId} — skipping`);
+        return;
+      }
+
+      const now = new Date();
+      const period = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+      await this.prisma.costBudget.upsert({
+        where: {
+          tenantId_propertyId_costCenterId_costTypeId_period: {
+            tenantId: event.tenantId,
+            propertyId: target.propertyId,
+            costCenterId: target.costCenterId,
+            costTypeId: costType.id,
+            period,
+          },
+        },
+        create: {
+          tenantId: event.tenantId,
+          propertyId: target.propertyId,
+          costCenterId: target.costCenterId,
+          costTypeId: costType.id,
+          period,
+          budgetAmount: event.budgetTotal,
+          notes: `Auto: recruitment budget reserved (${event.requestNo} — ${event.positionTitle} x${event.headcount})`,
+          createdBy: event.createdBy,
+        },
+        update: { budgetAmount: { increment: event.budgetTotal } },
+      });
+
+      this.logger.log(`Recruitment budget reserved: ${event.budgetTotal} THB (${event.requestNo}, period ${period})`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to reserve recruitment budget: ${(error as Error).message}`,
+        (error as Error).stack,
+      );
+    }
+  }
+
+  /**
+   * Stage 5: candidate hired → post committed monthly salary as a LABOR cost
+   * entry (CT-SAL) on the department's cost center, period = start month
+   */
+  @OnEvent(COST_EVENTS.RECRUITMENT_SALARY_COMMITTED, { async: true })
+  async handleSalaryCommitted(event: RecruitmentSalaryCommittedEvent): Promise<void> {
+    try {
+      const connected = await this.integrationsService.isEnabled(
+        event.tenantId,
+        'hr-costaccounting-recruitment',
+      );
+      if (!connected) return;
+      if (event.monthlySalary <= 0) return;
+
+      const target = await this.resolveRecruitmentTarget(event.tenantId, event.propertyId, event.departmentId);
+      if (!target) {
+        this.logger.warn(`No cost center resolved for hire ${event.hireRecordId} — skipping`);
+        return;
+      }
+      const costType = await this.prisma.costType.findFirst({
+        where: { tenantId: event.tenantId, code: 'CT-SAL', isActive: true },
+        select: { id: true },
+      });
+      if (!costType) {
+        this.logger.warn(`No cost type "CT-SAL" found for tenant ${event.tenantId} — skipping`);
+        return;
+      }
+
+      const startDate = new Date(event.startDate);
+      const period = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}`;
+
+      await this.prisma.costEntry.create({
+        data: {
+          tenantId: event.tenantId,
+          propertyId: target.propertyId,
+          costCenterId: target.costCenterId,
+          costTypeId: costType.id,
+          amount: event.monthlySalary,
+          period,
+          entryDate: startDate,
+          description: `Auto: salary committed — ${event.positionTitle} (new hire)`,
+          sourceType: 'hire_record',
+          sourceId: event.hireRecordId,
+          isAutoPosted: true,
+          status: 'posted',
+          createdBy: event.createdBy,
+        },
+      });
+
+      this.logger.log(`Salary commitment posted: ${event.monthlySalary} THB/month (hire ${event.hireRecordId}, period ${period})`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to post salary commitment: ${(error as Error).message}`,
+        (error as Error).stack,
+      );
+    }
+  }
+
+  /**
+   * Resolve cost center for a stock movement: if the event carries the owning
+   * department (equipment_issuance), use HrDepartment.costCenterId — falling
+   * back to a same-code center under the event's property when the mapped
+   * center belongs to another property — otherwise use the static mapping.
+   */
+  private async resolveCostCenter(
+    tenantId: string,
+    propertyId: string,
+    referenceType?: string,
+    departmentId?: string | null,
+  ): Promise<{ id: string } | null> {
+    if (departmentId) {
+      const fromDept = await this.costCenterFromDepartment(tenantId, propertyId, departmentId);
+      if (fromDept) return { id: fromDept.costCenterId };
+    }
+    const costCenterCode = this.mapReferenceToCostCenter(referenceType);
+    return this.prisma.costCenter.findFirst({
+      where: { tenantId, propertyId, code: costCenterCode, isActive: true },
+      select: { id: true },
+    });
+  }
+
+  /**
+   * Resolve cost center + property for recruitment events (propertyId may be
+   * null on tenant-wide requests): department mapping → CC-ADMIN fallback.
+   */
+  private async resolveRecruitmentTarget(
+    tenantId: string,
+    propertyId: string | null,
+    departmentId: string | null,
+  ): Promise<{ costCenterId: string; propertyId: string } | null> {
+    if (departmentId) {
+      const fromDept = await this.costCenterFromDepartment(tenantId, propertyId, departmentId);
+      if (fromDept) return fromDept;
+    }
+    // fallback: CC-ADMIN ใต้ property ของ event (หรือ property แรกของ tenant)
+    const admin = await this.prisma.costCenter.findFirst({
+      where: {
+        tenantId,
+        ...(propertyId ? { propertyId } : {}),
+        code: 'CC-ADMIN',
+        isActive: true,
+      },
+      select: { id: true, propertyId: true },
+    });
+    return admin ? { costCenterId: admin.id, propertyId: admin.propertyId } : null;
+  }
+
+  /** HrDepartment.costCenterId → cost center (เลือกตัวที่ตรง property ของ event ก่อน) */
+  private async costCenterFromDepartment(
+    tenantId: string,
+    propertyId: string | null,
+    departmentId: string,
+  ): Promise<{ costCenterId: string; propertyId: string } | null> {
+    const department = await (this.prisma as any).hrDepartment.findFirst({
+      where: { id: departmentId, tenantId },
+      include: { costCenter: { select: { id: true, code: true, propertyId: true, isActive: true } } },
+    });
+    const mapped = department?.costCenter;
+    if (!mapped?.isActive) return null;
+    if (!propertyId || mapped.propertyId === propertyId) {
+      return { costCenterId: mapped.id, propertyId: mapped.propertyId };
+    }
+    // cost center อยู่คนละ property → ใช้ center โค้ดเดียวกันใต้ property ของ event
+    const sameCode = await this.prisma.costCenter.findFirst({
+      where: { tenantId, propertyId, code: mapped.code, isActive: true },
+      select: { id: true, propertyId: true },
+    });
+    return sameCode ? { costCenterId: sameCode.id, propertyId: sameCode.propertyId } : null;
+  }
+
+  /**
    * Map reference type to USALI cost center code
    */
   private mapReferenceToCostCenter(referenceType?: string): string {
@@ -220,6 +413,8 @@ export class CostEventListener {
         return 'CT-PARTS'; // Maintenance Parts
       case 'restaurant_order':
         return 'CT-INGR'; // F&B Ingredients
+      case 'equipment_issuance':
+        return 'CT-EQUIP'; // Staff Equipment (first-day issuance)
       default:
         return 'CT-CLEAN'; // Cleaning Supplies (general)
     }

@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { PrismaService } from '../prisma/prisma.service';
 import { Invoice, InvoiceStatus } from '../invoices/entities/invoice.entity';
 import { InvoiceAdjustment, AdjustmentType } from '../invoices/entities/invoice-adjustment.entity';
 import { InvoiceItem } from '../invoice-items/entities/invoice-item.entity';
@@ -29,6 +30,7 @@ export class AdminInvoiceAdjustmentsService {
     private adjustmentsRepository: Repository<InvoiceAdjustment>,
     @InjectRepository(InvoiceItem)
     private invoiceItemsRepository: Repository<InvoiceItem>,
+    private readonly prisma: PrismaService,
   ) {}
 
   /**
@@ -40,10 +42,17 @@ export class AdminInvoiceAdjustmentsService {
     dto: AdjustInvoiceDto,
     adminId?: string,
   ): Promise<AdjustInvoiceResponseDto> {
-    const invoice = await this.findInvoice(invoiceId);
+    // Read via Prisma (system's primary ORM) so the write below is visible
+    // everywhere the invoice is read (admin breakdown + customer print).
+    const invoice = await this.prisma.invoices.findFirst({
+      where: { OR: [{ id: invoiceId }, { invoice_no: invoiceId }] },
+    });
+    if (!invoice) {
+      throw new NotFoundException(`Invoice with ID "${invoiceId}" not found`);
+    }
 
     // Can't adjust voided invoices
-    if (invoice.status === InvoiceStatus.VOIDED) {
+    if (String(invoice.status) === 'voided') {
       throw new BadRequestException('Cannot adjust a voided invoice');
     }
 
@@ -74,38 +83,43 @@ export class AdminInvoiceAdjustmentsService {
       creditMemoNo = `CM-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
     }
 
-    // Create adjustment record
-    const adjustment = this.adjustmentsRepository.create({
-      invoiceId: invoice.id,
-      type: dto.type as unknown as AdjustmentType,
-      amount: Math.abs(dto.amount),
-      originalAmount,
-      newAmount,
-      reason: dto.reason,
-      notes: dto.notes,
-      adjustmentReference: creditMemoNo,
-      createdBy: adminId,
-    });
-
-    await this.adjustmentsRepository.save(adjustment);
-
-    // Update invoice
-    if (!invoice.originalAmount) {
-      invoice.originalAmount = originalAmount;
-    }
-    invoice.amount = newAmount;
-    invoice.adjustedAmount = newAmount;
-    await this.invoicesRepository.save(invoice);
+    // Atomically record the adjustment AND update the invoice amount via Prisma.
+    // The previous TypeORM path wrote to a parallel layer and the update never
+    // reflected in the Prisma-backed reads, so the invoice looked unchanged.
+    await this.prisma.$transaction([
+      this.prisma.invoice_adjustments.create({
+        data: {
+          invoice_id: invoice.id,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          type: dto.type as any,
+          amount: Math.abs(dto.amount),
+          original_amount: originalAmount,
+          new_amount: newAmount,
+          reason: dto.reason,
+          notes: dto.notes,
+          adjustment_reference: creditMemoNo,
+          created_by: adminId,
+        },
+      }),
+      this.prisma.invoices.update({
+        where: { id: invoice.id },
+        data: {
+          amount: newAmount,
+          adjusted_amount: newAmount,
+          original_amount: invoice.original_amount ?? originalAmount,
+        },
+      }),
+    ]);
 
     this.logger.log(
-      `Invoice ${invoice.invoiceNo} adjusted: ${originalAmount} -> ${newAmount} (${dto.type}: ${dto.amount})`,
+      `Invoice ${invoice.invoice_no} adjusted: ${originalAmount} -> ${newAmount} (${dto.type}: ${dto.amount})`,
     );
 
     return {
       success: true,
       message: 'Invoice adjusted successfully',
       data: {
-        invoiceNo: invoice.invoiceNo,
+        invoiceNo: invoice.invoice_no,
         adjustmentType: dto.type,
         adjustmentAmount: Math.abs(dto.amount),
         originalAmount,
@@ -183,33 +197,38 @@ export class AdminInvoiceAdjustmentsService {
    * Get adjustment history for an invoice
    */
   async getAdjustments(invoiceId: string): Promise<InvoiceAdjustmentsListDto> {
-    const invoice = await this.findInvoice(invoiceId);
-
-    const adjustments = await this.adjustmentsRepository.find({
-      where: { invoiceId: invoice.id },
-      order: { createdAt: 'DESC' },
+    // Read via Prisma so the history reflects adjustments written above.
+    const invoice = await this.prisma.invoices.findFirst({
+      where: { OR: [{ id: invoiceId }, { invoice_no: invoiceId }] },
+      include: { invoice_adjustments: { orderBy: { created_at: 'desc' } } },
     });
+    if (!invoice) {
+      throw new NotFoundException(`Invoice with ID "${invoiceId}" not found`);
+    }
 
-    const adjustmentItems: AdjustmentItemDto[] = adjustments.map((adj) => ({
-      id: adj.id,
-      type: adj.type,
-      amount: Number(adj.amount),
-      originalAmount: Number(adj.originalAmount),
-      newAmount: Number(adj.newAmount),
-      reason: adj.reason || undefined,
-      creditMemoNo: adj.adjustmentReference || undefined,
-      createdAt: adj.createdAt.toISOString(),
-      createdBy: adj.createdBy || undefined,
-    }));
+    const adjustmentItems: AdjustmentItemDto[] = (invoice.invoice_adjustments || []).map(
+      (adj) => ({
+        id: adj.id,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        type: adj.type as any,
+        amount: Number(adj.amount),
+        originalAmount: Number(adj.original_amount),
+        newAmount: Number(adj.new_amount),
+        reason: adj.reason || undefined,
+        creditMemoNo: adj.adjustment_reference || undefined,
+        createdAt: adj.created_at.toISOString(),
+        createdBy: adj.created_by || undefined,
+      }),
+    );
 
-    const totalAdjustment =
-      Number(invoice.amount) - Number(invoice.originalAmount || invoice.amount);
+    const originalAmount = Number(invoice.original_amount ?? invoice.amount);
+    const currentAmount = Number(invoice.amount);
 
     return {
-      invoiceNo: invoice.invoiceNo,
-      originalAmount: Number(invoice.originalAmount || invoice.amount),
-      currentAmount: Number(invoice.amount),
-      totalAdjustment,
+      invoiceNo: invoice.invoice_no,
+      originalAmount,
+      currentAmount,
+      totalAdjustment: currentAmount - originalAmount,
       adjustments: adjustmentItems,
     };
   }
@@ -219,24 +238,49 @@ export class AdminInvoiceAdjustmentsService {
    * Get invoice with line items
    */
   async getInvoiceWithItems(invoiceId: string): Promise<InvoiceWithItemsDto> {
-    const invoice = await this.invoicesRepository.findOne({
-      where: { id: invoiceId },
-      relations: ['invoiceItems', 'tenant'],
+    // Read via Prisma (same source the customer print uses) so the admin view
+    // shows the exact same line items — including the coupon discount row.
+    // The previous TypeORM path could return a stale/empty invoiceItems relation
+    // for Prisma-written rows, so the admin breakdown fell back to a single line.
+    // This is a platform-admin cross-tenant route (no tenant context), so
+    // findFirst({ id }) resolves the invoice across tenants; if a tenant context
+    // is ever active the TenantScope guard auto-injects the tenant_id filter.
+    const invoice = await this.prisma.invoices.findFirst({
+      where: { OR: [{ id: invoiceId }, { invoice_no: invoiceId }] },
+      include: { invoice_items: true, tenants: true },
     });
 
     if (!invoice) {
-      // Try by invoice number
-      const byNo = await this.invoicesRepository.findOne({
-        where: { invoiceNo: invoiceId },
-        relations: ['invoiceItems', 'tenant'],
-      });
-      if (!byNo) {
-        throw new NotFoundException(`Invoice with ID "${invoiceId}" not found`);
-      }
-      return this.mapInvoiceWithItems(byNo);
+      throw new NotFoundException(`Invoice with ID "${invoiceId}" not found`);
     }
 
-    return this.mapInvoiceWithItems(invoice);
+    const items: InvoiceItemDetailDto[] = (invoice.invoice_items || []).map((item) => ({
+      id: item.id,
+      type: item.type as unknown as InvoiceItemDetailDto['type'],
+      description: item.description,
+      quantity: item.quantity || 1,
+      unitPrice: Number(item.unit_price ?? item.amount),
+      amount: Number(item.amount),
+      originalAmount: item.original_amount != null ? Number(item.original_amount) : undefined,
+      isAdjusted: Boolean(item.is_adjusted),
+    }));
+
+    const subtotal = items.reduce((sum, i) => sum + i.amount, 0);
+    const originalAmount = Number(invoice.original_amount ?? invoice.amount);
+    const currentAmount = Number(invoice.amount);
+
+    return {
+      id: invoice.id,
+      invoiceNo: invoice.invoice_no,
+      hotelName: invoice.tenants?.name || 'N/A',
+      status: invoice.status,
+      items,
+      subtotal,
+      totalAdjustments: currentAmount - originalAmount,
+      total: currentAmount,
+      dueDate: invoice.due_date?.toISOString().split('T')[0] || 'N/A',
+      voidedAt: invoice.voided_at?.toISOString() || undefined,
+    };
   }
 
   /**
@@ -362,36 +406,5 @@ export class AdminInvoiceAdjustmentsService {
     }
 
     return invoice;
-  }
-
-  private mapInvoiceWithItems(invoice: Invoice): InvoiceWithItemsDto {
-    const items: InvoiceItemDetailDto[] = (invoice.invoiceItems || []).map((item) => ({
-      id: item.id,
-      type: item.type,
-      description: item.description,
-      quantity: item.quantity || 1,
-      unitPrice: Number(item.unitPrice || item.amount),
-      amount: Number(item.amount),
-      originalAmount: item.originalAmount ? Number(item.originalAmount) : undefined,
-      isAdjusted: item.isAdjusted || false,
-    }));
-
-    const subtotal = items.reduce((sum, i) => sum + i.amount, 0);
-    const originalAmount = Number(invoice.originalAmount || invoice.amount);
-    const currentAmount = Number(invoice.amount);
-    const totalAdjustments = currentAmount - originalAmount;
-
-    return {
-      id: invoice.id,
-      invoiceNo: invoice.invoiceNo,
-      hotelName: invoice.tenant?.name || 'N/A',
-      status: invoice.status,
-      items,
-      subtotal,
-      totalAdjustments,
-      total: currentAmount,
-      dueDate: invoice.dueDate?.toISOString().split('T')[0] || 'N/A',
-      voidedAt: invoice.voidedAt?.toISOString() || undefined,
-    };
   }
 }

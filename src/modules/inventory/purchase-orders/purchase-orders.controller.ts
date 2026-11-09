@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Get,
@@ -19,11 +20,14 @@ import { PurchaseOrdersService } from './purchase-orders.service';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { QueryPurchaseOrderDto } from './dto/query-purchase-order.dto';
+import { QueryPurchaseOrderTrackingDto } from './dto/query-purchase-order-tracking.dto';
 
 @ApiTags('Inventory - Purchase Orders')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, AddonGuard)
 @RequireAddon('INVENTORY_MODULE')
+// Procurement Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('procurement', 'warehouse')
 @Controller({ path: 'inventory/purchase-orders', version: '1' })
 export class PurchaseOrdersController {
   constructor(private readonly purchaseOrdersService: PurchaseOrdersService) {}
@@ -39,6 +43,86 @@ export class PurchaseOrdersController {
     return { success: true, data };
   }
 
+  /**
+   * Sprint 1 — Receiving Pipeline view for the procurement side.
+   * Registered before `:id` so the literal "tracking" segment is matched first
+   * (NestJS uses declaration order for routes that share a prefix).
+   */
+  @Get('tracking')
+  @ApiOperation({
+    summary: 'Receiving pipeline — list post-approval POs with received-vs-ordered roll-ups',
+  })
+  @ApiResponse({ status: 200, description: 'Tracking list retrieved' })
+  async findTracking(
+    @Query() query: QueryPurchaseOrderTrackingDto,
+    @Req() req: { user: { tenantId: string } },
+  ): Promise<{ success: boolean; data: unknown }> {
+    const data = await this.purchaseOrdersService.findTracking(req.user.tenantId, query);
+    return { success: true, data };
+  }
+
+  /**
+   * Sprint 5 — Procurement dashboard spend summary. Surfaces this-month vs
+   * last-month committed spend, 12-month sparkline trend, and category
+   * breakdown for the current month. Registered before `:id` so the literal
+   * "spend-summary" segment is matched first (same reason as `/tracking`).
+   */
+  @Get('spend-summary')
+  @ApiOperation({
+    summary: 'Spend summary — this/last month + 12-month trend + category breakdown',
+  })
+  @ApiResponse({ status: 200, description: 'Spend summary retrieved' })
+  async findSpendSummary(
+    @Query('propertyId') propertyId: string | undefined,
+    @Req() req: { user: { tenantId: string } },
+  ): Promise<{ success: boolean; data: unknown }> {
+    const data = await this.purchaseOrdersService.findSpendSummary(req.user.tenantId, propertyId);
+    return { success: true, data };
+  }
+
+  /**
+   * Sprint 4 — Variance Report. Returns POs with non-zero delta between
+   * ordered/received/invoiced. Registered before `:id` for the same reason
+   * as `/tracking`.
+   */
+  @Get('variance')
+  @ApiOperation({ summary: 'Variance report — PO ordered vs received vs invoiced' })
+  @ApiResponse({ status: 200, description: 'Variance retrieved' })
+  async findVariance(
+    @Query('from') from: string | undefined,
+    @Query('to') to: string | undefined,
+    @Query('supplierId') supplierId: string | undefined,
+    @Req() req: { user: { tenantId: string } },
+  ): Promise<{ success: boolean; data: unknown }> {
+    const data = await this.purchaseOrdersService.findVariance(req.user.tenantId, {
+      from,
+      to,
+      supplierId,
+    });
+    return { success: true, data };
+  }
+
+  /**
+   * POs that deviate from the winning supplier quote (reason + diff).
+   * Registered before `:id`.
+   */
+  @Get('quote-variance')
+  @ApiOperation({ summary: 'Variance report — PO vs the supplier quote it was issued from' })
+  @ApiResponse({ status: 200, description: 'Quote variance retrieved' })
+  async findQuoteVariance(
+    @Query('from') from: string | undefined,
+    @Query('to') to: string | undefined,
+    @Query('supplierId') supplierId: string | undefined,
+    @Req() req: { user: { tenantId: string } },
+  ): Promise<{ success: boolean; data: unknown }> {
+    const data = await this.purchaseOrdersService.findQuoteVariance(req.user.tenantId, {
+      from,
+      to,
+      supplierId,
+    });
+    return { success: true, data };
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get purchase order detail' })
   @ApiResponse({ status: 200, description: 'Purchase order retrieved' })
@@ -48,6 +132,23 @@ export class PurchaseOrdersController {
     @Req() req: { user: { tenantId: string } },
   ): Promise<{ success: boolean; data: unknown }> {
     const data = await this.purchaseOrdersService.findOne(id, req.user.tenantId);
+    return { success: true, data };
+  }
+
+  /**
+   * Sprint 2 — line-level receiving tab. Returns per-line ordered/received/pending
+   * plus the full list of linked GRs. Cheaper than `findOne` when the UI only
+   * needs the receiving breakdown (PO Detail "การรับเข้า" tab).
+   */
+  @Get(':id/receiving')
+  @ApiOperation({ summary: 'Receiving breakdown — line-level + GR list' })
+  @ApiResponse({ status: 200, description: 'Receiving detail retrieved' })
+  @ApiResponse({ status: 404, description: 'Not found' })
+  async findReceiving(
+    @Param('id') id: string,
+    @Req() req: { user: { tenantId: string } },
+  ): Promise<{ success: boolean; data: unknown }> {
+    const data = await this.purchaseOrdersService.findReceiving(id, req.user.tenantId);
     return { success: true, data };
   }
 
@@ -93,9 +194,13 @@ export class PurchaseOrdersController {
   @ApiResponse({ status: 200, description: 'Purchase order approved' })
   async approve(
     @Param('id') id: string,
-    @Req() req: { user: { id: string; tenantId: string } },
+    @Req() req: { user: { id: string; tenantId: string; role: string } },
   ): Promise<{ success: boolean; data: unknown }> {
-    const data = await this.purchaseOrdersService.approve(id, req.user.id, req.user.tenantId);
+    const data = await this.purchaseOrdersService.approve(id, {
+      userId: req.user.id,
+      tenantId: req.user.tenantId,
+      role: req.user.role,
+    });
     return { success: true, data };
   }
 
@@ -105,14 +210,13 @@ export class PurchaseOrdersController {
   async cancel(
     @Param('id') id: string,
     @Body() body: { reason: string },
-    @Req() req: { user: { id: string; tenantId: string } },
+    @Req() req: { user: { id: string; tenantId: string; role: string } },
   ): Promise<{ success: boolean; data: unknown }> {
-    const data = await this.purchaseOrdersService.cancel(
-      id,
-      req.user.id,
-      body.reason,
-      req.user.tenantId,
-    );
+    const data = await this.purchaseOrdersService.cancel(id, body.reason, {
+      userId: req.user.id,
+      tenantId: req.user.tenantId,
+      role: req.user.role,
+    });
     return { success: true, data };
   }
 
@@ -124,6 +228,28 @@ export class PurchaseOrdersController {
     @Req() req: { user: { tenantId: string } },
   ): Promise<{ success: boolean; data: unknown }> {
     const data = await this.purchaseOrdersService.close(id, req.user.tenantId);
+    return { success: true, data };
+  }
+
+  /**
+   * Sprint 4 — Force-close a PO that won't be received in full.
+   * Allowed only for APPROVED or PARTIALLY_RECEIVED. Reason is required.
+   */
+  @Post(':id/force-close')
+  @ApiOperation({ summary: 'Force-close PO with outstanding qty (records variance)' })
+  @ApiResponse({ status: 200, description: 'Purchase order force-closed' })
+  @ApiResponse({ status: 400, description: 'Invalid status or missing reason' })
+  async forceClose(
+    @Param('id') id: string,
+    @Body() body: { reason: string },
+    @Req() req: { user: { id: string; tenantId: string } },
+  ): Promise<{ success: boolean; data: unknown }> {
+    const data = await this.purchaseOrdersService.forceClose(
+      id,
+      req.user.id,
+      body.reason,
+      req.user.tenantId,
+    );
     return { success: true, data };
   }
 }

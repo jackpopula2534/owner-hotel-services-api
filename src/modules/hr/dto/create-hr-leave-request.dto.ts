@@ -45,9 +45,22 @@ export class CreateHrLeaveRequestDto {
   @IsOptional()
   @IsString()
   substituteId?: string;
+
+  @ApiPropertyOptional({ description: 'Supporting document URL' })
+  @IsOptional()
+  @IsString()
+  attachmentUrl?: string;
 }
 
 export class UpdateHrLeaveRequestDto extends PartialType(CreateHrLeaveRequestDto) {}
+
+export class ApproveLeaveStepDto {
+  @ApiPropertyOptional({ description: 'Reviewer note' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  note?: string;
+}
 
 export class RejectLeaveRequestDto {
   @ApiProperty({ description: 'Reason for rejection' })

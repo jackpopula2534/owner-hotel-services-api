@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Get,
@@ -28,6 +29,8 @@ import { ResolveQRDto } from './dto/resolve-qr.dto';
 @ApiTags('Inventory QR')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
+// Warehouse Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('warehouse', 'retail')
 @Controller('inventory')
 export class QRController {
   constructor(private readonly qrService: QRService) {}
@@ -44,7 +47,12 @@ export class QRController {
     @Query('size', new DefaultValuePipe(256), ParseIntPipe) size: number,
     @Res() res: Response,
   ) {
-    const { buffer, mimeType } = await this.qrService.getItemQR(req.user.tenantId, id, format, size);
+    const { buffer, mimeType } = await this.qrService.getItemQR(
+      req.user.tenantId,
+      id,
+      format,
+      size,
+    );
     res.setHeader('Content-Type', mimeType);
     res.setHeader('Cache-Control', 'public, max-age=3600');
     res.send(buffer);
@@ -103,7 +111,7 @@ export class QRController {
   @ApiOperation({ summary: 'Resolve QR payload → item or lot detail (verifies HMAC)' })
   @ApiResponse({ status: 200, description: 'Item or lot detail' })
   @ApiResponse({ status: 400, description: 'Invalid or tampered QR' })
-  @Throttle({ default: { limit: 10, ttl: 60000 } })  // 10 req/min strict limit
+  @Throttle({ default: { limit: 10, ttl: 60000 } }) // 10 req/min strict limit
   @Post('qr/resolve')
   async resolveQR(@Request() req: any, @Body() dto: ResolveQRDto) {
     return this.qrService.resolveQR(req.user.tenantId, dto.payload);

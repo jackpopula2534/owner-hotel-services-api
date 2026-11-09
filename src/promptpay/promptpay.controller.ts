@@ -1,3 +1,4 @@
+import { AllowSystems } from '../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Post,
@@ -7,9 +8,13 @@ import {
   Param,
   UseGuards,
   Request,
+  Req,
+  Headers,
+  RawBodyRequest,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { Request as ExpressRequest } from 'express';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -25,13 +30,15 @@ import {
 } from './dto/promptpay.dto';
 
 @ApiTags('PromptPay Payment')
+// Hotel Terminal (PromptPay QR at front desk) — H1 allow-list, audit 2026-11-09
+@AllowSystems('hotel-terminal', 'camp-terminal', 'retail')
 @Controller('payments/promptpay')
 export class PromptPayController {
   constructor(private readonly promptPayService: PromptPayService) {}
 
   @Post('generate-qr')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('platform_admin', 'tenant_admin', 'manager', 'receptionist')
+  @Roles('platform_admin', 'tenant_admin', 'manager', 'receptionist', 'hotel_manager', 'front_desk')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Generate PromptPay QR code for payment' })
   @ApiResponse({ status: 200, description: 'QR code generated successfully' })
@@ -54,8 +61,13 @@ export class PromptPayController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Webhook endpoint for payment notifications' })
   @ApiResponse({ status: 200, description: 'Webhook processed' })
-  async handleWebhook(@Body() dto: WebhookPaymentDto) {
-    return this.promptPayService.handleWebhook(dto);
+  @ApiResponse({ status: 401, description: 'Invalid or missing webhook signature' })
+  async handleWebhook(
+    @Req() req: RawBodyRequest<ExpressRequest>,
+    @Headers('x-promptpay-signature') signature: string,
+    @Body() dto: WebhookPaymentDto,
+  ) {
+    return this.promptPayService.handleWebhook(dto, req.rawBody, signature);
   }
 
   @Post('verify')

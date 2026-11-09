@@ -7,12 +7,15 @@ import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { EmailModule } from '../../email/email.module';
 import { OnboardingModule } from '../../onboarding/onboarding.module';
+import { AddonModule } from '../addons/addon.module';
 
 @Module({
   imports: [
     PassportModule.register({ defaultStrategy: 'jwt' }),
     EmailModule,
     OnboardingModule,
+    // AddonGuard บน pos-launch (POS/KDS ต้องมี RESTAURANT_MODULE เหมือน /restaurants)
+    AddonModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({

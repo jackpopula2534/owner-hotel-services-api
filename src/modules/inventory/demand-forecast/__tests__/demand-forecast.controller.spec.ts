@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { DemandForecastController } from '../demand-forecast.controller';
 import { DemandForecastService } from '../demand-forecast.service';
 import { DemandForecastResponseDto, OccupancyForecastResponseDto } from '../dto';
+import { AddonGuard } from '@/common/guards/addon.guard';
 
 describe('DemandForecastController', () => {
   let controller: DemandForecastController;
@@ -73,7 +74,10 @@ describe('DemandForecastController', () => {
           useValue: mockDemandForecastService,
         },
       ],
-    }).compile();
+    })
+      .overrideGuard(AddonGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
 
     controller = module.get<DemandForecastController>(DemandForecastController);
     service = module.get<DemandForecastService>(DemandForecastService);

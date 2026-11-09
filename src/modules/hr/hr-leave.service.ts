@@ -1,16 +1,44 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AuditLogService } from '../../audit-log/audit-log.service';
+import { AuditAction, AuditResource, AuditCategory } from '../../audit-log/dto/audit-log.dto';
+import { HrLeavePolicyService } from './hr-leave-policy.service';
 import {
   CreateHrLeaveRequestDto,
   UpdateHrLeaveRequestDto,
   RejectLeaveRequestDto,
 } from './dto/create-hr-leave-request.dto';
 
+/** Approver role expected at each approval level (deepest chain = level 3). */
+const LEVEL_ROLES: Record<number, string> = { 1: 'supervisor', 2: 'manager', 3: 'hr' };
+
 @Injectable()
 export class HrLeaveService {
   private readonly logger = new Logger(HrLeaveService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly leavePolicyService: HrLeavePolicyService,
+    private readonly auditLog: AuditLogService,
+  ) {}
+
+  /** Build an approval chain for `levels` steps. Level N (hr) is always last. */
+  private buildApprovalChain(levels: number) {
+    const offset = 3 - levels; // so a 1-level chain is just 'hr', 2-level 'manager'+'hr', etc.
+    return Array.from({ length: levels }, (_, i) => ({
+      level: i + 1,
+      role: LEVEL_ROLES[offset + i + 1] ?? 'hr',
+      status: 'pending' as const,
+      approverId: null as string | null,
+      at: null as string | null,
+    }));
+  }
+
+  private tenureMonths(startDate?: Date | string | null): number {
+    if (!startDate) return 0;
+    const start = new Date(startDate).getTime();
+    return Math.max(0, Math.floor((Date.now() - start) / (1000 * 60 * 60 * 24 * 30)));
+  }
 
   // ─── List & Detail ────────────────────────────────────────────────────────────
 
@@ -156,6 +184,30 @@ export class HrLeaveService {
     const end = new Date(dto.endDate);
     if (end < start) throw new BadRequestException('End date must be on or after start date');
 
+    // Resolve tenure-aware leave policy → approval depth + attachment + blackout.
+    const tenure = this.tenureMonths(employee.startDate);
+    const policy = await this.leavePolicyService.resolveEffective(
+      tenantId,
+      dto.leaveTypeId,
+      tenure,
+    );
+
+    if ((policy.requiresAttachment || leaveType.requiresDoc) && !dto.attachmentUrl) {
+      throw new BadRequestException('This leave type requires a supporting document');
+    }
+    if (policy.blackoutDates.length) {
+      const blackout = policy.blackoutDates.find((d) => {
+        const day = new Date(d);
+        return day >= start && day <= end;
+      });
+      if (blackout) {
+        throw new BadRequestException(`Leave overlaps a blackout date (${blackout})`);
+      }
+    }
+
+    const requiredLevels = policy.approvalLevels;
+    const approvalChain = this.buildApprovalChain(requiredLevels);
+
     const request = await (this.prisma as any).hrLeaveRequest.create({
       data: {
         tenantId,
@@ -166,6 +218,10 @@ export class HrLeaveService {
         totalDays: dto.totalDays,
         reason: dto.reason ?? null,
         substituteId: dto.substituteId ?? null,
+        attachmentUrl: dto.attachmentUrl ?? null,
+        approvalChain,
+        currentLevel: 1,
+        requiredLevels,
         status: 'pending',
       },
       include: {
@@ -227,6 +283,65 @@ export class HrLeaveService {
     });
 
     this.logger.log(`Leave request ${id} approved by ${approverId}`);
+    return updated;
+  }
+
+  /**
+   * Multi-step approval (P2-05): approve the current level of the chain. When
+   * the final level is approved the request becomes `approved`.
+   */
+  async approveStep(id: string, approverId: string, tenantId: string, note?: string) {
+    const request = await this.findOne(id, tenantId);
+    if (request.status !== 'pending') {
+      throw new BadRequestException(`Leave request is already ${request.status}`);
+    }
+
+    const chain: any[] = Array.isArray(request.approvalChain)
+      ? [...request.approvalChain]
+      : this.buildApprovalChain(request.requiredLevels ?? 1);
+    const idx = chain.findIndex((s) => s.status === 'pending');
+    if (idx === -1) {
+      throw new BadRequestException('Approval chain already complete');
+    }
+
+    chain[idx] = {
+      ...chain[idx],
+      status: 'approved',
+      approverId,
+      at: new Date().toISOString(),
+      note: note ?? null,
+    };
+    const isFinal = idx === chain.length - 1;
+
+    const updated = await (this.prisma as any).hrLeaveRequest.update({
+      where: { id },
+      data: {
+        approvalChain: chain,
+        currentLevel: Math.min(idx + 2, chain.length),
+        ...(isFinal
+          ? { status: 'approved', approvedBy: approverId, approvedAt: new Date() }
+          : {}),
+      },
+      include: {
+        employee: { select: { id: true, firstName: true, lastName: true } },
+        leaveType: { select: { id: true, name: true } },
+      },
+    });
+
+    await this.auditLog
+      .log({
+        action: AuditAction.LEAVE_APPROVE_STEP,
+        resource: AuditResource.LEAVE_REQUEST,
+        resourceId: id,
+        category: AuditCategory.HR,
+        tenantId,
+        userId: approverId,
+        newValues: { level: idx + 1, role: chain[idx].role, final: isFinal },
+        description: `Leave approval step ${idx + 1}/${chain.length}`,
+      })
+      .catch((err) => this.logger.error(`Audit log failed: ${err.message}`));
+
+    this.logger.log(`Leave ${id} step ${idx + 1}/${chain.length} approved by ${approverId}`);
     return updated;
   }
 

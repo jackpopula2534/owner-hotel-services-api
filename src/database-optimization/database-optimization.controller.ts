@@ -1,11 +1,13 @@
 import { Controller, Get, Post, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { PlatformAdminGuard } from '../common/guards/platform-admin.guard';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { QueryPerformanceService } from './query-performance.service';
 
 @ApiTags('Database Performance (Admin)')
 @Controller('admin/database')
-@UseGuards(JwtAuthGuard)
+// Platform-admin only — was reachable by any logged-in tenant user (audit 2026-11-09)
+@UseGuards(JwtAuthGuard, PlatformAdminGuard)
 @ApiBearerAuth()
 export class DatabaseOptimizationController {
   constructor(private readonly queryPerformanceService: QueryPerformanceService) {}

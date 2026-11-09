@@ -5,7 +5,8 @@ export const ROLES_KEY = 'roles';
 // NOTE:
 // - platform_admin: SaaS platform admin (ดูแลทุก tenant) → login ผ่าน /admin/login
 // - tenant_admin: เจ้าของโรงแรม / ผู้ซื้อ subscription → login ผ่าน /login
-// - manager: ผู้จัดการโรงแรม
+// - manager: ผู้จัดการโรงแรม (GM)
+// - restaurant_manager: ผู้จัดการร้านอาหาร / POS (ไม่สืบทอดสิทธิ์ GM)
 // - receptionist: พนักงานต้อนรับ / Front Desk
 // - housekeeper: แม่บ้าน / Housekeeping
 // - chef: เชฟ / หัวหน้าครัว
@@ -16,6 +17,7 @@ export const ROLES_KEY = 'roles';
 // - staff: พนักงานทั่วไป
 // - user: ผู้ใช้ทั่วไป
 // - admin: legacy alias (รองรับค่าเดิมใน DB / seed)
+// - procurement_manager / buyer / approver / receiver: procurement workspace roles
 export type UserRole =
   | 'platform_admin'
   | 'tenant_admin'
@@ -30,6 +32,37 @@ export type UserRole =
   | 'accountant'
   | 'security'
   | 'staff'
-  | 'user';
+  | 'user'
+  | 'procurement_manager'
+  | 'buyer'
+  | 'approver'
+  | 'receiver'
+  | 'warehouse_manager'
+  | 'hotel_manager'
+  // Hotel Terminal front desk (tenant-users terminal-registry) — exact match only.
+  | 'front_desk'
+  | 'accounting_manager'
+  // Accounting Terminal roles (accounting-users ACCOUNTING_ROLES) — exact match only.
+  // ห้ามใส่ใน ROLE_LEVELS: ดู modules/accounting/accounting-access.decorator.ts
+  | 'chief_accountant'
+  | 'ap_clerk'
+  | 'ar_clerk'
+  | 'auditor'
+  | 'crm_manager'
+  | 'crm_agent'
+  | 'sales_rep'
+  | 'owner'
+  // Camp Terminal roles (tenant-users terminal-registry) — exact match only.
+  | 'camp_manager'
+  | 'camp_staff'
+  // POS floor roles. `create-pos-user.dto.ts` lets a tenant create these, so they
+  // are real. Neither is in ROLE_LEVELS: they reach POS endpoints by exact match
+  // only and inherit nothing else. See ROLE_LEVELS in guards/roles.guard.ts.
+  | 'cashier'
+  | 'bartender'
+  // ผู้จัดการร้านอาหาร/POS — แยกจาก 'manager' (GM) เพื่อไม่ให้สืบทอดสิทธิ์ level 80 ทั้งระบบ
+  // ไม่อยู่ใน ROLE_LEVELS: เข้าได้เฉพาะ endpoint ที่เอ่ยชื่อตรง ๆ (restaurant module)
+  | 'restaurant_manager'
+  | 'system';
 
 export const Roles = (...roles: UserRole[]) => SetMetadata(ROLES_KEY, roles);

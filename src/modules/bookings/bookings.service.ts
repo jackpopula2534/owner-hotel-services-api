@@ -1,5 +1,19 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import {
+  assertPeriodOpen,
+  fiscalPeriodOf,
+  nextJournalEntryNo,
+} from '@/modules/accounting/ledger/journal-posting.util';
+import type { CheckInDto } from './dto/check-in.dto';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+  Logger,
+} from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
+import { buildBookingListWhere } from './booking-list-filter';
 import { EmailEventsService } from '../../email/email-events.service';
 import { AuditLogService } from '../../audit-log/audit-log.service';
 import { AuditAction, AuditResource } from '../../audit-log/dto/audit-log.dto';
@@ -9,10 +23,39 @@ import { HousekeepingService } from '../housekeeping/housekeeping.service';
 import { LoyaltyService } from '../../loyalty/loyalty.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
-import { TaskType, TaskPriority } from '../housekeeping/dto/create-housekeeping-task.dto';
+import {
+  TaskType,
+  TaskPriority,
+  TaskStatus,
+} from '../housekeeping/dto/create-housekeeping-task.dto';
 import { PaymentsService } from '../../payments/payments.service';
 import { PaymentMethod, PaymentStatus } from '../../payments/entities/payment.entity';
 import { Prisma } from '@prisma/client';
+import {
+  applyCleaningBuffer,
+  buildBangkokDateTime,
+  DEFAULT_CHECK_IN_TIME,
+  DEFAULT_CHECK_OUT_TIME,
+  DEFAULT_CLEANING_BUFFER_MINUTES,
+  resolveTimeWithFallback,
+} from '../../common/availability/availability.util';
+import { CRM_EVENTS } from '../crm/crm.events';
+import { applyLedgerBalances } from '../accounting/ledger/ledger-balance.util';
+import { CHECKOUT_SETTLEMENT_REF } from '../accounting/ledger/folio-gl.util';
+import {
+  RevenuePostingService,
+  hasPostableRevenue,
+} from '../revenue/revenue-posting.service';
+import { buildBookingRevenueInput } from '../revenue/sources/booking-revenue.source';
+import { businessDateOf, toBangkokDate, DAY_MS, round2 } from '../../common/utils/bangkok-day.util';
+import { expandHolidayDates } from '../properties/property-holidays.service';
+import { computeTimeFees, timeFeeAmount, type TimeFees } from './time-fees';
+import { applyPromo, type AppliedPromo, type PromoRule } from './promo-discount';
+import {
+  ensureDefaultAccounts,
+  ensureDefaultChartOfAccounts,
+} from '@/modules/accounting/chart-of-accounts/default-chart-of-accounts';
+import { ACCOUNT_CODES } from '@/modules/accounting/ledger/posting-accounts.util';
 
 // ─── Activity Types ───────────────────────────────────────────────────────────
 
@@ -72,7 +115,7 @@ function toBookingStatusLabel(status?: string): string {
   }
 }
 
-type NightlyPricingRow = {
+export type NightlyPricingRow = {
   date: string;
   dayName: string;
   baseRate: number;
@@ -82,9 +125,16 @@ type NightlyPricingRow = {
   note?: string;
 };
 
-type BookingPricingSummary = {
+export type BookingPricingSummary = {
   nightlyRates: NightlyPricingRow[];
+  /** ยอดก่อนค่าบริการ/VAT = ค่าห้องทุกคืน + ค่าเตียงเสริม (ถ้ามี) */
   roomSubtotal: number;
+  /** เตียงเสริมคิดต่อคน ต่อคืน จาก room.extraBedPrice — รวมอยู่ใน roomSubtotal แล้ว */
+  extraBeds?: { guests: number; ratePerNight: number; nights: number; amount: number };
+  /** ค่าเช็คอินก่อน/เช็คเอาท์หลังเวลา ตามการตั้งค่าที่พัก — รวมอยู่ใน roomSubtotal แล้ว */
+  timeFees?: TimeFees;
+  /** ส่วนลดจากโค้ดโปรโมชัน — หักออกจาก roomSubtotal แล้ว (roomSubtotal = promo.grossSubtotal - promo.amount) */
+  promo?: AppliedPromo;
   serviceChargePercent: number;
   serviceChargeAmount: number;
   vatPercent: number;
@@ -99,6 +149,7 @@ export class BookingsService {
 
   constructor(
     private prisma: PrismaService,
+    private eventEmitter: EventEmitter2,
     private emailEventsService: EmailEventsService,
     private auditLogService: AuditLogService,
     private invoicesService: InvoicesService,
@@ -106,7 +157,14 @@ export class BookingsService {
     private loyaltyService: LoyaltyService,
     private notificationsService: NotificationsService,
     private paymentsService: PaymentsService,
+    private revenuePosting: RevenuePostingService,
   ) {}
+
+  /** วันหยุดที่ใช้คิดราคาของที่พัก (วันหยุดราชการที่ไม่ได้ปิด + วันหยุดที่โรงแรมเพิ่มเอง) */
+  private async loadHolidayDates(propertyId: string, tenantId: string): Promise<string[]> {
+    const rows = await this.prisma.propertyHoliday.findMany({ where: { propertyId, tenantId } });
+    return expandHolidayDates(rows ?? [], new Date().getUTCFullYear() + 1);
+  }
 
   private parseBookingDate(value: string, fieldName: 'checkIn' | 'checkOut'): Date {
     const parsed = new Date(value);
@@ -116,18 +174,13 @@ export class BookingsService {
     return parsed;
   }
 
+  /**
+   * Thin wrapper around the shared availability util so existing callers
+   * inside this service keep working. New code should call
+   * `buildBangkokDateTime` directly.
+   */
   private buildScheduledDateTime(value: string, fallbackTime: string): Date {
-    if (value.includes('T')) {
-      return new Date(value);
-    }
-
-    const [hours, minutes] = fallbackTime.split(':').map(Number);
-    // Treat the time as Bangkok local time (UTC+7) by appending the offset.
-    // e.g. "2026-04-23" + "14:00" → "2026-04-23T14:00:00+07:00" = 07:00 UTC stored in DB,
-    // which renders correctly as 14:00 when displayed in Bangkok timezone.
-    const hh = String(hours).padStart(2, '0');
-    const mm = String(minutes).padStart(2, '0');
-    return new Date(`${value}T${hh}:${mm}:00+07:00`);
+    return buildBangkokDateTime(value, fallbackTime);
   }
 
   private asNonEmptyString(value: unknown): string | undefined {
@@ -422,12 +475,51 @@ export class BookingsService {
     };
   }
 
+  /**
+   * ราคาเข้าพักตามกติกาเดียวกับ create() — ให้หน้าเว็บโรงแรมโชว์ราคาก่อนจอง
+   * คำนวณฝั่ง server ล้วน ไม่รับ pricingBreakdown จาก client
+   */
+  quoteStay(
+    room: any,
+    property: any,
+    checkIn: string,
+    checkOut: string,
+    holidayDates: string[],
+    guests: { adults: number; children: number } = { adults: 1, children: 0 },
+    promo?: PromoRule,
+  ): BookingPricingSummary {
+    const { extraBedGuests } = this.resolveOccupancy(guests as CreateBookingDto, room);
+    return this.resolveBookingPricing(
+      { holidayDates } as unknown as CreateBookingDto,
+      room,
+      property,
+      this.parseBookingDate(checkIn, 'checkIn'),
+      this.parseBookingDate(checkOut, 'checkOut'),
+      extraBedGuests,
+      undefined,
+      promo,
+    );
+  }
+
+  /** ห้องนี้รับแขกจำนวนนี้ได้ไหม (รวมเตียงเสริม) — กติกาเดียวกับ create() */
+  fitsOccupancy(room: any, adults: number, children: number): boolean {
+    try {
+      this.resolveOccupancy({ adults, children } as CreateBookingDto, room);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   private resolveBookingPricing(
     createBookingDto: CreateBookingDto,
     room: any,
     property: any,
     checkInDate: Date,
     checkOutDate: Date,
+    extraBedGuests = 0,
+    times?: { checkInTime?: string; checkOutTime?: string },
+    promoRule?: PromoRule,
   ): BookingPricingSummary {
     const holidayDates = new Set(
       Array.isArray((createBookingDto as any).holidayDates)
@@ -473,9 +565,34 @@ export class BookingsService {
       this.calculateNightlyRate(room, date, holidayDates),
     );
 
-    const roomSubtotal = this.roundCurrency(
-      nightlyRates.reduce((sum, nightlyRate) => sum + nightlyRate.appliedRate, 0),
+    const extraBedRate = Math.max(0, Number(room.extraBedPrice ?? 0));
+    const extraBeds =
+      extraBedGuests > 0 && extraBedRate > 0
+        ? {
+            guests: extraBedGuests,
+            ratePerNight: this.roundCurrency(extraBedRate),
+            nights: nightlyRates.length,
+            amount: this.roundCurrency(extraBedGuests * extraBedRate * nightlyRates.length),
+          }
+        : undefined;
+
+    const fees = times
+      ? computeTimeFees(property, times, {
+          firstNightRate: nightlyRates[0]?.appliedRate ?? 0,
+          lastNightRate: nightlyRates[nightlyRates.length - 1]?.appliedRate ?? 0,
+        })
+      : undefined;
+    const timeFees = fees && fees.total > 0 ? fees : undefined;
+
+    // ค่าธรรมเนียมเวลาเป็นค่าห้อง → คิดค่าบริการ/VAT รวมด้วย และลงรายได้ห้องพักตอนเช็คเอาท์
+    const grossSubtotal = this.roundCurrency(
+      nightlyRates.reduce((sum, nightlyRate) => sum + nightlyRate.appliedRate, 0) +
+        (extraBeds?.amount ?? 0) +
+        (timeFees?.total ?? 0),
     );
+    // ส่วนลดหักก่อนคิดค่าบริการ/VAT (ภาษีคิดจากยอดที่แขกจ่ายจริง)
+    const promo = promoRule ? applyPromo(promoRule, grossSubtotal) : undefined;
+    const roomSubtotal = this.roundCurrency(grossSubtotal - (promo?.amount ?? 0));
 
     const serviceChargePercent = property.serviceChargeEnabled
       ? Number(property.serviceChargePercent ?? 10)
@@ -489,6 +606,9 @@ export class BookingsService {
     return {
       nightlyRates,
       roomSubtotal,
+      ...(extraBeds && { extraBeds }),
+      ...(timeFees && { timeFees }),
+      ...(promo && { promo }),
       serviceChargePercent: this.roundCurrency(serviceChargePercent),
       serviceChargeAmount,
       vatPercent: this.roundCurrency(vatPercent),
@@ -644,7 +764,6 @@ export class BookingsService {
   async findAll(query: any, tenantId?: string) {
     const page = parseInt(query.page) || 1;
     const limit = parseInt(query.limit) || 10;
-    const { status, guestId, roomId, propertyId, search } = query;
     const skip = (page - 1) * limit;
 
     // tenantId is required for data isolation
@@ -652,20 +771,7 @@ export class BookingsService {
       throw new BadRequestException('Tenant ID is required');
     }
 
-    const where: any = { tenantId };
-    if (status) where.status = status;
-    if (guestId) where.guestId = guestId;
-    if (roomId) where.roomId = roomId;
-    if (propertyId) where.propertyId = propertyId;
-
-    if (search) {
-      where.OR = [
-        { guestFirstName: { contains: search } },
-        { guestLastName: { contains: search } },
-        { guestEmail: { contains: search } },
-        { room: { number: { contains: search } } },
-      ];
-    }
+    const where = buildBookingListWhere(query, tenantId);
 
     try {
       const [data, total] = await Promise.all([
@@ -728,7 +834,14 @@ export class BookingsService {
     return this.mapBookingResponse(booking);
   }
 
-  async create(createBookingDto: CreateBookingDto, tenantId?: string) {
+  /**
+   * @param options.promo โค้ดส่วนลดที่ผู้เรียก (เช่นหน้าเว็บโรงแรม) ตรวจสิทธิ์แล้ว — ไม่รับจาก DTO ของ client
+   */
+  async create(
+    createBookingDto: CreateBookingDto,
+    tenantId?: string,
+    options?: { promo?: PromoRule },
+  ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID is required');
     }
@@ -764,24 +877,39 @@ export class BookingsService {
       throw new NotFoundException('Room not found in this property');
     }
 
-    // Build scheduled check-in/out datetimes with property standard times (Bangkok UTC+7)
-    // ใช้ buildScheduledDateTime แทน parseBookingDate ซึ่งจะ return midnight UTC สำหรับ date-only string
-    // เช่น "2026-04-15" + "14:00" → 2026-04-15T14:00:00+07:00 = 07:00 UTC
-    const scheduledCheckInForOverlap = this.buildScheduledDateTime(
-      checkIn,
-      createBookingDto.checkInTime ?? property.standardCheckInTime ?? '14:00',
+    // Build scheduled check-in/out datetimes using the shared util.
+    // - resolveTimeWithFallback handles: user time → property time → default ('14:00'/'12:00')
+    // - buildBangkokDateTime appends the +07:00 offset for date-only strings
+    const effectiveCheckInTime = resolveTimeWithFallback(
+      createBookingDto.checkInTime,
+      property.standardCheckInTime,
+      DEFAULT_CHECK_IN_TIME,
     );
-    const scheduledCheckOutForOverlap = this.buildScheduledDateTime(
-      checkOut,
-      createBookingDto.checkOutTime ?? property.standardCheckOutTime ?? '12:00',
+    const effectiveCheckOutTime = resolveTimeWithFallback(
+      createBookingDto.checkOutTime,
+      property.standardCheckOutTime,
+      DEFAULT_CHECK_OUT_TIME,
+    );
+    const scheduledCheckInForOverlap = buildBangkokDateTime(checkIn, effectiveCheckInTime);
+    const scheduledCheckOutForOverlap = buildBangkokDateTime(checkOut, effectiveCheckOutTime);
+
+    // Apply symmetric cleaning buffer so back-to-back bookings respect
+    // the property's cleaningBufferMinutes setting.
+    const cleaningBufferMinutes = property.cleaningBufferMinutes ?? DEFAULT_CLEANING_BUFFER_MINUTES;
+    const { overlapStart, overlapEnd } = applyCleaningBuffer(
+      scheduledCheckInForOverlap,
+      scheduledCheckOutForOverlap,
+      cleaningBufferMinutes,
     );
 
     this.logger.debug(
-      `Overlap check: scheduledCheckIn=${scheduledCheckInForOverlap.toISOString()}, scheduledCheckOut=${scheduledCheckOutForOverlap.toISOString()}`,
+      `Overlap check: scheduledCheckIn=${scheduledCheckInForOverlap.toISOString()}, scheduledCheckOut=${scheduledCheckOutForOverlap.toISOString()}, buffer=${cleaningBufferMinutes}min`,
     );
 
     // Check room availability — include pending so double-booking is blocked immediately
-    // overlap condition: existing.scheduledCheckIn < newCheckOut AND existing.scheduledCheckOut > newCheckIn
+    // overlap condition (with buffer):
+    //   existing.scheduledCheckIn < (newCheckOut + buffer) AND
+    //   existing.scheduledCheckOut > (newCheckIn - buffer)
     const [existingBooking, existingBookingFallback] = await Promise.all([
       // Primary check: ใช้ scheduledCheckIn/Out ซึ่งเก็บ time ถูกต้อง
       this.prisma.booking.findFirst({
@@ -789,8 +917,8 @@ export class BookingsService {
           roomId,
           tenantId,
           status: { in: ['pending', 'confirmed', 'checked_in'] },
-          scheduledCheckIn: { lt: scheduledCheckOutForOverlap },
-          scheduledCheckOut: { gt: scheduledCheckInForOverlap },
+          scheduledCheckIn: { lt: overlapEnd },
+          scheduledCheckOut: { gt: overlapStart },
         },
       }),
       // Fallback: สำหรับ booking เก่าที่ไม่มี scheduledCheckIn
@@ -800,8 +928,8 @@ export class BookingsService {
           tenantId,
           status: { in: ['pending', 'confirmed', 'checked_in'] },
           scheduledCheckIn: null,
-          checkIn: { lt: scheduledCheckOutForOverlap },
-          checkOut: { gt: scheduledCheckInForOverlap },
+          checkIn: { lt: overlapEnd },
+          checkOut: { gt: overlapStart },
         },
       }),
     ]);
@@ -845,13 +973,19 @@ export class BookingsService {
     }
 
     const occupancy = this.resolveOccupancy(createBookingDto, room);
+    // วันหยุดมาจากการตั้งค่าของโรงแรมที่ server เสมอ — ไม่เชื่อรายการที่ client ส่งมา
+    const holidayDates = await this.loadHolidayDates(propertyId, tenantId);
     const pricingSummary = this.resolveBookingPricing(
-      createBookingDto,
+      { ...createBookingDto, holidayDates } as CreateBookingDto,
       room,
       property,
       checkInDate,
       checkOutDate,
+      occupancy.extraBedGuests,
+      { checkInTime: effectiveCheckInTime, checkOutTime: effectiveCheckOutTime },
+      options?.promo,
     );
+    const { earlyCheckIn, lateCheckOut } = pricingSummary.timeFees ?? {};
 
     // Extract paymentMethod for booking record + Payment record creation
     const rawPaymentMethod: string | undefined = createBookingDto.paymentMethod;
@@ -880,14 +1014,11 @@ export class BookingsService {
       extraBedGuests: occupancy.extraBedGuests,
       checkIn: toDateTime(createBookingDto.checkIn),
       checkOut: toDateTime(createBookingDto.checkOut),
-      scheduledCheckIn: this.buildScheduledDateTime(
-        createBookingDto.checkIn,
-        createBookingDto.checkInTime ?? property.standardCheckInTime ?? '14:00',
-      ),
-      scheduledCheckOut: this.buildScheduledDateTime(
-        createBookingDto.checkOut,
-        createBookingDto.checkOutTime ?? property.standardCheckOutTime ?? '11:00',
-      ),
+      // Persistence uses the SAME resolved times as the overlap check above
+      // — this guarantees the booking we just validated is stored with
+      // exactly the dates we checked. No more 11:00 vs 12:00 drift.
+      scheduledCheckIn: scheduledCheckInForOverlap,
+      scheduledCheckOut: scheduledCheckOutForOverlap,
       status: createBookingDto.status || 'pending',
       notes: createBookingDto.notes || undefined,
       channelId: createBookingDto.channelId || undefined,
@@ -899,6 +1030,20 @@ export class BookingsService {
       vatAmount: pricingSummary.vatAmount,
       grandTotal: pricingSummary.grandTotal,
       pricingBreakdown: pricingSummary as unknown as Prisma.InputJsonValue,
+      ...(earlyCheckIn && {
+        requestedEarlyCheckIn: true,
+        approvedEarlyCheckIn: true,
+        earlyCheckInFee: earlyCheckIn.amount,
+      }),
+      ...(lateCheckOut && {
+        requestedLateCheckOut: true,
+        approvedLateCheckOut: true,
+        lateCheckOutFee: lateCheckOut.amount,
+      }),
+      ...(pricingSummary.promo && {
+        promoCodeId: pricingSummary.promo.id,
+        discountAmount: pricingSummary.promo.amount,
+      }),
       source: createBookingDto.source || 'DIRECT',
       tenantId,
     };
@@ -950,6 +1095,15 @@ export class BookingsService {
     }).catch((err) => {
       this.logger.error(`Failed to track booking_created event: ${err.message}`);
     });
+
+    if (tenantId && booking.guestId) {
+      this.eventEmitter.emit(CRM_EVENTS.BOOKING_CREATED, {
+        bookingId: booking.id,
+        tenantId,
+        guestId: booking.guestId,
+        totalAmount: Number(booking.grandTotal ?? booking.totalPrice ?? 0),
+      });
+    }
 
     return this.mapBookingResponse(booking);
   }
@@ -1013,7 +1167,135 @@ export class BookingsService {
     return this.mapBookingResponse(updated);
   }
 
-  async checkIn(id: string, tenantId?: string) {
+  /**
+   * ย้ายห้อง — ใช้แทน PATCH ทั่วไป เพราะ PATCH เขียนทับ roomId ตรง ๆ โดยไม่ตรวจอะไร
+   *   • ห้องปลายทางต้องอยู่โรงแรมเดียวกัน ไม่ปิดซ่อม/ปิดขาย และไม่มีการจองอื่นทับช่วงที่เหลือ
+   *   • แขกเช็คอินแล้ว: ห้องใหม่ = occupied · ห้องเดิม = dirty + เปิดงานแม่บ้าน
+   *   • ราคาคงเดิม (ส่วนต่างอัปเกรด/ดาวน์เกรด เก็บผ่าน folio ตามนโยบายโรงแรม)
+   */
+  async moveRoom(id: string, roomId: string, tenantId?: string, userId?: string, reason?: string) {
+    const booking = await this.prisma.booking.findFirst({
+      where: { id, ...(tenantId ? { tenantId } : {}) },
+      include: { room: { select: { id: true, number: true } } },
+    });
+    if (!booking) throw new NotFoundException(`Booking ${id} not found`);
+    if (!['pending', 'confirmed', 'checked_in'].includes(booking.status)) {
+      throw new BadRequestException('ย้ายห้องได้เฉพาะการจองที่ยังไม่เช็คเอาท์');
+    }
+    if (booking.roomId === roomId) throw new BadRequestException('เป็นห้องเดิมอยู่แล้ว');
+
+    const target = await this.prisma.room.findFirst({
+      where: { id: roomId, propertyId: booking.propertyId, ...(tenantId ? { tenantId } : {}) },
+      select: { id: true, number: true, status: true },
+    });
+    if (!target) throw new NotFoundException('ไม่พบห้องปลายทางในโรงแรมนี้');
+    if (['maintenance', 'out_of_order'].includes(target.status)) {
+      throw new BadRequestException(`ห้อง ${target.number} ปิดซ่อม/ปิดขายอยู่`);
+    }
+
+    const now = new Date();
+    const from = booking.status === 'checked_in' && booking.checkIn < now ? now : booking.checkIn;
+    const clash = await this.prisma.booking.findFirst({
+      where: {
+        id: { not: id },
+        roomId,
+        OR: [
+          { status: 'checked_in' },
+          { status: { in: ['pending', 'confirmed'] }, checkIn: { lt: booking.checkOut }, checkOut: { gt: from } },
+        ],
+      },
+      select: { guestFirstName: true },
+    });
+    if (clash) throw new ConflictException(`ห้อง ${target.number} มีการจอง/แขกพักทับช่วงนี้`);
+
+    const inHouse = booking.status === 'checked_in';
+    // แขกเช็คอินแบบรอห้อง ย้ายไปห้องที่พร้อม = ส่งมอบห้องเลย ห้องเดิมยังไม่มีใครเข้า จึงไม่ต้องส่งแม่บ้านเพิ่ม
+    const waiting = inHouse && Boolean(booking.awaitingRoomSince);
+    if (waiting && ['dirty', 'cleaning'].includes(target.status)) {
+      throw new BadRequestException(`ห้อง ${target.number} ยังไม่พร้อม — เลือกห้องที่ทำความสะอาดแล้ว`);
+    }
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const b = await tx.booking.update({
+        where: { id },
+        data: { roomId, ...(waiting ? { awaitingRoomSince: null } : {}) },
+        include: { guest: true, room: true, property: true },
+      });
+      if (inHouse) {
+        await tx.room.update({ where: { id: roomId }, data: { status: 'occupied' } });
+        if (!waiting) await tx.room.update({ where: { id: booking.roomId }, data: { status: 'dirty' } });
+      }
+      return b;
+    });
+
+    if (inHouse && !waiting) {
+      this.housekeepingService
+        .createTask(
+          {
+            roomId: booking.roomId,
+            bookingId: id,
+            type: TaskType.CHECKOUT,
+            priority: TaskPriority.HIGH,
+            notes: `ย้ายแขก ${booking.guestFirstName} ไปห้อง ${target.number}${reason ? ` · ${reason}` : ''}`,
+          },
+          tenantId ?? booking.tenantId ?? '',
+        )
+        .catch((err: Error) => this.logger.error(`Failed to create room-move housekeeping task: ${err.message}`));
+    }
+
+    this.auditLogService
+      .log({
+        action: AuditAction.BOOKING_UPDATE,
+        resource: AuditResource.BOOKING,
+        resourceId: id,
+        oldValues: { roomId: booking.roomId, roomNumber: booking.room?.number },
+        newValues: { roomId, roomNumber: target.number },
+        userId: userId || 'system',
+        tenantId,
+        description: `Room moved ${booking.room?.number ?? '?'} → ${target.number} for ${booking.guestFirstName} ${booking.guestLastName}${reason ? ` (${reason})` : ''}`,
+      })
+      .catch((err: Error) => this.logger.error(`Failed to log room move: ${err.message}`));
+
+    return this.mapBookingResponse(updated);
+  }
+
+  /**
+   * ส่งมอบห้องให้แขกที่เช็คอินแบบรอห้อง — ห้องต้องพร้อมแล้ว (ไม่สกปรก/ไม่ปิด)
+   */
+  async handOverRoom(id: string, tenantId?: string, keyCards?: number, userId?: string) {
+    const booking = await this.prisma.booking.findFirst({
+      where: { id, ...(tenantId ? { tenantId } : {}) },
+      include: { room: { select: { id: true, number: true, status: true } } },
+    });
+    if (!booking) throw new NotFoundException(`Booking ${id} not found`);
+    if (booking.status !== 'checked_in' || !booking.awaitingRoomSince) {
+      throw new BadRequestException('การจองนี้ไม่ได้รอห้องอยู่');
+    }
+    if (['dirty', 'cleaning', 'maintenance', 'out_of_order'].includes(booking.room.status)) {
+      throw new BadRequestException(`ห้อง ${booking.room.number} ยังไม่พร้อม`);
+    }
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.room.update({ where: { id: booking.roomId }, data: { status: 'occupied' } });
+      return tx.booking.update({
+        where: { id },
+        data: { awaitingRoomSince: null, ...(keyCards != null ? { keyCards } : {}) },
+        include: { guest: true, room: true, property: true },
+      });
+    });
+    this.auditLogService
+      .log({
+        action: AuditAction.BOOKING_UPDATE,
+        resource: AuditResource.BOOKING,
+        resourceId: id,
+        newValues: { awaitingRoomSince: null, keyCards },
+        userId: userId || 'system',
+        tenantId,
+        description: `Room ${booking.room.number} handed over to ${booking.guestFirstName} ${booking.guestLastName}`,
+      })
+      .catch((err: Error) => this.logger.error(`Failed to log room hand-over: ${err.message}`));
+    return this.mapBookingResponse(updated);
+  }
+
+  async checkIn(id: string, tenantId?: string, dto: CheckInDto = {}, userId?: string) {
     const booking = await this.findOne(id, tenantId);
 
     if (booking.status === 'checked_in') {
@@ -1046,17 +1328,40 @@ export class BookingsService {
       );
     }
 
+    const now = new Date();
+    const deposit = dto.depositAmount && dto.depositAmount > 0 ? dto.depositAmount : null;
     const updated = await this.prisma.booking.update({
       where: { id },
       data: {
         status: 'checked_in',
-        actualCheckIn: new Date(),
+        actualCheckIn: now,
+        ...(dto.idVerified ? { idVerifiedAt: now, idVerifiedBy: userId ?? null } : {}),
+        ...(dto.keyCards != null ? { keyCards: dto.keyCards } : {}),
+        ...(deposit ? { depositAmount: deposit, depositMethod: dto.depositMethod ?? 'cash', depositReturnedAt: null } : {}),
+        awaitingRoomSince: dto.awaitingRoom ? now : null,
       },
       include: { guest: true, room: true, property: true },
     });
 
-    // Update room status to occupied
-    if (booking.roomId) {
+    // เลขบัตร/พาสปอร์ตที่ตรวจตอนเช็คอิน → เก็บเข้าโปรไฟล์แขก ใช้ซ้ำครั้งหน้า
+    if (booking.guestId && (dto.idNumber || dto.nationality)) {
+      await this.prisma.guest
+        .update({
+          where: { id: booking.guestId },
+          data: {
+            ...(dto.idNumber
+              ? dto.idDocumentType === 'national_id'
+                ? { nationalId: dto.idNumber.trim() }
+                : { passportNumber: dto.idNumber.trim() }
+              : {}),
+            ...(dto.nationality ? { nationality: dto.nationality.trim() } : {}),
+          },
+        })
+        .catch((err) => this.logger.warn(`Check-in: could not update guest ID (${err.message})`));
+    }
+
+    // ห้องยังไม่พร้อม (เช็คอินก่อน ห้องตามมา) → คงสถานะห้องไว้ให้แม่บ้านทำต่อ ส่งมอบห้องทีหลัง
+    if (booking.roomId && !dto.awaitingRoom) {
       await this.prisma.room
         .update({
           where: { id: booking.roomId },
@@ -1115,6 +1420,15 @@ export class BookingsService {
       this.logger.error(`Failed to send check-in confirmation email: ${err.message}`);
     });
 
+    if (tenantId && booking.guestId) {
+      this.eventEmitter.emit(CRM_EVENTS.BOOKING_CHECKED_IN, {
+        bookingId: booking.id,
+        tenantId,
+        guestId: booking.guestId,
+        totalAmount: Number(updated.grandTotal ?? updated.totalPrice ?? booking.totalPrice ?? 0),
+      });
+    }
+
     return this.mapBookingResponse(updated);
   }
 
@@ -1126,21 +1440,43 @@ export class BookingsService {
     }
 
     const now = new Date();
-    const updated = await this.prisma.booking.update({
-      where: { id },
-      data: {
-        status: 'checked_out',
-        actualCheckOut: now,
-      },
-      include: { guest: true, room: true, property: true },
+
+    // รายการเพิ่มเติมบนใบแจ้งหนี้ (พนักงานคีย์เข้าบิลห้องเอง) — อ่านก่อนเปิดทรานแซกชัน
+    // เพราะ `finalizeCheckoutInvoice` ที่รวมยอดเดียวกันนี้วิ่งแบบไม่บล็อกทีหลัง
+    // ถ้ารอมันสมุดรายได้จะได้ยอดคนละก้อนกับใบแจ้งหนี้แล้วแต่ใครเสร็จก่อน
+    const additionalCharges = await this.sumInvoiceExtras(id, tenantId);
+
+    // เช็คเอาต์กับลงสมุดรายได้อยู่ในทรานแซกชันเดียวกัน — ห้องที่ปิดบิลแล้วแต่รายได้
+    // ไม่ถูกบันทึกคือยอดที่หายไปจากทุกรายงานโดยไม่มีอะไรฟ้อง
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.booking.update({
+        where: { id },
+        data: {
+          status: 'checked_out',
+          actualCheckOut: now,
+          ...(booking.awaitingRoomSince ? { awaitingRoomSince: null } : {}),
+          // เงินประกันที่ถืออยู่ถือว่าคืนตอนเช็คเอาท์ (หักค่าเสียหายให้ลงเป็นรายการใน folio)
+          ...(booking.depositAmount && !booking.depositReturnedAt ? { depositReturnedAt: now } : {}),
+        },
+        include: { guest: true, room: true, property: true },
+      });
+
+      const revenue = buildBookingRevenueInput(row, additionalCharges);
+      if (hasPostableRevenue(revenue)) {
+        await this.revenuePosting.postWithin(tx, revenue);
+      }
+
+      return row;
     });
 
-    // Update room status to cleaning
+    // Update room status to dirty (ว่างยังไม่สะอาด)
+    // dirty = checkout เสร็จแล้ว รอมอบหมายแม่บ้าน
+    // cleaning = แม่บ้านรับงานและเริ่มทำแล้ว (housekeeping service จัดการ)
     if (booking.roomId) {
       await this.prisma.room
         .update({
           where: { id: booking.roomId },
-          data: { status: 'cleaning' },
+          data: { status: 'dirty' },
         })
         .catch(() => {});
     }
@@ -1227,16 +1563,212 @@ export class BookingsService {
       this.logger.error(`Failed to send review request email: ${err.message}`);
     });
 
-    // Stage 6: Add loyalty points for the stay (async, non-blocking)
-    if (booking.guestId && booking.totalPrice) {
-      this.loyaltyService
-        .addPointsForStay(booking.guestId, tenantId, Number(booking.totalPrice))
-        .catch((err) => {
-          this.logger.error(`Failed to add loyalty points: ${err.message}`);
-        });
+    if (tenantId && booking.guestId) {
+      this.eventEmitter.emit(CRM_EVENTS.BOOKING_CHECKED_OUT, {
+        bookingId: booking.id,
+        tenantId,
+        guestId: booking.guestId,
+        totalAmount: Number(updated.grandTotal ?? updated.totalPrice ?? booking.totalPrice ?? 0),
+      });
     }
 
     return this.mapBookingResponse(updated);
+  }
+
+  /**
+   * ย้อนสถานะเช็คเอาต์ (กดผิดใบ / ผิดห้อง / แขกยังไม่ไป)
+   *
+   * เช็คเอาต์เป็นประตูทางเดียวของทั้งระบบ — มันปิดบิล ลงสมุดรายได้ ตั้งห้องเป็นสกปรก
+   * สั่งงานแม่บ้าน แจกแต้ม แล้วปล่อยคืนที่เหลือกลับเข้าคลังให้ขายใหม่ พนักงานที่กด
+   * ผิดใบจึงไม่มีทางแก้เองเลยนอกจากไปแก้สถานะดิบ ๆ ในฐานข้อมูล ซึ่งทิ้งรายได้
+   * ค้างสมุดไว้ทั้งก้อน เมธอดนี้คือทางกลับที่ถอนของพวกนั้นให้ครบในคราวเดียว
+   *
+   * ขอบเขตที่ยอมให้ย้อนได้ จงใจแคบ:
+   * 1. ต้องเป็นวันทำการ (เวลาไทย) เดียวกับที่เช็คเอาต์ — ข้ามวันแล้ว `voidWithin`
+   *    จะเขียนแถวกลับรายการลงวันปัจจุบันแทนการล้างแถวเดิม แล้ว `postWithin` จะไม่
+   *    ยอมลงรายได้ใบนี้อีกตลอดไป (เช็คอินกลับได้แต่เช็คเอาต์รอบสองจะพัง)
+   *    ข้ามวันแล้วต้องใช้เส้นทางบัญชี: ยกเลิก/คืนเงิน แล้วเปิดใบใหม่
+   * 2. ห้องต้องยังไม่ถูกขายต่อ — คืนที่ปล่อยคืนคลังไปแล้วอาจมีคนจองทับ
+   *
+   * งานแม่บ้านที่แม่บ้าน "ยังไม่แตะ" จะถูกลบทิ้ง ใบที่รับงาน/ทำไปแล้วเก็บไว้ตามจริง
+   * แล้วรายงานกลับเป็นคำเตือน — ประวัติงานที่ทำจริงห้ามหายไปเพราะออฟฟิศกดผิด
+   */
+  async undoCheckOut(
+    id: string,
+    tenantId?: string,
+    userId?: string,
+    reason?: string,
+  ): Promise<any> {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+
+    const booking = await this.findOne(id, tenantId);
+
+    if (booking.status !== 'checked_out') {
+      throw new BadRequestException(
+        `ย้อนสถานะได้เฉพาะการจองที่เช็คเอาต์แล้วเท่านั้น (สถานะปัจจุบัน: ${booking.status})`,
+      );
+    }
+
+    const actualCheckOut = booking.actualCheckOut ? new Date(booking.actualCheckOut) : null;
+    if (!actualCheckOut || Number.isNaN(actualCheckOut.getTime())) {
+      throw new BadRequestException(
+        'การจองนี้ไม่มีเวลาเช็คเอาต์จริงบันทึกไว้ จึงย้อนสถานะอัตโนมัติไม่ได้',
+      );
+    }
+
+    const now = new Date();
+    const checkOutDay = toBangkokDate(actualCheckOut);
+    const today = toBangkokDate(now);
+    if (checkOutDay !== today) {
+      throw new BadRequestException(
+        `ย้อนสถานะได้เฉพาะภายในวันเดียวกับที่เช็คเอาต์ (เช็คเอาต์เมื่อ ${checkOutDay}) ` +
+          'ข้ามวันแล้วต้องแก้ผ่านการยกเลิก/คืนเงินและเปิดการจองใหม่ เพื่อไม่ให้ยอดของวันที่ปิดไปแล้วเปลี่ยน',
+      );
+    }
+
+    // ห้องอาจถูกขายต่อทันทีที่เช็คเอาต์ — คืนที่เหลือกลับเข้าคลังไปแล้ว
+    if (booking.roomId) {
+      const conflict = await this.prisma.booking.findFirst({
+        where: {
+          tenantId,
+          roomId: booking.roomId,
+          id: { not: id },
+          status: { in: ['pending', 'confirmed', 'checked_in'] },
+          checkIn: { lt: new Date(booking.checkOut) },
+          checkOut: { gt: now },
+        },
+        select: { id: true, bookingNo: true },
+      });
+      if (conflict) {
+        throw new ConflictException(
+          `ห้องนี้ถูกจองต่อแล้ว (${conflict.bookingNo ?? conflict.id.slice(0, 8)}) ` +
+            'ย้อนสถานะไม่ได้ ต้องย้ายการจองที่ทับก่อน',
+        );
+      }
+    }
+
+    // งานแม่บ้านที่ยังไม่มีใครรับ ลบได้ ใบที่เริ่มทำแล้วเก็บไว้เป็นประวัติ
+    const checkoutTasks = await this.prisma.housekeepingTask.findMany({
+      where: { tenantId, bookingId: id, type: TaskType.CHECKOUT },
+      select: { id: true, status: true, assignedToId: true },
+    });
+    const untouchedTaskIds = checkoutTasks
+      .filter((t) => t.status === TaskStatus.PENDING && !t.assignedToId)
+      .map((t) => t.id);
+    const keptTasks = checkoutTasks.filter((t) => !untouchedTaskIds.includes(t.id));
+
+    const { updated, revenue } = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.booking.update({
+        where: { id },
+        data: { status: 'checked_in', actualCheckOut: null },
+        include: { guest: true, room: true, property: true },
+      });
+
+      // วันเดียวกัน = ล้างแถวเดิมเป็น VOIDED (ไม่ใช่แถวกลับรายการ) เช็คเอาต์รอบใหม่
+      // จึงลงรายได้ทับได้ตามปกติ — นี่คือเหตุผลเดียวที่กติกา "ภายในวันเดียวกัน" มีอยู่
+      const voided = await this.revenuePosting.voidWithin(tx, {
+        tenantId,
+        sourceType: 'BOOKING',
+        sourceId: id,
+        voidedBy: userId || 'system',
+        reason: reason ? `ย้อนสถานะเช็คเอาต์: ${reason}` : 'ย้อนสถานะเช็คเอาต์',
+        at: now,
+      });
+
+      if (untouchedTaskIds.length > 0) {
+        await tx.housekeepingTask.deleteMany({
+          where: { tenantId, id: { in: untouchedTaskIds } },
+        });
+      }
+
+      if (booking.roomId) {
+        await tx.room.update({
+          where: { id: booking.roomId },
+          data: { status: 'occupied' },
+        });
+      }
+
+      return { updated: row, revenue: voided };
+    });
+
+    const warnings: string[] = [];
+    if (keptTasks.length > 0) {
+      warnings.push(
+        `งานแม่บ้าน ${keptTasks.length} ใบเริ่มทำไปแล้ว จึงไม่ถูกยกเลิกให้ กรุณาแจ้งแม่บ้านเอง`,
+      );
+    }
+    if (revenue.reversed > 0) {
+      warnings.push('รายได้บางส่วนถูกกลับรายการข้ามวัน ตรวจสอบรายงานรายได้ก่อนเช็คเอาต์ใหม่');
+    }
+
+    // กลับรายการบัญชี (async, ไม่บล็อก) — ระบบโรงแรมต้องกลับสถานะได้แม้บัญชีล้ม
+    this.reverseBookingRevenueJournal(id, tenantId, userId || 'system').catch((err: Error) => {
+      this.logger.warn(`Journal reversal skipped for booking ${id}: ${err.message}`);
+    });
+
+    // แต้มที่แจกตอนเช็คเอาต์ต้องดึงคืน ไม่งั้นกดผิดหนึ่งครั้ง = แต้มฟรีหนึ่งชุด
+    if (booking.guestId) {
+      this.loyaltyService
+        .reverseStayAward(tenantId, booking.guestId, id)
+        .catch((err: Error) => {
+          this.logger.warn(`Loyalty clawback skipped for booking ${id}: ${err.message}`);
+        });
+    }
+
+    this.auditLogService
+      .log({
+        action: AuditAction.BOOKING_CHECKOUT_UNDO,
+        resource: AuditResource.BOOKING,
+        resourceId: id,
+        oldValues: { status: 'checked_out', actualCheckOut: actualCheckOut.toISOString() },
+        newValues: { status: 'checked_in', actualCheckOut: null },
+        userId: userId || 'system',
+        tenantId,
+        description:
+          `ย้อนสถานะเช็คเอาต์ของ ${booking.guestFirstName} ${booking.guestLastName} ` +
+          `(ห้อง ${booking.room?.number || 'N/A'})` +
+          (reason ? ` — เหตุผล: ${reason}` : ''),
+      })
+      .catch((err) => {
+        this.logger.error(`Failed to log checkout undo: ${err.message}`);
+      });
+
+    this.logger.log(
+      `Checkout undone for booking ${booking.bookingNo ?? id} by ${userId || 'system'}: ` +
+        `revenue voided=${revenue.voided} reversed=${revenue.reversed}, ` +
+        `housekeeping removed=${untouchedTaskIds.length} kept=${keptTasks.length}`,
+    );
+
+    return {
+      ...this.mapBookingResponse(updated),
+      undo: {
+        revenue,
+        housekeepingTasksRemoved: untouchedTaskIds.length,
+        housekeepingTasksKept: keptTasks.length,
+        warnings,
+      },
+    };
+  }
+
+  /**
+   * ยอดรวมรายการเพิ่มเติมบนใบแจ้งหนี้ของการจองนี้
+   *
+   * เป็นค่าบริการที่พนักงานคีย์เข้าบิลห้องเอง (มินิบาร์ รถรับส่ง ค่าปรับ) — **ไม่ใช่**
+   * บิล POS ที่ชาร์จเข้าห้อง บิลพวกนั้นลงสมุดรายได้เป็นแถวของร้านตัวเองไปแล้วตอนปิดบิล
+   * ถ้านับซ้ำตรงนี้ ยอดรวมของโรงแรมจะบวมขึ้นเท่ากับยอด POS ทั้งหมดของทริปนั้น
+   *
+   * ไม่มีใบแจ้งหนี้ = 0 ไม่ใช่ error — การจองที่จ่ายครบตั้งแต่จองยังเช็คเอาต์ได้ปกติ
+   */
+  private async sumInvoiceExtras(bookingId: string, tenantId?: string): Promise<number> {
+    const invoice = await this.prisma.invoices.findFirst({
+      where: { booking_id: bookingId, tenant_id: tenantId },
+      select: { invoice_items: { select: { amount: true } } },
+    });
+    return (
+      invoice?.invoice_items?.reduce((sum, item) => sum + Number(item.amount || 0), 0) ?? 0
+    );
   }
 
   async getCheckoutSummary(id: string, tenantId?: string): Promise<any> {
@@ -1280,6 +1812,25 @@ export class BookingsService {
 
     const balanceRemaining = totalAmount - amountPaid;
 
+    // ── ออกก่อนกำหนด ─────────────────────────────────────────────────────
+    // เช็คเอาต์ก่อนวันคืนห้องตามใบจอง = คืนที่แขกจ่ายไว้แล้วแต่จะไม่ได้นอน กดแล้ว
+    // ห้องถูกปล่อยกลับเข้าคลังให้ขายต่อทันที ส่วนยอดที่ลงสมุดรายได้ยังเป็นยอดเต็ม
+    // ตามใบจอง (ระบบไม่ลดให้เอง — ถ้าจะคืนเงินต้องแก้ยอดก่อนกดเช็คเอาต์)
+    // หน้าจอจึงต้องได้ตัวเลขนี้ไปเตือนก่อน ไม่ใช่รู้ตอนที่ย้อนไม่ได้แล้ว
+    const scheduledOutDay = businessDateOf(toBangkokDate(new Date(booking.checkOut)));
+    const scheduledInDay = businessDateOf(toBangkokDate(new Date(booking.checkIn)));
+    const departureDay = businessDateOf(
+      toBangkokDate(booking.actualCheckOut ? new Date(booking.actualCheckOut) : new Date()),
+    );
+    const scheduledNights = Math.max(
+      0,
+      Math.round((scheduledOutDay.getTime() - scheduledInDay.getTime()) / DAY_MS),
+    );
+    const nightsRemaining = Math.max(
+      0,
+      Math.round((scheduledOutDay.getTime() - departureDay.getTime()) / DAY_MS),
+    );
+
     // Prepare summary object (all fields use defensive fallbacks)
     const summary = {
       booking: {
@@ -1300,6 +1851,9 @@ export class BookingsService {
         actualCheckOutDate: booking.actualCheckOut ?? null,
         stayDuration: `${stayDuration} คืน`,
         nightCount: stayDuration,
+        scheduledNights,
+        nightsRemaining,
+        isEarlyDeparture: nightsRemaining > 0,
       },
       charges: {
         roomCharge,
@@ -1322,13 +1876,30 @@ export class BookingsService {
   async remove(id: string, tenantId?: string, userId?: string) {
     const booking = await this.findOne(id, tenantId);
 
-    const cancelledBooking = await this.prisma.booking.update({
-      where: { id },
-      data: { status: 'cancelled' },
-      include: {
-        property: true,
-        room: true,
-      },
+    const cancelledBooking = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.booking.update({
+        where: { id },
+        data: { status: 'cancelled' },
+        include: {
+          property: true,
+          room: true,
+        },
+      });
+
+      // การจองที่เช็คเอาต์ไปแล้วแล้วถูกยกเลิกทีหลัง (คีย์ผิดคน/คืนเงินเต็มจำนวน) มีรายได้
+      // ค้างอยู่ในสมุด ต้องดึงกลับด้วย — เรียกดื้อ ๆ ได้ ถ้ายังไม่เคยลงก็คืน 0 ทุกช่อง
+      // ยกเลิกข้ามวันจะได้แถวกลับรายการลงวันที่ยกเลิก ไม่ไปแก้ยอดของวันที่ปิดไปแล้ว
+      if (tenantId) {
+        await this.revenuePosting.voidWithin(tx, {
+          tenantId,
+          sourceType: 'BOOKING',
+          sourceId: id,
+          voidedBy: userId || 'system',
+          reason: 'ยกเลิกการจอง',
+        });
+      }
+
+      return row;
     });
 
     // Send cancellation email (async, non-blocking)
@@ -1375,7 +1946,7 @@ export class BookingsService {
         invoiceNo,
         amount: Number(booking.grandTotal ?? booking.totalPrice),
         status: InvoiceStatus.PENDING,
-        dueDate,
+        dueDate: dueDate.toISOString(),
       });
 
       this.logger.log(`Invoice ${invoiceNo} auto-generated for booking ${booking.id}`);
@@ -1459,7 +2030,7 @@ export class BookingsService {
         return;
       }
 
-      // Calculate total from invoice items
+      // Calculate total from invoice items (add-ons / extra charges)
       const additionalCharges =
         invoice.invoice_items?.reduce((sum, item) => sum + Number(item.amount || 0), 0) || 0;
 
@@ -1481,12 +2052,508 @@ export class BookingsService {
       this.logger.log(
         `Invoice ${invoice.invoice_no} finalized on checkout: room ${roomCharge} + additional ${additionalCharges} = ${totalAmount}`,
       );
+
+      // Create accounting journal entry (non-blocking — hotel system unaffected if accounting fails)
+      this.createBookingRevenueJournal({
+        tenantId,
+        propertyId: booking?.propertyId,
+        bookingId,
+        bookingNo: booking?.bookingNo,
+        roomSubtotal: Number(booking?.roomSubtotal ?? booking?.totalPrice ?? roomCharge),
+        serviceChargeAmount: Number(booking?.serviceChargeAmount ?? 0),
+        vatAmount: Number(booking?.vatAmount ?? 0),
+        grandTotal: roomCharge,
+        additionalCharges,
+        totalAmount,
+      }).catch((err: Error) => {
+        this.logger.warn(`Accounting journal skipped for booking ${bookingId}: ${err.message}`);
+      });
     } catch (error) {
       this.logger.error(
         `Failed to finalize invoice on checkout for ${bookingId}: ${error.message}`,
       );
       throw error;
     }
+  }
+
+  /**
+   * Backfill journal entries สำหรับ booking ที่ checkout ไปแล้วแต่ยังไม่มี accounting entry
+   * เรียกใช้ครั้งเดียวหลัง seed Chart of Accounts เพื่อสร้าง JE ย้อนหลัง
+   */
+  async backfillJournalEntries(
+    tenantId?: string,
+    propertyId?: string,
+  ): Promise<{ processed: number; created: number; skipped: number; errors: number }> {
+    if (!tenantId) {
+      return { processed: 0, created: 0, skipped: 0, errors: 0 };
+    }
+
+    const where: any = { tenantId, status: 'checked_out' };
+    if (propertyId) where.propertyId = propertyId;
+
+    const bookings = await this.prisma.booking.findMany({
+      where,
+      select: {
+        id: true,
+        tenantId: true,
+        propertyId: true,
+        bookingNo: true,
+        grandTotal: true,
+        totalPrice: true,
+        roomSubtotal: true,
+        serviceChargeAmount: true,
+        vatAmount: true,
+        actualCheckOut: true,
+        checkOut: true,
+      },
+    });
+
+    let created = 0;
+    let skipped = 0;
+    let errors = 0;
+
+    for (const booking of bookings) {
+      try {
+        // ตรวจว่ามี journal entry สำหรับ booking นี้แล้วหรือยัง
+        const existing = await this.prisma.journalEntry.findFirst({
+          where: { tenantId, sourceType: 'BOOKING_PAYMENT', sourceId: booking.id },
+          select: { id: true },
+        });
+
+        if (existing) {
+          skipped++;
+          continue;
+        }
+
+        const grandTotal = Number(booking.grandTotal ?? booking.totalPrice ?? 0);
+        if (grandTotal <= 0) {
+          skipped++;
+          continue;
+        }
+
+        await this.createBookingRevenueJournal({
+          tenantId,
+          propertyId: booking.propertyId,
+          bookingId: booking.id,
+          bookingNo: booking.bookingNo,
+          roomSubtotal: Number(booking.roomSubtotal ?? booking.totalPrice ?? grandTotal),
+          serviceChargeAmount: Number(booking.serviceChargeAmount ?? 0),
+          vatAmount: Number(booking.vatAmount ?? 0),
+          grandTotal,
+          additionalCharges: 0,
+          totalAmount: grandTotal,
+          entryDate: booking.actualCheckOut ?? booking.checkOut ?? undefined,
+        });
+
+        created++;
+        this.logger.log(`Backfill JE created for booking ${booking.bookingNo ?? booking.id}`);
+      } catch (err: unknown) {
+        errors++;
+        this.logger.error(
+          `Backfill JE failed for booking ${booking.id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    this.logger.log(
+      `Backfill complete: ${bookings.length} processed, ${created} created, ${skipped} skipped, ${errors} errors`,
+    );
+    return { processed: bookings.length, created, skipped, errors };
+  }
+
+  /**
+   * สร้าง Journal Entry สำหรับรายได้ห้องพัก (BOOKING_PAYMENT)
+   * - DR: เงินสด 1101 = totalAmount
+   * - CR: รายได้ค่าห้องพัก 4101 = roomSubtotal
+   * - CR: รายได้ค่าธรรมเนียมบริการ 4305 = serviceChargeAmount (ถ้ามี)
+   * - CR: ภาษีขาย VAT Output 2103 = vatAmount (ถ้ามี)
+   * - CR: รายได้อื่นๆ 4309 = additionalCharges / add-ons (ถ้ามี)
+   *
+   * ถ้า Chart of Accounts ยังไม่ได้ seed → skip อย่าง graceful ไม่กระทบระบบโรงแรม
+   * ถ้าไม่มี add-ons → ไม่มีบรรทัด 4309 ในนั้น ปกติ
+   */
+  private async createBookingRevenueJournal(params: {
+    tenantId: string;
+    propertyId?: string;
+    bookingId: string;
+    bookingNo?: string | null;
+    roomSubtotal: number;
+    serviceChargeAmount: number;
+    vatAmount: number;
+    grandTotal: number;
+    additionalCharges: number;
+    totalAmount: number;
+    entryDate?: Date;
+  }): Promise<void> {
+    const {
+      tenantId,
+      propertyId,
+      bookingId,
+      bookingNo,
+      roomSubtotal,
+      serviceChargeAmount,
+      vatAmount,
+      additionalCharges,
+      totalAmount,
+    } = params;
+
+    if (!propertyId || totalAmount <= 0) return;
+
+    // เช็คเอาต์ซ้ำใบเดิม (ย้อนสถานะแล้วเช็คเอาต์ใหม่ / retry ของหน้าจอ) ต้องไม่ได้ JE
+    // เพิ่มอีกใบ — ต่างจากสมุดรายได้ที่ postWithin เขียนทับแถวเดิมได้ ตรงนี้ create
+    // ล้วน ๆ ยอดในงบทดลองจึงบวมเป็นสองเท่าเงียบ ๆ ใบที่ถูกกลับรายการไปแล้วสถานะ
+    // เป็น REVERSED ไม่ใช่ POSTED จึงเปิดทางให้ลงใหม่ได้ตามต้องการ
+    const postedEntry = await this.prisma.journalEntry.findFirst({
+      where: {
+        tenantId,
+        sourceType: 'BOOKING_PAYMENT',
+        sourceId: bookingId,
+        status: 'POSTED',
+      },
+      select: { entryNo: true },
+    });
+    if (postedEntry) {
+      this.logger.debug(
+        `Accounting journal skipped for booking ${bookingId}: ${postedEntry.entryNo} already posted`,
+      );
+      return;
+    }
+
+    // tenant ที่ยังไม่มีผังบัญชีเลยได้ผังมาตรฐานอัตโนมัติ — เดิมข้ามเงียบ ๆ สมุดรายวันจึงว่าง
+    await ensureDefaultChartOfAccounts(this.prisma, tenantId);
+
+    // Look up required accounts — skip if tenant's own chart lacks them
+    const REQUIRED_CODES = ['1101', '4101'];
+    const OPTIONAL_CODES = ['2103', '4305', ACCOUNT_CODES.OTHER_REVENUE];
+    const allCodes = [...REQUIRED_CODES, ...OPTIONAL_CODES];
+    // ผังเก่าไม่มี 4309 — เติมให้ ไม่งั้นค่าบริการเสริมหายจากสมุดรายวันเงียบ ๆ
+    await ensureDefaultAccounts(this.prisma, tenantId, allCodes);
+
+    const accounts = await this.prisma.accountChart.findMany({
+      where: { tenantId, code: { in: allCodes } },
+      select: { id: true, code: true },
+    });
+
+    const accountMap = new Map(accounts.map((a) => [a.code, a.id]));
+
+    // Abort if required accounts aren't seeded
+    for (const code of REQUIRED_CODES) {
+      if (!accountMap.has(code)) {
+        this.logger.debug(
+          `Accounting journal skipped for booking ${bookingId}: account ${code} not found (Chart of Accounts not seeded)`,
+        );
+        return;
+      }
+    }
+
+    // ลงวันที่ตามเวลาเช็คเอาต์จริง (backfill ส่งมา) — เดิมใช้วันที่รัน backfill
+    // รายได้ย้อนหลังทั้งปีจึงไปกองอยู่เดือนเดียว
+    const now = params.entryDate ?? new Date();
+    await assertPeriodOpen(this.prisma, tenantId, propertyId, now);
+    const entryNo = await nextJournalEntryNo(this.prisma, tenantId, now);
+
+    // Build journal lines
+    const lines: Array<{
+      accountId: string;
+      lineNo: number;
+      description: string;
+      debit: number;
+      credit: number;
+    }> = [];
+
+    let lineNo = 1;
+
+    // DR: Cash
+    lines.push({
+      accountId: accountMap.get('1101')!,
+      lineNo: lineNo++,
+      description: `รับชำระห้องพัก ${bookingNo ?? bookingId.slice(0, 8)}`,
+      debit: totalAmount,
+      credit: 0,
+    });
+
+    // CR: Room Revenue — use grandTotal if no breakdown, else roomSubtotal
+    const hasBreakdown = serviceChargeAmount > 0 || vatAmount > 0;
+    const roomRevenueAmount = hasBreakdown ? roomSubtotal : params.grandTotal;
+    lines.push({
+      accountId: accountMap.get('4101')!,
+      lineNo: lineNo++,
+      description: `รายได้ค่าห้องพัก ${bookingNo ?? bookingId.slice(0, 8)}`,
+      debit: 0,
+      credit: roomRevenueAmount,
+    });
+
+    // CR: Service Charge (4305) — if applicable and account exists
+    if (serviceChargeAmount > 0 && accountMap.has('4305')) {
+      lines.push({
+        accountId: accountMap.get('4305')!,
+        lineNo: lineNo++,
+        description: `ค่าธรรมเนียมบริการ ${bookingNo ?? bookingId.slice(0, 8)}`,
+        debit: 0,
+        credit: serviceChargeAmount,
+      });
+    }
+
+    // CR: VAT Output (2103) — if applicable and account exists
+    if (vatAmount > 0 && accountMap.has('2103')) {
+      lines.push({
+        accountId: accountMap.get('2103')!,
+        lineNo: lineNo++,
+        description: `ภาษีมูลค่าเพิ่ม (VAT) ${bookingNo ?? bookingId.slice(0, 8)}`,
+        debit: 0,
+        credit: vatAmount,
+      });
+    }
+
+    // CR: Other Revenue (4309) — add-ons / extra charges only if > 0
+    if (additionalCharges > 0 && accountMap.has(ACCOUNT_CODES.OTHER_REVENUE)) {
+      lines.push({
+        accountId: accountMap.get(ACCOUNT_CODES.OTHER_REVENUE)!,
+        lineNo: lineNo++,
+        description: `รายได้บริการเพิ่มเติม (add-ons) ${bookingNo ?? bookingId.slice(0, 8)}`,
+        debit: 0,
+        credit: additionalCharges,
+      });
+    }
+
+    // ส่งต่อจาก Night Audit (accrual handoff) — ค่าห้องคืนที่ Night Audit ปิดวันและลง GL แล้ว
+    // ถูกรับรู้เป็นรายได้ไปแล้ว (Dr 1103 / Cr 4101 + 2103) เช็คเอาต์จึงกลับส่วนนั้นออกจากรายได้
+    // แล้วตัดลูกหนี้แขกแทน ไม่งั้นรายได้ห้องคืนเดียวกันขึ้นสองครั้ง
+    const handoff = await this.nightAuditRecognizedRoomRevenue(tenantId, bookingId);
+    if (handoff.total > 0) {
+      const ar = await this.prisma.accountChart.findFirst({
+        where: { tenantId, code: '1103', isActive: true },
+        select: { id: true },
+      });
+      if (ar) {
+        const label = `ค่าห้องที่รับรู้แล้วโดย Night Audit ${bookingNo ?? bookingId.slice(0, 8)}`;
+        const vatAccount = accountMap.get('2103');
+        lines.push({
+          accountId: accountMap.get('4101')!,
+          lineNo: lineNo++,
+          description: label,
+          debit: vatAccount ? handoff.net : handoff.total,
+          credit: 0,
+        });
+        if (vatAccount && handoff.vat > 0) {
+          lines.push({
+            accountId: vatAccount,
+            lineNo: lineNo++,
+            description: label,
+            debit: handoff.vat,
+            credit: 0,
+          });
+        }
+        lines.push({
+          accountId: ar.id,
+          lineNo: lineNo++,
+          description: label,
+          debit: 0,
+          credit: handoff.total,
+        });
+      } else {
+        this.logger.warn(
+          `Booking ${bookingId}: account 1103 missing — Night Audit handoff skipped`,
+        );
+      }
+    }
+
+    // Verify double-entry balances before persisting
+    const totalDebit = lines.reduce((s, l) => s + l.debit, 0);
+    const totalCredit = lines.reduce((s, l) => s + l.credit, 0);
+    if (Math.abs(totalDebit - totalCredit) > 0.01) {
+      this.logger.error(
+        `Journal entry imbalance for booking ${bookingId}: debit ${totalDebit} ≠ credit ${totalCredit}`,
+      );
+      return;
+    }
+
+    const { fiscalYear, fiscalPeriod } = fiscalPeriodOf(now);
+
+    // JE + ledger_balances ต้องอยู่ transaction เดียวกัน — งบทดลอง/งบกำไรขาดทุนอ่านจาก
+    // ledger_balances ไม่ใช่ journal_entries ถ้าไม่บวกยอดตรงนี้ หน้าบัญชีจะขึ้น 0
+    await this.prisma.$transaction(async (tx) => {
+      await tx.journalEntry.create({
+        data: {
+          tenantId,
+          propertyId,
+          entryNo,
+          entryDate: now,
+          description: `รับชำระห้องพัก ${bookingNo ?? bookingId.slice(0, 8)}`,
+          reference: bookingNo ?? bookingId.slice(0, 8),
+          sourceType: 'BOOKING_PAYMENT',
+          sourceId: bookingId,
+          status: 'POSTED',
+          fiscalPeriod,
+          fiscalYear,
+          totalDebit,
+          totalCredit,
+          createdBy: 'system',
+          lines: {
+            create: lines.map((l) => ({
+              accountId: l.accountId,
+              lineNo: l.lineNo,
+              description: l.description,
+              debit: l.debit,
+              credit: l.credit,
+            })),
+          },
+        },
+      });
+
+      await applyLedgerBalances(tx, { tenantId, propertyId, fiscalYear, fiscalPeriod }, lines);
+    });
+
+    this.logger.log(
+      `Journal entry ${entryNo} created for booking ${bookingId}: total ${totalAmount} THB` +
+        (additionalCharges > 0 ? ` (incl. add-ons ${additionalCharges})` : ''),
+    );
+  }
+
+  /**
+   * กลับรายการ JE ของการจอง เมื่อเช็คเอาต์ถูกย้อนสถานะ
+   *
+   * ลบ JE ทิ้งไม่ได้ — สมุดรายวันต้องเดินหน้าอย่างเดียว จึงออกใบกลับรายการที่สลับ
+   * เดบิต/เครดิต แล้วปั๊มใบเดิมเป็น REVERSED (ซึ่งพ่วงเป็นตัวปลดล็อกให้เช็คเอาต์
+   * รอบใหม่ลง JE ได้อีกครั้ง ดู guard ใน createBookingRevenueJournal)
+   *
+   * `ledger_balances` ต้องขยับในทรานแซกชันเดียวกัน เพราะงบทดลอง/งบกำไรขาดทุน
+   * อ่านจากตารางนั้น ไม่ได้อ่านจาก journal_entries
+   */
+  /**
+   * ค่าห้องของการจองนี้ที่ Night Audit ปิดวันและลง GL ไปแล้ว (ยอดก่อน VAT / VAT / รวม)
+   * นับเฉพาะ audit ที่มี journalEntryId — audit ที่ยังไม่ปิดจะไม่ลงค่าห้องของการจองที่เช็คเอาต์แล้วซ้ำอีก
+   */
+  private async nightAuditRecognizedRoomRevenue(
+    tenantId: string,
+    bookingId: string,
+  ): Promise<{ net: number; vat: number; total: number }> {
+    const charges = await this.prisma.folioCharge.findMany({
+      where: {
+        tenantId,
+        chargeType: 'ROOM_CHARGE',
+        status: 'POSTED',
+        nightAuditId: { not: null },
+        folio: { bookingId },
+      },
+      select: { nightAuditId: true, netAmount: true, vatAmount: true, totalAmount: true },
+    });
+    if (charges.length === 0) return { net: 0, vat: 0, total: 0 };
+    const posted = await this.prisma.nightAudit.findMany({
+      where: {
+        tenantId,
+        id: { in: [...new Set(charges.map((c) => c.nightAuditId as string))] },
+        journalEntryId: { not: null },
+      },
+      select: { id: true },
+    });
+    const postedIds = new Set(posted.map((a) => a.id));
+    const recognized = charges.filter((c) => postedIds.has(c.nightAuditId as string));
+    const sum = (pick: (c: (typeof recognized)[number]) => unknown): number =>
+      round2(recognized.reduce((acc, c) => acc + Number(pick(c)), 0));
+    return {
+      net: sum((c) => c.netAmount),
+      vat: sum((c) => c.vatAmount),
+      total: sum((c) => c.totalAmount),
+    };
+  }
+
+  /** ย้อนเช็คเอาต์ → ยกเลิกรายการเคลียร์ค่าห้องบน folio บัญชี แล้วเปิด folio กลับ */
+  private async reopenGuestFolioAfterUndo(bookingId: string, tenantId: string): Promise<void> {
+    const settlements = await this.prisma.folioPayment.findMany({
+      where: { tenantId, reference: CHECKOUT_SETTLEMENT_REF(bookingId), isReversed: false },
+      select: { id: true, folioId: true, amount: true },
+    });
+    await this.prisma.$transaction(async (tx) => {
+      for (const p of settlements) {
+        await tx.folioPayment.update({ where: { id: p.id }, data: { isReversed: true } });
+        await tx.guestFolio.update({
+          where: { id: p.folioId },
+          data: { totalPayments: { decrement: p.amount }, balance: { increment: p.amount } },
+        });
+      }
+      await tx.guestFolio.updateMany({
+        where: { tenantId, bookingId, status: { in: ['PENDING', 'CLOSED'] } },
+        data: { status: 'OPEN', closedAt: null, closedBy: null, checkOutDate: null },
+      });
+    });
+  }
+
+  private async reverseBookingRevenueJournal(
+    bookingId: string,
+    tenantId: string,
+    reversedBy: string,
+  ): Promise<void> {
+    await this.reopenGuestFolioAfterUndo(bookingId, tenantId).catch((err: Error) =>
+      this.logger.error(`Reopen guest folio failed for booking ${bookingId}: ${err.message}`),
+    );
+    const entry = await this.prisma.journalEntry.findFirst({
+      where: {
+        tenantId,
+        sourceType: 'BOOKING_PAYMENT',
+        sourceId: bookingId,
+        status: 'POSTED',
+      },
+      include: { lines: true },
+    });
+    if (!entry) return;
+
+    const now = new Date();
+    await assertPeriodOpen(this.prisma, tenantId, entry.propertyId, now);
+    const entryNo = await nextJournalEntryNo(this.prisma, tenantId, now);
+
+    const reversalLines = entry.lines
+      .sort((a, b) => a.lineNo - b.lineNo)
+      .map((line, index) => ({
+        accountId: line.accountId,
+        lineNo: index + 1,
+        description: `กลับรายการ: ${line.description ?? ''}`.trim(),
+        debit: Number(line.credit),
+        credit: Number(line.debit),
+      }));
+
+    const { fiscalYear, fiscalPeriod } = fiscalPeriodOf(now);
+
+    await this.prisma.$transaction(async (tx) => {
+      const reversal = await tx.journalEntry.create({
+        data: {
+          tenantId,
+          propertyId: entry.propertyId,
+          entryNo,
+          entryDate: now,
+          description: `กลับรายการ ${entry.entryNo} (ย้อนสถานะเช็คเอาต์)`,
+          reference: entry.entryNo,
+          sourceType: 'ADJUSTMENT',
+          sourceId: bookingId,
+          status: 'POSTED',
+          fiscalPeriod,
+          fiscalYear,
+          totalDebit: entry.totalCredit,
+          totalCredit: entry.totalDebit,
+          reversedById: entry.id,
+          createdBy: reversedBy,
+          postedBy: reversedBy,
+          postedAt: now,
+          lines: { create: reversalLines },
+        },
+        select: { id: true },
+      });
+
+      await tx.journalEntry.update({
+        where: { id: entry.id },
+        data: { status: 'REVERSED', reversedById: reversal.id, reversedAt: now },
+      });
+
+      await applyLedgerBalances(
+        tx,
+        { tenantId, propertyId: entry.propertyId, fiscalYear, fiscalPeriod },
+        reversalLines,
+      );
+    });
+
+    this.logger.log(
+      `Journal entry ${entry.entryNo} reversed by ${entryNo} for booking ${bookingId}`,
+    );
   }
 
   /**
@@ -1599,6 +2666,7 @@ export class BookingsService {
         adults: 1,
         children: 0,
         numberOfGuests: 1,
+        holidayDates: await this.loadHolidayDates(finalPropertyId, tenantId),
       } as CreateBookingDto,
       room,
       property,
@@ -1764,22 +2832,16 @@ export class BookingsService {
       throw new BadRequestException('Early check-in is not enabled for this property');
     }
 
-    const feeAmount = property.earlyCheckInFeeAmount ? Number(property.earlyCheckInFeeAmount) : 0;
-
-    const updateData: Record<string, unknown> = {
-      requestedEarlyCheckIn: true,
-    };
-
-    if (approve) {
-      updateData.approvedEarlyCheckIn = true;
-      updateData.earlyCheckInFee = feeAmount;
-    }
-
-    const updated = await this.prisma.booking.update({
-      where: { id },
-      data: updateData,
-      include: { guest: true, room: true, property: true },
-    });
+    const { updated, fee: feeAmount } = approve
+      ? await this.approveTimeFee(id, tenantId, 'early')
+      : {
+          updated: await this.prisma.booking.update({
+            where: { id },
+            data: { requestedEarlyCheckIn: true },
+            include: { guest: true, room: true, property: true },
+          }),
+          fee: 0,
+        };
 
     this.logger.log(
       `Early check-in ${approve ? 'approved' : 'requested'} for booking ${id} | fee: ${feeAmount}`,
@@ -1827,22 +2889,9 @@ export class BookingsService {
     if (booking.approvedEarlyCheckIn) {
       throw new BadRequestException('Early check-in has already been approved');
     }
+    this.assertTimeFeeChargeable(booking.status);
 
-    const property = await this.prisma.property.findFirst({
-      where: { id: booking.propertyId, tenantId, deletedAt: null },
-      select: { earlyCheckInFeeAmount: true },
-    });
-
-    const feeAmount = property?.earlyCheckInFeeAmount ? Number(property.earlyCheckInFeeAmount) : 0;
-
-    const updated = await this.prisma.booking.update({
-      where: { id },
-      data: {
-        approvedEarlyCheckIn: true,
-        earlyCheckInFee: feeAmount,
-      },
-      include: { guest: true, room: true, property: true },
-    });
+    const { updated, fee: feeAmount } = await this.approveTimeFee(id, tenantId, 'early');
 
     this.logger.log(`Early check-in approved for booking ${id} | fee: ${feeAmount}`);
 
@@ -1904,22 +2953,16 @@ export class BookingsService {
       throw new BadRequestException('Late check-out is not enabled for this property');
     }
 
-    const feeAmount = property.lateCheckOutFeeAmount ? Number(property.lateCheckOutFeeAmount) : 0;
-
-    const updateData: Record<string, unknown> = {
-      requestedLateCheckOut: true,
-    };
-
-    if (approve) {
-      updateData.approvedLateCheckOut = true;
-      updateData.lateCheckOutFee = feeAmount;
-    }
-
-    const updated = await this.prisma.booking.update({
-      where: { id },
-      data: updateData,
-      include: { guest: true, room: true, property: true },
-    });
+    const { updated, fee: feeAmount } = approve
+      ? await this.approveTimeFee(id, tenantId, 'late')
+      : {
+          updated: await this.prisma.booking.update({
+            where: { id },
+            data: { requestedLateCheckOut: true },
+            include: { guest: true, room: true, property: true },
+          }),
+          fee: 0,
+        };
 
     this.logger.log(
       `Late check-out ${approve ? 'approved' : 'requested'} for booking ${id} | fee: ${feeAmount}`,
@@ -1967,22 +3010,9 @@ export class BookingsService {
     if (booking.approvedLateCheckOut) {
       throw new BadRequestException('Late check-out has already been approved');
     }
+    this.assertTimeFeeChargeable(booking.status);
 
-    const property = await this.prisma.property.findFirst({
-      where: { id: booking.propertyId, tenantId, deletedAt: null },
-      select: { lateCheckOutFeeAmount: true },
-    });
-
-    const feeAmount = property?.lateCheckOutFeeAmount ? Number(property.lateCheckOutFeeAmount) : 0;
-
-    const updated = await this.prisma.booking.update({
-      where: { id },
-      data: {
-        approvedLateCheckOut: true,
-        lateCheckOutFee: feeAmount,
-      },
-      include: { guest: true, room: true, property: true },
-    });
+    const { updated, fee: feeAmount } = await this.approveTimeFee(id, tenantId, 'late');
 
     this.logger.log(`Late check-out approved for booking ${id} | fee: ${feeAmount}`);
 
@@ -2002,6 +3032,115 @@ export class BookingsService {
       });
 
     return this.mapBookingResponse(updated);
+  }
+
+  /** บิลปิดแล้ว (ยกเลิก/เช็คเอาท์) → เพิ่มค่าธรรมเนียมไม่ได้ */
+  private assertTimeFeeChargeable(status: string): void {
+    if (status === 'cancelled' || status === 'checked_out') {
+      throw new BadRequestException(`Cannot approve for a booking in status '${status}'`);
+    }
+  }
+
+  /**
+   * อนุมัติเช็คอินก่อน/เช็คเอาท์หลังเวลา แล้วคิดค่าธรรมเนียมเข้าบิล
+   *
+   * - สูตรเดียวกับตอนสร้างการจอง (time-fees.ts): fixed หรือ % ของคืนแรก/คืนสุดท้าย
+   * - ค่าธรรมเนียมเป็นค่าห้อง → บวกเข้า roomSubtotal แล้วคิดค่าบริการ/VAT ด้วยอัตราเดิมของการจองนี้
+   * - อัปเดตใบแจ้งหนี้ที่ยังไม่ชำระให้ยอดตรงกับ grandTotal ใหม่ในธุรกรรมเดียวกัน
+   */
+  private async approveTimeFee(
+    id: string,
+    tenantId: string,
+    kind: 'early' | 'late',
+  ): Promise<{ updated: any; fee: number }> {
+    const booking = await this.prisma.booking.findFirst({
+      where: { id, tenantId },
+      include: { room: true },
+    });
+    if (!booking) throw new NotFoundException(`Booking with ID ${id} not found`);
+    const property = await this.prisma.property.findFirst({
+      where: { id: booking.propertyId, tenantId, deletedAt: null },
+      select: {
+        earlyCheckInFeeType: true,
+        earlyCheckInFeeAmount: true,
+        lateCheckOutFeeType: true,
+        lateCheckOutFeeAmount: true,
+      },
+    });
+
+    const early = kind === 'early';
+    const breakdown = (booking.pricingBreakdown ?? null) as Partial<BookingPricingSummary> | null;
+    const nightly = Array.isArray(breakdown?.nightlyRates) ? breakdown!.nightlyRates : [];
+    const night = early ? nightly[0] : nightly[nightly.length - 1];
+    const nightRate = night ? Number(night.appliedRate) : Number(booking.room?.price ?? 0);
+    const fee = timeFeeAmount(
+      early ? property?.earlyCheckInFeeType : property?.lateCheckOutFeeType,
+      early ? property?.earlyCheckInFeeAmount : property?.lateCheckOutFeeAmount,
+      nightRate,
+    );
+
+    const flags = early
+      ? { requestedEarlyCheckIn: true, approvedEarlyCheckIn: true, earlyCheckInFee: fee.amount }
+      : { requestedLateCheckOut: true, approvedLateCheckOut: true, lateCheckOutFee: fee.amount };
+
+    let totals: Record<string, unknown> = {};
+    if (fee.amount > 0) {
+      const sub = Number(booking.roomSubtotal ?? booking.totalPrice ?? 0);
+      const sc = Number(booking.serviceChargeAmount ?? 0);
+      const vat = Number(booking.vatAmount ?? 0);
+      const grand = Number(booking.grandTotal ?? sub + sc + vat);
+      // อัตราที่ใช้ตอนจอง (การจองเก่าไม่มี breakdown → ถอดอัตราจากยอดที่เก็บไว้)
+      const scPct = breakdown?.serviceChargePercent ?? (sub > 0 ? (sc / sub) * 100 : 0);
+      const vatPct = breakdown?.vatPercent ?? (sub + sc > 0 ? (vat / (sub + sc)) * 100 : 0);
+
+      const newSub = this.roundCurrency(sub + fee.amount);
+      const newSc = this.roundCurrency(newSub * (scPct / 100));
+      const newVat = this.roundCurrency((newSub + newSc) * (vatPct / 100));
+      const newGrand = this.roundCurrency(grand + (newSub - sub) + (newSc - sc) + (newVat - vat));
+
+      const key = early ? 'earlyCheckIn' : 'lateCheckOut';
+      const prevFees: TimeFees = breakdown?.timeFees ?? { total: 0 };
+      const timeFees: TimeFees = {
+        ...prevFees,
+        [key]: fee,
+        total: this.roundCurrency((prevFees.total ?? 0) - (prevFees[key]?.amount ?? 0) + fee.amount),
+      };
+
+      totals = {
+        totalPrice: newSub,
+        roomSubtotal: newSub,
+        serviceChargeAmount: newSc,
+        vatAmount: newVat,
+        grandTotal: newGrand,
+        ...(breakdown && {
+          pricingBreakdown: {
+            ...breakdown,
+            timeFees,
+            roomSubtotal: newSub,
+            serviceChargeAmount: newSc,
+            vatAmount: newVat,
+            grandTotal: newGrand,
+          } as unknown as Prisma.InputJsonValue,
+        }),
+      };
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.booking.update({
+        where: { id },
+        data: { ...flags, ...totals },
+        include: { guest: true, room: true, property: true },
+      });
+      if (fee.amount > 0) {
+        await tx.invoices.updateMany({
+          where: { booking_id: id, tenant_id: tenantId, status: { in: ['pending', 'draft'] } },
+          data: { amount: Number(totals.grandTotal) },
+        });
+      }
+      return row;
+    });
+
+    return { updated, fee: fee.amount };
   }
 
   // ─── Booking Activity Timeline ────────────────────────────────────────────
@@ -2130,6 +3269,7 @@ export class BookingsService {
       booking_cancel: 'ยกเลิกการจอง',
       booking_checkin: 'เช็คอิน',
       booking_checkout: 'เช็คเอาท์',
+      booking_checkout_undo: 'ย้อนสถานะเช็คเอาท์',
       booking_early_checkin_request: 'ขอ Early Check-in',
       booking_early_checkin_approve: 'อนุมัติ Early Check-in',
       booking_late_checkout_request: 'ขอ Late Check-out',
@@ -2154,6 +3294,7 @@ export class BookingsService {
       booking_cancel: 'x-circle',
       booking_checkin: 'log-in',
       booking_checkout: 'log-out',
+      booking_checkout_undo: 'rotate-ccw',
       booking_early_checkin_request: 'clock',
       booking_early_checkin_approve: 'check-square',
       booking_late_checkout_request: 'clock',
@@ -2178,6 +3319,7 @@ export class BookingsService {
       booking_cancel: 'red',
       booking_checkin: 'indigo',
       booking_checkout: 'gray',
+      booking_checkout_undo: 'orange',
       booking_early_checkin_request: 'amber',
       booking_early_checkin_approve: 'green',
       booking_late_checkout_request: 'amber',

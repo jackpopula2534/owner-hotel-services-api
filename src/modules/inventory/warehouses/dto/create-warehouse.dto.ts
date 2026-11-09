@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, IsOptional, IsBoolean, IsEnum } from 'class-validator';
+import { IsNotEmpty, IsString, IsOptional, IsBoolean, IsEnum, IsUUID, ValidateIf } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export enum WarehouseType {
@@ -7,6 +7,8 @@ export enum WarehouseType {
   HOUSEKEEPING = 'HOUSEKEEPING',
   MAINTENANCE = 'MAINTENANCE',
   MINIBAR = 'MINIBAR',
+  /** คลังของแถม — สต็อกที่กันไว้แจกในโปรโมชั่น POS */
+  PROMOTION = 'PROMOTION',
 }
 
 export class CreateWarehouseDto {
@@ -39,4 +41,10 @@ export class CreateWarehouseDto {
   @IsOptional()
   @IsBoolean()
   isDefault?: boolean;
+
+  @ApiPropertyOptional({ description: 'กลุ่มคลัง (null = ไม่มีกลุ่ม แสดงทุกระบบ)', nullable: true })
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsUUID()
+  groupId?: string | null;
 }

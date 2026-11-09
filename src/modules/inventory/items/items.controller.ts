@@ -7,20 +7,43 @@ import {
   Param,
   Delete,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
+  BadRequestException,
   Query,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
-import { ItemsService, ItemWithStock, ItemSearchResult, StockSummary, PaginatedResponse } from './items.service';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
+import { StorageService } from '@/common/storage/storage.service';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiQuery,
+  ApiConsumes,
+} from '@nestjs/swagger';
+import {
+  ItemsService,
+  ItemWithStock,
+  ItemSearchResult,
+  ScannedItem,
+  StockSummary,
+  PaginatedResponse,
+} from './items.service';
 import { CreateItemDto } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
 import { QueryItemDto } from './dto/query-item.dto';
 import { SearchItemDto } from './dto/search-item.dto';
+import { ScanBarcodeDto } from './dto/scan-barcode.dto';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AddonGuard } from '@/common/guards/addon.guard';
 import { RequireAddon } from '@/common/decorators/require-addon.decorator';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
+import { assertNotProcurementOnly } from '../product-change-requests/product-change-access';
 
 interface JwtPayload {
   sub: string;
@@ -29,14 +52,31 @@ interface JwtPayload {
   role: string;
 }
 
+interface MulterFile {
+  originalname: string;
+  mimetype: string;
+  size: number;
+  buffer: Buffer;
+  filename: string;
+}
+
 @ApiTags('Inventory - Items')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, AddonGuard)
 @RequireAddon('INVENTORY_MODULE')
+// Procurement Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('procurement', 'warehouse', 'retail')
 @Controller({ path: 'inventory/items', version: '1' })
 export class ItemsController {
-  constructor(private readonly itemsService: ItemsService) {}
+  constructor(
+    private readonly itemsService: ItemsService,
+    private readonly storage: StorageService,
+  ) {}
 
+  // The POS menu-management view (manager/tenant_admin only) lists inventory items to
+  // attach them to a recipe. Reading the catalogue is all it needs — the rest of this
+  // controller stays closed to POS tokens.
+  @AllowSystems('pos')
   @Get()
   @ApiOperation({ summary: 'Get all items with pagination and filters' })
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
@@ -88,7 +128,10 @@ export class ItemsController {
       },
     },
   })
-  async findAll(@CurrentUser() user: JwtPayload, @Query() query: QueryItemDto): Promise<{ success: boolean } & PaginatedResponse<ItemWithStock>> {
+  async findAll(
+    @CurrentUser() user: JwtPayload,
+    @Query() query: QueryItemDto,
+  ): Promise<{ success: boolean } & PaginatedResponse<ItemWithStock>> {
     const result = await this.itemsService.findAll(user.tenantId, query);
     return { success: true, ...result };
   }
@@ -151,7 +194,10 @@ export class ItemsController {
       },
     },
   })
-  async getStockSummary(@CurrentUser() user: JwtPayload, @Query('propertyId') propertyId?: string): Promise<{ success: boolean; data: StockSummary }> {
+  async getStockSummary(
+    @CurrentUser() user: JwtPayload,
+    @Query('propertyId') propertyId?: string,
+  ): Promise<{ success: boolean; data: StockSummary }> {
     const data = await this.itemsService.getStockSummary(user.tenantId, propertyId);
     return { success: true, data };
   }
@@ -199,6 +245,52 @@ export class ItemsController {
     @Query() query: SearchItemDto,
   ): Promise<{ success: boolean; data: ItemSearchResult[] }> {
     const data = await this.itemsService.searchItems(user.tenantId, query);
+    return { success: true, data };
+  }
+
+  // ต้องประกาศก่อน `:id` เสมอ ไม่งั้น Nest จะอ่าน "by-barcode" เป็น id แล้วตอบ 404
+  @Get('by-barcode')
+  @ApiOperation({
+    summary: 'ยิงบาร์โค้ดที่หน้าขาย — คืนสินค้าชิ้นเดียวแบบเทียบตรงตัว',
+    description:
+      'ต่างจาก /search ตรงที่เทียบบาร์โค้ดเท่ากันเป๊ะ และคืนได้ไม่เกินหนึ่งชิ้น ' +
+      'เพราะของที่ยิงเข้าตะกร้าไม่มีใครอ่านซ้ำก่อนคิดเงิน ' +
+      'ใส่ warehouseId มาด้วยจะได้ยอดคงเหลือของคลังนั้น (หักที่ถูกกันไว้แล้ว) ติดกลับไป',
+  })
+  @ApiQuery({ name: 'code', required: true, type: String, example: '8850001000011' })
+  @ApiQuery({ name: 'warehouseId', required: false, type: String })
+  @ApiQuery({ name: 'itemType', required: false, enum: ['RAW_MATERIAL', 'FINISHED_GOOD'] })
+  @ApiResponse({
+    status: 200,
+    description: 'สินค้าที่ผูกกับบาร์โค้ดนี้',
+    schema: {
+      example: {
+        success: true,
+        data: {
+          id: 'uuid',
+          sku: 'SKU-001',
+          name: 'น้ำดื่ม 600ml',
+          unit: 'BOTTLE',
+          barcode: '8850001000011',
+          imageUrl: null,
+          sellingPrice: 20,
+          category: { id: 'uuid', name: 'เครื่องดื่ม' },
+          stockQuantity: 144,
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 404, description: 'ไม่มีสินค้าที่ผูกกับบาร์โค้ดนี้' })
+  @ApiResponse({ status: 409, description: 'บาร์โค้ดซ้ำกันหลายรายการ — ต้องไปแก้ข้อมูลสินค้าก่อน' })
+  @ApiResponse({
+    status: 422,
+    description: 'เจอสินค้าแต่ประเภทไม่ตรงกับ itemType ที่ขอ (เช่น ยิงโดนวัตถุดิบที่หน้าขาย)',
+  })
+  async scanBarcode(
+    @CurrentUser() user: JwtPayload,
+    @Query() query: ScanBarcodeDto,
+  ): Promise<{ success: boolean; data: ScannedItem }> {
+    const data = await this.itemsService.findByBarcode(user.tenantId, query);
     return { success: true, data };
   }
 
@@ -304,6 +396,8 @@ export class ItemsController {
   @ApiResponse({ status: 400, description: 'Invalid input or invalid categoryId' })
   @ApiResponse({ status: 409, description: 'Item SKU already exists' })
   async create(@CurrentUser() user: JwtPayload, @Body() dto: CreateItemDto) {
+    // สินค้าสร้างได้จากฝั่งคลังเท่านั้น — จัดซื้อต้องส่ง /inventory/product-change-requests/new-items
+    assertNotProcurementOnly(user.role);
     const data = await this.itemsService.create(dto, user.tenantId);
     return { success: true, data };
   }
@@ -349,7 +443,49 @@ export class ItemsController {
     @Param('id') id: string,
     @Body() dto: UpdateItemDto,
   ) {
-    const data = await this.itemsService.update(id, dto, user.tenantId);
+    // จัดซื้อแก้สินค้าตรงๆ ไม่ได้ — ต้องผ่านคำขอให้คลังรับทราบ/อนุมัติ
+    assertNotProcurementOnly(user.role);
+    const data = await this.itemsService.update(id, dto, user.tenantId, user.role);
+    return { success: true, data };
+  }
+
+  @Post(':id/image')
+  @ApiOperation({ summary: 'Upload item image from device' })
+  @ApiConsumes('multipart/form-data')
+  @ApiResponse({ status: 201, description: 'Image uploaded, item.imageUrl updated' })
+  @ApiResponse({ status: 400, description: 'Missing or invalid image file' })
+  @ApiResponse({ status: 404, description: 'Item not found' })
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      fileFilter: (_req, file, cb) => {
+        if (!file.mimetype.match(/^image\/(jpeg|jpg|png|webp|gif)$/)) {
+          return cb(
+            new BadRequestException('อัปโหลดได้เฉพาะไฟล์รูปภาพ (jpg, png, webp, gif)'),
+            false,
+          );
+        }
+        cb(null, true);
+      },
+      limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+    }),
+  )
+  async uploadImage(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @UploadedFile() file: MulterFile,
+  ) {
+    assertNotProcurementOnly(user.role);
+    if (!file) {
+      throw new BadRequestException('ไม่พบไฟล์รูปภาพ');
+    }
+    const saved = await this.storage.save({
+      folder: 'inventory',
+      file,
+      prefix: `item-${id}`,
+    });
+    const imageUrl = saved.url;
+    const data = await this.itemsService.setImageUrl(id, imageUrl, user.tenantId);
     return { success: true, data };
   }
 
@@ -359,6 +495,7 @@ export class ItemsController {
   @ApiResponse({ status: 204, description: 'Item deleted successfully' })
   @ApiResponse({ status: 404, description: 'Item not found' })
   async remove(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    assertNotProcurementOnly(user.role);
     await this.itemsService.remove(id, user.tenantId);
   }
 }

@@ -20,6 +20,9 @@ import {
 export class AdminHotelsService {
   private readonly logger = new Logger(AdminHotelsService.name);
 
+  /** Fallback label for tenants without an active subscription/plan. */
+  private static readonly NO_PLAN_LABEL = 'No Plan';
+
   constructor(
     @InjectRepository(Tenant)
     private tenantsRepository: Repository<Tenant>,
@@ -33,7 +36,7 @@ export class AdminHotelsService {
    * Get all hotels with filtering, search, and pagination
    */
   async findAll(query: AdminHotelsQueryDto): Promise<AdminHotelsListResponseDto> {
-    const { status, search, page = 1, limit = 10 } = query;
+    const { status, search, plan, page = 1, limit = 10 } = query;
     const skip = (page - 1) * limit;
 
     // Build query
@@ -45,6 +48,17 @@ export class AdminHotelsService {
     // Filter by status
     if (status) {
       queryBuilder.andWhere('tenant.status = :status', { status });
+    }
+
+    // Filter by plan name. "No Plan" matches tenants without an active
+    // subscription/plan, mirroring the fallback label used in the list output
+    // and the byPlan summary breakdown.
+    if (plan) {
+      if (plan === AdminHotelsService.NO_PLAN_LABEL) {
+        queryBuilder.andWhere('plan.name IS NULL');
+      } else {
+        queryBuilder.andWhere('plan.name = :plan', { plan });
+      }
     }
 
     // Search by hotel name
@@ -65,21 +79,19 @@ export class AdminHotelsService {
     // Get users count and owner info for each tenant
     const data: AdminHotelListItemDto[] = await Promise.all(
       tenants.map(async (tenant) => {
-        // Get users count for this tenant
-        const usersCount = await this.prismaService.user.count({
-          where: { tenantId: tenant.id },
-        });
-
-        // Get owner (tenant_admin) for this tenant
-        const owner = await this.prismaService.user.findFirst({
-          where: {
-            tenantId: tenant.id,
-            role: 'tenant_admin',
-          },
-        });
-
-        // Calculate revenue from paid invoices
-        const revenue = await this.calculateTenantRevenue(tenant.id);
+        // Count actual rooms from Room table (not the cached roomCount column)
+        const [roomsCount, usersCount, owner, revenue] = await Promise.all([
+          this.prismaService.room.count({
+            where: { tenantId: tenant.id },
+          }),
+          this.prismaService.user.count({
+            where: { tenantId: tenant.id },
+          }),
+          this.prismaService.user.findFirst({
+            where: { tenantId: tenant.id, role: 'tenant_admin' },
+          }),
+          this.calculateTenantRevenue(tenant.id),
+        ]);
 
         return {
           id: tenant.id,
@@ -87,8 +99,8 @@ export class AdminHotelsService {
           ownerName: owner
             ? `${owner.firstName || ''} ${owner.lastName || ''}`.trim() || owner.email
             : 'N/A',
-          plan: tenant.subscription?.plan?.name || 'No Plan',
-          rooms: tenant.roomCount,
+          plan: tenant.subscription?.plan?.name || AdminHotelsService.NO_PLAN_LABEL,
+          rooms: roomsCount,
           users: usersCount,
           status: tenant.status,
           revenue,
@@ -109,14 +121,19 @@ export class AdminHotelsService {
    * Get hotels summary by status
    */
   async getSummary(): Promise<AdminHotelsSummaryDto> {
-    const [total, active, trial, expired, suspended] = await Promise.all([
+    const [total, active, trial, expired, suspended, byPlan] = await Promise.all([
       this.tenantsRepository.count(),
-      this.tenantsRepository.count({ where: { status: TenantStatus.ACTIVE } }),
+      this.tenantsRepository.count({
+        where: { status: TenantStatus.ACTIVE },
+      }),
       this.tenantsRepository.count({ where: { status: TenantStatus.TRIAL } }),
-      this.tenantsRepository.count({ where: { status: TenantStatus.EXPIRED } }),
+      this.tenantsRepository.count({
+        where: { status: TenantStatus.EXPIRED },
+      }),
       this.tenantsRepository.count({
         where: { status: TenantStatus.SUSPENDED },
       }),
+      this.getPlanBreakdown(),
     ]);
 
     return {
@@ -125,7 +142,31 @@ export class AdminHotelsService {
       trial,
       expired,
       suspended,
+      byPlan,
     };
+  }
+
+  /**
+   * Count hotels grouped by plan name across the whole system.
+   * Tenants with no subscription/plan are bucketed under "No Plan",
+   * matching the list endpoint's fallback label.
+   */
+  private async getPlanBreakdown(): Promise<Array<{ plan: string; count: number }>> {
+    const rows = await this.tenantsRepository
+      .createQueryBuilder('tenant')
+      .leftJoin('tenant.subscription', 'subscription')
+      .leftJoin('subscription.plan', 'plan')
+      .select('COALESCE(plan.name, :fallback)', 'plan')
+      .addSelect('COUNT(tenant.id)', 'count')
+      .setParameter('fallback', AdminHotelsService.NO_PLAN_LABEL)
+      .groupBy('COALESCE(plan.name, :fallback)')
+      .orderBy('count', 'DESC')
+      .getRawMany<{ plan: string; count: string }>();
+
+    return rows.map((row) => ({
+      plan: row.plan || AdminHotelsService.NO_PLAN_LABEL,
+      count: Number(row.count) || 0,
+    }));
   }
 
   /**
@@ -142,21 +183,19 @@ export class AdminHotelsService {
       throw new NotFoundException(`Hotel with ID "${id}" not found`);
     }
 
-    // Get owner (tenant_admin) for this tenant
-    const owner = await this.prismaService.user.findFirst({
-      where: {
-        tenantId: tenant.id,
-        role: 'tenant_admin',
-      },
-    });
-
-    // Get users count for this tenant
-    const usersCount = await this.prismaService.user.count({
-      where: { tenantId: tenant.id },
-    });
-
-    // Calculate revenue from paid invoices
-    const revenue = await this.calculateTenantRevenue(tenant.id);
+    // Fetch owner, real room count, user count, and revenue in parallel
+    const [owner, roomsCount, usersCount, revenue] = await Promise.all([
+      this.prismaService.user.findFirst({
+        where: { tenantId: tenant.id, role: 'tenant_admin' },
+      }),
+      this.prismaService.room.count({
+        where: { tenantId: tenant.id },
+      }),
+      this.prismaService.user.count({
+        where: { tenantId: tenant.id },
+      }),
+      this.calculateTenantRevenue(tenant.id),
+    ]);
 
     return {
       id: tenant.id,
@@ -165,18 +204,17 @@ export class AdminHotelsService {
         ? `${owner.firstName || ''} ${owner.lastName || ''}`.trim() || owner.email
         : 'N/A',
       email: owner?.email || 'N/A',
-      createdAt: tenant.createdAt.toISOString().split('T')[0],
-      rooms: tenant.roomCount,
+      createdAt: this.toDateString(tenant.createdAt),
+      rooms: roomsCount,
       users: usersCount,
-      plan: tenant.subscription?.plan?.name || 'No Plan',
+      plan: tenant.subscription?.plan?.name || AdminHotelsService.NO_PLAN_LABEL,
       status: tenant.status,
       revenue,
       subscription: {
-        expiresAt: tenant.subscription?.endDate
-          ? tenant.subscription.endDate.toISOString().split('T')[0]
-          : tenant.trialEndsAt
-            ? tenant.trialEndsAt.toISOString().split('T')[0]
-            : 'N/A',
+        expiresAt:
+          this.toDateString(tenant.subscription?.endDate) ||
+          this.toDateString(tenant.trialEndsAt) ||
+          'N/A',
       },
     };
   }
@@ -253,6 +291,21 @@ export class AdminHotelsService {
       message: `Notification of type "${dto.type}" sent to ${owner.email}`,
       notificationType: dto.type,
     };
+  }
+
+  /**
+   * Helper: Safely convert Date | string | null | undefined → 'YYYY-MM-DD' | null
+   * Guards against TypeORM returning stored dates as strings instead of Date objects
+   */
+  private toDateString(value: Date | string | null | undefined): string | null {
+    if (!value) return null;
+    try {
+      const d = value instanceof Date ? value : new Date(value);
+      if (isNaN(d.getTime())) return null;
+      return d.toISOString().split('T')[0];
+    } catch {
+      return null;
+    }
   }
 
   /**

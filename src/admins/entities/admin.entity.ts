@@ -47,6 +47,11 @@ export class Admin {
   @Column({ nullable: true })
   lastLoginIp: string;
 
+  // Per-admin menu access (Prisma: menuAccess Json?). NULL/empty = full access.
+  // ต้องประกาศที่นี่ด้วย ไม่งั้น dataSource.synchronize() ใน db:refresh จะ DROP คอลัมน์นี้ทิ้ง
+  @Column({ type: 'json', nullable: true })
+  menuAccess: unknown;
+
   @CreateDateColumn()
   createdAt: Date;
 

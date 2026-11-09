@@ -1,0 +1,187 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
+import { withPaginationMeta } from '@/common/utils/pagination.util';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Param,
+  Body,
+  Query,
+  Delete,
+  BadRequestException,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
+import { BankReconciliationService } from './bank-reconciliation.service';
+import { CreateBankReconDto } from './dto/create-bank-recon.dto';
+import { CreateReconLineDto } from './dto/create-recon-line.dto';
+import { ClearBookLinesDto } from './dto/clear-book-lines.dto';
+import { MatchStatementLinesDto } from './dto/match-statement-lines.dto';
+import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
+import { AddonGuard } from '@/common/guards/addon.guard';
+import { RequireAddon } from '@/common/decorators/require-addon.decorator';
+import { CurrentUser } from '@/common/decorators/current-user.decorator';
+import { RolesGuard } from '@/common/guards/roles.guard';
+import { Roles } from '@/common/decorators/roles.decorator';
+import {
+  ACCOUNTING_CLOSE_ROLES,
+  ACCOUNTING_WRITE_ROLES,
+  AccountingAccess,
+} from '@/modules/accounting/accounting-access.decorator';
+
+interface JwtPayload {
+  sub: string;
+  tenantId: string;
+  email: string;
+  role: string;
+}
+
+@ApiTags('Accounting - Bank Reconciliation')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard, AddonGuard, RolesGuard)
+@AccountingAccess(ACCOUNTING_WRITE_ROLES)
+@RequireAddon('ACCOUNTING_MODULE')
+// Accounting Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('accounting')
+@Controller({ path: 'accounting/bank-reconciliation', version: '1' })
+export class BankReconciliationController {
+  constructor(private readonly service: BankReconciliationService) {}
+
+  @Get()
+  @ApiOperation({ summary: 'ดูรายการกระทบยอดธนาคารทั้งหมด' })
+  @ApiQuery({ name: 'propertyId', required: false })
+  @ApiQuery({ name: 'bankAccountId', required: false })
+  @ApiQuery({ name: 'period', required: false })
+  @ApiQuery({ name: 'status', required: false })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async findAll(
+    @CurrentUser() user: JwtPayload,
+    @Query('propertyId') propertyId?: string,
+    @Query('bankAccountId') bankAccountId?: string,
+    @Query('period') period?: string,
+    @Query('status') status?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const data = await this.service.findAll(user.tenantId, {
+      propertyId,
+      bankAccountId,
+      period,
+      status,
+      page: page ? parseInt(page, 10) : 1,
+      limit: limit ? parseInt(limit, 10) : 20,
+    });
+    // ต้องมี meta ไม่งั้น apiClient ฝั่งเว็บแกะเหลือแค่ array แล้ว total หาย
+    return withPaginationMeta(data);
+  }
+
+  @Get('overview')
+  @ApiOperation({ summary: 'ภาพรวมต่อบัญชีเงินฝากธนาคาร (ยอด GL, งวดที่กระทบล่าสุด, งวดค้าง)' })
+  @ApiQuery({ name: 'propertyId', required: true })
+  async overview(@CurrentUser() user: JwtPayload, @Query('propertyId') propertyId?: string) {
+    if (!propertyId) throw new BadRequestException('propertyId is required');
+    const data = await this.service.overview(user.tenantId, propertyId);
+    return { success: true, data };
+  }
+
+  @Get(':id/workspace')
+  @ApiOperation({
+    summary: 'พื้นที่ทำงานกระทบยอด: รายการสมุดบัญชี + รายการเฉพาะ Statement + สูตรกระทบยอด',
+  })
+  async workspace(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    const data = await this.service.getWorkspace(id, user.tenantId);
+    return { success: true, data };
+  }
+
+  @Post(':id/clear')
+  @ApiOperation({ summary: 'ทำเครื่องหมายรายการสมุดบัญชีว่าปรากฏใน Statement แล้ว (หรือยกเลิก)' })
+  async clear(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: ClearBookLinesDto,
+  ) {
+    const data = await this.service.clearBookLines(
+      id,
+      user.tenantId,
+      dto.journalLineIds,
+      dto.cleared,
+    );
+    return { success: true, data };
+  }
+
+  @Post(':id/match-statement')
+  @ApiOperation({
+    summary: 'จับคู่รายการ Statement ที่นำเข้ากับรายการสมุดบัญชี และติ๊กว่าปรากฏใน Statement',
+  })
+  async matchStatement(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: MatchStatementLinesDto,
+  ) {
+    const data = await this.service.matchStatementLines(id, user.tenantId, dto.pairs);
+    return { success: true, data };
+  }
+
+  @Patch(':id/refresh-book')
+  @ApiOperation({ summary: 'ดึงยอดตามบัญชีใหม่จากสมุดแยกประเภท' })
+  async refreshBook(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    const data = await this.service.refreshBook(id, user.tenantId);
+    return { success: true, data };
+  }
+
+  @Delete('lines/:lineId')
+  @ApiOperation({ summary: 'ลบรายการกระทบยอด (เฉพาะงวดที่ยังไม่อนุมัติ)' })
+  async removeLine(@CurrentUser() user: JwtPayload, @Param('lineId') lineId: string) {
+    const data = await this.service.removeLine(lineId, user.tenantId);
+    return { success: true, data };
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'ดูรายละเอียดการกระทบยอด' })
+  async findOne(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    const data = await this.service.findOne(id, user.tenantId);
+    return { success: true, data };
+  }
+
+  @Post()
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'สร้างการกระทบยอดธนาคาร' })
+  async create(@CurrentUser() user: JwtPayload, @Body() dto: CreateBankReconDto) {
+    const data = await this.service.create(dto, user.tenantId, user.sub);
+    return { success: true, data };
+  }
+
+  @Post('lines')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'เพิ่มรายการกระทบยอด' })
+  async addLine(@CurrentUser() user: JwtPayload, @Body() dto: CreateReconLineDto) {
+    const data = await this.service.addLine(dto, user.tenantId);
+    return { success: true, data };
+  }
+
+  @Patch('lines/:lineId/match')
+  @ApiOperation({ summary: 'Toggle กระทบยอด / ยกเลิกกระทบยอด' })
+  async matchLine(@CurrentUser() user: JwtPayload, @Param('lineId') lineId: string) {
+    const data = await this.service.matchLine(lineId, user.tenantId);
+    return { success: true, data };
+  }
+
+  @Roles(...ACCOUNTING_CLOSE_ROLES)
+  @Patch(':id/approve')
+  @ApiOperation({ summary: 'อนุมัติการกระทบยอด' })
+  async approve(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    const data = await this.service.approve(id, user.tenantId, user.sub);
+    return { success: true, data };
+  }
+
+  @Get(':id/summary')
+  @ApiOperation({ summary: 'สรุปการกระทบยอด (matched vs unmatched)' })
+  async getSummary(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    const data = await this.service.getSummary(id, user.tenantId);
+    return { success: true, data };
+  }
+}

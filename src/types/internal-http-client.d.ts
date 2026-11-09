@@ -26,9 +26,21 @@ declare module '@internal/http-client' {
 
   interface HttpClient {
     get<T = unknown>(url: string, config?: HttpClientConfig): Promise<HttpResponse<T>>;
-    post<T = unknown>(url: string, data?: unknown, config?: HttpClientConfig): Promise<HttpResponse<T>>;
-    put<T = unknown>(url: string, data?: unknown, config?: HttpClientConfig): Promise<HttpResponse<T>>;
-    patch<T = unknown>(url: string, data?: unknown, config?: HttpClientConfig): Promise<HttpResponse<T>>;
+    post<T = unknown>(
+      url: string,
+      data?: unknown,
+      config?: HttpClientConfig,
+    ): Promise<HttpResponse<T>>;
+    put<T = unknown>(
+      url: string,
+      data?: unknown,
+      config?: HttpClientConfig,
+    ): Promise<HttpResponse<T>>;
+    patch<T = unknown>(
+      url: string,
+      data?: unknown,
+      config?: HttpClientConfig,
+    ): Promise<HttpResponse<T>>;
     delete<T = unknown>(url: string, config?: HttpClientConfig): Promise<HttpResponse<T>>;
   }
 

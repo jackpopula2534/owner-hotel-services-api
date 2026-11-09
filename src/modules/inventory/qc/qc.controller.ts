@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Get,
@@ -22,6 +23,8 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard';
 import { QCService } from './qc.service';
+import { PrismaService } from '@/prisma/prisma.service';
+import { assertCanReceive, purchaseOrderIdOfReceive } from '../common/receiving-access';
 import {
   CreateQCTemplateDto,
   UpdateQCTemplateDto,
@@ -34,9 +37,33 @@ import {
 @ApiTags('Inventory QC')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
+// Procurement Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('procurement', 'warehouse')
 @Controller('inventory/qc')
 export class QCController {
-  constructor(private readonly qcService: QCService) {}
+  constructor(
+    private readonly qcService: QCService,
+    private readonly prisma: PrismaService,
+  ) {}
+
+  /** บันทึก/ส่งผล QC — ฝั่งคลังเท่านั้น และไม่ใช่คนที่สั่งซื้อ/อนุมัติ PO ของใบรับนั้น */
+  private async guardQc(
+    user: { id?: string; userId?: string; tenantId: string; role: string; systemContext?: string },
+    goodsReceiveId?: string | null,
+  ): Promise<void> {
+    const poId = await purchaseOrderIdOfReceive(this.prisma, user.tenantId, goodsReceiveId);
+    await assertCanReceive(
+      this.prisma,
+      {
+        userId: (user.userId ?? user.id) as string,
+        tenantId: user.tenantId,
+        role: user.role,
+        systemContext: user.systemContext,
+      },
+      'qc',
+      poId,
+    );
+  }
 
   // ─── Templates ───────────────────────────────────────────────────────────────
 
@@ -95,13 +122,18 @@ export class QCController {
 
   @ApiOperation({ summary: 'List QC records with filters' })
   @Get('records')
-  listRecords(@Request() req: any, @Query() query: QueryQCRecordDto) {
-    return this.qcService.listRecords(req.user.tenantId, query);
+  async listRecords(@Request() req: any, @Query() query: QueryQCRecordDto) {
+    // Wrap response in { success, data } so apiClient's auto-unwrap returns
+    // { data: [...], meta: {...} } to the frontend store (consistent with other
+    // inventory controllers that return { success: true, data: result }).
+    const result = await this.qcService.listRecords(req.user.tenantId, query);
+    return { success: true, data: result };
   }
 
   @ApiOperation({ summary: 'Create a new QC record' })
   @Post('records')
-  createRecord(@Request() req: any, @Body() dto: CreateQCRecordDto) {
+  async createRecord(@Request() req: any, @Body() dto: CreateQCRecordDto) {
+    await this.guardQc(req.user, dto.goodsReceiveId);
     return this.qcService.createRecord(req.user.tenantId, dto, req.user.id);
   }
 
@@ -117,11 +149,9 @@ export class QCController {
   @ApiResponse({ status: 200, description: 'Record updated with status' })
   @Post('records/:id/submit')
   @HttpCode(HttpStatus.OK)
-  submitRecord(
-    @Request() req: any,
-    @Param('id') id: string,
-    @Body() dto: SubmitQCRecordDto,
-  ) {
+  async submitRecord(@Request() req: any, @Param('id') id: string, @Body() dto: SubmitQCRecordDto) {
+    const record = await this.qcService.getRecord(req.user.tenantId, id);
+    await this.guardQc(req.user, (record as { goodsReceiveId?: string | null }).goodsReceiveId);
     return this.qcService.submitRecord(req.user.tenantId, id, dto);
   }
 

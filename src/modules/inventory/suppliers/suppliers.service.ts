@@ -31,7 +31,20 @@ function deserializeSupplier<T extends { tags?: string | null }>(
   return { ...supplier, tags };
 }
 
-interface PaginatedResponse<T> {
+function maskTaxId(taxId?: string | null): string | null | undefined {
+  if (!taxId) return taxId;
+  const visible = taxId.replace(/\D/g, '').slice(-4);
+  return visible ? `***-***-${visible}` : '***';
+}
+
+function maskSupplierTaxId<T extends { taxId?: string | null }>(supplier: T): T {
+  return {
+    ...supplier,
+    taxId: maskTaxId(supplier.taxId),
+  };
+}
+
+export interface PaginatedResponse<T> {
   data: T[];
   meta: {
     page: number;
@@ -51,17 +64,17 @@ export class SuppliersService {
     search?: string,
     page: number = 1,
     limit: number = 20,
+    isActive?: boolean,
   ): Promise<PaginatedResponse<any>> {
     const skip = (page - 1) * limit;
 
     const where = {
       tenantId,
       deletedAt: null,
+      ...(isActive !== undefined && { isActive }),
+      // mode: 'insensitive' is not supported by Prisma v5 + MySQL
       ...(search && {
-        OR: [
-          { name: { contains: search, mode: 'insensitive' as const } },
-          { code: { contains: search, mode: 'insensitive' as const } },
-        ],
+        OR: [{ name: { contains: search } }, { code: { contains: search } }],
       }),
     };
 
@@ -83,14 +96,56 @@ export class SuppliersService {
       this.prisma.supplier.count({ where }),
     ]);
 
+    const stats = await this.purchaseStatsBySupplier(
+      tenantId,
+      data.map((s) => s.id),
+    );
+
     return {
-      data: data.map(deserializeSupplier),
+      data: data.map((supplier) => ({
+        ...maskSupplierTaxId(deserializeSupplier(supplier)),
+        purchaseStats: stats.get(supplier.id) ?? { spendTotal: 0, lastOrderAt: null },
+      })),
       meta: {
         page,
         limit,
         total,
       },
     };
+  }
+
+  /**
+   * Spend and last order date per supplier, for the supplier list.
+   *
+   * Only POs that were actually issued count — a DRAFT was never sent and a
+   * CANCELLED one was never paid, so either would inflate the figure people
+   * use to rank vendors.
+   */
+  private async purchaseStatsBySupplier(
+    tenantId: string,
+    supplierIds: string[],
+  ): Promise<Map<string, { spendTotal: number; lastOrderAt: Date | null }>> {
+    const result = new Map<string, { spendTotal: number; lastOrderAt: Date | null }>();
+    if (supplierIds.length === 0) return result;
+
+    const rows = await this.prisma.purchaseOrder.groupBy({
+      by: ['supplierId'],
+      where: {
+        tenantId,
+        supplierId: { in: supplierIds },
+        status: { notIn: ['DRAFT', 'CANCELLED'] },
+      },
+      _sum: { totalAmount: true },
+      _max: { orderDate: true },
+    });
+
+    for (const row of rows) {
+      result.set(row.supplierId, {
+        spendTotal: Number(row._sum.totalAmount?.toString() ?? 0),
+        lastOrderAt: row._max.orderDate ?? null,
+      });
+    }
+    return result;
   }
 
   async findOne(id: string, tenantId: string): Promise<any> {
@@ -126,40 +181,80 @@ export class SuppliersService {
       throw new NotFoundException(`Supplier with ID ${id} not found for tenant ${tenantId}`);
     }
 
-    return deserializeSupplier(supplier);
+    return maskSupplierTaxId(deserializeSupplier(supplier));
+  }
+
+  /**
+   * Next free SUP-#### for the tenant.
+   *
+   * Soft-deleted rows still hold their code — the unique index covers every row,
+   * deleted or not — so the scan deliberately ignores `deletedAt`. Reusing a
+   * dead supplier's code would collide at the database and, worse, silently
+   * attach old purchase history to a different vendor.
+   */
+  private async allocateSupplierCode(tenantId: string): Promise<string> {
+    const taken = await this.prisma.supplier.findMany({
+      where: { tenantId, code: { startsWith: 'SUP-' } },
+      select: { code: true },
+    });
+
+    let highest = 0;
+    for (const { code } of taken) {
+      const n = Number(code.slice(4));
+      if (Number.isInteger(n) && n > highest) highest = n;
+    }
+
+    return `SUP-${String(highest + 1).padStart(4, '0')}`;
   }
 
   async create(dto: CreateSupplierDto, tenantId: string): Promise<Supplier> {
-    // Validate unique code per tenant
-    const existing = await this.prisma.supplier.findFirst({
-      where: {
-        code: dto.code,
-        tenantId,
-        deletedAt: null,
-      },
-    });
+    const { code: requestedCode, ...rest } = dto;
 
-    if (existing) {
-      throw new ConflictException(`Supplier with code ${dto.code} already exists for this tenant`);
-    }
-
-    try {
-      const supplier = await this.prisma.supplier.create({
-        data: {
-          ...dto,
-          tags: serializeTags(dto.tags),
-          tenantId,
-        },
+    // An explicit code is the caller's to own — a clash is their mistake and
+    // must be reported. An allocated one is ours, so a clash (two people adding
+    // a vendor in the same second) is ours to retry through.
+    if (requestedCode) {
+      const existing = await this.prisma.supplier.findFirst({
+        where: { code: requestedCode, tenantId, deletedAt: null },
       });
 
-      this.logger.log(
-        `Created supplier ${supplier.id} (code: ${supplier.code}) for tenant ${tenantId}`,
-      );
+      if (existing) {
+        throw new ConflictException(
+          `Supplier with code ${requestedCode} already exists for this tenant`,
+        );
+      }
+    }
 
-      return deserializeSupplier(supplier) as unknown as Supplier;
-    } catch (error) {
-      this.logger.error(`Failed to create supplier for tenant ${tenantId}`, error);
-      throw error;
+    const MAX_ATTEMPTS = 5;
+    for (let attempt = 1; ; attempt++) {
+      const code = requestedCode ?? (await this.allocateSupplierCode(tenantId));
+      try {
+        const supplier = await this.prisma.supplier.create({
+          data: {
+            ...rest,
+            code,
+            tags: serializeTags(dto.tags),
+            tenantId,
+          },
+        });
+
+        this.logger.log(
+          `Created supplier ${supplier.id} (code: ${supplier.code}) for tenant ${tenantId}`,
+        );
+
+        return maskSupplierTaxId(deserializeSupplier(supplier)) as unknown as Supplier;
+      } catch (error) {
+        const raced =
+          !requestedCode &&
+          (error as { code?: string }).code === 'P2002' &&
+          attempt < MAX_ATTEMPTS;
+        if (raced) {
+          this.logger.warn(`Supplier code ${code} was taken mid-flight — reallocating`);
+          continue;
+        }
+        this.logger.error(`Failed to create supplier for tenant ${tenantId}`, error);
+        throw error;
+      }
     }
   }
 
@@ -206,7 +301,7 @@ export class SuppliersService {
 
       this.logger.log(`Updated supplier ${id} for tenant ${tenantId}`);
 
-      return deserializeSupplier(updated) as unknown as Supplier;
+      return maskSupplierTaxId(deserializeSupplier(updated)) as unknown as Supplier;
     } catch (error) {
       this.logger.error(`Failed to update supplier ${id}`, error);
       throw error;

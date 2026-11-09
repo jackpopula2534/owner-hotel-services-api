@@ -75,8 +75,10 @@ export class CostCentersService {
    */
   async findOne(id: string, tenantId: string): Promise<CostCenterWithRelations> {
     try {
-      const costCenter = await this.prisma.costCenter.findUnique({
-        where: { id },
+      // findFirst (NOT findUnique): CostCenter is tenant-scoped and the
+      // tenant-scope middleware rejects findUnique on scoped models.
+      const costCenter = await this.prisma.costCenter.findFirst({
+        where: { id, tenantId },
         include: {
           parent: true,
           children: {
@@ -129,8 +131,10 @@ export class CostCentersService {
 
       // Validate parentId if provided
       if (dto.parentId) {
-        const parent = await this.prisma.costCenter.findUnique({
-          where: { id: dto.parentId },
+        // findFirst (NOT findUnique): CostCenter is tenant-scoped and the
+        // tenant-scope middleware rejects findUnique on scoped models.
+        const parent = await this.prisma.costCenter.findFirst({
+          where: { id: dto.parentId, tenantId },
         });
 
         if (!parent || parent.tenantId !== tenantId) {
@@ -183,8 +187,10 @@ export class CostCentersService {
     tenantId: string,
   ): Promise<CostCenterWithRelations> {
     try {
-      const costCenter = await this.prisma.costCenter.findUnique({
-        where: { id },
+      // findFirst (NOT findUnique): CostCenter is tenant-scoped and the
+      // tenant-scope middleware rejects findUnique on scoped models.
+      const costCenter = await this.prisma.costCenter.findFirst({
+        where: { id, tenantId },
       });
 
       if (!costCenter || costCenter.tenantId !== tenantId) {
@@ -211,8 +217,10 @@ export class CostCentersService {
 
       // Validate parentId if updating
       if (dto.parentId && dto.parentId !== costCenter.parentId) {
-        const parent = await this.prisma.costCenter.findUnique({
-          where: { id: dto.parentId },
+        // findFirst (NOT findUnique): CostCenter is tenant-scoped and the
+        // tenant-scope middleware rejects findUnique on scoped models.
+        const parent = await this.prisma.costCenter.findFirst({
+          where: { id: dto.parentId, tenantId },
         });
 
         if (!parent || parent.tenantId !== tenantId) {
@@ -264,8 +272,10 @@ export class CostCentersService {
    */
   async remove(id: string, tenantId: string): Promise<void> {
     try {
-      const costCenter = await this.prisma.costCenter.findUnique({
-        where: { id },
+      // findFirst (NOT findUnique): CostCenter is tenant-scoped and the
+      // tenant-scope middleware rejects findUnique on scoped models.
+      const costCenter = await this.prisma.costCenter.findFirst({
+        where: { id, tenantId },
       });
 
       if (!costCenter || costCenter.tenantId !== tenantId) {

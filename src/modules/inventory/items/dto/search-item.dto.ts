@@ -1,4 +1,15 @@
-import { IsOptional, IsString, IsInt, IsBoolean, MinLength, MaxLength, Min, Max } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  IsInt,
+  IsBoolean,
+  MinLength,
+  MaxLength,
+  Min,
+  Max,
+  IsEnum,
+} from 'class-validator';
+import { InventoryItemTypeEnum } from './create-item.dto';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type, Transform } from 'class-transformer';
 
@@ -44,7 +55,17 @@ export class SearchItemDto {
   categoryId?: string;
 
   @ApiPropertyOptional({
-    description: 'Restrict results to active items. Default true (dropdowns rarely need archived items).',
+    description:
+      'When provided, each result includes `stockQuantity` — the on-hand balance of the item in this warehouse. Used by the requisition form to show what can be drawn from the source warehouse.',
+    example: 'uuid',
+  })
+  @IsOptional()
+  @IsString()
+  warehouseId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Restrict results to active items. Default true (dropdowns rarely need archived items).',
     example: true,
     default: true,
   })
@@ -56,4 +77,13 @@ export class SearchItemDto {
     return undefined;
   })
   isActive?: boolean;
+
+  @ApiPropertyOptional({
+    enum: InventoryItemTypeEnum,
+    description:
+      'Restrict results to one item type — Retail POS asks for FINISHED_GOOD only, so rental gear / raw materials never show up as "unpriced" goods.',
+  })
+  @IsOptional()
+  @IsEnum(InventoryItemTypeEnum)
+  itemType?: InventoryItemTypeEnum;
 }

@@ -1,5 +1,12 @@
 import { Module } from '@nestjs/common';
 import { SeederService } from './seeder.service';
+import { ReadyMadeGoodsSeeder } from './ready-made-goods.seeder';
+import { CampPremiumSeeder } from './camp-premium.seeder';
+import { CampSuppliersSeeder } from './camp-suppliers.seeder';
+import { Hotel3dDemoSeeder } from './hotel-3d-demo.seeder';
+import { RetailPromotionsSeeder } from './retail-promotions.seeder';
+import { WarehouseGroupsSeeder } from './warehouse-groups.seeder';
+import { SeedLotsSeeder } from './seed-lots.seeder';
 import { SeederController } from './seeder.controller';
 import { PlansModule } from '../plans/plans.module';
 import { FeaturesModule } from '../features/features.module';
@@ -10,6 +17,8 @@ import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { InvoicesModule } from '../invoices/invoices.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { SubscriptionFeaturesModule } from '../subscription-features/subscription-features.module';
+import { AddonModule } from '../modules/addons/addon.module';
+import { RevenueModule } from '../modules/revenue/revenue.module';
 
 @Module({
   imports: [
@@ -22,9 +31,20 @@ import { SubscriptionFeaturesModule } from '../subscription-features/subscriptio
     InvoicesModule,
     PaymentsModule,
     SubscriptionFeaturesModule,
+    AddonModule,
+    RevenueModule,
   ],
   controllers: [SeederController],
-  providers: [SeederService],
+  providers: [
+    SeederService,
+    ReadyMadeGoodsSeeder,
+    RetailPromotionsSeeder,
+    WarehouseGroupsSeeder,
+    SeedLotsSeeder,
+    CampPremiumSeeder,
+    CampSuppliersSeeder,
+    Hotel3dDemoSeeder,
+  ],
   exports: [SeederService],
 })
 export class SeederModule {}

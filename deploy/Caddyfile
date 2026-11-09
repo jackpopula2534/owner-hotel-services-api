@@ -1,0 +1,47 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Caddyfile — reverse proxy + auto HTTPS สำหรับ StaySync
+#
+# Caddy จะขอ/ต่ออายุ SSL cert จาก Let's Encrypt ให้อัตโนมัติ (ไม่ต้องตั้งเอง)
+# วาง Caddy ไว้หน้า frontend (Next.js :9010) และ api (NestJS :9011)
+#
+# วิธีใช้กับ docker: ดู docker-compose.prod.yml (service: caddy)
+# แก้ domain ด้านล่างเป็นของจริงก่อนใช้งาน
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Frontend (เว็บหลักที่ลูกค้าเข้า) ──
+app.example.com {
+	encode gzip zstd
+	reverse_proxy frontend:9010
+
+	# security headers พื้นฐาน
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
+
+# ── API (backend) ──
+api.example.com {
+	encode gzip zstd
+
+	# WebSocket (Socket.IO) ผ่านได้อัตโนมัติ — Caddy รองรับ upgrade ให้เอง
+	reverse_proxy api:9011
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+
+	# จำกัดขนาด upload ที่ proxy (สอดคล้องกับ limit 10MB ใน controller)
+	request_body {
+		max_size 15MB
+	}
+}
+
+# หมายเหตุ:
+# - ถ้าเสิร์ฟไฟล์ uploads ผ่าน R2/CDN แล้ว (STORAGE_DRIVER=s3) ไม่ต้อง proxy /uploads
+# - ถ้ายังใช้ local storage ชั่วคราว Caddy จะ proxy /uploads ไป api ให้เองตาม path ปกติ

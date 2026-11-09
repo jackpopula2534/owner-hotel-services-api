@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<title>User Management — Redesign Mockup</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          brand: { 50:'#faf5ff',100:'#f3e8ff',200:'#e9d5ff',500:'#a855f7',600:'#9333ea',700:'#7e22ce' }
+        },
+        fontFamily: { sans:['"IBM Plex Sans Thai"','Inter','sans-serif'] }
+      }
+    }
+  }
+</script>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'IBM Plex Sans Thai', system-ui, sans-serif; }
+  .scrollbar-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { background: #e9d5ff; border-radius: 999px; }
+</style>
+</head>
+<body class="bg-slate-100 p-6">
+
+<!-- ========== HEADER LABEL ========== -->
+<div class="max-w-[1500px] mx-auto mb-6">
+  <div class="bg-gradient-to-r from-brand-600 to-brand-800 text-white rounded-2xl p-6 shadow-lg">
+    <div class="flex items-center justify-between">
+      <div>
+        <div class="text-xs uppercase tracking-wider opacity-80 mb-1">Mockup</div>
+        <h1 class="text-2xl font-bold">User Management — Redesign</h1>
+        <p class="text-sm opacity-80 mt-1">หน้าจัดการผู้ใช้ระบบ — ปรับให้ admin จัดการเร็วและครอบคลุม</p>
+      </div>
+      <span class="px-3 py-1.5 bg-white/20 rounded-full text-sm">v2.0 · Admin Panel</span>
+    </div>
+  </div>
+</div>
+
+<div class="max-w-[1500px] mx-auto bg-white rounded-2xl shadow-xl overflow-hidden border border-slate-200">
+
+  <!-- ============ HEADER + KPI ============ -->
+  <div class="px-6 py-5 border-b border-slate-200 bg-gradient-to-br from-brand-50/40 to-white">
+    <div class="flex items-start justify-between gap-4 mb-4">
+      <div>
+        <h2 class="text-xl font-bold text-slate-900">จัดการผู้ใช้ระบบ</h2>
+        <p class="text-sm text-slate-500 mt-0.5">19 บัญชี · จัดการสถานะ บทบาท และวันหมดอายุของผู้ใช้ในแพลตฟอร์ม</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <button class="px-3 py-1.5 text-sm border border-slate-200 hover:bg-slate-50 rounded-lg flex items-center gap-1.5 text-slate-700">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+          Export CSV
+        </button>
+        <button class="px-3 py-1.5 text-sm border border-slate-200 hover:bg-slate-50 rounded-lg flex items-center gap-1.5 text-slate-700">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+          นำเข้าจาก CSV
+        </button>
+        <button class="px-4 py-1.5 text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-lg flex items-center gap-1.5 shadow-sm">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+          เพิ่มผู้ใช้
+        </button>
+      </div>
+    </div>
+
+    <!-- KPI Strip -->
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div class="bg-white rounded-xl border border-slate-200 p-3">
+        <div class="text-[11px] text-slate-500 uppercase tracking-wide">ทั้งหมด</div>
+        <div class="font-bold text-2xl text-slate-900 mt-0.5">19</div>
+        <div class="text-[10px] text-slate-400">บัญชีในระบบ</div>
+      </div>
+      <div class="bg-white rounded-xl border border-green-200 p-3">
+        <div class="text-[11px] text-green-700 uppercase tracking-wide">ใช้งานได้</div>
+        <div class="font-bold text-2xl text-green-700 mt-0.5">19</div>
+        <div class="text-[10px] text-slate-400">100% Active</div>
+      </div>
+      <div class="bg-white rounded-xl border border-amber-200 p-3">
+        <div class="text-[11px] text-amber-700 uppercase tracking-wide">ระงับ</div>
+        <div class="font-bold text-2xl text-amber-600 mt-0.5">0</div>
+        <div class="text-[10px] text-slate-400">รอตรวจสอบ</div>
+      </div>
+      <div class="bg-white rounded-xl border border-slate-200 p-3">
+        <div class="text-[11px] text-slate-500 uppercase tracking-wide">ปิดใช้งาน</div>
+        <div class="font-bold text-2xl text-slate-700 mt-0.5">0</div>
+        <div class="text-[10px] text-slate-400">ชั่วคราว</div>
+      </div>
+      <div class="bg-white rounded-xl border border-red-200 p-3">
+        <div class="text-[11px] text-red-700 uppercase tracking-wide">หมดอายุเร็วๆ นี้</div>
+        <div class="font-bold text-2xl text-red-600 mt-0.5">0</div>
+        <div class="text-[10px] text-slate-400">ภายใน 7 วัน</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ FILTERS BAR ============ -->
+  <div class="px-6 py-3 border-b border-slate-200 bg-slate-50/40">
+    <!-- Status tabs (clickable) -->
+    <div class="flex items-center gap-1 flex-wrap mb-3">
+      <button class="px-3 py-1.5 text-sm font-medium bg-brand-600 text-white rounded-lg flex items-center gap-1.5">
+        ทั้งหมด <span class="px-1.5 py-0.5 text-[10px] bg-white/20 rounded">19</span>
+      </button>
+      <button class="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 rounded-lg flex items-center gap-1.5">
+        <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+        ใช้งานได้ <span class="text-[10px] text-slate-400">19</span>
+      </button>
+      <button class="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 rounded-lg flex items-center gap-1.5">
+        <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+        ระงับ <span class="text-[10px] text-slate-400">0</span>
+      </button>
+      <button class="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 rounded-lg flex items-center gap-1.5">
+        <span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+        ปิดใช้งาน <span class="text-[10px] text-slate-400">0</span>
+      </button>
+      <button class="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 rounded-lg flex items-center gap-1.5">
+        <span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+        หมดอายุ <span class="text-[10px] text-slate-400">0</span>
+      </button>
+      <span class="text-slate-300 mx-1">|</span>
+      <button class="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 rounded-lg flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z"/></svg>
+        บันทึก Filter
+      </button>
+    </div>
+
+    <!-- Search + advanced filters -->
+    <div class="grid grid-cols-12 gap-2">
+      <!-- Search -->
+      <div class="col-span-12 md:col-span-5 relative">
+        <svg class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z"/></svg>
+        <input type="text" placeholder="ค้นหาจากชื่อ อีเมล หรือ ID..." class="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"/>
+      </div>
+      <!-- Role filter -->
+      <div class="col-span-6 md:col-span-2">
+        <button class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white hover:border-slate-300 flex items-center justify-between gap-2 text-slate-700">
+          <span class="flex items-center gap-1.5">
+            <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+            บทบาท <span class="text-[10px] px-1.5 py-0.5 bg-brand-100 text-brand-700 rounded-full">3</span>
+          </span>
+          <svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        </button>
+      </div>
+      <!-- Hotel filter -->
+      <div class="col-span-6 md:col-span-2">
+        <button class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white hover:border-slate-300 flex items-center justify-between gap-2 text-slate-700">
+          <span class="flex items-center gap-1.5">
+            <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16h14zM9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
+            โรงแรม
+          </span>
+          <svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        </button>
+      </div>
+      <!-- Last login filter -->
+      <div class="col-span-6 md:col-span-2">
+        <button class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white hover:border-slate-300 flex items-center justify-between gap-2 text-slate-700">
+          <span class="flex items-center gap-1.5">
+            <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            เข้าระบบ
+          </span>
+          <svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        </button>
+      </div>
+      <!-- Sort -->
+      <div class="col-span-6 md:col-span-1">
+        <button class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white hover:border-slate-300 flex items-center justify-center gap-1 text-slate-700">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Active filter chips -->
+    <div class="mt-2 flex items-center gap-1.5 flex-wrap">
+      <span class="text-[11px] text-slate-500">Filters active:</span>
+      <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-brand-50 text-brand-700 border border-brand-200 rounded-full text-[11px]">
+        บทบาท: Receptionist
+        <button class="hover:text-brand-900">×</button>
+      </span>
+      <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-brand-50 text-brand-700 border border-brand-200 rounded-full text-[11px]">
+        บทบาท: Cashier
+        <button class="hover:text-brand-900">×</button>
+      </span>
+      <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-brand-50 text-brand-700 border border-brand-200 rounded-full text-[11px]">
+        บทบาท: Waiter
+        <button class="hover:text-brand-900">×</button>
+      </span>
+      <button class="text-[11px] text-slate-500 hover:text-slate-800 underline ml-1">ล้างทั้งหมด</button>
+    </div>
+  </div>
+
+  <!-- ============ BULK ACTIONS BAR (shown when selected) ============ -->
+  <div class="px-6 py-2.5 bg-brand-50 border-b border-brand-100 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <span class="text-sm font-medium text-brand-900">เลือก 3 รายการ</span>
+      <span class="text-xs text-brand-700">จาก 19 รายการ</span>
+      <button class="text-xs text-brand-700 hover:text-brand-900 underline">เลือกทั้งหมดในหน้า</button>
+    </div>
+    <div class="flex items-center gap-1.5">
+      <button class="px-2.5 py-1 text-xs bg-white border border-brand-200 hover:border-brand-300 rounded-md text-brand-700 flex items-center gap-1">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        เปิดใช้งาน
+      </button>
+      <button class="px-2.5 py-1 text-xs bg-white border border-amber-200 hover:border-amber-300 rounded-md text-amber-700 flex items-center gap-1">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        ระงับ
+      </button>
+      <button class="px-2.5 py-1 text-xs bg-white border border-slate-200 hover:border-slate-300 rounded-md text-slate-700 flex items-center gap-1">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+        ส่งอีเมล
+      </button>
+      <button class="px-2.5 py-1 text-xs bg-white border border-red-200 hover:border-red-300 rounded-md text-red-600 flex items-center gap-1">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+        ลบ
+      </button>
+      <span class="text-brand-300 mx-1">|</span>
+      <button class="text-xs text-brand-700 hover:text-brand-900 px-2">ยกเลิก</button>
+    </div>
+  </div>
+
+  <!-- ============ TABLE ============ -->
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="bg-slate-50/80 border-b border-slate-200 text-slate-600">
+          <th class="px-3 py-3 text-left w-10">
+            <input type="checkbox" class="rounded border-slate-300 text-brand-600 focus:ring-brand-500" checked/>
+          </th>
+          <th class="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider">
+            <button class="flex items-center gap-1 hover:text-slate-900">ผู้ใช้
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l4-4 4 4m0 6l-4 4-4-4"/></svg>
+            </button>
+          </th>
+          <th class="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider">บทบาท</th>
+          <th class="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider">โรงแรม / Tenant</th>
+          <th class="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider">สถานะ</th>
+          <th class="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider">
+            <button class="flex items-center gap-1 hover:text-slate-900">เข้าระบบล่าสุด
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>
+            </button>
+          </th>
+          <th class="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider">วันหมดอายุ</th>
+          <th class="px-3 py-3 text-right text-xs font-semibold uppercase tracking-wider">จัดการ</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+
+        <!-- ROW 1: Tenant Admin (selected) -->
+        <tr class="hover:bg-slate-50/60 bg-brand-50/30 group">
+          <td class="px-3 py-2.5">
+            <input type="checkbox" class="rounded border-slate-300 text-brand-600 focus:ring-brand-500" checked/>
+          </td>
+          <td class="px-3 py-2.5">
+            <div class="flex items-center gap-2.5">
+              <div class="w-9 h-9 rounded-full bg-gradient-to-br from-purple-500 to-purple-700 text-white flex items-center justify-center text-xs font-bold shrink-0">PT</div>
+              <div class="min-w-0">
+                <div class="font-medium text-slate-900 truncate">Premium Tester</div>
+                <div class="text-xs text-slate-500 truncate">premium.test@email.com</div>
+              </div>
+            </div>
+          </td>
+          <td class="px-3 py-2.5">
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-purple-50 text-purple-700 border border-purple-200">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+              ผู้ดูแลโรงแรม
+            </span>
+          </td>
+          <td class="px-3 py-2.5">
+            <div class="flex items-center gap-1.5">
+              <div class="w-6 h-6 rounded bg-purple-100 text-purple-700 flex items-center justify-center text-[10px] font-bold">M</div>
+              <span class="text-sm text-slate-700 truncate">Mountain View Resort</span>
+            </div>
+          </td>
+          <td class="px-3 py-2.5">
+            <span class="inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-medium bg-green-50 text-green-700 border border-green-200 rounded-full">
+              <span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
+              ใช้งานได้
+            </span>
+          </td>
+          <td class="px-3 py-2.5 text-sm">
+            <div class="text-slate-700 font-medium">2 ชม.ที่แล้ว</div>
+            <div class="text-[10px] text-slate-400">IP: 192.168.1.45</div>
+          </td>
+          <td class="px-3 py-2.5 text-sm">
+            <span class="text-slate-400">—</span>
+          </td>
+          <td class="px-3 py-2.5">
+            <div class="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button class="w-7 h-7 rounded-md hover:bg-slate-100 flex items-center justify-center text-slate-500" title="ดูรายละเอียด">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+              </button>
+              <button class="w-7 h-7 rounded-md hover:bg-blue-50 hover:text-blue-600 flex items-center justify-center text-slate-500" title="Impersonate (Login เป็น user นี้)">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"/></svg>
+              </button>
+              <button class="w-7 h-7 rounded-md hover:bg-amber-50 hover:text-amber-600 flex items-center justify-center text-slate-500" title="ส่งอีเมล">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+              </button>
+              <button class="w-7 h-7 rounded-md hover:bg-slate-100 flex items-center justify-center text-slate-500" title="เพิ่มเติม">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+              </button>
+            </div>
+          </td>
+        </tr>
+
+        <!-- ROW 2: Receptionist -->
+        <tr class="hover:bg-slate-50/60 group">
+          <td class="px-3 py-2.5"><input type="checkbox" class="rounded border-slate-300"/></td>
+          <td class="px-3 py-2.5">
+            <div class="flex items-center gap-2.5">
+              <div class="w-9 h-9 rounded-full bg-gradient-to-br from-sky-500 to-sky-700 text-white flex items-center justify-center text-xs font-bold shrink-0">SR</div>
+              <div class="min-w-0">
+                <div class="font-medium text-slate-900 truncate">Sarah Reception</div>
+                <div class="text-xs text-slate-500 truncate">receptionist1.seasidesta@hotel.test</div>
+              </div>
+            </div>
+          </td>
+          <td class="px-3 py-2.5">
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-sky-50 text-sky-700 border border-sky-200">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+              พนักงานต้อนรับ
+            </span>
+          </td>
+          <td class="px-3 py-2.5">
+            <div class="flex items-center gap-1.5">
+              <div class="w-6 h-6 rounded bg-teal-100 text-teal-700 flex items-center justify-center text-[10px] font-bold">S</div>
+              <span class="text-sm text-slate-700 truncate">Seaside Hotel</span>
+            </div>
+          </td>
+          <td class="px-3 py-2.5">
+            <span class="inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-medium bg-green-50 text-green-700 border border-green-200 rounded-full">
+              <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span> ใช้งานได้
+            </span>
+          </td>
+          <td class="px-3 py-2.5 text-sm">
+            <div class="text-slate-700">เมื่อวาน 14:32</div>
+            <div class="text-[10px] text-slate-400">เข้า 23 ครั้ง / 30 วัน</div>
+          </td>
+          <td class="px-3 py-2.5 text-sm"><span class="text-slate-400">—</span></td>
+          <td class="px-3 py-2.5">
+            <div class="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button class="w-7 h-7 rounded-md hover:bg-slate-100 flex items-center justify-center text-slate-500" title="ดูรายละเอียด">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+              </button>
+              <button class="w-7 h-7 rounded-md hover:bg-blue-50 flex items-center justify-center text-slate-500" title="Impersonate">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14"/></svg>
+              </button>
+              <button class="w-7 h-7 rounded-md hover:bg-amber-50 flex items-center justify-center text-slate-500" title="ส่งอีเมล">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l9 6 9-6"/></svg>
+              </button>
+              <button class="w-7 h-7 rounded-md hover:bg-slate-100 flex items-center justify-center text-slate-500" title="เพิ่มเติม">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+              </button>
+            </div>
+          </td>
+        </tr>
+
+        <!-- ROW 3: Suspended example -->
+        <tr class="hover:bg-slate-50/60 group">
+          <td class="px-3 py-2.5"><input type="checkbox" class="rounded border-slate-300" checked/></td>
+          <td class="px-3 py-2.5">
+            <div class="flex items-center gap-2.5">
+              <div class="w-9 h-9 rounded-full bg-gradient-to-br from-rose-500 to-rose-700 text-white flex items-center justify-center text-xs font-bold shrink-0 opacity-70">นค</div>
+              <div class="min-w-0">
+                <div class="font-medium text-slate-700 truncate">นภา คล่องแคล่ว</div>
+                <div class="text-xs text-slate-500 truncate">cashier1@mountainviewresort.test</div>
+              </div>
+            </div>
+          </td>
+          <td class="px-3 py-2.5">
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+              แคชเชียร์
+            </span>
+          </td>
+          <td class="px-3 py-2.5">
+            <div class="flex items-center gap-1.5">
+              <div class="w-6 h-6 rounded bg-purple-100 text-purple-700 flex items-center justify-center text-[10px] font-bold">M</div>
+              <span class="text-sm text-slate-700 truncate">Mountain View Resort</span>
+            </div>
+          </td>
+          <td class="px-3 py-2.5">
+            <span class="inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200 rounded-full">
+              <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span> ระงับ
+            </span>
+            <div class="text-[10px] text-amber-700/70 mt-0.5">ระงับโดย admin · 3 วันก่อน</div>
+          </td>
+          <td class="px-3 py-2.5 text-sm">
+            <div class="text-slate-500">3 วันที่แล้ว</div>
+            <div class="text-[10px] text-slate-400">ก่อนถูกระงับ</div>
+          </td>
+          <td class="px-3 py-2.5 text-sm"><span class="text-slate-400">—</span></td>
+          <td class="px-3 py-2.5">
+            <div class="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button class="w-7 h-7 rounded-md hover:bg-green-50 hover:text-green-600 flex items-center justify-center text-slate-500" title="กู้คืนการใช้งาน">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+              </button>
+              <button class="w-7 h-7 rounded-md hover:bg-slate-100 flex items-center justify-center text-slate-500" title="ดูรายละเอียด">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+              </button>
+              <button class="w-7 h-7 rounded-md hover:bg-slate-100 flex items-center justify-center text-slate-500" title="เพิ่มเติม">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+              </button>
+            </div>
+          </td>
+        </tr>
+
+        <!-- ROW 4: Chef -->
+        <tr class="hover:bg-slate-50/60 group">
+          <td class="px-3 py-2.5"><input type="checkbox" class="rounded border-slate-300"/></td>
+          <td class="px-3 py-2.5">
+            <div class="flex items-center gap-2.5">
+              <div class="w-9 h-9 rounded-full bg-gradient-to-br from-orange-500 to-orange-700 text-white flex items-center justify-center text-xs font-bold shrink-0">วช</div>
+              <div class="min-w-0">
+                <div class="font-medium text-slate-900 truncate">วิชัย ฝีมือดี</div>
+                <div class="text-xs text-slate-500 truncate">chef1@mountainviewresort.test</div>
+              </div>
+            </div>
+          </td>
+          <td class="px-3 py-2.5">
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-orange-50 text-orange-700 border border-orange-200">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3l1.664 1.664M21 21l-1.5-1.5m-5.485-1.242L12 17.25 4.5 21V8.742m.164-4.078a2.15 2.15 0 011.743-1.342 48.507 48.507 0 0111.186 0c1.1.128 1.907 1.077 1.907 2.185V19.5M4.664 4.664L19.5 19.5"/></svg>
+              เชฟ
+            </span>
+          </td>
+          <td class="px-3 py-2.5">
+            <div class="flex items-center gap-1.5">
+              <div class="w-6 h-6 rounded bg-purple-100 text-purple-700 flex items-center justify-center text-[10px] font-bold">M</div>
+              <span class="text-sm text-slate-700 truncate">Mountain View Resort</span>
+            </div>
+          </td>
+          <td class="px-3 py-2.5">
+            <span class="inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-medium bg-green-50 text-green-700 border border-green-200 rounded-full">
+              <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span> ใช้งานได้
+            </span>
+          </td>
+          <td class="px-3 py-2.5 text-sm">
+            <div class="text-slate-700">5 ชม.ที่แล้ว</div>
+            <div class="text-[10px] text-slate-400">เข้า 18 ครั้ง / 30 วัน</div>
+          </td>
+          <td class="px-3 py-2.5 text-sm">
+            <div class="text-amber-700 font-medium">31 ธ.ค. 2569</div>
+            <div class="text-[10px] text-amber-600">เหลือ 219 วัน</div>
+          </td>
+          <td class="px-3 py-2.5">
+            <div class="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button class="w-7 h-7 rounded-md hover:bg-slate-100 flex items-center justify-center text-slate-500" title="ดูรายละเอียด"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg></button>
+              <button class="w-7 h-7 rounded-md hover:bg-blue-50 flex items-center justify-center text-slate-500" title="Impersonate"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14"/></svg></button>
+              <button class="w-7 h-7 rounded-md hover:bg-amber-50 flex items-center justify-center text-slate-500" title="ส่งอีเมล"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l9 6 9-6"/></svg></button>
+              <button class="w-7 h-7 rounded-md hover:bg-slate-100 flex items-center justify-center text-slate-500" title="เพิ่มเติม"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg></button>
+            </div>
+          </td>
+        </tr>
+
+        <!-- ROW 5: Waiter -->
+        <tr class="hover:bg-slate-50/60 group">
+          <td class="px-3 py-2.5"><input type="checkbox" class="rounded border-slate-300"/></td>
+          <td class="px-3 py-2.5">
+            <div class="flex items-center gap-2.5">
+              <div class="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-500 to-indigo-700 text-white flex items-center justify-center text-xs font-bold shrink-0">สญ</div>
+              <div class="min-w-0">
+                <div class="font-medium text-slate-900 truncate">สมหญิง รักงาน</div>
+                <div class="text-xs text-slate-500 truncate">waiter2@mountainviewresort.test</div>
+              </div>
+            </div>
+          </td>
+          <td class="px-3 py-2.5">
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-blue-50 text-blue-700 border border-blue-200">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"/></svg>
+              พนักงานเสิร์ฟ
+            </span>
+          </td>
+          <td class="px-3 py-2.5">
+            <div class="flex items-center gap-1.5">
+              <div class="w-6 h-6 rounded bg-purple-100 text-purple-700 flex items-center justify-center text-[10px] font-bold">M</div>
+              <span class="text-sm text-slate-700 truncate">Mountain View Resort</span>
+            </div>
+          </td>
+          <td class="px-3 py-2.5">
+            <span class="inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-medium bg-green-50 text-green-700 border border-green-200 rounded-full">
+              <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span> ใช้งานได้
+            </span>
+          </td>
+          <td class="px-3 py-2.5 text-sm">
+            <div class="text-slate-700">10 นาทีที่แล้ว</div>
+            <div class="text-[10px] text-green-600">● Online</div>
+          </td>
+          <td class="px-3 py-2.5 text-sm"><span class="text-slate-400">—</span></td>
+          <td class="px-3 py-2.5">
+            <div class="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button class="w-7 h-7 rounded-md hover:bg-slate-100 flex items-center justify-center text-slate-500" title="ดูรายละเอียด"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg></button>
+              <button class="w-7 h-7 rounded-md hover:bg-blue-50 flex items-center justify-center text-slate-500" title="Impersonate"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14"/></svg></button>
+              <button class="w-7 h-7 rounded-md hover:bg-amber-50 flex items-center justify-center text-slate-500" title="ส่งอีเมล"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l9 6 9-6"/></svg></button>
+              <button class="w-7 h-7 rounded-md hover:bg-slate-100 flex items-center justify-center text-slate-500" title="เพิ่มเติม"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg></button>
+            </div>
+          </td>
+        </tr>
+
+        <!-- ROW 6: Disabled example -->
+        <tr class="hover:bg-slate-50/60 group">
+          <td class="px-3 py-2.5"><input type="checkbox" class="rounded border-slate-300"/></td>
+          <td class="px-3 py-2.5">
+            <div class="flex items-center gap-2.5 opacity-60">
+              <div class="w-9 h-9 rounded-full bg-gradient-to-br from-slate-400 to-slate-600 text-white flex items-center justify-center text-xs font-bold shrink-0">MM</div>
+              <div class="min-w-0">
+                <div class="font-medium text-slate-600 truncate line-through">Michael Manager</div>
+                <div class="text-xs text-slate-400 truncate">manager.seasidesta@hotel.test</div>
+              </div>
+            </div>
+          </td>
+          <td class="px-3 py-2.5">
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-violet-50 text-violet-700 border border-violet-200">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              ผู้จัดการ
+            </span>
+          </td>
+          <td class="px-3 py-2.5">
+            <div class="flex items-center gap-1.5">
+              <div class="w-6 h-6 rounded bg-teal-100 text-teal-700 flex items-center justify-center text-[10px] font-bold">S</div>
+              <span class="text-sm text-slate-700 truncate">Seaside Hotel</span>
+            </div>
+          </td>
+          <td class="px-3 py-2.5">
+            <span class="inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-medium bg-slate-100 text-slate-700 border border-slate-300 rounded-full">
+              <span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span> ปิดใช้งาน
+            </span>
+            <div class="text-[10px] text-slate-500 mt-0.5">ปิดเมื่อ 7 วันก่อน</div>
+          </td>
+          <td class="px-3 py-2.5 text-sm">
+            <div class="text-slate-500">7 วันที่แล้ว</div>
+          </td>
+          <td class="px-3 py-2.5 text-sm"><span class="text-slate-400">—</span></td>
+          <td class="px-3 py-2.5">
+            <div class="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button class="w-7 h-7 rounded-md hover:bg-green-50 hover:text-green-600 flex items-center justify-center text-slate-500" title="เปิดใช้งาน"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg></button>
+              <button class="w-7 h-7 rounded-md hover:bg-slate-100 flex items-center justify-center text-slate-500"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg></button>
+              <button class="w-7 h-7 rounded-md hover:bg-slate-100 flex items-center justify-center text-slate-500"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg></button>
+            </div>
+          </td>
+        </tr>
+
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ============ FOOTER / PAGINATION ============ -->
+  <div class="px-6 py-3 bg-slate-50/60 border-t border-slate-200 flex items-center justify-between text-sm">
+    <div class="flex items-center gap-3 text-slate-600">
+      <span>แสดง <span class="font-medium text-slate-900">1-6</span> จาก <span class="font-medium text-slate-900">19</span> รายการ</span>
+      <span class="text-slate-300">|</span>
+      <div class="flex items-center gap-1.5">
+        <span class="text-xs text-slate-500">แสดงต่อหน้า:</span>
+        <select class="text-xs border border-slate-200 rounded px-1.5 py-0.5 bg-white">
+          <option>10</option>
+          <option selected>20</option>
+          <option>50</option>
+          <option>100</option>
+        </select>
+      </div>
+    </div>
+    <div class="flex items-center gap-1">
+      <button class="w-8 h-8 rounded-md border border-slate-200 hover:bg-white flex items-center justify-center text-slate-400" disabled>
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+      </button>
+      <button class="w-8 h-8 rounded-md bg-brand-600 text-white text-sm font-medium">1</button>
+      <button class="w-8 h-8 rounded-md hover:bg-white border border-slate-200 text-slate-600 text-sm">2</button>
+      <button class="w-8 h-8 rounded-md hover:bg-white border border-slate-200 text-slate-600 text-sm">3</button>
+      <button class="w-8 h-8 rounded-md border border-slate-200 hover:bg-white flex items-center justify-center text-slate-600">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ ROLE LEGEND / IMPROVEMENTS ============ -->
+<div class="max-w-[1500px] mx-auto mt-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
+  <!-- Role Legend -->
+  <div class="bg-white rounded-2xl border border-slate-200 p-5">
+    <div class="flex items-center gap-2 mb-3">
+      <div class="w-8 h-8 rounded-lg bg-brand-100 text-brand-700 flex items-center justify-center">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/></svg>
+      </div>
+      <h3 class="font-bold text-slate-900">บทบาทในระบบ — แปลไทย + สี</h3>
+    </div>
+    <div class="grid grid-cols-2 gap-2 text-xs">
+      <div class="space-y-1.5">
+        <div class="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mt-2">Platform / Tenant</div>
+        <div class="flex items-center gap-2"><span class="px-2 py-0.5 bg-red-50 text-red-700 border border-red-200 rounded-md font-medium">ผู้ดูแลแพลตฟอร์ม</span> <span class="text-slate-500">platform_admin</span></div>
+        <div class="flex items-center gap-2"><span class="px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-md font-medium">ผู้ดูแลโรงแรม</span> <span class="text-slate-500">tenant_admin</span></div>
+        <div class="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mt-2">Management</div>
+        <div class="flex items-center gap-2"><span class="px-2 py-0.5 bg-violet-50 text-violet-700 border border-violet-200 rounded-md font-medium">ผู้จัดการ</span> <span class="text-slate-500">manager</span></div>
+        <div class="flex items-center gap-2"><span class="px-2 py-0.5 bg-sky-50 text-sky-700 border border-sky-200 rounded-md font-medium">พนักงานต้อนรับ</span> <span class="text-slate-500">receptionist</span></div>
+        <div class="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mt-2">F&B</div>
+        <div class="flex items-center gap-2"><span class="px-2 py-0.5 bg-orange-50 text-orange-700 border border-orange-200 rounded-md font-medium">เชฟ</span> <span class="text-slate-500">chef</span></div>
+        <div class="flex items-center gap-2"><span class="px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-md font-medium">พนักงานเสิร์ฟ</span> <span class="text-slate-500">waiter</span></div>
+        <div class="flex items-center gap-2"><span class="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md font-medium">แคชเชียร์</span> <span class="text-slate-500">cashier</span></div>
+      </div>
+      <div class="space-y-1.5">
+        <div class="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mt-2">Operations</div>
+        <div class="flex items-center gap-2"><span class="px-2 py-0.5 bg-cyan-50 text-cyan-700 border border-cyan-200 rounded-md font-medium">แม่บ้าน</span> <span class="text-slate-500">housekeeper</span></div>
+        <div class="flex items-center gap-2"><span class="px-2 py-0.5 bg-yellow-50 text-yellow-700 border border-yellow-200 rounded-md font-medium">ช่างซ่อม</span> <span class="text-slate-500">maintenance</span></div>
+        <div class="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mt-2">Procurement</div>
+        <div class="flex items-center gap-2"><span class="px-2 py-0.5 bg-teal-50 text-teal-700 border border-teal-200 rounded-md font-medium">ผู้จัดการจัดซื้อ</span> <span class="text-slate-500">procurement_manager</span></div>
+        <div class="flex items-center gap-2"><span class="px-2 py-0.5 bg-pink-50 text-pink-700 border border-pink-200 rounded-md font-medium">ผู้จัดซื้อ</span> <span class="text-slate-500">buyer</span></div>
+        <div class="flex items-center gap-2"><span class="px-2 py-0.5 bg-lime-50 text-lime-700 border border-lime-200 rounded-md font-medium">ผู้อนุมัติ</span> <span class="text-slate-500">approver</span></div>
+        <div class="flex items-center gap-2"><span class="px-2 py-0.5 bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200 rounded-md font-medium">ผู้รับของ</span> <span class="text-slate-500">receiver</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Improvements -->
+  <div class="bg-white rounded-2xl border border-slate-200 p-5">
+    <div class="flex items-center gap-2 mb-3">
+      <div class="w-8 h-8 rounded-lg bg-green-100 text-green-700 flex items-center justify-center">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+      </div>
+      <h3 class="font-bold text-slate-900">สิ่งที่ปรับปรุง</h3>
+    </div>
+    <ul class="space-y-1.5 text-sm text-slate-700">
+      <li class="flex gap-2"><span class="text-green-500 shrink-0">✓</span> KPI 5 ช่อง: ทั้งหมด/ใช้งานได้/ระงับ/ปิดใช้งาน/หมดอายุเร็วๆ นี้</li>
+      <li class="flex gap-2"><span class="text-green-500 shrink-0">✓</span> Avatar รูปวงกลม + สีตาม role (ดูเร็วขึ้น)</li>
+      <li class="flex gap-2"><span class="text-green-500 shrink-0">✓</span> Role แสดงภาษาไทย + icon ตาม category</li>
+      <li class="flex gap-2"><span class="text-green-500 shrink-0">✓</span> Column "โรงแรม / Tenant" — แยกข้อมูลให้รู้ว่าผู้ใช้ของโรงแรมไหน</li>
+      <li class="flex gap-2"><span class="text-green-500 shrink-0">✓</span> Last login แบบ relative time + Online indicator + จำนวนครั้ง</li>
+      <li class="flex gap-2"><span class="text-green-500 shrink-0">✓</span> Filters ขั้นสูง: บทบาท (multi-select) / โรงแรม / Last login</li>
+      <li class="flex gap-2"><span class="text-green-500 shrink-0">✓</span> Filter chips แสดง filter ที่ active</li>
+      <li class="flex gap-2"><span class="text-green-500 shrink-0">✓</span> Bulk select + actions (เปิดใช้, ระงับ, อีเมล, ลบ)</li>
+      <li class="flex gap-2"><span class="text-green-500 shrink-0">✓</span> Quick actions แสดงตอน hover row (ดูรายละเอียด/Impersonate/อีเมล/3-dot)</li>
+      <li class="flex gap-2"><span class="text-green-500 shrink-0">✓</span> Add User / Import CSV / Export CSV ที่ header</li>
+      <li class="flex gap-2"><span class="text-green-500 shrink-0">✓</span> Sort by column + page size selector</li>
+      <li class="flex gap-2"><span class="text-green-500 shrink-0">✓</span> Suspended/Disabled row จะดู dim + แสดงเหตุผล/เวลา</li>
+    </ul>
+    <div class="mt-3 pt-3 border-t border-slate-100">
+      <p class="text-xs font-semibold text-slate-600 mb-1.5">ข้อเสนอแนะเพิ่มเติม:</p>
+      <ul class="space-y-1 text-xs text-slate-600">
+        <li class="flex gap-2"><span class="text-blue-500">•</span> Side panel ดูรายละเอียด user (ไม่ต้องเปลี่ยนหน้า) + Activity Log</li>
+        <li class="flex gap-2"><span class="text-blue-500">•</span> Reset Password / Send Magic Link จาก dropdown</li>
+        <li class="flex gap-2"><span class="text-blue-500">•</span> Saved filters (Filter Presets) เช่น "Tenant Admin หมดอายุเร็วๆ นี้"</li>
+        <li class="flex gap-2"><span class="text-blue-500">•</span> Audit trail ใครเปลี่ยน status, เมื่อไหร่</li>
+        <li class="flex gap-2"><span class="text-blue-500">•</span> Confirm Dialog ทุก action (เหมือนหน้า Subscription)</li>
+        <li class="flex gap-2"><span class="text-blue-500">•</span> Keyboard shortcuts: / โฟกัสค้นหา, j/k เลื่อน, Esc clear selection</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

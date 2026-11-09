@@ -1,0 +1,14 @@
+# Development-only overrides — DO NOT use on production
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+version: '3.8'
+
+services:
+  adminer:
+    image: adminer:latest
+    container_name: hotel-adminer
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      - mysql

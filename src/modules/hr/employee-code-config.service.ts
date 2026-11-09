@@ -17,7 +17,7 @@ export class EmployeeCodeConfigService {
       throw new BadRequestException('Tenant ID is required');
     }
 
-    const config = await (this.prisma as any).employeeCodeConfig.findUnique({
+    const config = await (this.prisma as any).employeeCodeConfig.findFirst({
       where: { tenantId },
     });
 
@@ -91,7 +91,7 @@ export class EmployeeCodeConfigService {
     const MAX_ATTEMPTS = 50;
 
     return this.prisma.$transaction(async (tx: any) => {
-      let config = await tx.employeeCodeConfig.findUnique({ where: { tenantId } });
+      let config = await tx.employeeCodeConfig.findFirst({ where: { tenantId } });
 
       if (!config) {
         config = await tx.employeeCodeConfig.create({
@@ -224,7 +224,7 @@ export class EmployeeCodeConfigService {
       throw new BadRequestException('Tenant ID is required');
     }
 
-    const config = await (this.prisma as any).employeeCodeConfig.findUnique({
+    const config = await (this.prisma as any).employeeCodeConfig.findFirst({
       where: { tenantId },
     });
 

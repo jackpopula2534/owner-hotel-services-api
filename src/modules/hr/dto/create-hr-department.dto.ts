@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsOptional, IsBoolean, IsInt, Min, MaxLength } from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsInt, IsNumber, Min, MaxLength } from 'class-validator';
 
 export class CreateHrDepartmentDto {
   @ApiProperty({ example: 'Front Office', description: 'ชื่อแผนก (ภาษาไทย)' })
@@ -39,4 +39,24 @@ export class CreateHrDepartmentDto {
   @IsInt()
   @Min(0)
   sortOrder?: number;
+
+  @ApiPropertyOptional({
+    description: 'Cost center ของแผนก (เจ้าของต้นทุน — ใช้โดย cost accounting integration), ส่ง null เพื่อลบ mapping',
+    nullable: true,
+  })
+  @IsOptional()
+  @IsString()
+  costCenterId?: string | null;
+
+  @ApiPropertyOptional({ example: 12, description: 'อัตรากำลังตามแผน (คน)', nullable: true })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  plannedHeadcount?: number | null;
+
+  @ApiPropertyOptional({ example: 3600000, description: 'งบบุคลากรต่อปี (บาท)', nullable: true })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  annualPersonnelBudget?: number | null;
 }

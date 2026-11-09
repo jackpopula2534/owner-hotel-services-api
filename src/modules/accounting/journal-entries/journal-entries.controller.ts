@@ -1,0 +1,120 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
+import { withPaginationMeta } from '@/common/utils/pagination.util';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Param,
+  Body,
+  Query,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { JournalEntriesService } from './journal-entries.service';
+import { CreateJournalEntryDto } from './dto/create-journal-entry.dto';
+import { QueryJournalEntryDto } from './dto/query-journal-entry.dto';
+import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
+import { AddonGuard } from '@/common/guards/addon.guard';
+import { RequireAddon } from '@/common/decorators/require-addon.decorator';
+import { CurrentUser } from '@/common/decorators/current-user.decorator';
+import { IsDateString, IsOptional, IsString, IsUUID } from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
+import { RolesGuard } from '@/common/guards/roles.guard';
+import { Roles } from '@/common/decorators/roles.decorator';
+import { ACCOUNTING_CLOSE_ROLES, ACCOUNTING_WRITE_ROLES, AccountingAccess } from '@/modules/accounting/accounting-access.decorator';
+
+class ReverseJournalDto {
+  @ApiPropertyOptional() @IsOptional() @IsString() description?: string;
+  @ApiPropertyOptional({ description: 'วันที่กลับรายการ (ค่าเริ่มต้น = วันนี้)' })
+  @IsOptional()
+  @IsDateString()
+  reversalDate?: string;
+}
+
+class JournalSummaryQueryDto {
+  @ApiPropertyOptional() @IsOptional() @IsUUID() propertyId?: string;
+}
+
+interface JwtPayload {
+  sub: string;
+  tenantId: string;
+  email: string;
+  role: string;
+}
+
+@ApiTags('Accounting - Journal Entries')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard, AddonGuard, RolesGuard)
+@AccountingAccess(ACCOUNTING_WRITE_ROLES)
+@RequireAddon('ACCOUNTING_MODULE')
+// Accounting Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('accounting')
+@Controller({ path: 'accounting/journal-entries', version: '1' })
+export class JournalEntriesController {
+  constructor(private readonly service: JournalEntriesService) {}
+
+  @Get()
+  @ApiOperation({ summary: 'ดูรายการสมุดรายวันทั้งหมด' })
+  async findAll(@CurrentUser() user: JwtPayload, @Query() query: QueryJournalEntryDto) {
+    const data = await this.service.findAll(user.tenantId, query);
+    return withPaginationMeta(data);
+  }
+
+  @Get('summary')
+  @ApiOperation({ summary: 'จำนวนรายการตามสถานะ + ยอดร่างค้าง' })
+  async summary(@CurrentUser() user: JwtPayload, @Query() query: JournalSummaryQueryDto) {
+    const data = await this.service.summary(user.tenantId, query.propertyId);
+    return { success: true, data };
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'ดูรายการสมุดรายวันตาม ID' })
+  async findOne(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    const data = await this.service.findOne(id, user.tenantId);
+    return { success: true, data };
+  }
+
+  @Post()
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'สร้างรายการสมุดรายวัน (double-entry)' })
+  async create(@CurrentUser() user: JwtPayload, @Body() dto: CreateJournalEntryDto) {
+    const data = await this.service.create(dto, user.tenantId, user.sub);
+    return { success: true, data };
+  }
+
+  @Patch(':id/post')
+  @ApiOperation({ summary: 'Post รายการ (DRAFT → POSTED) และอัปเดต Ledger Balance' })
+  async post(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    const data = await this.service.post(id, user.tenantId, user.sub);
+    return { success: true, data };
+  }
+
+  @Roles(...ACCOUNTING_CLOSE_ROLES)
+  @Patch(':id/reverse')
+  @ApiOperation({ summary: 'กลับรายการ (สร้าง reversal entry อัตโนมัติ)' })
+  async reverse(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: ReverseJournalDto,
+  ) {
+    const data = await this.service.reverse(
+      id,
+      user.tenantId,
+      user.sub,
+      dto.description,
+      dto.reversalDate,
+    );
+    return { success: true, data };
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'ลบรายการร่างที่บันทึกเอง (MANUAL + DRAFT เท่านั้น)' })
+  async remove(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    const data = await this.service.removeDraft(id, user.tenantId);
+    return { success: true, data };
+  }
+}

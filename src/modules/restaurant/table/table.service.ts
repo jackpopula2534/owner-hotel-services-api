@@ -7,12 +7,20 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as QRCode from 'qrcode';
+import { Prisma, RestaurantTable } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditLogService } from '../../../audit-log/audit-log.service';
 import { CreateTableDto } from './dto/create-table.dto';
 import { UpdateTableDto } from './dto/update-table.dto';
 import { UpdateTableStatusDto } from './dto/update-table-status.dto';
 import { SaveLayoutDto } from './dto/save-layout.dto';
+import {
+  BLOCKING_RESERVATION_STATUSES,
+  overlaps,
+  startOfDay,
+  today,
+  toRange,
+} from '../reservation/reservation-slot.util';
 
 @Injectable()
 export class TableService {
@@ -39,6 +47,54 @@ export class TableService {
     return this.prisma.restaurantTable.findMany({
       where,
       orderBy: { tableNumber: 'asc' },
+      include: {
+        // The floor view needs to see who is booked in and what is on the bill,
+        // otherwise a RESERVED table gives staff no idea which party it is for.
+        reservations: {
+          where: {
+            reservationDate: today(),
+            status: { in: [...BLOCKING_RESERVATION_STATUSES] },
+          },
+          orderBy: { startTime: 'asc' },
+          select: {
+            id: true,
+            guestName: true,
+            guestPhone: true,
+            partySize: true,
+            startTime: true,
+            endTime: true,
+            status: true,
+            // The POS shows it when staff check the party in (birthday, high chair, …).
+            specialRequests: true,
+          },
+        },
+        orders: {
+          where: { status: { notIn: ['COMPLETED', 'CANCELLED'] } },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: {
+            id: true,
+            orderNumber: true,
+            status: true,
+            paymentStatus: true,
+            total: true,
+            // Live Monitor: how long the party has been seated, and how many.
+            partySize: true,
+            createdAt: true,
+          },
+        },
+        // Live Monitor: calls still waiting on staff — PAYMENT is "ขอเช็คบิล".
+        staffCalls: {
+          where: { status: { in: ['PENDING', 'ACKNOWLEDGED'] } },
+          orderBy: { createdAt: 'asc' },
+          select: {
+            id: true,
+            callType: true,
+            status: true,
+            createdAt: true,
+          },
+        },
+      },
     });
   }
 
@@ -67,9 +123,22 @@ export class TableService {
       );
     }
 
-    const result = await this.prisma.restaurantTable.create({
-      data: { ...dto, restaurantId, tenantId },
-    });
+    let result: RestaurantTable;
+    try {
+      result = await this.prisma.restaurantTable.create({
+        data: { ...dto, restaurantId, tenantId },
+      });
+    } catch (error) {
+      // Two people adding a table at once clear the check above and then hit
+      // `restaurant_tables_restaurantId_tableNumber_key`. Say what happened
+      // instead of putting the index name on screen.
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException(
+          `Table number '${dto.tableNumber}' already exists in this restaurant`,
+        );
+      }
+      throw error;
+    }
 
     this.auditLogService.log({
       action: 'create' as any,
@@ -122,12 +191,20 @@ export class TableService {
       resourceId: tableId,
       userId,
       tenantId,
+      // `status` is editable here too (the POS edit form submits the whole
+      // table), so it has to be in the trail — not only on the status endpoint.
       oldValues: {
         tableNumber: oldTable.tableNumber,
         zone: oldTable.zone,
         capacity: oldTable.capacity,
+        status: oldTable.status,
       },
-      newValues: { tableNumber: result.tableNumber, zone: result.zone, capacity: result.capacity },
+      newValues: {
+        tableNumber: result.tableNumber,
+        zone: result.zone,
+        capacity: result.capacity,
+        status: result.status,
+      },
       description: 'แก้ไขโต๊ะ',
     });
 
@@ -195,6 +272,37 @@ export class TableService {
       throw new BadRequestException('Cannot delete an occupied table');
     }
 
+    // `TableReservation` cascades on delete, so removing a table would silently
+    // wipe live bookings. Refuse instead — the caller has to cancel or move them.
+    const liveBookings = await this.prisma.tableReservation.count({
+      where: {
+        tableId,
+        restaurantId,
+        status: { in: [...BLOCKING_RESERVATION_STATUSES] },
+        reservationDate: { gte: today() },
+      },
+    });
+
+    if (liveBookings > 0) {
+      throw new BadRequestException(
+        `Cannot delete this table — it still has ${liveBookings} upcoming reservation(s). Cancel or move them first.`,
+      );
+    }
+
+    const openBills = await this.prisma.order.count({
+      where: {
+        tableId,
+        restaurantId,
+        status: { notIn: ['COMPLETED', 'CANCELLED'] },
+      },
+    });
+
+    if (openBills > 0) {
+      throw new BadRequestException(
+        `Cannot delete this table — it still has ${openBills} open order(s). Close or cancel them first.`,
+      );
+    }
+
     await this.prisma.restaurantTable.delete({ where: { id: tableId } });
 
     this.auditLogService.log({
@@ -225,21 +333,33 @@ export class TableService {
       orderBy: { capacity: 'asc' },
     });
 
-    const reservationDate = new Date(date);
-    reservationDate.setHours(0, 0, 0, 0);
+    const reservationDate = startOfDay(date);
 
-    const reservedTableIds = await this.prisma.tableReservation.findMany({
+    const requested = toRange(startTime);
+    if (!requested) {
+      throw new BadRequestException(`Invalid start time '${startTime}' (expected HH:mm)`);
+    }
+
+    const sameDay = await this.prisma.tableReservation.findMany({
       where: {
         restaurantId,
         tenantId,
         reservationDate,
-        startTime: startTime,
-        status: { in: ['PENDING', 'CONFIRMED'] },
+        status: { in: [...BLOCKING_RESERVATION_STATUSES] },
       },
-      select: { tableId: true },
+      select: { tableId: true, startTime: true, endTime: true },
     });
 
-    const reservedIds = new Set(reservedTableIds.map((r) => r.tableId));
+    // Compare whole time ranges — matching only on an identical startTime would
+    // report a table free at 18:30 while an 18:00–20:00 party is sitting at it.
+    const reservedIds = new Set(
+      sameDay
+        .filter((r) => {
+          const booked = toRange(r.startTime, r.endTime);
+          return booked !== null && overlaps(requested, booked);
+        })
+        .map((r) => r.tableId),
+    );
 
     return allTables.map((table) => ({
       ...table,

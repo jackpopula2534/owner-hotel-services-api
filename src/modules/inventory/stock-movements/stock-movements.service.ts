@@ -8,8 +8,9 @@ import {
 import { CreateStockMovementDto, StockMovementTypeDto } from './dto/create-stock-movement.dto';
 import { CreateTransferDto } from './dto/create-transfer.dto';
 import { QueryStockMovementDto } from './dto/query-stock-movement.dto';
+import { LotsService } from '../lots/lots.service';
 
-interface PaginatedResponse<T> {
+export interface PaginatedResponse<T> {
   data: T[];
   meta: {
     page: number;
@@ -23,23 +24,43 @@ interface StockMovementDetail {
   id: string;
   tenantId: string;
   warehouseId: string;
+  /** @deprecated kept for backward compat; prefer `warehouse.name` */
   warehouseName?: string;
+  warehouse?: { id: string; name: string };
   itemId: string;
+  /** @deprecated kept for backward compat; prefer `item.name` */
   itemName?: string;
+  /** @deprecated kept for backward compat; prefer `item.sku` */
   itemSku?: string;
+  item?: { id: string; name: string; sku: string };
   type: string;
   quantity: number;
   unitCost: number;
+  /** Total movement cost (qty * unitCost). Mirrors DB `totalCost` field. */
+  totalCost: number;
+  /** @deprecated alias of `totalCost` for backward compat */
   totalValue: number;
   referenceType?: string;
   referenceId?: string;
   transferWarehouseId?: string;
   notes?: string;
   batchNumber?: string;
-  expiryDate?: string;
+  expiryDate?: string | Date | null;
+  lotId?: string | null;
+  lot?: { id: string; lotNumber: string; expiryDate?: Date | null; status: string } | null;
+  /** Raw user id of the actor (kept for backward compat). */
   createdBy: string;
+  /** Display name resolved from User table. */
+  createdByName?: string;
+  /** Populated user record for the actor (firstName/lastName/email). */
+  createdByUser?: {
+    id: string;
+    firstName: string | null;
+    lastName: string | null;
+    email: string;
+  } | null;
   createdAt: Date;
-  updatedAt: Date;
+  updatedAt?: Date;
 }
 
 @Injectable()
@@ -49,6 +70,7 @@ export class StockMovementsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly lotsService: LotsService,
   ) {}
 
   /**
@@ -74,6 +96,32 @@ export class StockMovementsService {
       where.itemId = query.itemId;
     }
 
+    const itemWhere: Record<string, any> = {};
+    if (query.categoryId) {
+      itemWhere.categoryId = query.categoryId;
+    }
+    if (query.search?.trim()) {
+      const search = query.search.trim();
+      where.OR = [
+        { notes: { contains: search } },
+        { referenceId: { contains: search } },
+        {
+          item: {
+            is: {
+              OR: [
+                { name: { contains: search } },
+                { sku: { contains: search } },
+                { barcode: { contains: search } },
+              ],
+            },
+          },
+        },
+      ];
+    }
+    if (Object.keys(itemWhere).length > 0) {
+      where.item = { is: itemWhere };
+    }
+
     if (query.type) {
       where.type = query.type;
     }
@@ -94,6 +142,7 @@ export class StockMovementsService {
         include: {
           warehouse: { select: { id: true, name: true } },
           item: { select: { id: true, name: true, sku: true } },
+          lot: { select: { id: true, lotNumber: true, expiryDate: true, status: true } },
         },
         orderBy: { [sort]: order },
         skip,
@@ -102,7 +151,21 @@ export class StockMovementsService {
       this.prisma.stockMovement.count({ where }),
     ]);
 
-    const data = movements.map((m) => this.mapToDetail(m));
+    // Resolve actor names in a single batch query.
+    // StockMovement.createdBy is a plain UUID string (no FK relation in schema),
+    // so we fetch the matching users separately and stitch them in.
+    const userIds = Array.from(
+      new Set(movements.map((m) => m.createdBy).filter((id): id is string => Boolean(id))),
+    );
+    const users = userIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: userIds } },
+          select: { id: true, firstName: true, lastName: true, email: true },
+        })
+      : [];
+    const userMap = new Map(users.map((u) => [u.id, u]));
+
+    const data = movements.map((m) => this.mapToDetail(m, userMap.get(m.createdBy) ?? null));
 
     return {
       data,
@@ -119,11 +182,12 @@ export class StockMovementsService {
    * Find a single stock movement by ID
    */
   async findOne(id: string, tenantId: string): Promise<StockMovementDetail> {
-    const movement = await this.prisma.stockMovement.findUnique({
-      where: { id },
+    const movement = await this.prisma.stockMovement.findFirst({
+      where: { id, tenantId },
       include: {
         warehouse: { select: { id: true, name: true } },
         item: { select: { id: true, name: true, sku: true } },
+        lot: { select: { id: true, lotNumber: true, expiryDate: true, status: true } },
       },
     });
 
@@ -135,7 +199,14 @@ export class StockMovementsService {
       throw new NotFoundException(`Stock movement with ID ${id} not found`);
     }
 
-    return this.mapToDetail(movement);
+    const user = movement.createdBy
+      ? await this.prisma.user.findFirst({
+          where: { id: movement.createdBy, tenantId },
+          select: { id: true, firstName: true, lastName: true, email: true },
+        })
+      : null;
+
+    return this.mapToDetail(movement, user);
   }
 
   /**
@@ -184,6 +255,85 @@ export class StockMovementsService {
       }
     }
 
+    // ── Auto-create Lot for GOODS_RECEIVE on perishable/lot-tracked items ───────
+    // When receiving stock via this modal (not via GR flow), we still need to
+    // create an InventoryLot so the item is traceable. We generate the lot
+    // number + expiry date here, then pass the lotId into the transaction below.
+    let autoCreatedLotId: string | undefined;
+    if (dto.type === StockMovementTypeDto.GOODS_RECEIVE) {
+      const needsLot = (item as any).isPerishable || (item as any).requiresLotTracking;
+      if (needsLot && !dto.lotId) {
+        // Generate lot number via sequence (outside tx to keep the tx short)
+        const lotNumber = await this.lotsService.generateLotNumber(tenantId);
+
+        // Calculate expiry date: use provided value, or derive from shelf life
+        let expiryDate: Date | undefined;
+        if (dto.expiryDate) {
+          expiryDate = new Date(dto.expiryDate);
+        } else if ((item as any).defaultShelfLifeDays) {
+          expiryDate = new Date();
+          expiryDate.setDate(expiryDate.getDate() + (item as any).defaultShelfLifeDays);
+        }
+
+        const newLot = await this.prisma.inventoryLot.create({
+          data: {
+            tenantId,
+            itemId: dto.itemId,
+            warehouseId: dto.warehouseId,
+            lotNumber,
+            batchNumber: dto.batchNumber,
+            initialQty: dto.quantity,
+            remainingQty: dto.quantity,
+            unitCost: dto.unitCost,
+            expiryDate: expiryDate ?? null,
+            status: 'ACTIVE',
+          },
+        });
+        autoCreatedLotId = newLot.id;
+      }
+    }
+
+    // ── Resolve lotId for outbound movements ────────────────────────────────────
+    // Callers may pass an explicit lotId via dto.lotId.
+    // For outbound types without an explicit lot, auto-FEFO pick one.
+    const explicitLotId: string | undefined = dto.lotId || autoCreatedLotId || undefined;
+
+    const outboundLotTypes = [
+      StockMovementTypeDto.GOODS_ISSUE,
+      StockMovementTypeDto.ADJUSTMENT_OUT,
+      StockMovementTypeDto.WASTE,
+      StockMovementTypeDto.RETURN_SUPPLIER,
+    ];
+    const isOutboundLotType = outboundLotTypes.includes(dto.type);
+
+    // For ADJUSTMENT_IN: if a lotId is provided we will increment that lot's
+    // remainingQty; otherwise we leave lot tracking to the caller (GR flow).
+    const inboundLotTypes = [StockMovementTypeDto.ADJUSTMENT_IN];
+    const isInboundLotType = inboundLotTypes.includes(dto.type);
+
+    // Only lot-tracked items (perishable or explicitly lot-tracked) go through
+    // the FEFO lot picker. Non-lot items (e.g. rental equipment) are tracked at
+    // the WarehouseStock level only — forcing a lot pick on them throws a
+    // spurious "สต็อก lot ไม่เพียงพอ" even when warehouse stock is sufficient.
+    const needsLot = (item as any).isPerishable || (item as any).requiresLotTracking;
+
+    let resolvedLotId: string | undefined = explicitLotId;
+
+    if (isOutboundLotType && needsLot && !resolvedLotId) {
+      // Auto FEFO pick — returns the first lot with enough remainingQty
+      const picks = await this.pickLotsForIssue(
+        tenantId,
+        dto.itemId,
+        dto.warehouseId,
+        dto.quantity,
+      );
+      // Single-lot path: resolve here and proceed in one transaction.
+      // Multi-lot path is handled by createWithFEFO; here we take the first pick.
+      if (picks.length > 0) {
+        resolvedLotId = picks[0].lotId;
+      }
+    }
+
     // Execute transaction for atomicity
     const result = await this.prisma.$transaction(async (tx) => {
       // Create the stock movement record
@@ -204,12 +354,51 @@ export class StockMovementsService {
           batchNumber: dto.batchNumber,
           expiryDate: dto.expiryDate ? new Date(dto.expiryDate) : null,
           createdBy: userId,
+          // Link to lot when available
+          ...(resolvedLotId ? { lotId: resolvedLotId } : {}),
         },
         include: {
           warehouse: { select: { id: true, name: true } },
           item: { select: { id: true, name: true, sku: true } },
         },
       });
+
+      // ── Sync InventoryLot.remainingQty ──────────────────────────────────────
+      if (resolvedLotId) {
+        if (isOutboundLotType) {
+          // Deduct from lot
+          const lot = await tx.inventoryLot.findFirst({ where: { id: resolvedLotId, tenantId } });
+          if (!lot) {
+            throw new BadRequestException(`Lot ${resolvedLotId} not found`);
+          }
+          if (lot.remainingQty < dto.quantity) {
+            throw new BadRequestException(
+              `Lot ${lot.lotNumber} มีสต็อกเหลือ ${lot.remainingQty} หน่วย แต่ต้องการ ${dto.quantity} หน่วย`,
+            );
+          }
+          const newRemaining = lot.remainingQty - dto.quantity;
+          await tx.inventoryLot.update({
+            where: { id: resolvedLotId },
+            data: {
+              remainingQty: newRemaining,
+              // Mark lot as DEPLETED when fully consumed
+              status: newRemaining === 0 ? 'EXHAUSTED' : lot.status,
+              updatedAt: new Date(),
+            },
+          });
+        } else if (isInboundLotType) {
+          // Increment lot remainingQty for ADJUSTMENT_IN
+          await tx.inventoryLot.update({
+            where: { id: resolvedLotId },
+            data: {
+              remainingQty: { increment: dto.quantity },
+              // Re-activate lot if it was depleted
+              status: 'ACTIVE',
+              updatedAt: new Date(),
+            },
+          });
+        }
+      }
 
       // Update warehouse stock balance
       await this.updateWarehouseStock(
@@ -375,6 +564,8 @@ export class StockMovementsService {
         quantity: dto.quantity,
         unitCost: avgCost,
         transferWarehouseId: dto.toWarehouseId,
+        referenceType: dto.referenceType,
+        referenceId: dto.referenceId,
         notes: dto.notes,
       },
       userId,
@@ -393,13 +584,140 @@ export class StockMovementsService {
       include: {
         warehouse: { select: { id: true, name: true } },
         item: { select: { id: true, name: true, sku: true } },
+        lot: { select: { id: true, lotNumber: true, expiryDate: true, status: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
 
+    const transferUser = toMovement?.createdBy
+      ? await this.prisma.user.findFirst({
+          where: { id: toMovement.createdBy, tenantId },
+          select: { id: true, firstName: true, lastName: true, email: true },
+        })
+      : null;
+
     return {
       from: fromMovement,
-      to: toMovement ? this.mapToDetail(toMovement) : fromMovement,
+      to: toMovement ? this.mapToDetail(toMovement, transferUser) : fromMovement,
+    };
+  }
+
+  async cancelMovement(
+    id: string,
+    reason: string,
+    userId: string,
+    tenantId: string,
+  ): Promise<{ original: StockMovementDetail; reversal: unknown }> {
+    const original = await this.prisma.stockMovement.findFirst({
+      where: { id, tenantId },
+      include: {
+        warehouse: { select: { id: true, name: true } },
+        item: { select: { id: true, name: true, sku: true } },
+        lot: { select: { id: true, lotNumber: true, expiryDate: true, status: true } },
+      },
+    });
+
+    if (!original) {
+      throw new NotFoundException(`Stock movement with ID ${id} not found`);
+    }
+
+    if (original.referenceType === 'STOCK_MOVEMENT_CANCEL') {
+      throw new BadRequestException('รายการยกเลิกไม่สามารถยกเลิกซ้ำได้');
+    }
+
+    const existingCancellation = await this.prisma.stockMovement.findFirst({
+      where: {
+        tenantId,
+        referenceType: 'STOCK_MOVEMENT_CANCEL',
+        referenceId: id,
+      },
+      select: { id: true },
+    });
+
+    if (existingCancellation) {
+      throw new BadRequestException('รายการนี้ถูกยกเลิกแล้ว');
+    }
+
+    const note = `ยกเลิกรายการ ${id}: ${reason}`;
+
+    if (
+      original.type === StockMovementTypeDto.TRANSFER_OUT ||
+      original.type === StockMovementTypeDto.TRANSFER_IN
+    ) {
+      if (!original.transferWarehouseId) {
+        throw new BadRequestException('ไม่พบคลังอีกฝั่งของรายการโอน ไม่สามารถยกเลิกได้');
+      }
+
+      const reversal =
+        original.type === StockMovementTypeDto.TRANSFER_OUT
+          ? await this.createTransfer(
+              {
+                fromWarehouseId: original.transferWarehouseId,
+                toWarehouseId: original.warehouseId,
+                itemId: original.itemId,
+                quantity: original.quantity,
+                referenceType: 'STOCK_MOVEMENT_CANCEL',
+                referenceId: original.id,
+                notes: note,
+              },
+              userId,
+              tenantId,
+            )
+          : await this.createTransfer(
+              {
+                fromWarehouseId: original.warehouseId,
+                toWarehouseId: original.transferWarehouseId,
+                itemId: original.itemId,
+                quantity: original.quantity,
+                referenceType: 'STOCK_MOVEMENT_CANCEL',
+                referenceId: original.id,
+                notes: note,
+              },
+              userId,
+              tenantId,
+            );
+
+      return {
+        original: this.mapToDetail(original),
+        reversal,
+      };
+    }
+
+    const reverseTypeByOriginal: Partial<Record<StockMovementTypeDto, StockMovementTypeDto>> = {
+      [StockMovementTypeDto.GOODS_RECEIVE]: StockMovementTypeDto.ADJUSTMENT_OUT,
+      [StockMovementTypeDto.GOODS_ISSUE]: StockMovementTypeDto.ADJUSTMENT_IN,
+      [StockMovementTypeDto.ADJUSTMENT_IN]: StockMovementTypeDto.ADJUSTMENT_OUT,
+      [StockMovementTypeDto.ADJUSTMENT_OUT]: StockMovementTypeDto.ADJUSTMENT_IN,
+      [StockMovementTypeDto.RETURN_SUPPLIER]: StockMovementTypeDto.ADJUSTMENT_IN,
+      [StockMovementTypeDto.WASTE]: StockMovementTypeDto.ADJUSTMENT_IN,
+    };
+    const reverseType = reverseTypeByOriginal[original.type as StockMovementTypeDto];
+
+    if (!reverseType) {
+      throw new BadRequestException(`ไม่รองรับการยกเลิกรายการประเภท ${original.type}`);
+    }
+
+    const reversal = await this.createMovement(
+      {
+        warehouseId: original.warehouseId,
+        itemId: original.itemId,
+        type: reverseType,
+        quantity: original.quantity,
+        unitCost: this.toNumber(original.unitCost),
+        referenceType: 'STOCK_MOVEMENT_CANCEL',
+        referenceId: original.id,
+        notes: note,
+        batchNumber: original.batchNumber ?? undefined,
+        expiryDate: original.expiryDate ? original.expiryDate.toISOString() : undefined,
+        lotId: original.lotId ?? undefined,
+      },
+      userId,
+      tenantId,
+    );
+
+    return {
+      original: this.mapToDetail(original),
+      reversal,
     };
   }
 
@@ -478,32 +796,36 @@ export class StockMovementsService {
       throw new BadRequestException(`Unknown movement type: ${movementType}`);
     }
 
-    // Get or create warehouse stock
-    let warehouseStock = await tx.warehouseStock.findFirst({
-      where: {
-        warehouseId,
-        itemId,
-      },
+    // Fetch existing stock record (warehouseId + itemId is the unique key).
+    // NOTE: WarehouseStock has no tenantId column — do NOT include it here.
+    const warehouseStock = await tx.warehouseStock.findFirst({
+      where: { warehouseId, itemId },
     });
 
     if (!warehouseStock) {
-      // Create new warehouse stock entry
+      // No stock record yet — only inbound movements are allowed to bootstrap one.
       if (isOutbound) {
         throw new BadRequestException(
-          `Cannot issue items: no stock record for item ${itemId} in warehouse ${warehouseId}`,
+          `ไม่มีสต็อกสินค้าในคลังนี้ ไม่สามารถดำเนินการได้ (item: ${itemId}, warehouse: ${warehouseId})`,
         );
       }
 
-      warehouseStock = await tx.warehouseStock.create({
-        data: {
+      // Bootstrap a new WarehouseStock row for this item/warehouse pair.
+      // Use upsert so that concurrent requests cannot race into a duplicate-key error.
+      await tx.warehouseStock.upsert({
+        where: { warehouseId_itemId: { warehouseId, itemId } },
+        create: {
           id: this.generateUUID(),
           warehouseId,
           itemId,
           quantity,
           avgCost: unitCost,
           totalValue: quantity * unitCost,
-          tenantId,
-          createdAt: new Date(),
+        },
+        update: {
+          // If a concurrent request already created the row, add to it instead.
+          quantity: { increment: quantity },
+          totalValue: { increment: quantity * unitCost },
           updatedAt: new Date(),
         },
       });
@@ -516,34 +838,33 @@ export class StockMovementsService {
     let newTotalValue: number;
 
     if (isInbound) {
-      // Inbound movement: increase quantity and recalculate average cost
-      const oldQuantity = warehouseStock.quantity;
-      const oldAvgCost = warehouseStock.avgCost || 0;
+      // Inbound: increase quantity and recalculate weighted average cost.
+      const oldQuantity = Number(warehouseStock.quantity);
+      const oldAvgCost = Number(warehouseStock.avgCost) || 0;
 
       newQuantity = oldQuantity + quantity;
 
-      // Weighted average cost formula:
-      // newAvgCost = ((oldQty * oldAvgCost) + (newQty * unitCost)) / (oldQty + newQty)
-      newAvgCost = (oldQuantity * oldAvgCost + quantity * unitCost) / newQuantity;
+      // Weighted average cost: ((oldQty * oldAvgCost) + (newQty * unitCost)) / totalQty
+      newAvgCost =
+        newQuantity > 0 ? (oldQuantity * oldAvgCost + quantity * unitCost) / newQuantity : unitCost;
 
       newTotalValue = newQuantity * newAvgCost;
     } else {
-      // Outbound movement: decrease quantity, validate sufficient stock
-      if (warehouseStock.quantity < quantity) {
+      // Outbound: validate sufficient stock then deduct.
+      const currentQty = Number(warehouseStock.quantity);
+      if (currentQty < quantity) {
         throw new BadRequestException(
-          `Insufficient stock: warehouse has ${warehouseStock.quantity} units but trying to issue ${quantity} units`,
+          `สต็อกไม่เพียงพอ: คลังมี ${currentQty} หน่วย แต่ต้องการเบิก ${quantity} หน่วย`,
         );
       }
 
-      newQuantity = warehouseStock.quantity - quantity;
-      const avgCost = warehouseStock.avgCost || 0;
-      newTotalValue = newQuantity * avgCost;
-
-      // Average cost remains the same for outbound movements
-      newAvgCost = warehouseStock.avgCost;
+      newQuantity = currentQty - quantity;
+      // Average cost is unchanged on outbound movements.
+      newAvgCost = Number(warehouseStock.avgCost) || 0;
+      newTotalValue = newQuantity * newAvgCost;
     }
 
-    // Update warehouse stock
+    // Persist the updated stock balance.
     await tx.warehouseStock.update({
       where: { id: warehouseStock.id },
       data: {
@@ -556,31 +877,96 @@ export class StockMovementsService {
   }
 
   /**
-   * Private: Map database record to detail response
+   * Private: Map database record to detail response.
+   *
+   * Resolves the following display issues that show up in the UI:
+   *  - Prisma Decimal fields (`unitCost`, `totalCost`) are coerced to plain
+   *    numbers so the frontend's `formatCurrency` does not produce `NaN`.
+   *  - The DB column is `totalCost`; we expose it under both `totalCost`
+   *    (preferred) and `totalValue` (legacy alias) for backward compatibility.
+   *  - Nested `item` / `warehouse` objects are forwarded so the frontend can
+   *    read `movement.item.name`, `movement.warehouse.name`, etc.
+   *  - The actor record (looked up separately because `createdBy` has no FK
+   *    relation in the Prisma schema) is attached as `createdByUser` and a
+   *    pre-formatted `createdByName` for direct rendering.
    */
-  private mapToDetail(movement: any): StockMovementDetail {
+  private mapToDetail(
+    movement: any,
+    user: {
+      id: string;
+      firstName: string | null;
+      lastName: string | null;
+      email: string;
+    } | null = null,
+  ): StockMovementDetail {
+    const unitCost = this.toNumber(movement.unitCost);
+    const totalCost = this.toNumber(movement.totalCost);
+
+    const createdByName = user
+      ? [user.firstName, user.lastName].filter(Boolean).join(' ').trim() || user.email
+      : undefined;
+
     return {
       id: movement.id,
       tenantId: movement.tenantId,
       warehouseId: movement.warehouseId,
       warehouseName: movement.warehouse?.name,
+      warehouse: movement.warehouse
+        ? { id: movement.warehouse.id, name: movement.warehouse.name }
+        : undefined,
       itemId: movement.itemId,
       itemName: movement.item?.name,
       itemSku: movement.item?.sku,
+      item: movement.item
+        ? { id: movement.item.id, name: movement.item.name, sku: movement.item.sku }
+        : undefined,
       type: movement.type,
       quantity: movement.quantity,
-      unitCost: movement.unitCost,
-      totalValue: movement.totalValue,
-      referenceType: movement.referenceType,
-      referenceId: movement.referenceId,
-      transferWarehouseId: movement.transferWarehouseId,
-      notes: movement.notes,
-      batchNumber: movement.batchNumber,
-      expiryDate: movement.expiryDate,
+      unitCost,
+      totalCost,
+      totalValue: totalCost,
+      referenceType: movement.referenceType ?? undefined,
+      referenceId: movement.referenceId ?? undefined,
+      transferWarehouseId: movement.transferWarehouseId ?? undefined,
+      notes: movement.notes ?? undefined,
+      batchNumber: movement.batchNumber ?? undefined,
+      expiryDate: movement.expiryDate ?? null,
+      lotId: movement.lotId ?? null,
+      lot: movement.lot
+        ? {
+            id: movement.lot.id,
+            lotNumber: movement.lot.lotNumber,
+            expiryDate: movement.lot.expiryDate ?? null,
+            status: movement.lot.status,
+          }
+        : null,
       createdBy: movement.createdBy,
+      createdByName,
+      createdByUser: user,
       createdAt: movement.createdAt,
       updatedAt: movement.updatedAt,
     };
+  }
+
+  /**
+   * Coerce a Prisma `Decimal` (or anything number-ish) into a plain JS number.
+   * Returns 0 for null/undefined/non-finite inputs so the frontend never
+   * receives `NaN` for the value column.
+   */
+  private toNumber(value: unknown): number {
+    if (value === null || value === undefined) return 0;
+    if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+    if (typeof value === 'string') {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+    // Prisma Decimal exposes a `.toNumber()` helper.
+    if (typeof (value as { toNumber?: () => number }).toNumber === 'function') {
+      const parsed = (value as { toNumber: () => number }).toNumber();
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
   }
 
   /**
@@ -634,7 +1020,13 @@ export class StockMovementsService {
     userId: string,
     tenantId: string,
   ) {
-    const OUTBOUND_TYPES = ['GOODS_ISSUE', 'TRANSFER_OUT', 'WASTE', 'ADJUSTMENT_OUT', 'RETURN_SUPPLIER'];
+    const OUTBOUND_TYPES = [
+      'GOODS_ISSUE',
+      'TRANSFER_OUT',
+      'WASTE',
+      'ADJUSTMENT_OUT',
+      'RETURN_SUPPLIER',
+    ];
 
     if (!OUTBOUND_TYPES.includes(dto.type)) {
       // Not outbound — use normal create

@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { PurchaseOrdersService } from '../purchase-orders.service';
 import { PrismaService } from '@/prisma/prisma.service';
 import { CreatePurchaseOrderDto } from '../dto/create-purchase-order.dto';
@@ -66,7 +67,7 @@ describe('PurchaseOrdersService — discount mode & breakdown', () => {
   const mockPrismaService = {
     purchaseOrder: {
       create: jest.fn().mockResolvedValue({ id: newPoId, poNumber: 'PO-202604-0001' }),
-      findUnique: jest.fn().mockResolvedValue(createdPoRow),
+      findFirst: jest.fn().mockResolvedValue(createdPoRow),
       update: jest.fn(),
     },
     purchaseOrderItem: {
@@ -75,14 +76,16 @@ describe('PurchaseOrdersService — discount mode & breakdown', () => {
       findMany: jest.fn(),
     },
     property: {
-      findUnique: jest.fn().mockResolvedValue({ id: propertyId, tenantId }),
-      findFirst: jest.fn().mockResolvedValue({ id: propertyId }),
+      // Service calls findFirst both for the default-property lookup and the
+      // tenant-scoped validation. Default returns a property with tenantId so the
+      // validation passes; tests that need the auto-resolve path override per-call.
+      findFirst: jest.fn().mockResolvedValue({ id: propertyId, tenantId }),
     },
     supplier: {
-      findUnique: jest.fn().mockResolvedValue({ id: supplierId, tenantId }),
+      findFirst: jest.fn().mockResolvedValue({ id: supplierId, tenantId }),
     },
     warehouse: {
-      findUnique: jest.fn().mockResolvedValue({ id: warehouseId, tenantId }),
+      findFirst: jest.fn().mockResolvedValue({ id: warehouseId, tenantId }),
     },
     inventoryItem: {
       // Default: return one row per queried id so `existingItems.length === itemIds.length`.
@@ -98,6 +101,10 @@ describe('PurchaseOrdersService — discount mode & breakdown', () => {
     purchaseRequisition: {
       update: jest.fn(),
     },
+    supplierQuote: {
+      findFirst: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     documentSequence: {
       upsert: jest.fn().mockResolvedValue({ lastNumber: 1 }),
     },
@@ -106,13 +113,17 @@ describe('PurchaseOrdersService — discount mode & breakdown', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [PurchaseOrdersService, { provide: PrismaService, useValue: mockPrismaService }],
+      providers: [
+        PurchaseOrdersService,
+        { provide: PrismaService, useValue: mockPrismaService },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+      ],
     }).compile();
 
     service = module.get<PurchaseOrdersService>(PurchaseOrdersService);
 
     jest.clearAllMocks();
-    mockPrismaService.purchaseOrder.findUnique.mockResolvedValue(createdPoRow);
+    mockPrismaService.purchaseOrder.findFirst.mockResolvedValue(createdPoRow);
     mockPrismaService.purchaseOrder.create.mockResolvedValue({
       id: newPoId,
       poNumber: 'PO-202604-0001',
@@ -123,14 +134,137 @@ describe('PurchaseOrdersService — discount mode & breakdown', () => {
         return Promise.resolve(ids.map((id) => ({ id })));
       },
     );
-    mockPrismaService.property.findUnique.mockResolvedValue({ id: propertyId, tenantId });
-    mockPrismaService.property.findFirst.mockResolvedValue({ id: propertyId });
-    mockPrismaService.supplier.findUnique.mockResolvedValue({ id: supplierId, tenantId });
-    mockPrismaService.warehouse.findUnique.mockResolvedValue({ id: warehouseId, tenantId });
+    mockPrismaService.property.findFirst.mockResolvedValue({ id: propertyId, tenantId });
+    mockPrismaService.supplier.findFirst.mockResolvedValue({ id: supplierId, tenantId });
+    mockPrismaService.warehouse.findFirst.mockResolvedValue({ id: warehouseId, tenantId });
     mockPrismaService.documentSequence.upsert.mockResolvedValue({ lastNumber: 1 });
     mockPrismaService.$transaction.mockImplementation((fn: (tx: unknown) => Promise<unknown>) =>
       fn(mockPrismaService),
     );
+  });
+
+  describe('findQuoteVariance', () => {
+    it('returns deviated POs with reason, item names and delta vs quote', async () => {
+      (mockPrismaService.purchaseOrder as unknown as { findMany: jest.Mock }).findMany = jest
+        .fn()
+        .mockResolvedValue([
+          {
+            id: 'po-9',
+            poNumber: 'PO-9',
+            status: 'DRAFT',
+            createdAt: new Date('2026-10-29'),
+            totalAmount: 70145.69,
+            supplierId,
+            supplier: { id: supplierId, name: 'Village' },
+            requestedBy: null,
+            sourceQuoteId: 'quote-001',
+            priceOverrideReason: 'คลังยังมีของ',
+            quoteVariance: [{ field: 'quantity', itemId: itemId1, quote: 45, po: 40 }],
+          },
+        ]);
+      mockPrismaService.supplierQuote.findMany.mockResolvedValue([
+        { id: 'quote-001', quoteNumber: 'Q-941', totalAmount: 77040 },
+      ]);
+      mockPrismaService.inventoryItem.findMany.mockResolvedValueOnce([
+        { id: itemId1, name: 'น้ำตาลทราย' },
+      ]);
+
+      const res = await service.findQuoteVariance(tenantId, {});
+
+      expect(res.meta.total).toBe(1);
+      expect(res.meta.byField).toEqual({ quantity: 1 });
+      expect(res.data[0]).toMatchObject({
+        poNumber: 'PO-9',
+        reason: 'คลังยังมีของ',
+        quote: { quoteNumber: 'Q-941' },
+        deltaAmount: -6894.31,
+      });
+      expect(res.data[0].changes[0].itemName).toBe('น้ำตาลทราย');
+    });
+  });
+
+  describe('create — locked to source quote', () => {
+    const quoteRow = {
+      id: 'quote-001',
+      tenantId,
+      supplierId,
+      purchaseRequisitionId: null,
+      discountMode: 'BEFORE_VAT',
+      headerDiscount: '0',
+      headerDiscountType: 'AMOUNT',
+      pricesIncludeVat: false,
+      items: [
+        {
+          itemId: itemId1,
+          quantity: 10,
+          unitPrice: '100',
+          discount: '5',
+          discountType: 'PERCENT',
+          taxRate: '7',
+        },
+      ],
+    };
+    const lockedDto = (
+      overrides: Partial<CreatePurchaseOrderDto> = {},
+    ): CreatePurchaseOrderDto => ({
+      propertyId,
+      supplierId,
+      warehouseId,
+      sourceQuoteId: 'quote-001',
+      items: [{ itemId: itemId1, quantity: 10, unitPrice: 100, discount: 5, taxRate: 7 }],
+      ...overrides,
+    });
+
+    beforeEach(() => {
+      mockPrismaService.supplierQuote.findFirst.mockResolvedValue(quoteRow);
+    });
+
+    it('creates without a reason when the PO matches the quote', async () => {
+      await service.create(lockedDto(), userId, tenantId);
+      const data = mockPrismaService.purchaseOrder.create.mock.calls[0][0].data;
+      expect(data.sourceQuoteId).toBe('quote-001');
+      expect(data.priceOverrideReason).toBeNull();
+      expect(data.quoteVariance).toBeUndefined();
+    });
+
+    it('rejects a deviation without a reason', async () => {
+      await expect(
+        service.create(
+          lockedDto({
+            items: [{ itemId: itemId1, quantity: 8, unitPrice: 100, discount: 5, taxRate: 7 }],
+          }),
+          userId,
+          tenantId,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(mockPrismaService.purchaseOrder.create).not.toHaveBeenCalled();
+    });
+
+    it('stores reason + variance when the deviation is justified', async () => {
+      await service.create(
+        lockedDto({
+          items: [{ itemId: itemId1, quantity: 8, unitPrice: 100, discount: 5, taxRate: 7 }],
+          priceOverrideReason: 'คลังยังมีของ',
+        }),
+        userId,
+        tenantId,
+      );
+      const data = mockPrismaService.purchaseOrder.create.mock.calls[0][0].data;
+      expect(data.priceOverrideReason).toBe('คลังยังมีของ');
+      expect(data.quoteVariance).toEqual([
+        expect.objectContaining({ field: 'quantity', itemId: itemId1, quote: 10, po: 8 }),
+      ]);
+    });
+
+    it('rejects a quote from another supplier', async () => {
+      mockPrismaService.supplierQuote.findFirst.mockResolvedValue({
+        ...quoteRow,
+        supplierId: 'other',
+      });
+      await expect(service.create(lockedDto(), userId, tenantId)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+    });
   });
 
   describe('create', () => {
@@ -250,7 +384,7 @@ describe('PurchaseOrdersService — discount mode & breakdown', () => {
     });
 
     it('snapshots paymentTerms from DTO and deliveryAddress as-is', async () => {
-      mockPrismaService.supplier.findUnique.mockResolvedValueOnce({
+      mockPrismaService.supplier.findFirst.mockResolvedValueOnce({
         id: supplierId,
         tenantId,
         paymentTerms: 'NET 30',
@@ -272,7 +406,7 @@ describe('PurchaseOrdersService — discount mode & breakdown', () => {
     });
 
     it('falls back to supplier.paymentTerms when DTO omits it', async () => {
-      mockPrismaService.supplier.findUnique.mockResolvedValueOnce({
+      mockPrismaService.supplier.findFirst.mockResolvedValueOnce({
         id: supplierId,
         tenantId,
         paymentTerms: 'NET 30',

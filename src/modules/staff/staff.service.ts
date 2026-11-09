@@ -12,6 +12,41 @@ import { normalizePagination } from '../../common/utils/pagination.util';
 import { LinkEmployeeDto } from './dto/link-employee.dto';
 import { AuditLogService } from '../../audit-log/audit-log.service';
 
+/**
+ * ขอบเขต "วันนี้" ของงานแม่บ้าน — เที่ยงคืนถึงเที่ยงคืนของวันเดียวกัน
+ *
+ * ของเดิมเขียน `gte: วันนี้ตอนเที่ยงคืน` คู่กับ `lt: ตอนนี้ + 24 ชม.` ซึ่งกินเวลา
+ * เกือบ 48 ชั่วโมง งานของ "พรุ่งนี้" จึงถูกนับเป็น tasksToday ทำให้ยอดงานวันนี้
+ * ของพนักงานพองเกินจริงและตัวเลขบนการ์ดไม่ตรงกับที่เห็นบนบอร์ด
+ */
+function todayWindow(): { gte: Date; lt: Date } {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return { gte: start, lt: end };
+}
+
+/** ข้อมูลคนหนึ่งคนที่จะถูกนำขึ้นทะเบียนพนักงานปฏิบัติการ (staff) */
+export interface ProvisionStaffInput {
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone?: string | null;
+  role: string;
+  department?: string | null;
+  employeeCode?: string | null;
+  /** HR Employee.id — ผู้เรียกต้องยืนยันแล้วว่าอยู่ใน tenant เดียวกัน */
+  employeeId?: string | null;
+  status?: string;
+}
+
+export interface ProvisionStaffResult {
+  staff: any;
+  /** created = สร้างใหม่, linked = ไปเจอแถวเดิมแล้วผูกกับ HR ให้, existing = มีอยู่แล้วไม่ต้องทำอะไร */
+  action: 'created' | 'linked' | 'existing';
+}
+
 interface PaginationQuery {
   page?: number;
   limit?: number;
@@ -95,14 +130,7 @@ export class StaffService {
           skip,
           take: limit,
           include: {
-            housekeepingTasks: {
-              where: {
-                scheduledFor: {
-                  gte: new Date(new Date().toDateString()),
-                  lt: new Date(new Date().getTime() + 24 * 60 * 60 * 1000),
-                },
-              },
-            },
+            housekeepingTasks: { where: { scheduledFor: todayWindow() } },
           },
           orderBy: { createdAt: 'desc' },
         }),
@@ -172,14 +200,7 @@ export class StaffService {
         staff = await this.prisma.staff.findFirst({
           where: { id, tenantId },
           include: {
-            housekeepingTasks: {
-              where: {
-                scheduledFor: {
-                  gte: new Date(new Date().toDateString()),
-                  lt: new Date(new Date().getTime() + 24 * 60 * 60 * 1000),
-                },
-              },
-            },
+            housekeepingTasks: { where: { scheduledFor: todayWindow() } },
           },
         });
       } catch {
@@ -333,13 +354,20 @@ export class StaffService {
       throw new NotFoundException(`Staff member with ID ${id} not found`);
     }
 
-    // Check for active housekeeping tasks
-    const activeTasks = await this.prisma.housekeepingTask.count({
-      where: {
-        assignedToId: id,
-        status: { in: ['pending', 'in_progress'] },
-      },
-    });
+    // งานที่ยังค้างอยู่ — ต้องนับทั้งงานแม่บ้านและงานซ่อมบำรุง
+    //
+    // เดิมนับแต่งานแม่บ้าน ช่างที่มีใบงานซ่อมค้างจึงลบออกได้ และเพราะ
+    // MaintenanceTask.assignedToId เป็น FK แบบ optional ตัวงานจะถูก set null เงียบ ๆ
+    // กลายเป็นใบงานไร้เจ้าของที่ไม่มีใครเห็นว่าหายไปไหน
+    const [activeHousekeeping, activeMaintenance] = await Promise.all([
+      this.prisma.housekeepingTask.count({
+        where: { assignedToId: id, tenantId, status: { in: ['pending', 'in_progress'] } },
+      }),
+      this.prisma.maintenanceTask.count({
+        where: { assignedToId: id, tenantId, status: { in: ['pending', 'in_progress'] } },
+      }),
+    ]);
+    const activeTasks = activeHousekeeping + activeMaintenance;
 
     if (activeTasks > 0) {
       throw new BadRequestException(
@@ -352,6 +380,127 @@ export class StaffService {
       this.logger.log(`Deleted staff member ${id}`);
     } catch (error) {
       this.logger.error(`Failed to delete staff member ${id}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * นำคนหนึ่งคนขึ้นทะเบียนพนักงานปฏิบัติการ (staff) แบบ "หาเจอก่อน ค่อยสร้าง"
+   *
+   * นี่คือประตูเดียวที่ทุกทางเข้าใช้ร่วมกัน — เพิ่มเองในหน้าแม่บ้าน, นำเข้าจาก HR,
+   * และสร้างบัญชี Hotel Terminal ที่ตำแหน่งเป็นแม่บ้าน/ช่าง — เพื่อให้โรงแรมที่
+   * "ยังไม่เชื่อม HR" กับที่ "เชื่อม HR แล้ว" ได้ผลลัพธ์เดียวกันคือคนหนึ่งคนมีแถวเดียว
+   *
+   * ลำดับการตัดสินใจ
+   *  1. ถ้าพนักงาน HR คนนี้มี staff อยู่แล้วใน tenant → คืนแถวเดิม (existing)
+   *  2. ถ้ามีแถวเดิมที่เป็นคนเดียวกัน (รหัสพนักงานหรืออีเมลตรง) แต่ยังไม่ผูก HR →
+   *     ผูกให้เลย ไม่สร้างซ้ำ (linked) ← เส้นทางอัปเกรดจาก "ไม่เชื่อม" เป็น "เชื่อม"
+   *  3. ไม่เจอใครเลย → สร้างใหม่ (created)
+   *
+   * ทั้งหมดอยู่ใน transaction เดียว และห้ามใช้ findUnique เพราะ Staff เป็น
+   * tenant-scoped model (middleware จะโยน error ทิ้งทั้ง request)
+   */
+  async provision(
+    input: ProvisionStaffInput,
+    tenantId: string,
+    userId?: string,
+  ): Promise<ProvisionStaffResult> {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID is required');
+    }
+    if (!input.email) {
+      throw new BadRequestException('Email is required to provision a staff record');
+    }
+
+    const employeeId = input.employeeId ?? null;
+    const employeeCode = input.employeeCode?.trim() || null;
+
+    try {
+      const result = await this.prisma.$transaction(
+        async (tx): Promise<ProvisionStaffResult> => {
+          // 1) พนักงาน HR คนนี้ขึ้นทะเบียนไปแล้วหรือยัง
+          if (employeeId) {
+            const linked = await tx.staff.findFirst({ where: { employeeId, tenantId } });
+            if (linked) {
+              return { staff: linked, action: 'existing' };
+            }
+          }
+
+          // 2) มีแถวเดิมของคนคนนี้อยู่แล้วไหม (รหัสพนักงานก่อน แล้วค่อยอีเมล)
+          const candidate = await tx.staff.findFirst({
+            where: {
+              tenantId,
+              OR: [
+                ...(employeeCode ? [{ employeeCode }] : []),
+                { email: input.email },
+              ],
+            },
+            orderBy: { createdAt: 'asc' },
+          });
+
+          if (candidate) {
+            if (candidate.employeeId && candidate.employeeId !== employeeId) {
+              throw new ConflictException(
+                `Staff ${candidate.id} (${candidate.email}) is already linked to a different HR employee`,
+              );
+            }
+            if (!employeeId) {
+              // ไม่มีข้อมูล HR มาให้ผูก — ถือว่ามีคนนี้อยู่แล้ว ไม่ต้องสร้างซ้ำ
+              return { staff: candidate, action: 'existing' };
+            }
+            const adopted = await tx.staff.update({
+              where: { id: candidate.id },
+              data: {
+                employeeId,
+                // เติมเฉพาะช่องที่ยังว่าง ไม่ทับข้อมูลที่โรงแรมกรอกเองไว้
+                ...(candidate.employeeCode ? {} : { employeeCode: employeeCode ?? undefined }),
+                ...(candidate.phone ? {} : { phone: input.phone ?? undefined }),
+                ...(candidate.department ? {} : { department: input.department ?? undefined }),
+              },
+            });
+            return { staff: adopted, action: 'linked' };
+          }
+
+          // 3) คนใหม่จริง ๆ
+          const created = await tx.staff.create({
+            data: {
+              tenantId,
+              firstName: input.firstName,
+              lastName: input.lastName,
+              email: input.email,
+              phone: input.phone ?? null,
+              role: input.role,
+              department: input.department ?? null,
+              employeeCode: employeeCode ?? undefined,
+              status: input.status ?? StaffStatus.ACTIVE,
+              efficiency: 100,
+              employeeId: employeeId ?? undefined,
+            },
+          });
+          return { staff: created, action: 'created' };
+        },
+      );
+
+      if (result.action === 'created') {
+        this.auditLogService.logStaffCreate(result.staff, userId, tenantId);
+      }
+      this.logger.log(
+        `Provision staff (${result.action}): ${result.staff.id} ${result.staff.email} role=${result.staff.role} employeeId=${result.staff.employeeId ?? '-'} tenant=${tenantId}`,
+      );
+      return result;
+    } catch (error: any) {
+      if (error instanceof ConflictException || error instanceof BadRequestException) {
+        throw error;
+      }
+      // employeeId เป็น unique ทั้งตาราง — ชนได้เฉพาะกับ staff ของ tenant อื่น
+      if (error?.code === 'P2002') {
+        throw new ConflictException(
+          'This HR employee is already linked to another staff record',
+        );
+      }
+      this.logger.error(
+        `Failed to provision staff for ${input.email}: ${error?.message ?? error}`,
+      );
       throw error;
     }
   }
@@ -383,9 +532,13 @@ export class StaffService {
       throw new NotFoundException(`Employee ${dto.employeeId} not found in this tenant`);
     }
 
-    // Guard: Employee not already linked to another Staff (cast to any — field added in latest migration)
-    const alreadyLinked = await (this.prisma.staff as any).findUnique({
-      where: { employeeId: dto.employeeId },
+    // Guard: พนักงาน HR คนนี้ต้องยังไม่ถูกผูกกับ staff คนอื่น
+    //
+    // ห้ามใช้ findUnique ที่นี่ แม้ employeeId จะเป็นคอลัมน์ unique ก็ตาม — Staff เป็น
+    // tenant-scoped model, middleware จะโยน error ทิ้งทั้ง request (เคสนี้ทำให้ปุ่ม
+    // "เชื่อมกับ HR" พังด้วย 500 มาตลอด) ใช้ findFirst ที่มี tenantId แทน
+    const alreadyLinked = await this.prisma.staff.findFirst({
+      where: { employeeId: dto.employeeId, tenantId },
     });
     if (alreadyLinked) {
       throw new ConflictException(
@@ -393,11 +546,22 @@ export class StaffService {
       );
     }
 
-    const updated = await (this.prisma.staff as any).update({
-      where: { id: staffId },
-      data: { employeeId: dto.employeeId }, // field added in latest migration
-      include: { employee: true },
-    });
+    const updated = await this.prisma.staff
+      .update({
+        where: { id: staffId },
+        data: { employeeId: dto.employeeId },
+        include: { employee: true },
+      })
+      .catch((error: any) => {
+        // employeeId เป็น unique ระดับทั้งตาราง — ถ้าชน แปลว่ามี staff ของ tenant อื่น
+        // ผูกอยู่ ซึ่งไม่ควรเปิดเผย id ข้าม tenant
+        if (error?.code === 'P2002') {
+          throw new ConflictException(
+            `Employee ${dto.employeeId} is already linked to another staff record`,
+          );
+        }
+        throw error;
+      });
 
     this.logger.log(`Linked Staff ${staffId} ↔ Employee ${dto.employeeId} (tenant: ${tenantId})`);
     return { success: true, data: updated };

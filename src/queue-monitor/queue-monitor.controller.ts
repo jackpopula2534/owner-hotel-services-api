@@ -1,0 +1,52 @@
+import { Controller, Delete, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { PlatformAdminGuard } from '../common/guards/platform-admin.guard';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { QueueMonitorService } from './queue-monitor.service';
+
+@ApiTags('Admin / Queue Monitor')
+@ApiBearerAuth()
+// Platform-admin only — was reachable by any logged-in tenant user (audit 2026-11-09)
+@UseGuards(JwtAuthGuard, PlatformAdminGuard)
+@Controller({ path: 'admin/queues', version: '1' })
+export class QueueMonitorController {
+  constructor(private readonly service: QueueMonitorService) {}
+
+  @Get('stats')
+  @ApiOperation({ summary: 'List queues with job counts' })
+  async stats() {
+    return this.service.getStats();
+  }
+
+  @Get(':name/failed')
+  @ApiOperation({ summary: 'List failed jobs for a queue' })
+  async failed(@Param('name') name: string, @Query('limit') limit?: string) {
+    return this.service.listFailed(name, limit ? parseInt(limit, 10) : 50);
+  }
+
+  @Post(':name/jobs/:jobId/retry')
+  @ApiOperation({ summary: 'Retry a failed job' })
+  async retry(@Param('name') name: string, @Param('jobId') jobId: string) {
+    await this.service.retryFailed(name, jobId);
+    return { success: true };
+  }
+
+  @Delete(':name/jobs/:jobId')
+  @ApiOperation({ summary: 'Remove a failed job' })
+  async remove(@Param('name') name: string, @Param('jobId') jobId: string) {
+    await this.service.removeFailed(name, jobId);
+    return { success: true };
+  }
+
+  @Post(':name/failed/retry-all')
+  @ApiOperation({ summary: 'Retry all failed jobs for a queue' })
+  async retryAll(@Param('name') name: string) {
+    return this.service.retryAllFailed(name);
+  }
+
+  @Delete(':name/failed')
+  @ApiOperation({ summary: 'Clear (remove) all failed jobs for a queue' })
+  async clearAll(@Param('name') name: string) {
+    return this.service.clearAllFailed(name);
+  }
+}

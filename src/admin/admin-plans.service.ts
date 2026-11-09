@@ -10,6 +10,8 @@ import { Repository } from 'typeorm';
 import { Plan } from '../plans/entities/plan.entity';
 import { PlanFeature } from '../plan-features/entities/plan-feature.entity';
 import { Feature } from '../features/entities/feature.entity';
+import { AddonService, isAddonAvailableForSystem } from '../modules/addons/addon.service';
+import { PrismaService } from '../prisma/prisma.service';
 import {
   AdminPlansListDto,
   AdminPlanItemDto,
@@ -33,7 +35,74 @@ export class AdminPlansService {
     private planFeaturesRepository: Repository<PlanFeature>,
     @InjectRepository(Feature)
     private featuresRepository: Repository<Feature>,
+    private readonly addonService: AddonService,
+    private readonly prisma: PrismaService,
   ) {}
+
+  /**
+   * Build a Map<planId, count> of how many add-ons each given plan has
+   * assigned via `plan_addons`. Used to surface "Add-ons: N รายการ" badges
+   * on the admin plan cards.
+   *
+   * Returns counts only — fetching full add-on rows here would be wasteful
+   * because the card just shows a number. The detail list lives behind the
+   * "จัดการ Add-ons" modal.
+   */
+  private async countAddonsByPlanIds(planIds: string[]): Promise<Map<string, number>> {
+    const counts = new Map<string, number>();
+    if (planIds.length === 0) return counts;
+
+    // The Prisma client may not yet expose `plan_addons` in its generated
+    // types until the next `prisma generate` runs after the migration; use
+    // the runtime-available cast to keep TypeScript happy.
+    const planAddonsClient = (
+      this.prisma as unknown as {
+        plan_addons: {
+          groupBy: (
+            args: Record<string, unknown>,
+          ) => Promise<Array<{ plan_id: string; _count: { _all: number } }>>;
+        };
+      }
+    ).plan_addons;
+
+    const grouped = await planAddonsClient.groupBy({
+      by: ['plan_id'],
+      where: { plan_id: { in: planIds } },
+      _count: { _all: true },
+    });
+
+    for (const row of grouped) {
+      counts.set(row.plan_id, row._count._all);
+    }
+    return counts;
+  }
+
+  /**
+   * ราคารายปี + ส่วนที่ประหยัดได้ — mirror ของ `PlansController.toPublicPlan()`
+   *
+   * `plans.price_yearly` เป็น null ได้ (แผนเก่าที่สร้างก่อนมีคอลัมน์นี้ หรือแผนที่
+   * แอดมินกรอกแต่ % ส่วนลด) ถ้าคืนค่าดิบไปตรง ๆ การ์ดฝั่งแอดมินจะโชว์ "฿/ปี"
+   * ที่ไม่มีตัวเลข — จึงคำนวณจาก % ส่วนลดให้เหมือนหน้าราคาสาธารณะ
+   */
+  private resolveYearlyPricing(
+    priceMonthly: number,
+    rawPriceYearly: number | null | undefined,
+    yearlyDiscountPercent: number | null | undefined,
+  ): { priceYearly?: number; yearlySavings?: number } {
+    const discount = yearlyDiscountPercent || 0;
+
+    let priceYearly: number | undefined;
+    if (rawPriceYearly) {
+      priceYearly = Number(rawPriceYearly);
+    } else if (discount > 0) {
+      priceYearly = Math.round(priceMonthly * 12 * (1 - discount / 100));
+    }
+
+    if (!priceYearly) return {};
+
+    const savings = Math.round(priceMonthly * 12 - priceYearly);
+    return { priceYearly, yearlySavings: savings > 0 ? savings : undefined };
+  }
 
   /**
    * GET /api/v1/admin/plans
@@ -48,27 +117,41 @@ export class AdminPlansService {
       .addOrderBy('plan.name', 'ASC')
       .getMany();
 
-    const data: AdminPlanItemDto[] = plans.map((plan) => ({
-      id: plan.id,
-      code: plan.code,
-      name: plan.name,
-      priceMonthly: Number(plan.priceMonthly || 0),
-      priceYearly: plan.priceYearly ? Number(plan.priceYearly) : undefined,
-      yearlyDiscountPercent: plan.yearlyDiscountPercent,
-      maxRooms: plan.maxRooms,
-      maxUsers: plan.maxUsers,
-      isActive: plan.isActive !== false,
-      subscriptionCount: plan.subscriptions?.length || 0,
-      featureCount: plan.planFeatures?.length || 0,
-      // Sales Page fields
-      description: plan.description,
-      displayOrder: plan.displayOrder,
-      isPopular: plan.isPopular,
-      badge: plan.badge,
-      highlightColor: plan.highlightColor,
-      features: plan.features,
-      buttonText: plan.buttonText,
-    }));
+    const addonCounts = await this.countAddonsByPlanIds(plans.map((p) => p.id));
+
+    const data: AdminPlanItemDto[] = plans.map((plan) => {
+      const priceMonthly = Number(plan.priceMonthly || 0);
+      const yearly = this.resolveYearlyPricing(
+        priceMonthly,
+        plan.priceYearly,
+        plan.yearlyDiscountPercent,
+      );
+
+      return {
+        id: plan.id,
+        code: plan.code,
+        system: plan.system ?? 'HOTEL',
+        name: plan.name,
+        priceMonthly,
+        priceYearly: yearly.priceYearly,
+        yearlySavings: yearly.yearlySavings,
+        yearlyDiscountPercent: plan.yearlyDiscountPercent,
+        maxRooms: plan.maxRooms,
+        maxUsers: plan.maxUsers,
+        isActive: plan.isActive !== false,
+        subscriptionCount: plan.subscriptions?.length || 0,
+        featureCount: plan.planFeatures?.length || 0,
+        addonCount: addonCounts.get(plan.id) ?? 0,
+        // Sales Page fields
+        description: plan.description,
+        displayOrder: plan.displayOrder,
+        isPopular: plan.isPopular,
+        badge: plan.badge,
+        highlightColor: plan.highlightColor,
+        features: plan.features,
+        buttonText: plan.buttonText,
+      };
+    });
 
     return {
       data,
@@ -98,18 +181,30 @@ export class AdminPlansService {
         priceMonthly: Number(pf.feature?.priceMonthly || 0),
       })) || [];
 
+    const addonCountMap = await this.countAddonsByPlanIds([plan.id]);
+
+    const detailPriceMonthly = Number(plan.priceMonthly || 0);
+    const detailYearly = this.resolveYearlyPricing(
+      detailPriceMonthly,
+      plan.priceYearly,
+      plan.yearlyDiscountPercent,
+    );
+
     return {
       id: plan.id,
       code: plan.code,
+      system: plan.system ?? 'HOTEL',
       name: plan.name,
-      priceMonthly: Number(plan.priceMonthly || 0),
-      priceYearly: plan.priceYearly ? Number(plan.priceYearly) : undefined,
+      priceMonthly: detailPriceMonthly,
+      priceYearly: detailYearly.priceYearly,
+      yearlySavings: detailYearly.yearlySavings,
       yearlyDiscountPercent: plan.yearlyDiscountPercent,
       maxRooms: plan.maxRooms,
       maxUsers: plan.maxUsers,
       isActive: plan.isActive !== false,
       planFeatures,
       subscriptionCount: plan.subscriptions?.length || 0,
+      addonCount: addonCountMap.get(plan.id) ?? 0,
       // Sales Page fields
       description: plan.description,
       displayOrder: plan.displayOrder,
@@ -157,6 +252,8 @@ export class AdminPlansService {
 
     const plan = this.plansRepository.create({
       code: dto.code,
+      // แผนใหม่เป็นของสายธุรกิจโรงแรมโดย default — ระบุ CAMP เพื่อสร้างแผนลานกางเต็นท์
+      system: dto.system ?? 'HOTEL',
       name: dto.name,
       priceMonthly: dto.priceMonthly,
       priceYearly: yearlyPrice,
@@ -221,6 +318,10 @@ export class AdminPlansService {
 
     // Update fields
     if (dto.name !== undefined) plan.name = dto.name;
+    // Switching a plan's business line invalidates any add-on bundled from the
+    // old line — see the prune after save().
+    const systemChanged = dto.system !== undefined && dto.system !== plan.system;
+    if (dto.system !== undefined) plan.system = dto.system;
     if (dto.priceMonthly !== undefined) plan.priceMonthly = dto.priceMonthly;
     if (dto.maxRooms !== undefined) plan.maxRooms = dto.maxRooms;
     if (dto.maxUsers !== undefined) plan.maxUsers = dto.maxUsers;
@@ -248,9 +349,47 @@ export class AdminPlansService {
 
     await this.plansRepository.save(plan);
 
+    if (systemChanged) {
+      await this.unbundleCrossSystemAddons(plan.id, plan.code, plan.system);
+    }
+
     this.logger.log(`Updated plan: ${plan.name} (${plan.code})`);
 
     return this.findOne(plan.id);
+  }
+
+  /**
+   * A plan that moves to the other business line keeps its old `plan_addons`
+   * rows, which would silently entitle every tenant on it to modules from the
+   * line it just left (a hotel plan flipped to CAMP would still hand out
+   * Housekeeping). Drop those rows and clear the tenants' entitlement cache.
+   */
+  private async unbundleCrossSystemAddons(
+    planId: string,
+    planCode: string,
+    planSystem: string,
+  ): Promise<void> {
+    const planAddonsClient = (this.prisma as unknown as { plan_addons: any }).plan_addons;
+    const rows: Array<{ addon_id: string; add_ons?: { code: string; system: string } | null }> =
+      await planAddonsClient.findMany({
+        where: { plan_id: planId },
+        include: { add_ons: { select: { code: true, system: true } } },
+      });
+
+    const stale = rows.filter(
+      (row) => row.add_ons && !isAddonAvailableForSystem(row.add_ons.system, planSystem),
+    );
+    if (stale.length === 0) return;
+
+    await planAddonsClient.deleteMany({
+      where: { plan_id: planId, addon_id: { in: stale.map((row) => row.addon_id) } },
+    });
+    await this.addonService.invalidateAddonCacheForPlan(planId);
+
+    this.logger.log(
+      `Plan ${planCode} moved to ${planSystem} — unbundled ` +
+        `${stale.map((row) => row.add_ons?.code).join(', ')} (cross product line)`,
+    );
   }
 
   /**
@@ -334,6 +473,10 @@ export class AdminPlansService {
 
     this.logger.log(`Assigned feature "${feature.name}" to plan "${plan.name}" (${plan.code})`);
 
+    // Bust the entitlement cache for every tenant currently on this plan so
+    // their sidebar reflects the new feature without waiting for the 5min TTL.
+    await this.addonService.invalidateAddonCacheForPlan(planId);
+
     return this.findOne(planId);
   }
 
@@ -378,6 +521,10 @@ export class AdminPlansService {
     await this.planFeaturesRepository.remove(planFeature);
 
     this.logger.log(`Removed feature "${feature.name}" from plan "${plan.name}" (${plan.code})`);
+
+    // Bust the entitlement cache for every tenant currently on this plan so
+    // their sidebar reflects the removed feature without waiting for the TTL.
+    await this.addonService.invalidateAddonCacheForPlan(planId);
 
     return {
       message: `Feature "${feature.name}" removed from plan "${plan.name}" successfully`,

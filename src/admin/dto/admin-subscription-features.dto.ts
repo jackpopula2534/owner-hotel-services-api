@@ -118,6 +118,28 @@ export class SubscriptionFeatureItemDto {
 
   @ApiProperty({ example: '2024-01-01' })
   createdAt: string;
+
+  @ApiPropertyOptional({ example: 'subscription' })
+  source?: 'subscription' | 'plan';
+
+  @ApiPropertyOptional({ example: true })
+  includedInPlan?: boolean;
+
+  // ── Add-on catalog taxonomy ───────────────────────────────────────────────
+  // ส่งมาด้วยเพื่อให้หน้า Admin จัดกลุ่ม/ติดป้ายเหมือนหน้า "แผนบริการ"
+  // (add_ons.code / add_ons.category / add_ons.system)
+  @ApiPropertyOptional({ example: 'RESTAURANT_MODULE', description: 'รหัส add-on จาก add_ons.code' })
+  code?: string;
+
+  @ApiPropertyOptional({ example: 'RESTAURANT', description: 'หมวดงานของ add-on (add_ons.category)' })
+  category?: string | null;
+
+  @ApiPropertyOptional({
+    example: 'BOTH',
+    enum: ['HOTEL', 'CAMP', 'BOTH'],
+    description: 'สายธุรกิจที่ add-on ขายได้ (add_ons.system)',
+  })
+  system?: string;
 }
 
 export class SubscriptionFeaturesListDto {
@@ -133,11 +155,30 @@ export class SubscriptionFeaturesListDto {
   @ApiProperty({ example: 'Professional' })
   planName: string;
 
+  @ApiPropertyOptional({ example: 'uuid-plan', description: 'Plan UUID ของ subscription นี้' })
+  planId?: string;
+
+  @ApiPropertyOptional({ example: 'CAMP', description: 'รหัสแพ็กเกจ (plans.code)' })
+  planCode?: string;
+
+  @ApiPropertyOptional({
+    example: 'CAMP',
+    enum: ['HOTEL', 'CAMP'],
+    description: 'สายธุรกิจของแพ็กเกจ (plans.system) — ใช้กรอง add-on ให้ตรงสาย',
+  })
+  planSystem?: string;
+
   @ApiProperty({ example: 4990 })
   planPrice: number;
 
   @ApiProperty({ type: [SubscriptionFeatureItemDto] })
   addons: SubscriptionFeatureItemDto[];
+
+  @ApiProperty({ type: [SubscriptionFeatureItemDto] })
+  includedFeatures: SubscriptionFeatureItemDto[];
+
+  @ApiProperty({ type: [SubscriptionFeatureItemDto] })
+  includedAddons: SubscriptionFeatureItemDto[];
 
   @ApiProperty({ example: 2480 })
   totalAddonPrice: number;

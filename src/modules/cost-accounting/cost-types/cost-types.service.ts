@@ -62,8 +62,10 @@ export class CostTypesService {
    */
   async findOne(id: string, tenantId: string): Promise<CostType> {
     try {
-      const costType = await this.prisma.costType.findUnique({
-        where: { id },
+      // findFirst (NOT findUnique): CostType is tenant-scoped and the
+      // tenant-scope middleware rejects findUnique on scoped models.
+      const costType = await this.prisma.costType.findFirst({
+        where: { id, tenantId },
       });
 
       if (!costType) {
@@ -135,8 +137,10 @@ export class CostTypesService {
    */
   async update(id: string, dto: UpdateCostTypeDto, tenantId: string): Promise<CostType> {
     try {
-      const costType = await this.prisma.costType.findUnique({
-        where: { id },
+      // findFirst (NOT findUnique): CostType is tenant-scoped and the
+      // tenant-scope middleware rejects findUnique on scoped models.
+      const costType = await this.prisma.costType.findFirst({
+        where: { id, tenantId },
       });
 
       if (!costType || costType.tenantId !== tenantId) {
@@ -190,8 +194,10 @@ export class CostTypesService {
    */
   async remove(id: string, tenantId: string): Promise<void> {
     try {
-      const costType = await this.prisma.costType.findUnique({
-        where: { id },
+      // findFirst (NOT findUnique): CostType is tenant-scoped and the
+      // tenant-scope middleware rejects findUnique on scoped models.
+      const costType = await this.prisma.costType.findFirst({
+        where: { id, tenantId },
       });
 
       if (!costType || costType.tenantId !== tenantId) {

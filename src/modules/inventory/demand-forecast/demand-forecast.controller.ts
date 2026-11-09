@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import { Controller, Get, Query, UseGuards, Req, HttpStatus } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { DemandForecastService } from './demand-forecast.service';
@@ -20,6 +21,8 @@ interface RequestWithUser extends Request {
 }
 
 @ApiTags('Inventory - Demand Forecast')
+// Warehouse Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('warehouse')
 @Controller({
   path: 'inventory/demand-forecast',
   version: '1',

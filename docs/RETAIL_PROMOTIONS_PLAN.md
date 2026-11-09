@@ -1,0 +1,170 @@
+# แผนระบบโปรโมชั่น Retail POS (โค้ดส่วนลด / ของแถม) — เชื่อม CRM + คลัง
+
+> เอกสารติดตามงาน — อัปเดตสถานะ checkbox และ "บันทึกความคืบหน้า" ท้ายไฟล์ทุกครั้งที่ทำงานเสร็จ
+> Backend: `owner-hotel-services-api` · Frontend: `owner-hotel-services` (หน้า `/retail`)
+
+## 1. ข้อตัดสินใจ (ยืนยันกับเจ้าของงาน 2026-10-07)
+
+| # | คำถาม | คำตอบ |
+|---|---|---|
+| 1 | 1 บิลใช้ได้กี่โค้ด | **1 โค้ด + โปรอัตโนมัติ** — โค้ดได้ 1 ใบต่อบิล, โปรอัตโนมัติ (ของแถม) ซ้อนได้หลายโปร, ตั้งต่อโปรได้ว่า "ใช้ร่วมกับโปรอื่นได้" หรือไม่ (เฟส 4) |
+| 2 | ของแถมหมด | **ให้ลูกค้าเลือกรับเฉพาะส่วนลดได้** (แคชเชียร์ต้องกดยืนยันเอง — ระบบไม่ตัดของแถมทิ้งเงียบ ๆ) |
+| 3 | ผูกสมาชิก | **ต้องผูกสมาชิกทุกครั้งที่ใช้โค้ด** โดยใช้ระบบสมาชิกของระบบหลัก — ห้ามสร้างตารางสมาชิกใหม่ |
+| 4 | ของแถมตัดจากคลังไหน | **แยกคลังของแถมโดยเฉพาะ** (Warehouse type `PROMOTION`) |
+| 5 | เริ่มเฟส 1 | ✅ เริ่มแล้ว |
+| 6 | โปรอัตโนมัติต้องผูกสมาชิกไหม | **บังคับเฉพาะโปรที่จำกัดสิทธิ์** (tier / segment / โควตาต่อสมาชิก) — โปรเปิดทั่วไปลูกค้า walk-in ได้ด้วย (เฟส 4) |
+| 7 | อัตราให้แต้ม | **1 แต้ม / 100 ฿ ของยอดสุทธิหลังหักส่วนลด** เฉพาะบิลสมาชิก, ยกเลิกบิล = ดึงแต้มคืน (เฟส 4) |
+| 8 | tier คิดจากอะไร | **แต้มสะสมตลอดชีพ** — แลกแต้มแล้ว tier ไม่ตก (เฟส 4) |
+
+## 2. "สมาชิก" ของระบบหลักคืออะไร (ไม่สร้างใหม่)
+
+ระบบมีตัวตนลูกค้าอยู่แล้ว 3 ชั้น — โปรโมชั่นต่อเข้ากับของเดิมทั้งหมด:
+
+```
+Guest (guests)              ← ตัวตนสมาชิก: ชื่อ เบอร์ อีเมล PDPA consent  [ใช้เป็น memberId]
+ ├─ CrmContact (crm_contacts) ← โปรไฟล์ CRM: segment, RFM, tags  @@unique([tenantId, guestId])
+ └─ LoyaltyPoint (loyalty_points) ← แต้ม + tier  @@unique([tenantId, guestId])
+```
+
+- POS ค้นสมาชิกจาก `Guest` (เบอร์โทร / ชื่อ / อีเมล) ใน tenant เดียวกัน แสดง tier + segment
+- ไม่เจอ → "สมัครสมาชิก" = สร้างแถว `Guest` ปกติของระบบหลัก (พร้อม consent PDPA) ไม่ใช่ตารางใหม่
+- ตอนใช้โค้ด ระบบ upsert `CrmContact` ของ guest นั้น (idempotent บน tenantId+guestId) แล้วผูก redemption กับ contact → CRM เห็นประวัติการใช้โปรทันที
+- เงื่อนไขกลุ่มเป้าหมาย (tier / segment) อ่านจาก LoyaltyPoint / CrmContact ตัวเดิม
+
+## 3. โมเดลข้อมูล (tenant-scoped ทุกตัว)
+
+| Model | หน้าที่ |
+|---|---|
+| `RetailPromotion` | ตัวโปร: ส่วนลด (NONE/PERCENT/FIXED, maxDiscount), minSpend, สินค้าที่ร่วมรายการ, tier/segment ที่มีสิทธิ์, ช่วงเวลา, โควตารวม, โควตาต่อสมาชิก, คลังของแถม, สถานะ |
+| `RetailPromoCode` | โค้ด `@@unique([tenantId, code])` แบบ SHARED (ใช้ร่วม) หรือ UNIQUE (ใช้ครั้งเดียว/ออกให้สมาชิกรายคน) |
+| `RetailPromotionGift` | ของแถมต่อโปร: item, จำนวนต่อครั้ง, งบจำนวน (budgetQty) / แจกไปแล้ว (issuedQty) |
+| `RetailPromotionMemberUsage` | ตัวนับการใช้ต่อสมาชิก `@@unique([promotionId, guestId])` — กัน race ของโควตาต่อคน |
+| `RetailPromotionRedemption` | ประวัติการใช้ 1 แถวต่อบิล: โค้ด สมาชิก contact ส่วนลด ต้นทุนของแถม ข้ามของแถมหรือไม่ สถานะ APPLIED/REVERSED |
+
+เพิ่มใน `RetailSale`: `memberGuestId`, `memberContactId`, `promotionId`, `promoCode`, `promoDiscount`, `promoGiftCost`
+เพิ่มใน `RetailSaleItem`: `isGift`, `promotionId`, `sourceWarehouseId` (บรรทัดของแถมตัดจากคลังของแถม)
+เพิ่ม enum `WarehouseType.PROMOTION` = คลังของแถม
+
+### กันใช้เกินโควตา (race-safe)
+ทุกตัวนับใช้ conditional increment ใน transaction เดียวกับการขาย:
+`updateMany({ where: { id, usedCount: { lt: limit } }, data: { usedCount: { increment: 1 } } })` → count 0 = เต็ม → rollback ทั้งบิล
+ใช้กับ: promotion.usageLimit, code.maxUses, memberUsage.perMemberLimit, gift.budgetQty (เพิ่มทีละจำนวนชิ้น)
+
+## 4. Flow ที่ POS
+
+1. ตะกร้า → ปุ่ม "สมาชิก" ค้นหา/สมัคร → ผูกสมาชิกกับบิล
+2. กรอกโค้ด → `POST /inventory/retail/promotions/preview` (ต้องมีสมาชิกก่อน) → ได้ส่วนลด + รายการของแถม + สต็อกของแถม
+3. ของแถมไม่พอ → แสดงคำเตือน + ปุ่ม "รับเฉพาะส่วนลด" (ถ้าโปรนั้นมีส่วนลด) — โปรที่มีแต่ของแถมแล้วของหมด = ใช้ไม่ได้
+4. Modal สรุปการสั่งซื้อแสดง: สมาชิก โค้ด ส่วนลดโปร ของแถม ฿0
+5. ยืนยัน → `POST /inventory/retail/sales` พร้อม `promoCode`, `memberGuestId`, `acceptWithoutGift` → server **คำนวณโปรใหม่ทั้งหมด** ใน transaction (ไม่เชื่อยอดจาก client) → ตัดสต็อกสินค้า (คลังขาย) + ของแถม (คลังของแถม) + ตัดโควตา + บันทึก redemption + ออกใบเสร็จ — พลาดจุดเดียว rollback ทั้งหมด
+
+## 5. คลัง / บัญชี
+
+- ของแถม: `StockMovement` GOODS_ISSUE, `referenceType = 'PROMO_GIFT'`, `referenceId = saleId`, ตัด FEFO ที่ต้นทุนจริง
+- บรรทัดของแถมใน `RetailSaleItem`: unitPrice 0, lineTotal 0, `lineCost` = ต้นทุนจริง, `isGift = true`
+- `costTotal` = ต้นทุนสินค้าที่ขายเท่านั้น; ต้นทุนของแถมแยกไว้ที่ `promoGiftCost` (ค่าใช้จ่ายส่งเสริมการขาย); `profitTotal = taxable − costTotal − promoGiftCost`
+- ส่วนลดโปรลดฐาน VAT (รวมใน `discountTotal`)
+- ⚠️ VAT ของแถมตามมูลค่าตลาด: ยังไม่คิด — รอฝ่ายบัญชียืนยัน (บันทึกต้นทุนไว้ให้รายงานแล้ว)
+
+## 6. Phase & Checklist
+
+### Phase 1 — Core ✅ (2026-10-07)
+- [x] Schema + migration (models, enums, ฟิลด์ใน RetailSale/RetailSaleItem, WarehouseType.PROMOTION) — `20261007090000_retail_promotions`
+- [x] regenerate tenant-scoped-models
+- [x] Backend: promotions engine (คำนวณส่วนลด/ของแถม/ตรวจเงื่อนไข) + unit test
+- [x] Backend: CRUD โปรโมชั่น + โค้ด (สร้างเอง / สุ่มทีละชุด) + ของแถม
+- [x] Backend: ค้นหา/สมัครสมาชิก (Guest) สำหรับ POS
+- [x] Backend: preview endpoint
+- [x] Backend: ผูกโปรเข้า `RetailSalesService.create` (transaction เดียว, race-safe counters, ตัดของแถมจากคลังของแถม, redemption, CrmContact upsert)
+- [x] Backend: ห้ามขายตรงจากคลังของแถม (`GIFT_WAREHOUSE_NOT_SELLABLE`)
+- [x] curl API จริงทุก endpoint (mock Prisma ไม่ผ่าน tenant middleware)
+- [x] Frontend: api client + types (`lib/types/retail-promotion.ts`)
+- [x] Frontend: หน้า `/dashboard/inventory/promotions` จัดการโปร/โค้ด/ของแถม + เมนู sidebar (ย้ายไป `/crm-terminal/promotions` แล้ว — ดูบันทึก 2026-10-07 ย้ายไป CRM)
+- [x] Frontend: POS — เลือกสมาชิก (`MemberPicker`), กรอกโค้ด (`PromoCodeField`), แสดงส่วนลด/ของแถม, "รับเฉพาะส่วนลด"
+- [x] Frontend: Modal สรุปการสั่งซื้อแสดงสมาชิก/โค้ด/ของแถม ฿0
+- [x] Frontend: ซ่อนคลังของแถมจากตัวเลือกคลังขาย + หน้าคลังสินค้ารู้จัก type `PROMOTION` (เดิมจะพัง)
+- [x] Jest ฝั่ง POS + MemberPicker + ฟอร์มโปรโมชั่น
+- [x] Seed: คลังของแถม + โปรตัวอย่าง (WELCOME10 / TOTE300 / GOLD50) + `npm run db:refresh`
+- [ ] ทดสอบผ่านเบราว์เซอร์จริงทั้ง flow (ยังไม่ได้ทำ — เทสต์อัตโนมัติ + curl ผ่านแล้ว)
+
+### Phase 2 — Void & รายงาน ✅ (2026-10-07)
+- [x] Void/คืนบิล: `POST /inventory/retail/sales/:id/void` (ผู้จัดการเท่านั้น, ต้องมีเหตุผล ≥ 3 ตัวอักษร) — ทรานแซกชันเดียว: COMPLETED→VOIDED แบบมีเงื่อนไข, คืนสต็อกสินค้า + ของแถมตาม GOODS_ISSUE จริง (ADJUSTMENT_IN `RETAIL_SALE_VOID` / `PROMO_GIFT_VOID` + คืนล็อต + avgCost ถ่วงน้ำหนัก), ลดตัวนับโปร/โค้ด/สมาชิก/ของแถม, redemption → REVERSED, กลับรายการชาร์จเข้าห้อง (โฟลิโอต้อง OPEN ไม่งั้น `FOLIO_NOT_OPEN` → ออกใบลดหนี้แทน), revenue entry → VOIDED
+  - FE: ปุ่ม "ยกเลิกบิล" ในประวัติการขาย (เฉพาะ role ผู้จัดการ) + modal เหตุผล (zod); บิลที่ยกเลิกโชว์วันที่/เหตุผล; ยอดสรุปประวัติไม่นับบิลที่ยกเลิก
+- [x] แจ้งเตือน: `GET /inventory/retail/promotions/alerts` — GIFT_OUT / GIFT_LOW (≤ 10 บิล หรืองบเหลือ ≤ 20%) / USAGE_FULL / USAGE_LOW (≤ 10% ขั้นต่ำ 5) สูตรเดียวอยู่ใน `promotion-health.ts`
+- [x] Auto-pause: หลังตัดของแถมในทรานแซกชันขาย ถ้าโปร discountType = NONE และของแถมตัวใดแจกต่อไม่ได้ → PAUSED + `autoPausedAt`/`pausedReason` (migration `20261007120000_retail_promotion_auto_pause`); ผู้จัดการเปลี่ยนสถานะเอง = ล้าง flag
+  - FE: แบนเนอร์แจ้งเตือน + รายการโปรที่หยุดอัตโนมัติบนหน้าโปรโมชั่น, แถวโปรโชว์ "หยุดอัตโนมัติ" + เหตุผล
+- [x] รายงาน: `GET /inventory/retail/promotions/report?from&to&promotionId` (ผู้จัดการ, ดีฟอลต์ 30 วัน สูงสุด 366) — ต่อโปร/ต่อโค้ด: บิล, สมาชิกไม่ซ้ำ, ยอดขาย, ส่วนลด, ชิ้น/ต้นทุนของแถม, บิลที่ถูกยกเลิก (นับแยก)
+  - FE: แท็บ "รายงาน" เลือกช่วงวัน (zod) กางดูต่อโค้ด + การ์ดสรุปต้นทุนโปรเทียบยอดก่อนลด
+- [x] คลังของแถม: `GET /inventory/retail/promotions/gift-stock` — สต็อกทุกคลัง PROMOTION + โปรที่ผูก + แจกได้อีกกี่บิล (รวมของที่โปรผูกแต่ยังไม่เคยเข้าคลัง = 0)
+  - FE: แท็บ "คลังของแถม" + modal โอนเข้า/คืนออก ใช้ `POST /inventory/stock-movements/transfer` เดิม
+- ข้อจำกัดที่รู้: transfer เดิมย้ายแค่ยอด **ไม่ย้ายล็อต**; 403 ของ role ที่ไม่ใช่ผู้จัดการยังไม่ได้ทดสอบสด (บัญชี staff ล็อกอินแดชบอร์ดหลักไม่ได้) — อาศัย RolesGuard; ยังไม่ได้ทดสอบผ่านเบราว์เซอร์ (Chrome เปิด localhost ไม่ได้ในรอบนี้)
+
+### Phase 3 — CRM
+- [x] ออกโค้ด UNIQUE ให้สมาชิกตาม segment ผ่าน `CrmCampaign` (LINE/อีเมล) + ติดตาม sent → redeemed
+  - `CrmCampaign.promotionId` + `promoCodeValidDays` (ล็อก promotionId หลังสร้าง), `RetailPromoCode.campaignId` + `campaignDeliveryId @unique` (ออกซ้ำไม่ได้ต่อ delivery)
+  - processor ออกโค้ด (maxUses 1, ผูก issuedToGuestId) **ก่อน**ส่ง → ส่งพัง = ปิดโค้ดทิ้ง; ข้อความแทน `{{promoCode}}` / `{{promoExpiresAt}}` (ไม่ใส่ = ต่อท้ายให้)
+  - วันหมดอายุ = min(ส่ง + N วัน, วันจบโปร); ช่องทางรับได้เฉพาะ line/email
+  - `GET /crm/campaigns/by-promotion/:id`, `POST /crm/campaigns/audience-estimate`, stats `promo` ใน `GET /crm/campaigns/:id/stats`
+  - FE: ส่วน "ส่งโค้ดให้สมาชิก (CRM)" ใน drawer โปร + `SendPromoCodesModal` (นับผู้รับสด)
+- [x] event `PROMO_REDEEMED` → crm-event.listener (tag, automation, lifetimeValue retail)
+  - emit หลัง commit: `RETAIL_MEMBER_SALE` (LTV +), `RETAIL_MEMBER_SALE_VOIDED` (LTV −), `PROMO_REDEEMED` (tag `promo-redeemer` + journey trigger `retail.promo_redeemed`)
+- [x] หน้า Contact 360 แสดงประวัติการใช้โปร — `GET /crm/contacts/:id/promotions` + ปุ่ม 🏷 ในการ์ดผู้ติดต่อ (`ContactPromoHistoryModal`)
+- ข้อจำกัดที่รู้: journey dedupe ต่อ (journey, guest, booking=null) → journey โปรลงทะเบียนสมาชิกได้ครั้งเดียว; tag `promo-redeemer` ไม่ถูกถอดตอน void (ถือเป็นประวัติ)
+
+### Phase 4 — Loyalty / โปรอัตโนมัติ / Stacking ✅ (2026-10-07)
+- [x] Loyalty: แลกแต้มเป็นโค้ด / ให้แต้มจากยอดหลังส่วนลด
+  - `RetailPromotion.pointsCost` (ว่าง = แลกไม่ได้) → `GET /inventory/retail/members/:guestId/rewards`, `POST /inventory/retail/promotions/:id/redeem-points` ออกโค้ด UNIQUE `PT-XXXXXXXX` อายุ 30 วัน (หรือถึงวันจบโปร) หักแต้มกับออกโค้ดใน transaction เดียว (`LoyaltyService.redeemWithin`)
+  - ขายบิลสมาชิก → `earnForRetailSaleWithin` floor(grandTotal/100) แต้ม, void → `reverseRetailSaleWithin` ดึงแต้มคืน (`pointsReversed`), `lifetimePoints` ไม่ลดตอนแลก
+  - FE: `MemberRewardsPanel` ที่ POS (แลก 2 จังหวะ: กด → ยืนยันหัก) โค้ดที่ได้ถูกส่งเข้าช่องโค้ดตรวจทันที, สรุปบิลแสดง "+N แต้ม"
+- [x] GIFT_WITH_PURCHASE อัตโนมัติ (ไม่ต้องกรอกโค้ด)
+  - `autoApply` = ของแถมล้วนเท่านั้น (`PROMO_AUTO_GIFT_ONLY`), ห้ามมีโค้ด/แต้ม (`PROMO_AUTO_NO_CODE`, `PROMO_AUTO_HAS_CODES`, `PROMO_AUTO_NO_POINTS`)
+  - `POST /inventory/retail/promotions/checkout-preview` คืนโปรที่ได้ + `skippedAutoPromotions` (MIN_SPEND + shortBy, MEMBER_REQUIRED, GIFT_OUT, NOT_STACKABLE, CODE_NOT_STACKABLE ฯลฯ)
+  - `RetailPromotionRedemption.promoCodeId` nullable → 1 บิลมีหลาย redemption; void ถอนครบทุกตัว
+  - FE: `AutoPromotionsPanel` (debounce 400ms, ชวน "ซื้อเพิ่มอีก ฿X"), ฟอร์มโปรเลือก "ใช้โค้ด / อัตโนมัติ" (`PromotionModeFields`), รายงาน/ประวัติ CRM แสดง "อัตโนมัติ"
+- [x] ใช้หลายโปรร่วมกัน (stacking rules)
+  - โค้ด 1 ใบ + โปรอัตโนมัติหลายตัว; `stackable=false` = บิลที่มีโปรนั้นไม่รับโปรอื่นเพิ่ม (โปรอัตโนมัติที่หลุดแจ้งเป็น `NOT_STACKABLE` / `CODE_NOT_STACKABLE`)
+- ข้อจำกัดที่รู้: แต้มยังไม่ถูกตัดตอนคืนสินค้าบางส่วน (ระบบยังไม่มี partial refund มีแต่ void ทั้งบิล); ตัวเลขที่ POS เป็นตัวอย่าง backend คิดใหม่ตอนตัดขาย
+
+## 7. คำถามค้าง
+- VAT ของแถมตามมูลค่าตลาด — รอฝ่ายบัญชี
+- ข้อความ PDPA consent ตอนสมัครสมาชิกที่ POS (ใช้ consentVersion เดิมของ Guest)
+
+## 8. บันทึกความคืบหน้า
+- 2026-10-07 — สรุปข้อตัดสินใจ 5 ข้อ, ออกแบบ data model, เริ่ม Phase 1
+- 2026-10-07 — Backend Phase 1 เสร็จ + curl ครบ (preview, ขายพร้อมโค้ด, ของแถมหมด→รับเฉพาะส่วนลด, โควตาเต็ม, ขายจากคลังของแถมถูกปฏิเสธ) · backend spec 80 ผ่าน
+- 2026-10-07 — Frontend Phase 1 เสร็จ: หน้าจัดการโปร, POS สมาชิก+โค้ด, modal สรุปบิล · Jest 37 ผ่าน, `tsc --noEmit` 0 error
+  - เจอระหว่างทาง: หน้าคลังสินค้าจะพังเมื่อมีคลัง type PROMOTION (แก้แล้ว), POS เลือกคลังของแถมเป็นคลังขายได้ (ซ่อน + กันที่ backend แล้ว)
+  - ตั้งข้อสังเกต: Sidebar Jest 24 เคสพังอยู่ก่อนแล้ว (พังเท่าเดิมบน HEAD) — ไม่เกี่ยวกับงานนี้
+
+### 2026-10-07 — Phase 2 เสร็จ (ยังไม่ commit)
+- Backend: `RetailSaleVoidService`, `reverseChargeWithin` (folio), `reverseRedemptionWithin`, `promotion-health.ts` + `RetailPromotionHealthService` (alerts / auto-pause / gift-stock), `RetailPromotionReportService`, migration auto-pause; findAll ประวัติขายไม่นับบิลที่ยกเลิกในยอดสรุป
+- ทดสอบสด: void RCP-202610-0003 คืนสต็อก/ตัวนับครบ, void ซ้ำ = `SALE_ALREADY_VOIDED`; auto-pause โปรของแถมอย่างเดียวงบ 1 หยุดเองหลังขาย 1 บิล; รายงาน TOTE300 = 1 บิล + 1 ยกเลิก; โอน WH-RETAIL ↔ WH-GIFT ได้ทั้งสองทาง
+- เทสต์: backend retail-sales/promotions/minibar 111 ผ่าน, frontend ที่เกี่ยวข้อง 37 ผ่าน, tsc ทั้งสอง repo 0 error
+
+### 2026-10-07 — Phase 3 เสร็จ (ยังไม่ commit)
+- Backend: migration `20261007150000_retail_promotion_crm_campaign`, `CampaignPromoCodeService`, processor ออก/ถอนโค้ดต่อ delivery, `retail-sale-events.ts` + listener (LTV/tag/journey), `CrmContactPromotionsService`
+- ทดสอบสด: แคมเปญ VIP อีเมล 2 คน → โค้ด UNIQUE 2 ใบ (14 วัน) · สมาชิกอื่นใช้โค้ด = `PROMO_CODE_NOT_YOURS` · เจ้าของใช้ได้ (RCP-202610-0001 ลด 50) · ใช้ซ้ำ = `PROMO_CODE_USED_UP` · LTV 481.50 + tag · stats issued 2 / redeemed 1 · void → LTV 0, redeemed 0, โค้ดกลับเป็น available
+- แก้ระหว่างทาง: หน้าสร้างแคมเปญ CRM เดิมส่ง `bodyText` (ฟิลด์ไม่มีใน DTO → 400 ทุกครั้ง) และ audienceQuery ผิดรูป — แก้เป็น `bodyOverride` + JSON string แล้ว
+- เทสต์: backend crm + retail 22 suites / 258 ผ่าน, frontend Phase 3 12 ผ่าน (+ Phase 1–2 29, CRM terminal 8), tsc ทั้งสอง repo 0 error
+
+### 2026-10-07 — Phase 4 เสร็จ (ยังไม่ commit)
+- Backend: migration `20261007180000_retail_promotion_stacking_loyalty` (autoApply/stackable/pointsCost, redemption.promoCodeId nullable, promoCode.pointsSpent), `RetailPromotionCheckoutService` (คิดโค้ด + โปรอัตโนมัติ + stacking), `RetailPromotionRewardsService` (แลกแต้ม), `retail-stock-issue.ts`, `LoyaltyService.earnForRetailSaleWithin/reverseRetailSaleWithin/redeemWithin/applyPointsDeltaWithin`, void ดึงแต้มคืน, CRM ประวัตินับบิลไม่ซ้ำ
+- ทดสอบสด: walk-in ได้ของแถมอัตโนมัติ · ยอดไม่ถึง shortBy 120 · โค้ดบนโปรอัตโนมัติ = `PROMO_AUTO_NO_CODE` · โค้ด + อัตโนมัติในบิลเดียว · โปรไม่ร่วม = NOT_STACKABLE · โปรจำกัดสิทธิ์ walk-in = MEMBER_REQUIRED, ครบโควตา = NOT_ELIGIBLE · ขายได้ 3 แต้ม/2 redemption → void คืนทั้งคู่ + ของแถม + แต้ม (pointsReversed 3) · แลกแต้มได้ `PT-XARVNMWU` points 3→0 lifetime คง 3
+- เทสต์: backend retail-sales/promotions/loyalty 145 ผ่าน, frontend POS 18 + Phase 4 14 + Phase 1–3 ผ่านทั้งหมด (87), tsc ทั้งสอง repo 0 error (ยกเว้น drift ของ goods ที่มีอยู่ก่อน)
+- โปรทดสอบชื่อ "P4 …" ตั้งเป็น PAUSED ไว้ในฐานข้อมูล local
+
+### 2026-10-07 — ข้อมูลตัวอย่างเฟส 4 ใน seeder
+- `src/seeder/retail-promotions.seeder.ts` เพิ่มต่อกิจการที่มี WH-RETAIL:
+  - ของแถม `GIFT-CUP` (แก้วที่ระลึก 15 ใบ)
+  - โปรอัตโนมัติ "ซื้อครบ ฿500 แถมถุงผ้า (อัตโนมัติ)" (เปิดทั่วไป) และ "สมาชิก Gold รับแก้วที่ระลึก (อัตโนมัติ)" (gold/platinum, คนละ 1 ครั้ง)
+  - ของรางวัลแลกแต้ม "แลก 50 แต้ม ลด ฿50" และ "แลก 200 แต้ม ลด 20% (ไม่ร่วมโปรอื่น)" (stackable=false)
+  - สมาชิก วิภา 0890000101 (250 แต้ม, สะสม 6000, gold) / ธนา 0890000102 (30 แต้ม, standard) + CRM contact + ประวัติแต้มยอดยกมา
+- `db:refresh` แล้ว curl: walk-in ฿600 ได้ถุงผ้า + Gold = MEMBER_REQUIRED · ฿380 = shortBy 120 · วิภา ฿600 ได้ถุงผ้า + แก้ว · วิภาแลกได้ทั้ง 2 รางวัล · ธนาแลกไม่ได้ (affordable=false)
+
+### 2026-10-07 — ย้ายหน้าตั้งโปรไป CRM (ยังไม่ commit)
+- เหตุผล: โปร/โค้ด/แลกแต้มเป็นงานการตลาด ไม่ใช่งานคลัง → หน้าตั้งโปรอยู่ที่ CRM → การตลาด → โปรโมชั่นหน้าร้าน (`/crm-terminal/promotions`, รองรับ `?open=<id>`)
+- ฝั่งคลังเหลือหน้า "คลังของแถม" `/dashboard/inventory/gift-stock` (ยอดของแถม + โอนเข้าคลังของแถม + แจ้งเตือนของใกล้หมด → ปุ่มเปิดดูโปรพาไป CRM)
+- `/dashboard/inventory/promotions` เดิม redirect ไปหน้า CRM (bookmark เก่ายังใช้ได้)
+- หน้าแรก CRM มี tile โปรโมชั่นหน้าร้าน แสดงจำนวนโปรที่เปิดใช้อยู่
+- Backend: `PROMO_MANAGERS` เพิ่ม `crm_manager` (API ยังอยู่ที่ `/inventory/retail/promotions` + `@RequireAddon('INVENTORY_MODULE')` เพราะตัดสต็อกของแถมผ่านคลัง)
+- เทสต์: backend retail-promotions 65 ผ่าน, frontend CrmTerminal + retail-promotions-move 11 ผ่าน, tsc ทั้งสอง repo 0 error; Sidebar 4 suites (24 tests) ล้มเหมือนเดิมก่อนแก้ (ตรวจด้วยไฟล์ HEAD แล้ว)

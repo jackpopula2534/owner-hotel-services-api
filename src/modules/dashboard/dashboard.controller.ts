@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -5,6 +6,8 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { DashboardService } from './dashboard.service';
+import { BusinessOverview, BusinessOverviewService } from './business-overview.service';
+import { TonightBoard, TonightBoardService } from './tonight-board.service';
 
 interface CurrentUserType {
   tenantId?: string;
@@ -13,13 +16,95 @@ interface CurrentUserType {
 
 @ApiTags('Dashboard')
 @ApiBearerAuth('JWT-auth')
+// Hotel Terminal (front-desk board data) — H1 allow-list, audit 2026-11-09
+@AllowSystems('hotel-terminal')
 @Controller({ path: 'dashboard', version: '1' })
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class DashboardController {
-  constructor(private readonly dashboardService: DashboardService) {}
+  constructor(
+    private readonly dashboardService: DashboardService,
+    private readonly businessOverviewService: BusinessOverviewService,
+    private readonly tonightBoardService: TonightBoardService,
+  ) {}
+
+  @Get('tonight')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'receptionist',
+    'staff',
+    'hotel_manager',
+    'front_desk',
+  )
+  @ApiOperation({
+    summary: "Tonight's unit map + recent guest activity for the Owner Console home",
+    description:
+      'HOTEL → rooms grouped by floor; CAMP → pitches grouped by zone. Each unit carries one ' +
+      'status for the Bangkok night that starts today (available / occupied / arriving / ' +
+      'reserved / dirty / blocked). `activity` lists bookings, check-ins/outs, payments and ' +
+      'cancellations, newest first. Pass `line` to skip product-line inference.',
+  })
+  @ApiQuery({ name: 'line', required: false, enum: ['HOTEL', 'CAMP'] })
+  @ApiQuery({ name: 'propertyId', required: false })
+  @ApiQuery({ name: 'limit', required: false, type: 'number' })
+  @ApiResponse({ status: 200, description: 'Tonight board retrieved' })
+  async getTonight(
+    @CurrentUser() user: CurrentUserType,
+    @Query('line') line?: string,
+    @Query('propertyId') propertyId?: string,
+    @Query('limit') limit?: string,
+  ): Promise<TonightBoard> {
+    return this.tonightBoardService.getBoard(user.tenantId, {
+      line,
+      propertyId: propertyId || user.defaultPropertyId,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
+  }
+
+  @Get('business-overview')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager')
+  @ApiOperation({
+    summary: 'Get a cross-system overview of every module the tenant is entitled to',
+    description:
+      'Reports today revenue and outstanding work for the hotel plus F&B, inventory, ' +
+      'procurement, accounting, cost accounting, HR and the campground. Each module carries ' +
+      'an `entitlement`: `owned` (live tile) or `lapsed` — no longer entitled, but the ledger ' +
+      'holds money it earned in the window, so the money is reported and the operational ' +
+      'half is left off. Modules with neither entitlement nor money are omitted entirely. ' +
+      'Headline revenue is the ledger total for the tenant, so it never moves with ' +
+      'entitlements. Figures are cut on the Bangkok (UTC+7) calendar day.',
+  })
+  @ApiQuery({
+    name: 'propertyId',
+    required: false,
+    type: 'string',
+    description: "Property to scope to (defaults to the user's default property)",
+  })
+  @ApiResponse({ status: 200, description: 'Business overview retrieved successfully' })
+  @ApiResponse({ status: 401, description: 'Missing or invalid access token' })
+  @ApiResponse({ status: 403, description: 'Role not permitted to read the overview' })
+  async getBusinessOverview(
+    @CurrentUser() user: CurrentUserType,
+    @Query('propertyId') propertyId?: string,
+  ): Promise<BusinessOverview> {
+    return this.businessOverviewService.getBusinessOverview(
+      user.tenantId,
+      propertyId || user.defaultPropertyId,
+    );
+  }
 
   @Get('today-actions')
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'receptionist')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'receptionist',
+    'hotel_manager',
+    'front_desk',
+  )
   @ApiOperation({ summary: 'Get today action items for dashboard' })
   @ApiResponse({ status: 200, description: 'Today actions retrieved successfully' })
   async getTodayActions(
@@ -52,7 +137,15 @@ export class DashboardController {
   }
 
   @Get('metrics')
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'receptionist')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'receptionist',
+    'hotel_manager',
+    'front_desk',
+  )
   @ApiOperation({ summary: 'Get KPI metrics (occupancy, ADR, RevPAR, revenue)' })
   @ApiResponse({ status: 200, description: 'Metrics retrieved successfully' })
   async getMetrics(
@@ -77,7 +170,15 @@ export class DashboardController {
   }
 
   @Get('timeline')
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'receptionist')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'receptionist',
+    'hotel_manager',
+    'front_desk',
+  )
   @ApiOperation({ summary: 'Get today timeline (arrivals/departures sorted by time)' })
   @ApiResponse({ status: 200, description: 'Timeline retrieved successfully' })
   async getTimeline(
@@ -98,7 +199,16 @@ export class DashboardController {
   }
 
   @Get('room-heatmap')
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'receptionist', 'staff')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'receptionist',
+    'staff',
+    'hotel_manager',
+    'front_desk',
+  )
   @ApiOperation({ summary: 'Get room status summary grouped by floor' })
   @ApiResponse({ status: 200, description: 'Room heatmap retrieved successfully' })
   async getRoomHeatmap(
@@ -130,7 +240,16 @@ export class DashboardController {
   }
 
   @Get('activity-feed')
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'receptionist', 'staff')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'receptionist',
+    'staff',
+    'hotel_manager',
+    'front_desk',
+  )
   @ApiOperation({ summary: 'Get recent activity feed' })
   @ApiQuery({
     name: 'limit',

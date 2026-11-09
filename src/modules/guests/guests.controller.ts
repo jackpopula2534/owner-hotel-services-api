@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Get,
@@ -9,9 +10,12 @@ import {
   Param,
   Query,
   UseGuards,
+  Ip,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { GuestsService } from './guests.service';
+import { CreateGuestDto } from './dto/create-guest.dto';
+import { UpdateGuestDto } from './dto/update-guest.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -19,6 +23,8 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @ApiTags('guests')
 @ApiBearerAuth('JWT-auth')
+// Hotel Terminal (guests) — H1 allow-list, audit 2026-11-09
+@AllowSystems('hotel-terminal', 'crm')
 @Controller({ path: 'guests' })
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class GuestsController {
@@ -26,56 +32,100 @@ export class GuestsController {
 
   @Get()
   @ApiOperation({ summary: 'Get all guests' })
-  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
+  @Roles(
+    'admin',
+    'manager',
+    'tenant_admin',
+    'receptionist',
+    'platform_admin',
+    'staff',
+    'user',
+    'hotel_manager',
+    'front_desk',
+  )
   async findAll(@Query() query: any, @CurrentUser() user: { tenantId?: string }) {
     return this.guestsService.findAll(query, user?.tenantId);
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get guest by ID' })
-  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
+  @Roles(
+    'admin',
+    'manager',
+    'tenant_admin',
+    'receptionist',
+    'platform_admin',
+    'staff',
+    'user',
+    'hotel_manager',
+    'front_desk',
+  )
   async findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.guestsService.findOne(id, user?.tenantId);
   }
 
   @Post()
   @ApiOperation({ summary: 'Create a new guest' })
-  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
+  @Roles(
+    'admin',
+    'manager',
+    'tenant_admin',
+    'receptionist',
+    'platform_admin',
+    'staff',
+    'user',
+    'hotel_manager',
+    'front_desk',
+  )
   async create(
-    @Body() createGuestDto: any,
+    @Body() createGuestDto: CreateGuestDto,
     @CurrentUser() user: { id?: string; tenantId?: string },
+    @Ip() ip: string,
   ) {
-    return this.guestsService.create(createGuestDto, user?.tenantId, user?.id);
+    // LEGAL-04: capture the request IP as evidence of where/when consent was given.
+    return this.guestsService.create(createGuestDto, user?.tenantId, user?.id, ip);
   }
 
   @Put(':id')
   @ApiOperation({ summary: 'Update guest (PUT)' })
-  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
+  @Roles(
+    'admin',
+    'manager',
+    'tenant_admin',
+    'receptionist',
+    'platform_admin',
+    'staff',
+    'user',
+    'hotel_manager',
+    'front_desk',
+  )
   async updatePut(
     @Param('id') id: string,
-    @Body() updateGuestDto: any,
+    @Body() updateGuestDto: UpdateGuestDto,
     @CurrentUser() user: { id?: string; tenantId?: string },
   ) {
-    console.log(`Update (PUT) called for ID: ${id}, tenantId: ${user?.tenantId}`);
     return this.guestsService.update(id, updateGuestDto, user?.tenantId, user?.id);
   }
 
   @Patch(':id')
   @ApiOperation({ summary: 'Update guest (PATCH)' })
-  @Roles('admin', 'manager', 'tenant_admin', 'receptionist', 'platform_admin', 'staff', 'user')
+  @Roles(
+    'admin',
+    'manager',
+    'tenant_admin',
+    'receptionist',
+    'platform_admin',
+    'staff',
+    'user',
+    'hotel_manager',
+    'front_desk',
+  )
   async updatePatch(
     @Param('id') id: string,
-    @Body() updateGuestDto: any,
+    @Body() updateGuestDto: UpdateGuestDto,
     @CurrentUser() user: { id?: string; tenantId?: string },
   ) {
-    console.log(`Update (PATCH) called for ID: ${id}, tenantId: ${user?.tenantId}`);
     return this.guestsService.update(id, updateGuestDto, user?.tenantId, user?.id);
-  }
-
-  @Patch('*')
-  async debugPatch(@Param() params: any, @Body() body: any) {
-    console.log('DEBUG: Wildcard PATCH caught', params, body);
-    return { success: true, debug: 'Wildcard caught' };
   }
 
   @Delete(':id')

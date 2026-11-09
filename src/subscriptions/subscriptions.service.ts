@@ -1,14 +1,62 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { AddonService } from '@/modules/addons/addon.service';
 import { SubscriptionStatus } from './entities/subscription.entity';
 import { CreateSubscriptionDto } from './dto/create-subscription.dto';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
 
 @Injectable()
 export class SubscriptionsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(SubscriptionsService.name);
 
-  create(createSubscriptionDto: CreateSubscriptionDto) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly addonService: AddonService,
+  ) {}
+
+  /**
+   * A subscription row IS the tenant's entitlement: the plan it points at
+   * decides which modules and which product line (HOTEL | CAMP) they own, and
+   * AddonService caches both answers for 5 minutes. Every write here therefore
+   * has to drop that cache, or the tenant keeps their previous plan's modules
+   * until the TTL lapses — which is exactly what made a fresh Camp subscriber
+   * stare at "ADD-ON REQUIRED" (and a 403) on the campground pages: checkout
+   * swaps the plan milliseconds after registration warms the cache with the
+   * default hotel plan.
+   *
+   * Non-fatal: a cache that failed to clear must not fail the billing write.
+   */
+  private async invalidateEntitlements(tenantId: string | null | undefined): Promise<void> {
+    if (!tenantId) return;
+    try {
+      await this.addonService.invalidateAddonCache(tenantId);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to invalidate addon cache for tenant ${tenantId}: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
+    }
+  }
+
+  async create(createSubscriptionDto: CreateSubscriptionDto) {
+    const startDate = createSubscriptionDto.startDate
+      ? new Date(createSubscriptionDto.startDate)
+      : undefined;
+    const endDate = createSubscriptionDto.endDate
+      ? new Date(createSubscriptionDto.endDate)
+      : undefined;
+
+    // Default next billing date and anchor date when caller omits them.
+    // Without this, every subscription created via the public endpoint ends up
+    // with NULL next_billing_date and the admin Billing tab shows "N/A".
+    const nextBillingDate = createSubscriptionDto.nextBillingDate
+      ? new Date(createSubscriptionDto.nextBillingDate)
+      : endDate;
+    const billingAnchorDate = createSubscriptionDto.billingAnchorDate
+      ? new Date(createSubscriptionDto.billingAnchorDate)
+      : startDate;
+
     const data: any = {
       subscription_code: createSubscriptionDto.subscriptionCode,
       tenant_id: createSubscriptionDto.tenantId,
@@ -17,6 +65,8 @@ export class SubscriptionsService {
       status: createSubscriptionDto.status,
       start_date: createSubscriptionDto.startDate,
       end_date: createSubscriptionDto.endDate,
+      next_billing_date: nextBillingDate,
+      billing_anchor_date: billingAnchorDate,
       auto_renew:
         createSubscriptionDto.autoRenew !== undefined
           ? createSubscriptionDto.autoRenew
@@ -32,7 +82,7 @@ export class SubscriptionsService {
       }
     });
 
-    return this.prisma.subscriptions.create({
+    const created = await this.prisma.subscriptions.create({
       data,
       include: {
         tenants: true,
@@ -40,6 +90,32 @@ export class SubscriptionsService {
         subscription_features: { include: { features: true } },
       },
     });
+
+    // 🏕️ Auto-provision a default campground for Camp-plan tenants. This mirrors
+    // the default hotel `property` created at registration — so a tenant who
+    // subscribes to a Camp plan lands in /camp-terminal with a ready workspace
+    // instead of an empty hotel dashboard. Idempotent + non-fatal: never blocks
+    // the subscription itself if provisioning fails.
+    try {
+      const plan = (created as any).plans_subscriptions_plan_idToplans;
+      const tenantId = (created as any).tenant_id as string | undefined;
+      if (plan?.system === 'CAMP' && tenantId) {
+        const campgroundClient = (this.prisma as any).campground;
+        const existing = await campgroundClient.findFirst({ where: { tenantId } });
+        if (!existing) {
+          const tenantName = (created as any).tenants?.name || 'ลานกางเต็นท์ของฉัน';
+          await campgroundClient.create({
+            data: { tenantId, name: tenantName, status: 'active' },
+          });
+        }
+      }
+    } catch {
+      /* provisioning is best-effort — subscription creation must still succeed */
+    }
+
+    await this.invalidateEntitlements((created as any).tenant_id);
+
+    return created;
   }
 
   findAll() {
@@ -55,7 +131,7 @@ export class SubscriptionsService {
   }
 
   findOne(id: string) {
-    return this.prisma.subscriptions.findUnique({
+    return this.prisma.subscriptions.findFirst({
       where: { id },
       include: {
         tenants: true,
@@ -70,6 +146,10 @@ export class SubscriptionsService {
   findByTenantId(tenantId: string) {
     return this.prisma.subscriptions.findFirst({
       where: { tenant_id: tenantId },
+      // Latest subscription wins — same rule as AddonGuard. Without an order the
+      // DB may return an older row (e.g. a previous HOTEL plan) and the UI shows
+      // the wrong product line.
+      orderBy: { created_at: 'desc' },
       include: {
         plans_subscriptions_plan_idToplans: {
           include: { plan_features: { include: { features: true } } },
@@ -79,22 +159,77 @@ export class SubscriptionsService {
     });
   }
 
-  update(id: string, updateSubscriptionDto: UpdateSubscriptionDto) {
-    return this.prisma.subscriptions.update({
+  async update(id: string, updateSubscriptionDto: UpdateSubscriptionDto) {
+    // Map the camelCase DTO to the snake_case Prisma columns (same as create()).
+    // Passing the DTO straight through fails — e.g. the plan upgrade/downgrade
+    // flow sends `planId`, but the column is `plan_id` (Prisma: "Unknown
+    // argument `planId`"). Only defined fields are forwarded so partial updates
+    // don't clobber existing values.
+    const data: any = {
+      subscription_code: updateSubscriptionDto.subscriptionCode,
+      tenant_id: updateSubscriptionDto.tenantId,
+      plan_id: updateSubscriptionDto.planId,
+      previous_plan_id: updateSubscriptionDto.previousPlanId,
+      status: updateSubscriptionDto.status,
+      start_date: updateSubscriptionDto.startDate
+        ? new Date(updateSubscriptionDto.startDate)
+        : undefined,
+      end_date: updateSubscriptionDto.endDate ? new Date(updateSubscriptionDto.endDate) : undefined,
+      next_billing_date: updateSubscriptionDto.nextBillingDate
+        ? new Date(updateSubscriptionDto.nextBillingDate)
+        : undefined,
+      billing_anchor_date: updateSubscriptionDto.billingAnchorDate
+        ? new Date(updateSubscriptionDto.billingAnchorDate)
+        : undefined,
+      auto_renew:
+        updateSubscriptionDto.autoRenew !== undefined
+          ? updateSubscriptionDto.autoRenew
+            ? 1
+            : 0
+          : undefined,
+    };
+
+    Object.keys(data).forEach((key) => {
+      if (data[key] === undefined) {
+        delete data[key];
+      }
+    });
+
+    // Read the current owner first: a subscription can be re-pointed at another
+    // tenant, and the tenant losing it needs its entitlements dropped too.
+    const before = await this.prisma.subscriptions.findFirst({
       where: { id },
-      data: updateSubscriptionDto,
+      select: { tenant_id: true },
+    });
+
+    const updated = await this.prisma.subscriptions.update({
+      where: { id },
+      data,
       include: {
         tenants: true,
         plans_subscriptions_plan_idToplans: true,
         subscription_features: { include: { features: true } },
       },
     });
+
+    const affected = new Set(
+      [before?.tenant_id, (updated as any).tenant_id].filter(Boolean) as string[],
+    );
+    for (const tenantId of affected) {
+      await this.invalidateEntitlements(tenantId);
+    }
+
+    return updated;
   }
 
-  remove(id: string) {
-    return this.prisma.subscriptions.delete({
+  async remove(id: string) {
+    const deleted = await this.prisma.subscriptions.delete({
       where: { id },
     });
+
+    await this.invalidateEntitlements((deleted as any).tenant_id);
+
+    return deleted;
   }
 
   async checkSubscriptionActive(tenantId: string): Promise<boolean> {

@@ -71,3 +71,33 @@ export class ApprovePayrollDto {
   @MaxLength(500)
   note?: string;
 }
+
+/**
+ * Manual per-employee edit of a DRAFT payroll record. The owner/HR can override
+ * the base salary and fully replace the itemized breakdown; the service then
+ * recomputes every total column + net pay from these values so the displayed
+ * figure always matches the items.
+ */
+export class UpdatePayrollDto {
+  @ApiPropertyOptional({ description: 'Override base salary (THB)', example: 30000 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  baseSalary?: number;
+
+  @ApiPropertyOptional({
+    description: 'Full replacement of payroll items (allowance/deduction/overtime/bonus)',
+    type: [PayrollItemDto],
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PayrollItemDto)
+  items?: PayrollItemDto[];
+
+  @ApiPropertyOptional({ description: 'Note for the manual edit' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  note?: string;
+}

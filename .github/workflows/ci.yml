@@ -65,6 +65,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          # Full history needed for gitleaks to scan past commits, not just the diff
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -79,7 +82,20 @@ jobs:
         run: npm audit --audit-level=moderate
         continue-on-error: true
 
-      - name: Check for secrets in code
+      # ── W1.6 — Hard secret scan ──────────────────────────────────────────
+      # BLOCKING: any commit containing a string that matches our ruleset
+      # (.gitleaks.toml) fails the job. This is the safety net that prevents
+      # another JWT_SECRET / Firebase key leak like the one rotated 2026-05-17.
+      - name: Scan for secrets (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+
+      # Defense-in-depth: trufflehog finds verified-credential leaks gitleaks
+      # might miss. Non-blocking because it can have false positives on
+      # placeholder strings.
+      - name: Check for verified secrets (trufflehog)
         uses: trufflesecurity/trufflehog@main
         with:
           path: ./

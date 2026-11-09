@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <title>ทดลองใช้งาน StaySync ใกล้สิ้นสุด</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Sarabun', Arial, sans-serif; background-color: #f4f4f4;">
+  <table width="100%" style="background-color: #f4f4f4; padding: 24px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" style="background-color: #ffffff; border-radius: 12px; overflow: hidden;">
+          <tr>
+            <td style="background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%); padding: 32px; text-align: center;">
+              <h1 style="color: #ffffff; margin: 0; font-size: 22px;">เหลือเวลาทดลองอีก {{daysLeft}} วัน</h1>
+              <p style="color: rgba(255,255,255,0.95); margin: 8px 0 0 0; font-size: 14px;">{{hotelName}}</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 32px;">
+              <p style="color: #333; line-height: 1.7; font-size: 16px;">สวัสดีคุณ {{customerName}},</p>
+              <p style="color: #555; line-height: 1.7;">
+                ขอบคุณที่ทดลองใช้งาน StaySync — ระบบจัดการโรงแรมของคุณ
+                บัญชีทดลองของคุณ <b>{{hotelName}}</b> จะสิ้นสุดในวันที่
+                <b style="color: #ef4444;">{{trialEndDate}}</b>
+                ({{daysLeft}} วันจากนี้)
+              </p>
+              <p style="color: #555; line-height: 1.7;">
+                เมื่อหมดอายุ บัญชีของคุณจะถูก<b>ระงับการใช้งาน</b>
+                ข้อมูลทั้งหมดยังถูกเก็บไว้ 30 วัน หลังจากนั้นจะถูกลบถาวร
+              </p>
+              <table width="100%" style="margin: 24px 0;">
+                <tr>
+                  <td align="center">
+                    <a href="{{upgradeUrl}}" style="display: inline-block; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: #ffffff; padding: 14px 36px; border-radius: 8px; text-decoration: none; font-weight: 600;">
+                      อัปเกรดแพ็กเกจตอนนี้
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              <p style="color: #777; font-size: 14px; line-height: 1.7;">
+                หากต้องการความช่วยเหลือ ตอบกลับอีเมลฉบับนี้ได้เลย
+                ทีมงาน StaySync ยินดีให้คำปรึกษาในการเลือกแพ็กเกจที่เหมาะกับโรงแรมของคุณ
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #f9fafb; padding: 16px; text-align: center; color: #9ca3af; font-size: 12px;">
+              StaySync — Hotel Management System<br>
+              อีเมลฉบับนี้ส่งให้ {{recipient}}
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

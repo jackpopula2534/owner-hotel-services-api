@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <title>แจ้งเตือนการชำระเงิน — {{invoiceNo}}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Sarabun', Arial, sans-serif; background-color: #f4f4f4;">
+  <table width="100%" style="background-color: #f4f4f4; padding: 24px 0;">
+    <tr><td align="center">
+      <table width="600" style="background-color: #ffffff; border-radius: 12px; overflow: hidden;">
+        <tr><td style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); padding: 28px; text-align: center;">
+          <h1 style="color: #ffffff; margin: 0; font-size: 22px;">แจ้งเตือนการชำระเงิน</h1>
+        </td></tr>
+        <tr><td style="padding: 32px;">
+          <p style="color: #333; line-height: 1.7;">เรียน {{customerName}},</p>
+          <p style="color: #555; line-height: 1.7;">
+            ใบแจ้งหนี้ <b>{{invoiceNo}}</b> จำนวน <b>฿{{amount}}</b>
+            ครบกำหนดชำระเมื่อวันที่ <b>{{dueDate}}</b> และยังไม่ได้รับการชำระ
+          </p>
+          <p style="color: #555; line-height: 1.7;">
+            กรุณาชำระเงินภายในวันที่ <b>{{gracePeriodEnd}}</b>
+            เพื่อใช้งานระบบโรงแรมของคุณได้ต่อเนื่อง
+          </p>
+          <table width="100%" style="margin: 24px 0;"><tr><td align="center">
+            <a href="{{payInvoiceUrl}}" style="display: inline-block; background: #2563eb; color: #ffffff; padding: 14px 36px; border-radius: 8px; text-decoration: none; font-weight: 600;">ดูใบแจ้งหนี้</a>
+          </td></tr></table>
+          <p style="color: #777; font-size: 14px;">หากชำระเงินแล้ว กรุณาเพิกเฉยอีเมลฉบับนี้</p>
+        </td></tr>
+        <tr><td style="background: #f9fafb; padding: 16px; text-align: center; color: #9ca3af; font-size: 12px;">StaySync — Hotel Management</td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>

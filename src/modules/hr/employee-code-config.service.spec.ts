@@ -9,7 +9,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 function createMockPrisma() {
   return {
     employeeCodeConfig: {
-      findUnique: jest.fn(),
+      findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
       upsert: jest.fn(),
@@ -21,7 +21,7 @@ function createMockPrisma() {
     $transaction: jest.fn((fn: (tx: any) => Promise<any>) =>
       fn({
         employeeCodeConfig: {
-          findUnique: jest.fn(),
+          findFirst: jest.fn(),
           create: jest.fn(),
           update: jest.fn(),
         },
@@ -54,7 +54,7 @@ describe('EmployeeCodeConfigService', () => {
 
   describe('previewNextCode', () => {
     it('should return default EMP-0001 when no config and no existing employees', async () => {
-      prisma.employeeCodeConfig.findUnique.mockResolvedValue(null);
+      prisma.employeeCodeConfig.findFirst.mockResolvedValue(null);
       prisma.employee.findMany.mockResolvedValue([]);
 
       const code = await service.previewNextCode('tenant-1');
@@ -62,7 +62,7 @@ describe('EmployeeCodeConfigService', () => {
     });
 
     it('should sync with existing employees and skip used numbers', async () => {
-      prisma.employeeCodeConfig.findUnique.mockResolvedValue({
+      prisma.employeeCodeConfig.findFirst.mockResolvedValue({
         pattern: '{PREFIX}-{NNNN}',
         prefix: 'EMP',
         separator: '-',
@@ -84,7 +84,7 @@ describe('EmployeeCodeConfigService', () => {
     });
 
     it('should consider codes with different prefixes when syncing max number', async () => {
-      prisma.employeeCodeConfig.findUnique.mockResolvedValue({
+      prisma.employeeCodeConfig.findFirst.mockResolvedValue({
         pattern: '{PREFIX}-{NNNN}',
         prefix: 'EMP',
         separator: '-',
@@ -108,7 +108,7 @@ describe('EmployeeCodeConfigService', () => {
     });
 
     it('should use config.nextNumber when it is higher than DB max', async () => {
-      prisma.employeeCodeConfig.findUnique.mockResolvedValue({
+      prisma.employeeCodeConfig.findFirst.mockResolvedValue({
         pattern: '{PREFIX}-{NNNN}',
         prefix: 'EMP',
         separator: '-',
@@ -127,7 +127,7 @@ describe('EmployeeCodeConfigService', () => {
     });
 
     it('should scope query by propertyId when provided', async () => {
-      prisma.employeeCodeConfig.findUnique.mockResolvedValue(null);
+      prisma.employeeCodeConfig.findFirst.mockResolvedValue(null);
       prisma.employee.findMany.mockResolvedValue([]);
 
       await service.previewNextCode('tenant-1', undefined, 'property-abc');
@@ -155,7 +155,7 @@ describe('EmployeeCodeConfigService', () => {
     it('should generate code and update counter atomically', async () => {
       const txMock = {
         employeeCodeConfig: {
-          findUnique: jest.fn().mockResolvedValue({
+          findFirst: jest.fn().mockResolvedValue({
             pattern: '{PREFIX}-{NNNN}',
             prefix: 'EMP',
             separator: '-',
@@ -189,7 +189,7 @@ describe('EmployeeCodeConfigService', () => {
     it('should skip already-used codes and retry', async () => {
       const txMock = {
         employeeCodeConfig: {
-          findUnique: jest.fn().mockResolvedValue({
+          findFirst: jest.fn().mockResolvedValue({
             pattern: '{PREFIX}-{NNNN}',
             prefix: 'EMP',
             separator: '-',

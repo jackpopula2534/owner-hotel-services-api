@@ -6,6 +6,7 @@ import {
   IsBoolean,
   IsNumber,
   IsEnum,
+  IsInt,
   Min,
   Max,
 } from 'class-validator';
@@ -51,6 +52,17 @@ export class CreatePropertyDto {
   @IsString()
   @IsOptional()
   status?: string;
+
+  @ApiPropertyOptional({
+    example: 5,
+    description:
+      'จำนวนชั้นของอาคาร — ใช้เป็นตัวเลือก "ชั้น" ตอนเพิ่มห้องพักและตัวกรองชั้นทุกหน้าจอ',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(200)
+  floors?: number;
 
   // --- Service Charge & Tax Settings ---
 

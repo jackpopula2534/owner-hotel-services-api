@@ -1,12 +1,16 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import { Controller, Get, Post, Body, Query, UseGuards, Req, Version } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AddonGuard } from '@/common/guards/addon.guard';
 import { RequireAddon } from '@/common/decorators/require-addon.decorator';
+import { toBangkokDate } from '@/common/utils/bangkok-day.util';
 import { KpiSnapshotsService } from './kpi-snapshots.service';
 import { QueryKpiSnapshotDto, GenerateDailySnapshotDto } from './dto/query-kpi-snapshot.dto';
 
 @ApiTags('Cost Accounting - KPI Snapshots')
+// Accounting Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('accounting')
 @Controller({ path: 'cost-accounting/kpi-snapshots', version: '1' })
 @UseGuards(JwtAuthGuard, AddonGuard)
 @RequireAddon('COST_ACCOUNTING_MODULE')
@@ -38,13 +42,10 @@ export class KpiSnapshotsController {
     @Query('propertyId') propertyId: string,
     @Req() req: any,
   ): Promise<{ success: boolean; data: any }> {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
     const snapshot = await this.kpiSnapshotsService.getSnapshot(
       req.user.tenantId,
       propertyId,
-      today,
+      toBangkokDate(new Date()),
       'daily',
     );
 

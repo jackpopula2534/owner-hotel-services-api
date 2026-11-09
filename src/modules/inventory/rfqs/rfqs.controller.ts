@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import {
   Body,
   Controller,
@@ -31,6 +32,8 @@ import { CurrentUser } from '@/common/decorators/current-user.decorator';
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, AddonGuard)
 @RequireAddon('INVENTORY_MODULE')
+// Procurement Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('procurement', 'warehouse')
 @Controller({ path: 'rfqs', version: '1' })
 export class RfqsController {
   constructor(private readonly rfqsService: RfqsService) {}

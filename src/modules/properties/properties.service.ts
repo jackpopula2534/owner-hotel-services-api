@@ -1,14 +1,23 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { RevenueSegment, RevenueSourceModule } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreatePropertyDto } from './dto/create-property.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
 import { AuditLogService } from '../../audit-log/audit-log.service';
+import {
+  bangkokDayRange,
+  bangkokMonthRange,
+  toBangkokDate,
+  toBangkokMonth,
+} from '../../common/utils/bangkok-day.util';
+import { RevenueFilter, RevenueQueryService } from '../revenue/revenue-query.service';
 
 @Injectable()
 export class PropertiesService {
   constructor(
     private prisma: PrismaService,
     private auditLogService: AuditLogService,
+    private readonly revenue: RevenueQueryService,
   ) {}
 
   private buildWhere(tenantId: string, search?: string, includeDeleted = false) {
@@ -106,6 +115,12 @@ export class PropertiesService {
 
     const plan = subscription.plans_subscriptions_plan_idToplans;
 
+    // แพ็กเกจ Camp ใช้ max_rooms เป็นโควตาจุดกางเต็นท์ — นับ pitch แทนห้องพัก
+    const unitsCurrent =
+      String(plan.system ?? '').toUpperCase() === 'CAMP'
+        ? await this.prisma.campPitch.count({ where: { tenantId } })
+        : roomsCurrent;
+
     // Check property add-ons
     const propertyAddOns = await this.prisma.subscription_features.findMany({
       where: {
@@ -122,7 +137,7 @@ export class PropertiesService {
       max: Number(plan.max_properties),
       addOns,
       totalLimit: Number(plan.max_properties) + addOns,
-      roomsCurrent,
+      roomsCurrent: unitsCurrent,
       roomsMax: Number(plan.max_rooms),
       usersCurrent,
       usersMax: Number(plan.max_users),
@@ -153,13 +168,28 @@ export class PropertiesService {
     }
 
     // Build detailed statistics filtered by tenantId + propertyId
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    const now = new Date();
+    // วันนี้/ต้นเดือนตามปฏิทินไทย — หน้าต่างเดียวกับ dashboard และตัวกรองรายการจอง
+    const { start: today, end: tomorrow } = bangkokDayRange(toBangkokDate(now));
+    const { start: firstDayOfMonth } = bangkokMonthRange(toBangkokMonth(now));
 
     const roomWhere = { tenantId, propertyId: id };
+
+    // เดือนนี้ถึงวันนี้ตามปฏิทินไทย — ตัวเงินทุกตัวถามจากสมุดรายได้ด้วยช่วงเดียวกัน
+    // แปลงจากเวลาจริง ไม่ใช่เที่ยงคืนของเครื่อง — เครื่องที่ไม่ได้ตั้ง TZ ไทยจะเพี้ยนไปหนึ่งวัน
+    const todayBkk = toBangkokDate(now);
+    const monthToDate: RevenueFilter = {
+      tenantId,
+      propertyId: id,
+      from: `${todayBkk.slice(0, 7)}-01`,
+      to: todayBkk,
+    };
+    // ค่าห้องของโรงแรมหลังนี้เท่านั้น — ไม่ปนร้านอาหาร/ร้านค้าที่ตั้งอยู่ในโรงแรม
+    const roomsMonthToDate: RevenueFilter = {
+      ...monthToDate,
+      sourceModule: RevenueSourceModule.HOTEL,
+      segment: RevenueSegment.ROOMS,
+    };
 
     const [
       totalRooms,
@@ -169,6 +199,8 @@ export class PropertiesService {
       cleaningRooms,
       monthlyBookings,
       monthlyRevenue,
+      roomsRevenue,
+      roomsStays,
       todayCheckIns,
       todayCheckOuts,
       totalUsers,
@@ -179,7 +211,8 @@ export class PropertiesService {
       this.prisma.room.count({
         where: { ...roomWhere, status: { in: ['maintenance', 'out_of_order'] } },
       }),
-      this.prisma.room.count({ where: { ...roomWhere, status: 'cleaning' } }),
+      // dirty = รอมอบหมายแม่บ้าน (หลัง checkout), cleaning = กำลังทำอยู่ — ทั้งสองรอทำความสะอาด
+      this.prisma.room.count({ where: { ...roomWhere, status: { in: ['cleaning', 'dirty'] } } }),
       this.prisma.booking.count({
         where: {
           tenantId,
@@ -188,18 +221,14 @@ export class PropertiesService {
           status: { not: 'cancelled' },
         },
       }),
-      this.prisma.booking
-        .aggregate({
-          where: {
-            tenantId,
-            propertyId: id,
-            createdAt: { gte: firstDayOfMonth },
-            status: { in: ['confirmed', 'checked-in', 'checked-out'] },
-          },
-          _sum: { totalPrice: true },
-        })
-        .then((r) => Number(r._sum.totalPrice ?? 0))
-        .catch(() => 0),
+      // รายได้ทั้งหมดที่รับรู้ที่โรงแรมหลังนี้เดือนนี้ (ห้อง + ร้านอาหาร + ร้านค้า)
+      // ใช้ net (= gross − ส่วนลด) เท่านั้น ตรงกับไทล์ "รายได้วันนี้" ของหน้าภาพรวม
+      // VAT กับค่าบริการไม่ใช่รายได้ ถ้าเอา total มาโชว์จะสูงกว่ารายงานรายได้เสมอ
+      // เคยบวก grandTotal ของใบจองที่ "สร้าง" เดือนนี้เอง ซึ่งไม่ใช่ทั้งวันที่รับรู้
+      // และไม่ใช่ทั้งรายได้ — ใบที่สร้างเดือนนี้เพื่อเข้าพักเดือนหน้าก็ถูกนับไปแล้ว
+      this.revenue.totals(monthToDate).then((t) => t.net),
+      this.revenue.totals(roomsMonthToDate).then((t) => t.net),
+      this.revenue.countDocuments(roomsMonthToDate),
       this.prisma.booking.count({
         where: {
           tenantId,
@@ -213,7 +242,7 @@ export class PropertiesService {
           tenantId,
           propertyId: id,
           checkOut: { gte: today, lt: tomorrow },
-          status: 'checked-in',
+          status: 'checked_in',
         },
       }),
       this.prisma.userTenant.count({ where: { tenantId } }).catch(() => 0),
@@ -232,7 +261,9 @@ export class PropertiesService {
         roomUsagePercent,
         monthlyBookings,
         totalRevenue: monthlyRevenue,
-        avgDailyRate: monthlyBookings > 0 ? Math.round(monthlyRevenue / monthlyBookings) : 0,
+        // ค่าห้องเฉลี่ยต่อการเข้าพักที่รับรู้เดือนนี้ — ตัวตั้งกับตัวหารมาจากชุดเดียวกัน
+        // (เดิมหารด้วยจำนวนใบจองที่สร้างเดือนนี้ ซึ่งเป็นคนละกลุ่มกับตัวตั้ง)
+        avgDailyRate: roomsStays > 0 ? Math.round(roomsRevenue / roomsStays) : 0,
         totalUsers,
         activeUsers: 0,
         todayCheckIns,
@@ -351,6 +382,21 @@ export class PropertiesService {
       if (existing) {
         throw new BadRequestException(
           `Property with code ${updatePropertyDto.code} already exists`,
+        );
+      }
+    }
+
+    // ลดจำนวนชั้นทิ้งห้องไว้ข้างบนไม่ได้ — ห้องที่อยู่เกินชั้นสูงสุดจะกลายเป็นห้องที่
+    // ไม่มีชั้นให้เลือกอีกต่อไป และหลุดจากตัวกรองชั้นทุกหน้าจอแบบเงียบ ๆ
+    if (updatePropertyDto.floors !== undefined) {
+      const highest = await this.prisma.room.aggregate({
+        where: { propertyId: id, tenantId },
+        _max: { floor: true },
+      });
+      const highestFloor = highest._max.floor ?? 0;
+      if (highestFloor > updatePropertyDto.floors) {
+        throw new BadRequestException(
+          `ลดจำนวนชั้นเหลือ ${updatePropertyDto.floors} ชั้นไม่ได้ — ยังมีห้องพักอยู่ถึงชั้น ${highestFloor} กรุณาย้ายหรือลบห้องเหล่านั้นก่อน`,
         );
       }
     }

@@ -20,9 +20,11 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { AddonGuard } from '../../common/guards/addon.guard';
 import { RequireAddon } from '../../common/decorators/require-addon.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 
 @ApiTags('restaurant')
 @ApiBearerAuth('JWT-auth')
+@AllowSystems('pos')
 @Controller({ path: 'restaurants', version: '1' })
 @UseGuards(JwtAuthGuard, RolesGuard, AddonGuard)
 @RequireAddon('RESTAURANT_MODULE')
@@ -37,10 +39,13 @@ export class RestaurantController {
     'tenant_admin',
     'admin',
     'manager',
+    'restaurant_manager',
     'chef',
     'waiter',
     'receptionist',
     'staff',
+    'cashier',
+    'bartender',
   )
   async findAll(@Query() query: any, @CurrentUser() user: { tenantId?: string }) {
     return this.restaurantService.findAll(query, user?.tenantId);
@@ -55,6 +60,7 @@ export class RestaurantController {
     'tenant_admin',
     'admin',
     'manager',
+    'restaurant_manager',
     'chef',
     'waiter',
     'receptionist',
@@ -62,6 +68,27 @@ export class RestaurantController {
   )
   async findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.restaurantService.findOne(id, user?.tenantId);
+  }
+
+  // แยกจาก GET :id เพราะแคชเชียร์/บาร์เทนเดอร์ต้องอ่านได้ตอนรับเงิน แต่ไม่ควรได้ทั้งเมนู/โต๊ะ/ผังร้าน
+  @Get(':id/payment-config')
+  @ApiOperation({ summary: 'Payment methods + receiving accounts for the POS of this outlet' })
+  @ApiResponse({ status: 200 })
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'chef',
+    'waiter',
+    'receptionist',
+    'staff',
+    'cashier',
+    'bartender',
+  )
+  async paymentConfig(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
+    return this.restaurantService.paymentConfig(id, user?.tenantId);
   }
 
   @Post()
@@ -78,7 +105,7 @@ export class RestaurantController {
   @Patch(':id')
   @ApiOperation({ summary: 'Update restaurant' })
   @ApiResponse({ status: 200, description: 'Restaurant updated successfully' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager', 'chef')
   async update(
     @Param('id') id: string,
     @Body() updateRestaurantDto: UpdateRestaurantDto,
@@ -90,6 +117,7 @@ export class RestaurantController {
   @Delete(':id')
   @ApiOperation({ summary: 'Delete restaurant' })
   @ApiResponse({ status: 200, description: 'Restaurant deleted successfully' })
+  // ไม่มี restaurant_manager — เปิด/ปิดร้านเป็นการตัดสินใจระดับเจ้าของ/GM
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager')
   async remove(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
     return this.restaurantService.remove(id, user?.tenantId);

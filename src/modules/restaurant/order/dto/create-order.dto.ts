@@ -54,6 +54,14 @@ export class CreateOrderDto {
   @IsOptional()
   orderType?: OrderTypeEnum;
 
+  @ApiPropertyOptional({
+    example: 'uuid-reservation-id',
+    description: 'Table reservation this bill belongs to. Auto-detected from the table when omitted.',
+  })
+  @IsString()
+  @IsOptional()
+  reservationId?: string;
+
   @ApiPropertyOptional({ example: 'uuid-waiter-user-id' })
   @IsString()
   @IsOptional()

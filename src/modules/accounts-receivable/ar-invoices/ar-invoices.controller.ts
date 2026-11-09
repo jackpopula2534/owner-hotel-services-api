@@ -1,0 +1,153 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
+import { withPaginationMeta } from '@/common/utils/pagination.util';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Param,
+  Body,
+  Query,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
+import { IsOptional, IsString } from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
+import { CityLedgerBillingService } from './city-ledger-billing.service';
+import { CreateCityLedgerInvoiceDto } from './dto/create-city-ledger-invoice.dto';
+import { ArInvoicesService } from './ar-invoices.service';
+import { CreateArInvoiceDto } from './dto/create-ar-invoice.dto';
+import { CreateCreditNoteDto } from './dto/create-credit-note.dto';
+import { QueryArInvoiceDto } from './dto/query-ar-invoice.dto';
+import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
+import { AddonGuard } from '@/common/guards/addon.guard';
+import { RequireAddon } from '@/common/decorators/require-addon.decorator';
+import { CurrentUser } from '@/common/decorators/current-user.decorator';
+import { RolesGuard } from '@/common/guards/roles.guard';
+import { AR_WRITE_ROLES, AccountingAccess } from '@/modules/accounting/accounting-access.decorator';
+
+class VoidInvoiceDto {
+  @ApiPropertyOptional() @IsOptional() @IsString() reason?: string;
+}
+
+interface JwtPayload {
+  sub: string;
+  tenantId: string;
+  email: string;
+  role: string;
+}
+
+@ApiTags('Accounting - AR Invoices')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard, AddonGuard, RolesGuard)
+@AccountingAccess(AR_WRITE_ROLES)
+@RequireAddon('ACCOUNTING_MODULE')
+// Accounting Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('accounting')
+@Controller({ path: 'accounting/ar-invoices', version: '1' })
+export class ArInvoicesController {
+  constructor(
+    private readonly service: ArInvoicesService,
+    private readonly cityLedger: CityLedgerBillingService,
+  ) {}
+
+  @Get('aging')
+  @ApiOperation({ summary: 'AR Aging Report' })
+  @ApiQuery({ name: 'propertyId', required: true })
+  @ApiQuery({ name: 'asOfDate', required: false })
+  async getAging(
+    @CurrentUser() user: JwtPayload,
+    @Query('propertyId') propertyId: string,
+    @Query('asOfDate') asOfDate?: string,
+  ) {
+    const data = await this.service.getAging(user.tenantId, propertyId, asOfDate);
+    return { success: true, data };
+  }
+
+  @Get('sequence-audit')
+  @ApiOperation({ summary: 'ตรวจเลขรันใบกำกับภาษีว่ามีเลขขาด/ซ้ำหรือไม่ (LEGAL-03)' })
+  @ApiQuery({ name: 'yearMonth', required: false, description: 'e.g. 202605' })
+  async sequenceAudit(@CurrentUser() user: JwtPayload, @Query('yearMonth') yearMonth?: string) {
+    const data = await this.service.detectSequenceGaps(user.tenantId, { yearMonth });
+    return { success: true, data };
+  }
+
+  @Get('city-ledger/unbilled')
+  @ApiOperation({
+    summary: 'ยอด City Ledger ที่โอนจาก Folio แล้วยังไม่ได้วางบิล (จัดกลุ่มตามบริษัท)',
+  })
+  @ApiQuery({ name: 'propertyId', required: true })
+  async unbilledCityLedger(
+    @CurrentUser() user: JwtPayload,
+    @Query('propertyId') propertyId: string,
+  ) {
+    const data = await this.cityLedger.listUnbilled(user.tenantId, propertyId);
+    return { success: true, data };
+  }
+
+  @Post('city-ledger')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'สร้างใบแจ้งหนี้รวบยอด City Ledger จากยอดโอน Folio (ร่าง) — ออกใบแล้วไม่ลงรายได้ซ้ำ',
+  })
+  async createCityLedger(@CurrentUser() user: JwtPayload, @Body() dto: CreateCityLedgerInvoiceDto) {
+    const data = await this.cityLedger.createInvoice(dto, user.tenantId, user.sub);
+    return { success: true, data };
+  }
+
+  @Get()
+  @ApiOperation({ summary: 'ดูรายการ AR Invoice ทั้งหมด' })
+  async findAll(@CurrentUser() user: JwtPayload, @Query() query: QueryArInvoiceDto) {
+    const result = await this.service.findAll(user.tenantId, query);
+    return withPaginationMeta(result);
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'ดู AR Invoice รายละเอียด' })
+  async findOne(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    const data = await this.service.findOne(id, user.tenantId);
+    return { success: true, data };
+  }
+
+  @Post()
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'สร้าง AR Invoice' })
+  async create(@CurrentUser() user: JwtPayload, @Body() dto: CreateArInvoiceDto) {
+    const data = await this.service.create(dto, user.tenantId, user.sub);
+    return { success: true, data };
+  }
+
+  @Patch(':id/issue')
+  @ApiOperation({ summary: 'ออก Invoice (DRAFT → ISSUED)' })
+  async issue(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    const data = await this.service.issue(id, user.tenantId, user.sub);
+    return { success: true, data };
+  }
+
+  @Post(':id/credit-note')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'ออกใบลดหนี้อ้างใบนี้ (Dr รายได้ + 2103 / Cr 1103|1104) และตัดยอดคงค้างทันที',
+  })
+  async createCreditNote(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: CreateCreditNoteDto,
+  ) {
+    const data = await this.service.createCreditNote(id, dto, user.tenantId, user.sub);
+    return { success: true, data };
+  }
+
+  @Patch(':id/void')
+  @ApiOperation({ summary: 'ยกเลิก Invoice' })
+  async void(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: VoidInvoiceDto,
+  ) {
+    const data = await this.service.void(id, user.tenantId, user.sub, dto.reason);
+    return { success: true, data };
+  }
+}

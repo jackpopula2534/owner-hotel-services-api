@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditLogService } from '../../audit-log/audit-log.service';
+import { CreateGuestDto } from './dto/create-guest.dto';
+import { UpdateGuestDto } from './dto/update-guest.dto';
 
 @Injectable()
 export class GuestsService {
@@ -8,6 +10,46 @@ export class GuestsService {
     private prisma: PrismaService,
     private readonly auditLogService: AuditLogService,
   ) {}
+
+  /**
+   * Allowlist of Prisma `Guest` columns that are safe to write from API DTOs.
+   * Keep this in sync with the Prisma schema (`prisma/schema.prisma`) and the
+   * Create/Update DTOs in `./dto/`.
+   */
+  private static readonly WRITABLE_FIELDS = [
+    'firstName',
+    'lastName',
+    'email',
+    'phone',
+    'nationalId',
+    'passportNumber',
+    'dateOfBirth',
+    'nationality',
+    'address',
+    'city',
+    'country',
+    'postalCode',
+    'isVip',
+    'vipLevel',
+    'vehiclePlateNumber',
+    'specialNotes',
+    // PDPA consent fields (S1-02)
+    'consentGiven',
+    'consentVersion',
+  ] as const;
+
+  /** Pick only writable fields from a DTO and drop undefined values. */
+  private sanitize(dto: CreateGuestDto | UpdateGuestDto): Record<string, unknown> {
+    const out: Record<string, unknown> = {};
+    const source = dto as Record<string, unknown>;
+    for (const key of GuestsService.WRITABLE_FIELDS) {
+      const value = source[key];
+      if (value !== undefined) {
+        out[key] = value;
+      }
+    }
+    return out;
+  }
 
   private buildWhere(tenantId: string, search?: string) {
     const where: any = { tenantId };
@@ -96,12 +138,35 @@ export class GuestsService {
     }
   }
 
-  async create(createGuestDto: any, tenantId?: string, userId?: string) {
+  async create(
+    createGuestDto: CreateGuestDto,
+    tenantId?: string,
+    userId?: string,
+    consentIp?: string,
+  ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID is required');
     }
 
-    const data: any = { ...createGuestDto, tenantId };
+    // Defense-in-depth: pick only schema-allowed fields to prevent unknown
+    // keys from leaking into Prisma when this service is called from internal
+    // code that bypasses the ValidationPipe whitelist. firstName/lastName are
+    // guaranteed by CreateGuestDto's @IsNotEmpty validators.
+    // PDPA: บันทึก consent timestamp และ IP (S1-02 / LEGAL-04)
+    const consentData = createGuestDto.consentGiven
+      ? {
+          consentGiven: true,
+          consentAt: new Date(),
+          consentVersion: createGuestDto.consentVersion ?? '1.0',
+          ...(consentIp ? { consentIpAddress: consentIp } : {}),
+        }
+      : {};
+
+    const data = {
+      ...this.sanitize(createGuestDto),
+      ...consentData,
+      tenantId,
+    } as Parameters<PrismaService['guest']['create']>[0]['data'];
 
     try {
       const result = await this.prisma.guest.create({
@@ -123,10 +188,13 @@ export class GuestsService {
     }
   }
 
-  async update(id: string, updateGuestDto: any, tenantId?: string, userId?: string) {
+  async update(id: string, updateGuestDto: UpdateGuestDto, tenantId?: string, userId?: string) {
     const oldGuest = await this.findOne(id, tenantId);
 
-    const data: any = { ...updateGuestDto };
+    // Defense-in-depth: keep only schema-allowed fields. Prisma throws a
+    // PrismaClientValidationError on unknown keys, which surfaces as a
+    // confusing "ข้อมูลไม่ถูกต้องตามโครงสร้างฐานข้อมูล" error to the client.
+    const data = this.sanitize(updateGuestDto);
 
     try {
       const result = await this.prisma.guest.update({

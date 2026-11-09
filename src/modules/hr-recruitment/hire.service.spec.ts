@@ -1,0 +1,280 @@
+import { Test, TestingModule } from '@nestjs/testing';
+import { BadRequestException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { HireService } from './hire.service';
+import { PrismaService } from '../../prisma/prisma.service';
+import { AuditLogService } from '../../audit-log/audit-log.service';
+import { AddonService } from '../addons/addon.service';
+import { EmployeeCodeConfigService } from '../hr/employee-code-config.service';
+import { RecruitmentInventoryService } from '../hr/recruitment-inventory.service';
+
+function createMockPrisma() {
+  const tx = {
+    employee: { create: jest.fn().mockResolvedValue({ id: 'emp1' }), update: jest.fn() },
+    hrHireRecord: { update: jest.fn().mockResolvedValue({ id: 'h1', employeeId: 'emp1' }) },
+    hrEquipmentIssuance: { create: jest.fn() },
+    hrCandidate: {
+      update: jest.fn(),
+      count: jest.fn().mockResolvedValue(1),
+      // ผู้ถูกจ้างทุกคนของคำขอ — ค่าเริ่มต้น: คนเดียวที่เพิ่งยืนยันเริ่มงาน (PROBATION)
+      findMany: jest
+        .fn()
+        .mockResolvedValue([{ hireRecord: { employee: { status: 'PROBATION' } } }]),
+    },
+    hrManpowerRequest: { update: jest.fn(), updateMany: jest.fn() },
+    hrProbationRound: { create: jest.fn().mockResolvedValue({ id: 'round1' }) },
+    hrProbationCheckpoint: { create: jest.fn() },
+    hrCompensationChange: {
+      create: jest.fn().mockResolvedValue({ id: 'cc1' }),
+      findFirst: jest.fn(),
+    },
+  };
+  return {
+    tx,
+    hrCandidate: { findFirst: jest.fn() },
+    hrHireRecord: { findFirst: jest.fn() },
+    hrProbationRound: { findFirst: jest.fn() },
+    hrEquipmentIssuance: { count: jest.fn().mockResolvedValue(1) },
+    $transaction: jest.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
+  };
+}
+
+const baseCandidate = {
+  id: 'c1',
+  firstName: 'สมชาย',
+  lastName: 'ใจดี',
+  email: 'somchai@example.com',
+  phone: null,
+  manpowerRequestId: 'mpr1',
+  hireRecord: {
+    id: 'h1',
+    offerStatus: 'offered',
+    offeredSalary: 18000,
+    startDate: new Date('2026-07-01'),
+    probationDays: 90,
+  },
+  manpowerRequest: {
+    id: 'mpr1',
+    propertyId: 'p1',
+    departmentId: null,
+    positionId: null,
+    positionTitle: 'พนักงานต้อนรับ',
+    employmentType: 'FULLTIME',
+    equipmentRequests: [
+      {
+        id: 'eq1',
+        items: [
+          { name: 'Uniform', qty: 2 },
+          { name: 'Name tag', qty: 1 },
+        ],
+      },
+    ],
+  },
+};
+
+describe('HireService', () => {
+  let service: HireService;
+  let prisma: ReturnType<typeof createMockPrisma>;
+
+  beforeEach(async () => {
+    prisma = createMockPrisma();
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        HireService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: AuditLogService, useValue: { log: jest.fn().mockResolvedValue(undefined) } },
+        {
+          provide: EmployeeCodeConfigService,
+          useValue: { generateNextCode: jest.fn().mockResolvedValue('EMP-0042') },
+        },
+        {
+          provide: RecruitmentInventoryService,
+          useValue: {
+            isEnabled: jest.fn().mockResolvedValue(false),
+            reserveItems: jest.fn(),
+            releaseReservation: jest.fn(),
+          },
+        },
+        { provide: AddonService, useValue: { hasActiveAddon: jest.fn().mockResolvedValue(false) } },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+      ],
+    }).compile();
+    service = module.get(HireService);
+  });
+
+  describe('hire', () => {
+    it('creates employee (PENDING_START) + issuance checklists in one transaction', async () => {
+      prisma.hrCandidate.findFirst.mockResolvedValue(baseCandidate);
+      const result = await service.hire('c1', {}, 't1', 'u1');
+
+      expect(prisma.tx.employee.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            employeeCode: 'EMP-0042',
+            status: 'PENDING_START',
+            baseSalary: 18000,
+          }),
+        }),
+      );
+      expect(prisma.tx.hrEquipmentIssuance.create).toHaveBeenCalledTimes(1);
+      expect(prisma.tx.hrCandidate.update).toHaveBeenCalledWith({
+        where: { id: 'c1' },
+        data: { status: 'hired' },
+      });
+      // มีคำขอเบิกที่อนุมัติแล้ว (pre-approved) → ข้ามไปขั้นรับของ (onboarding) ได้เลย
+      expect(prisma.tx.hrManpowerRequest.update).toHaveBeenCalledWith({
+        where: { id: 'mpr1' },
+        data: { status: 'onboarding' },
+      });
+      expect(result.employee.id).toBe('emp1');
+    });
+
+    it('stays at "hired" (equipment stage) when no equipment approved yet', async () => {
+      prisma.hrCandidate.findFirst.mockResolvedValue({
+        ...baseCandidate,
+        manpowerRequest: { ...baseCandidate.manpowerRequest, equipmentRequests: [] },
+      });
+      await service.hire('c1', {}, 't1', 'u1');
+      expect(prisma.tx.hrManpowerRequest.update).toHaveBeenCalledWith({
+        where: { id: 'mpr1' },
+        data: { status: 'hired' },
+      });
+    });
+
+    it('records HIRE at probation pay + pending PROBATION_PASS when post-probation pay differs', async () => {
+      prisma.hrCandidate.findFirst.mockResolvedValue({
+        ...baseCandidate,
+        hireRecord: {
+          ...baseCandidate.hireRecord,
+          probationPositionBonus: 0,
+          probationAllowance: 500,
+          postProbationSalary: 20000,
+          postProbationPositionBonus: 1500,
+          postProbationAllowance: 500,
+        },
+      });
+      await service.hire('c1', {}, 't1', 'u1');
+
+      expect(prisma.tx.employee.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ baseSalary: 18000, positionBonus: 0, allowance: 500 }),
+        }),
+      );
+      const rows = prisma.tx.hrCompensationChange.create.mock.calls.map((c: any[]) => c[0].data);
+      expect(rows).toHaveLength(2);
+      expect(rows[0]).toMatchObject({
+        changeType: 'HIRE',
+        source: 'system',
+        baseSalary: 18000,
+        previous: null,
+      });
+      expect(rows[1]).toMatchObject({
+        changeType: 'PROBATION_PASS',
+        status: 'pending',
+        effectiveDate: null,
+        baseSalary: 20000,
+        positionBonus: 1500,
+        previous: { baseSalary: 18000, positionBonus: 0, allowance: 500 },
+      });
+    });
+
+    it('no post-probation terms → only the HIRE row', async () => {
+      prisma.hrCandidate.findFirst.mockResolvedValue(baseCandidate);
+      await service.hire('c1', {}, 't1', 'u1');
+      const rows = prisma.tx.hrCompensationChange.create.mock.calls.map((c: any[]) => c[0].data);
+      expect(rows.map((r: any) => r.changeType)).toEqual(['HIRE']);
+    });
+
+    it('rejects when there is no pending offer', async () => {
+      prisma.hrCandidate.findFirst.mockResolvedValue({
+        ...baseCandidate,
+        hireRecord: { ...baseCandidate.hireRecord, offerStatus: 'declined' },
+      });
+      await expect(service.hire('c1', {}, 't1', 'u1')).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('rejects when no email is available', async () => {
+      prisma.hrCandidate.findFirst.mockResolvedValue({ ...baseCandidate, email: null });
+      await expect(service.hire('c1', {}, 't1', 'u1')).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
+
+  describe('confirmStart', () => {
+    const acceptedHire = {
+      id: 'h1',
+      offerStatus: 'accepted',
+      employeeId: 'emp1',
+      probationDays: 90,
+      candidate: { manpowerRequestId: 'mpr1' },
+    };
+
+    it('sets PROBATION + opens a round with 30/60 checkpoints + final 90', async () => {
+      prisma.hrHireRecord.findFirst.mockResolvedValue(acceptedHire);
+      prisma.hrProbationRound.findFirst.mockResolvedValue(null);
+      prisma.hrEquipmentIssuance.count.mockResolvedValue(1);
+      await service.confirmStart('h1', 't1', 'u1');
+
+      expect(prisma.tx.employee.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'emp1' },
+          data: expect.objectContaining({ status: 'PROBATION' }),
+        }),
+      );
+      // 30, 60 (< 90) + final 90
+      expect(prisma.tx.hrProbationCheckpoint.create).toHaveBeenCalledTimes(3);
+      // ผ่านขั้นอุปกรณ์แล้ว (onboarding) หรือ hired+อนุมัติพร้อมกัน → ขยับไป probation
+      expect(prisma.tx.hrManpowerRequest.updateMany).toHaveBeenCalledWith({
+        where: { id: 'mpr1', status: { in: ['onboarding', 'hired'] } },
+        data: { status: 'probation' },
+      });
+    });
+
+    it('keeps the request in its stage while another hire has not reported for work yet', async () => {
+      prisma.hrHireRecord.findFirst.mockResolvedValue(acceptedHire);
+      prisma.hrProbationRound.findFirst.mockResolvedValue(null);
+      prisma.tx.hrCandidate.findMany.mockResolvedValue([
+        { hireRecord: { employee: { status: 'PROBATION' } } },
+        { hireRecord: { employee: { status: 'PENDING_START' } } },
+      ]);
+      await service.confirmStart('h1', 't1', 'u1');
+      expect(prisma.tx.hrCandidate.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { tenantId: 't1', manpowerRequestId: 'mpr1', status: 'hired' },
+        }),
+      );
+      expect(prisma.tx.hrManpowerRequest.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects when offer is not accepted yet', async () => {
+      prisma.hrHireRecord.findFirst.mockResolvedValue({
+        ...acceptedHire,
+        offerStatus: 'offered',
+        employeeId: null,
+      });
+      await expect(service.confirmStart('h1', 't1', 'u1')).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+    });
+
+    it('allows confirming start even when no equipment issuance exists yet (equipment is parallel, not blocking)', async () => {
+      prisma.hrHireRecord.findFirst.mockResolvedValue(acceptedHire);
+      prisma.hrProbationRound.findFirst.mockResolvedValue(null);
+      prisma.hrEquipmentIssuance.count.mockResolvedValue(0);
+      await service.confirmStart('h1', 't1', 'u1');
+      expect(prisma.tx.employee.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'emp1' },
+          data: expect.objectContaining({ status: 'PROBATION' }),
+        }),
+      );
+    });
+
+    it('rejects when an active round already exists', async () => {
+      prisma.hrHireRecord.findFirst.mockResolvedValue(acceptedHire);
+      prisma.hrProbationRound.findFirst.mockResolvedValue({ id: 'round-active' });
+      await expect(service.confirmStart('h1', 't1', 'u1')).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+    });
+  });
+});

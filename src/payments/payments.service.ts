@@ -1,11 +1,23 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailEventsService } from '../email/email-events.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { AddonService } from '@/modules/addons/addon.service';
 import { PaymentStatus } from './entities/payment.entity';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
 import { Prisma, payments_method, payments_status } from '@prisma/client';
+import { isInvoiceSettled } from '@/common/billing/invoice-settlement';
+import { markWebsiteQrVerified } from '@/modules/website/website-qr-verification';
+import { grantAddonPurchaseForInvoice } from '@/modules/addon-purchases/addon-purchase-grant';
+
+/**
+ * Who is acting through the tenant-facing /payments routes. Omitted by trusted
+ * internal callers (admin-approval, seeders) that are already platform-scoped.
+ */
+export interface PaymentActor {
+  isPlatformAdmin?: boolean;
+}
 
 @Injectable()
 export class PaymentsService {
@@ -15,9 +27,16 @@ export class PaymentsService {
     private readonly prisma: PrismaService,
     private readonly emailEventsService: EmailEventsService,
     private readonly auditLogService: AuditLogService,
+    private readonly addonService: AddonService,
   ) {}
 
-  create(createPaymentDto: CreatePaymentDto) {
+  async create(createPaymentDto: CreatePaymentDto, actor?: PaymentActor) {
+    // A tenant may only *submit* a slip for a StaySync bill — a status of
+    // approved here would skip the platform review and, worse, make the later
+    // real approval a no-op that never grants the plan/add-on.
+    if (actor && !actor.isPlatformAdmin && (await this.isSaasInvoice(createPaymentDto.invoiceId))) {
+      createPaymentDto = { ...createPaymentDto, status: undefined };
+    }
     const data: Prisma.paymentsUncheckedCreateInput = {
       invoice_id: createPaymentDto.invoiceId,
       method: createPaymentDto.method as payments_method,
@@ -42,7 +61,20 @@ export class PaymentsService {
     const where = tenantId ? { tenant_id: tenantId } : {};
     return this.prisma.payments.findMany({
       where,
-      include: { invoices: true },
+      include: {
+        invoices: {
+          include: {
+            tenants: { select: { id: true, name: true } },
+            subscriptions: {
+              include: {
+                plans_subscriptions_plan_idToplans: {
+                  select: { id: true, name: true, price_monthly: true, price_yearly: true },
+                },
+              },
+            },
+          },
+        },
+      },
       orderBy: { created_at: 'desc' },
     });
   }
@@ -66,7 +98,16 @@ export class PaymentsService {
     });
   }
 
-  update(id: string, updatePaymentDto: UpdatePaymentDto) {
+  async update(
+    id: string,
+    updatePaymentDto: UpdatePaymentDto,
+    tenantId?: string,
+    actor?: PaymentActor,
+  ) {
+    const existing = await this.findOne(id, tenantId);
+    if (!existing) throw new NotFoundException('Payment not found');
+    await this.assertMaySettle(existing.invoice_id, actor);
+
     const data: Prisma.paymentsUncheckedUpdateInput = {
       invoice_id: updatePaymentDto.invoiceId,
       method: updatePaymentDto.method as payments_method,
@@ -88,33 +129,114 @@ export class PaymentsService {
     });
   }
 
-  async approvePayment(id: string, adminId: string, tenantId?: string) {
+  async approvePayment(id: string, adminId: string, tenantId?: string, actor?: PaymentActor) {
     const payment = await this.findOne(id, tenantId);
     if (!payment) {
       throw new NotFoundException('Payment not found');
     }
+    await this.assertMaySettle(payment.invoice_id, actor);
 
-    const approvedPayment = await this.prisma.payments.update({
-      where: { id },
-      data: {
-        status: PaymentStatus.APPROVED,
-        approved_by: adminId,
-        approved_at: new Date(),
-      },
-      include: { invoices: true },
+    // SALES-04: idempotency. An already-approved payment must NOT be approved
+    // again — re-running would extend the subscription a second time and
+    // re-mark the invoice paid. Fast-path no-op for the common double-click /
+    // duplicate-request case.
+    if (payment.status === PaymentStatus.APPROVED) {
+      this.logger.warn(`Payment ${id} already approved — returning existing (idempotent no-op)`);
+      return payment;
+    }
+
+    // Atomically "claim" the payment (pending → approved) and flip the invoice
+    // to paid in the SAME transaction — this is the money-critical pair. The
+    // conditional updateMany guard also closes the concurrent-approve race:
+    // only one caller can transition a non-approved payment.
+    const approvedPayment = await this.prisma.$transaction(async (tx) => {
+      const claim = await tx.payments.updateMany({
+        where: { id, status: { not: PaymentStatus.APPROVED as payments_status } },
+        data: {
+          status: PaymentStatus.APPROVED as payments_status,
+          approved_by: adminId,
+          approved_at: new Date(),
+        },
+      });
+
+      if (claim.count === 0) {
+        return null; // lost the race — another request approved it first
+      }
+
+      if (payment.invoice_id) {
+        // ใบแจ้งหนี้ของการจอง: ปิดเมื่อยอดอนุมัติครบเท่านั้น (มัดจำ ≠ ชำระครบ)
+        const invoice = await tx.invoices.findFirst({
+          where: { id: payment.invoice_id, tenant_id: payment.tenant_id },
+          select: { booking_id: true, amount: true, adjusted_amount: true },
+        });
+        const settled =
+          !invoice?.booking_id ||
+          isInvoiceSettled(
+            invoice,
+            await tx.payments.findMany({
+              where: {
+                invoice_id: payment.invoice_id,
+                status: PaymentStatus.APPROVED as payments_status,
+              },
+              select: { amount: true },
+            }),
+          );
+        if (settled) {
+          await tx.invoices.update({
+            where: { id: payment.invoice_id },
+            data: { status: 'paid' },
+          });
+        }
+
+        // H2: activate + extend the subscription INSIDE the same transaction.
+        // If activation fails, the whole approval rolls back (payment stays
+        // un-approved) so a retry reconciles cleanly — avoiding the stuck state
+        // where a payment is approved but its subscription never activates.
+        // Atomicity also means the idempotency guard above is safe: an
+        // already-approved payment has, by construction, already been activated.
+        await this.activateSubscriptionForInvoice(payment.invoice_id, payment.tenant_id, tx);
+        // Self-service add-on month (addon_purchases) — same all-or-nothing rule.
+        await grantAddonPurchaseForInvoice(tx, payment.invoice_id, payment.tenant_id);
+      }
+
+      // findFirstOrThrow (NOT findUniqueOrThrow) with the tenant filter —
+      // `payments` is tenant-scoped and the TenantScope guard rejects findUnique*.
+      return tx.payments.findFirstOrThrow({
+        where: { id, tenant_id: payment.tenant_id },
+        include: { invoices: true },
+      });
     });
 
-    // Update invoice status to paid
-    if (payment.invoice_id) {
-      await this.updateInvoiceStatusToPaid(payment.invoice_id).catch((err) => {
-        this.logger.error(`Failed to update invoice status: ${err.message}`);
+    if (!approvedPayment) {
+      this.logger.warn(`Payment ${id} approved concurrently — idempotent no-op`);
+      return this.findOne(id, tenantId);
+    }
+
+    // Approval flips the subscription to `active` (and extends it), which is
+    // what turns a `pending` subscription into an entitlement — so the tenant's
+    // cached add-on status is now stale. Post-commit on purpose: dropping the
+    // cache mid-transaction lets a concurrent read re-warm it from uncommitted
+    // state and we end up stale all over again.
+    if (payment.tenant_id) {
+      await this.addonService.invalidateAddonCache(payment.tenant_id).catch((err) => {
+        this.logger.error(`Failed to invalidate addon cache: ${err.message}`);
       });
     }
 
-    // Update related booking status to confirmed
+    // Update related booking status to confirmed (idempotent; runs post-commit)
     if (payment.invoice_id) {
-      await this.updateBookingStatusToConfirmed(payment.invoice_id).catch((err) => {
-        this.logger.error(`Failed to update booking status: ${err.message}`);
+      await this.updateBookingStatusToConfirmed(payment.invoice_id, payment.tenant_id).catch(
+        (err) => {
+          this.logger.error(`Failed to update booking status: ${err.message}`);
+        },
+      );
+    }
+
+    // QR จากหน้าเว็บโรงแรม: ปิดธุรกรรม PromptPay เมื่ออนุมัติครบ (จองหลายห้อง = ครบทุกห้อง)
+    // ไม่งั้นแขกที่รอหน้า QR ไม่เคยเห็นว่าชำระแล้ว ทั้งที่โรงแรมอนุมัติไปแล้ว
+    if (payment.invoice_id && payment.tenant_id && payment.method === 'qr') {
+      await this.verifyWebsiteQr(payment.invoice_id, payment.tenant_id).catch((err) => {
+        this.logger.error(`Failed to verify website PromptPay transaction: ${err.message}`);
       });
     }
 
@@ -131,11 +253,12 @@ export class PaymentsService {
     return approvedPayment;
   }
 
-  async rejectPayment(id: string, adminId: string, tenantId?: string) {
+  async rejectPayment(id: string, adminId: string, tenantId?: string, actor?: PaymentActor) {
     const payment = await this.findOne(id, tenantId);
     if (!payment) {
-      throw new Error('Payment not found');
+      throw new NotFoundException('Payment not found');
     }
+    await this.assertMaySettle(payment.invoice_id, actor);
 
     return this.prisma.payments.update({
       where: { id },
@@ -148,26 +271,104 @@ export class PaymentsService {
     });
   }
 
-  remove(id: string) {
+  async remove(id: string, tenantId?: string, actor?: PaymentActor) {
+    const existing = await this.findOne(id, tenantId);
+    if (!existing) throw new NotFoundException('Payment not found');
+    await this.assertMaySettle(existing.invoice_id, actor);
     return this.prisma.payments.delete({
       where: { id },
     });
   }
 
   /**
-   * Update invoice status to paid after payment approval
+   * StaySync's own bills (plan subscription or self-service add-on) are
+   * settled by the platform only. Without this a tenant admin could approve
+   * their own slip through /payments/:id/approve and unlock a paid plan or
+   * add-on for free. Guest/booking payments stay with the tenant.
    */
-  private async updateInvoiceStatusToPaid(invoiceId: string): Promise<void> {
-    try {
-      await this.prisma.invoices.update({
-        where: { id: invoiceId },
-        data: { status: 'paid' },
-      });
-      this.logger.log(`Invoice ${invoiceId} status updated to paid`);
-    } catch (error) {
-      this.logger.error(`Failed to update invoice ${invoiceId} status: ${error.message}`);
-      throw error;
+  private async assertMaySettle(invoiceId: string | null, actor?: PaymentActor): Promise<void> {
+    if (!actor || actor.isPlatformAdmin) return;
+    if (await this.isSaasInvoice(invoiceId)) {
+      throw new ForbiddenException('การชำระค่าบริการ StaySync ต้องให้ทีมงานเป็นผู้ตรวจสอบ');
     }
+  }
+
+  private async isSaasInvoice(invoiceId: string | null | undefined): Promise<boolean> {
+    if (!invoiceId) return false;
+    const invoice = await this.prisma.invoices.findFirst({
+      where: { id: invoiceId },
+      select: { subscription_id: true },
+    });
+    if (invoice?.subscription_id) return true;
+    return (await this.prisma.addonPurchase.count({ where: { invoiceId } })) > 0;
+  }
+
+  /**
+   * Activate and extend the subscription linked to an approved invoice.
+   *
+   * - status: trial → active
+   * - start_date: วันที่ approve จริง (now)
+   * - end_date: start + 1 รอบบิล (monthly = +1 month, yearly = +1 year)
+   * - next_billing_date: เท่ากับ end_date (รอบบิลถัดไป)
+   *
+   * ถ้า subscription ยัง active อยู่แล้ว (ต่ออายุ) จะต่อจาก end_date เดิม
+   * เมื่อ end_date เดิมยังไม่หมดอายุ เพื่อไม่ให้ลูกค้าเสียวันที่เหลือ
+   */
+  private async activateSubscriptionForInvoice(
+    invoiceId: string,
+    tenantId: string | null,
+    // Optional transaction client so activation can run atomically with the
+    // payment approval (H2). Defaults to the base client for standalone calls.
+    db: Prisma.TransactionClient = this.prisma,
+  ): Promise<void> {
+    // findFirst (NOT findUnique) with the tenant filter — invoices/subscriptions
+    // are tenant-scoped and the TenantScope guard rejects findUnique.
+    const invoice = await db.invoices.findFirst({
+      where: { id: invoiceId, tenant_id: tenantId },
+      select: { subscription_id: true },
+    });
+
+    if (!invoice?.subscription_id) {
+      this.logger.log(`Invoice ${invoiceId} has no subscription — skipping activation`);
+      return;
+    }
+
+    const subscription = await db.subscriptions.findFirst({
+      where: { id: invoice.subscription_id, tenant_id: tenantId },
+      select: { id: true, billing_cycle: true, end_date: true, status: true },
+    });
+
+    if (!subscription) {
+      this.logger.warn(`Subscription ${invoice.subscription_id} not found — skipping activation`);
+      return;
+    }
+
+    const now = new Date();
+
+    // ต่ออายุจาก end_date เดิมถ้ายังไม่หมด (กันลูกค้าเสียวันที่เหลือ), ไม่งั้นเริ่มนับจากวันนี้
+    const extendFrom =
+      subscription.end_date && subscription.end_date > now ? new Date(subscription.end_date) : now;
+
+    const endDate = new Date(extendFrom);
+    if (subscription.billing_cycle === 'yearly') {
+      endDate.setFullYear(endDate.getFullYear() + 1);
+    } else {
+      endDate.setMonth(endDate.getMonth() + 1);
+    }
+
+    await db.subscriptions.update({
+      where: { id: subscription.id },
+      data: {
+        status: 'active',
+        start_date: now,
+        end_date: endDate,
+        next_billing_date: endDate,
+      },
+    });
+
+    this.logger.log(
+      `Subscription ${subscription.id} activated (${subscription.billing_cycle}) — ends ${endDate.toISOString().slice(0, 10)}`,
+    );
   }
 
   /**
@@ -175,11 +376,29 @@ export class PaymentsService {
    * First tries to find booking via invoice.booking_id (direct foreign key)
    * Falls back to searching recent pending bookings if not found
    */
-  private async updateBookingStatusToConfirmed(invoiceId: string): Promise<void> {
+  private async verifyWebsiteQr(invoiceId: string, tenantId: string): Promise<void> {
+    const invoice = await this.prisma.invoices.findFirst({
+      where: { id: invoiceId, tenant_id: tenantId },
+      select: { booking_id: true },
+    });
+    if (!invoice?.booking_id) return;
+    const booking = await this.prisma.booking.findFirst({
+      where: { id: invoice.booking_id, tenantId },
+      select: { id: true, bookingGroupId: true },
+    });
+    if (booking) await markWebsiteQrVerified(this.prisma, booking, tenantId);
+  }
+
+  private async updateBookingStatusToConfirmed(
+    invoiceId: string,
+    tenantId: string | null,
+  ): Promise<void> {
     try {
-      // Get invoice to find booking_id and tenant_id
-      const invoice = await this.prisma.invoices.findUnique({
-        where: { id: invoiceId },
+      // Get invoice to find booking_id and tenant_id.
+      // findFirst (NOT findUnique) with the tenant filter — `invoices` is
+      // tenant-scoped and the TenantScope guard rejects findUnique.
+      const invoice = await this.prisma.invoices.findFirst({
+        where: { id: invoiceId, tenant_id: tenantId },
       });
 
       if (!invoice) {
@@ -187,47 +406,47 @@ export class PaymentsService {
         return;
       }
 
-      // Try to find booking via direct booking_id relationship first (preferred method)
-      let booking = null;
+      // ใบแจ้งหนี้ที่ไม่ผูก booking (เช่น ค่า subscription) ไม่เกี่ยวกับการจองใดเลย
+      // ห้ามเดาเอาการจอง pending ล่าสุดของ tenant — เคยทำแบบนั้นแล้วอนุมัติค่าแพ็กเกจ
+      // ไปยืนยันการจองของแขกที่ยังไม่จ่าย
+      if (!invoice.booking_id) return;
 
-      if (invoice.booking_id) {
-        booking = await this.prisma.booking.findUnique({
-          where: { id: invoice.booking_id },
-        });
-
-        if (booking) {
-          this.logger.log(`Found booking ${booking.id} via invoice.booking_id`);
-        }
-      }
-
-      // Fallback: search by tenant and recent pending booking if direct lookup failed
+      // `Booking` is tenant-scoped → findFirst with the invoice's tenant_id.
+      const booking = await this.prisma.booking.findFirst({
+        where: { id: invoice.booking_id, tenantId: invoice.tenant_id },
+        select: { id: true, status: true },
+      });
       if (!booking) {
-        this.logger.debug(
-          `No booking_id found on invoice ${invoiceId}, searching by tenant and status`,
-        );
-        booking = await this.prisma.booking.findFirst({
-          where: {
-            tenantId: invoice.tenant_id,
-            status: 'pending',
-            createdAt: {
-              gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000), // Within last 7 days
-            },
-          },
-          orderBy: { createdAt: 'desc' },
-        });
-
-        if (!booking) {
-          this.logger.warn(`No pending booking found for invoice ${invoiceId}`);
-          return;
-        }
+        this.logger.warn(`Booking ${invoice.booking_id} of invoice ${invoiceId} not found`);
+        return;
       }
 
+      // sync ยอดที่ชำระแล้วให้ตรงกับ folio (มัดจำ = partial)
+      const approved = await this.prisma.payments.findMany({
+        where: { invoice_id: invoiceId, status: PaymentStatus.APPROVED as payments_status },
+        select: { amount: true },
+      });
+      const amountPaid =
+        Math.round(approved.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) * 100) / 100;
+      const paymentStatus = isInvoiceSettled(invoice, approved)
+        ? 'paid'
+        : amountPaid > 0
+          ? 'partial'
+          : 'pending';
+
+      // ยืนยันเฉพาะการจองที่ยังรอ — การจองที่เช็กอิน/เช็กเอาต์/ยกเลิกไปแล้วต้องไม่ถูกดึงกลับเป็น confirmed
       await this.prisma.booking.update({
         where: { id: booking.id },
-        data: { status: 'confirmed' },
+        data: {
+          ...(booking.status === 'pending' ? { status: 'confirmed' } : {}),
+          paymentStatus,
+          amountPaid,
+        },
       });
 
-      this.logger.log(`Booking ${booking.id} status updated to confirmed from payment approval`);
+      this.logger.log(
+        `Booking ${booking.id} payment synced from payment approval (${paymentStatus})`,
+      );
     } catch (error) {
       this.logger.error(`Failed to update booking status: ${error.message}`);
       throw error;
@@ -256,9 +475,11 @@ export class PaymentsService {
         return;
       }
 
-      // Get invoice details
-      const invoice = await this.prisma.invoices.findUnique({
-        where: { id: payment.invoice_id },
+      // Get invoice details.
+      // findFirst (NOT findUnique) with the tenant filter — `invoices` is
+      // tenant-scoped and the TenantScope guard rejects findUnique.
+      const invoice = await this.prisma.invoices.findFirst({
+        where: { id: payment.invoice_id, tenant_id: payment.tenant_id },
       });
 
       if (!invoice) {

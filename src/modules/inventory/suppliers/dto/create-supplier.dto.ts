@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsEmail, IsInt, Min, MaxLength, IsArray } from 'class-validator';
+import { IsString, IsOptional, IsEmail, IsInt, Min, MaxLength, IsArray, IsBoolean } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 
@@ -11,13 +11,17 @@ export class CreateSupplierDto {
   @MaxLength(255)
   name: string;
 
-  @ApiProperty({
-    description: 'Unique supplier code per tenant',
+  @ApiPropertyOptional({
+    description:
+      'Unique supplier code per tenant. Omit it and the server allocates the next free SUP-#### — ' +
+      'the quick-add form on the RFQ screen relies on this, because a code is bookkeeping the ' +
+      'person typing a market vendor’s name has no way to invent.',
     example: 'SUP-001',
   })
+  @IsOptional()
   @IsString()
   @MaxLength(50)
-  code: string;
+  code?: string;
 
   @ApiPropertyOptional({
     description: 'Contact person name',
@@ -103,7 +107,11 @@ export class CreateSupplierDto {
     // รับทั้ง array และ JSON string
     if (Array.isArray(value)) return value;
     if (typeof value === 'string') {
-      try { return JSON.parse(value); } catch { return []; }
+      try {
+        return JSON.parse(value);
+      } catch {
+        return [];
+      }
     }
     return [];
   })
@@ -117,4 +125,12 @@ export class CreateSupplierDto {
   @IsString()
   @MaxLength(10)
   emoji?: string;
+
+  @ApiPropertyOptional({
+    description: 'Inactive suppliers are hidden from PR, RFQ and PO pickers',
+    example: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
 }

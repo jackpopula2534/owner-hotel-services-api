@@ -1,6 +1,12 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+  Logger,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, IsNull, Not, Repository } from 'typeorm';
 import {
   Subscription,
   SubscriptionStatus,
@@ -10,11 +16,20 @@ import { BillingHistory, BillingEventType } from '../subscriptions/entities/bill
 import { Invoice, InvoiceStatus } from '../invoices/entities/invoice.entity';
 import { SubscriptionFeature } from '../subscription-features/entities/subscription-feature.entity';
 import { Plan } from '../plans/entities/plan.entity';
+import { Prisma } from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
+import {
+  AddonCharge,
+  SAAS_VAT_RATE,
+  addMonthsUtc,
+  addonChargesForRenewal,
+  utcMidnight,
+  vatOnTop,
+} from '../common/billing/addon-billing';
 import {
   UpdateBillingCycleDto,
   RenewSubscriptionDto,
   CancelRenewalDto,
-  BillingCycleDto,
   BillingCycleResponseDto,
   RenewSubscriptionResponseDto,
   CancelRenewalResponseDto,
@@ -38,6 +53,7 @@ export class AdminBillingCycleService {
     private subscriptionFeaturesRepository: Repository<SubscriptionFeature>,
     @InjectRepository(Plan)
     private plansRepository: Repository<Plan>,
+    private readonly prisma: PrismaService,
   ) {}
 
   /**
@@ -56,6 +72,9 @@ export class AdminBillingCycleService {
     const planPrice = Number(subscription.plan?.priceMonthly || 0);
     const totalMonthlyAmount = planPrice + addonAmount;
 
+    const nextBilling = this.computeNextBillingDate(subscription);
+    const anchorDate = subscription.billingAnchorDate || subscription.startDate || null;
+
     return {
       subscriptionCode: subscription.subscriptionCode || subscription.id,
       hotelName: subscription.tenant?.name || 'N/A',
@@ -63,16 +82,12 @@ export class AdminBillingCycleService {
       planPrice,
       billingCycle: subscription.billingCycle || 'monthly',
       status: subscription.status,
-      currentPeriodStart: this.formatDate(subscription.startDate),
-      currentPeriodEnd: this.formatDate(subscription.endDate),
-      nextBillingDate:
-        this.formatDate(subscription.nextBillingDate) ||
-        this.formatDate(subscription.endDate) ||
-        'N/A',
-      billingAnchorDate:
-        this.formatDate(subscription.billingAnchorDate) ||
-        this.formatDate(subscription.startDate) ||
-        'N/A',
+      // Period boundaries carry a real expiry moment -> full ISO datetime.
+      currentPeriodStart: this.formatDateTimeOrNa(subscription.startDate),
+      currentPeriodEnd: this.formatDateTimeOrNa(subscription.endDate),
+      // Billing calendar dates -> date-only is fine.
+      nextBillingDate: this.formatDate(nextBilling),
+      billingAnchorDate: this.formatDate(anchorDate),
       autoRenew: subscription.autoRenew,
       renewedCount: subscription.renewedCount || 0,
       lastRenewedAt: this.formatDateTime(subscription.lastRenewedAt),
@@ -81,6 +96,43 @@ export class AdminBillingCycleService {
       cancelledAt: this.formatDateTime(subscription.cancelledAt),
       cancellationReason: subscription.cancellationReason || undefined,
     };
+  }
+
+  /**
+   * Compute the next billing date for a subscription.
+   *
+   * Priority:
+   *  1) Use stored `nextBillingDate` if present
+   *  2) Fall back to `endDate` (the active period boundary == next charge moment)
+   *  3) If `endDate` already passed, roll forward by billing cycle until in the future
+   *  4) Returns null only when subscription has no endDate at all
+   */
+  private computeNextBillingDate(subscription: Subscription): Date | null {
+    if (subscription.nextBillingDate) {
+      return new Date(subscription.nextBillingDate);
+    }
+
+    if (!subscription.endDate) {
+      return null;
+    }
+
+    const cycle = subscription.billingCycle || BillingCycle.MONTHLY;
+    const candidate = new Date(subscription.endDate);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Roll forward until the candidate date is in the future
+    let safetyCounter = 0;
+    while (candidate.getTime() < today.getTime() && safetyCounter < 240) {
+      if (cycle === BillingCycle.YEARLY) {
+        candidate.setFullYear(candidate.getFullYear() + 1);
+      } else {
+        candidate.setMonth(candidate.getMonth() + 1);
+      }
+      safetyCounter += 1;
+    }
+
+    return candidate;
   }
 
   /**
@@ -183,32 +235,87 @@ export class AdminBillingCycleService {
       throw new BadRequestException('Cannot renew cancelled subscription. Reactivate first.');
     }
 
-    // Calculate renewal period
-    const periodMonths =
-      dto.periodMonths || (subscription.billingCycle === BillingCycle.YEARLY ? 12 : 1);
-
-    // Calculate new dates
+    // Calculate new dates. Three input modes, in priority order:
+    //   1) explicit customEndDate (admin picked a date)
+    //   2) periodDays (sub-month renewals such as 1 week)
+    //   3) periodMonths (default — falls back to billing cycle)
     const newStartDate = new Date(subscription.endDate);
-    const newEndDate = new Date(newStartDate);
-    newEndDate.setMonth(newEndDate.getMonth() + periodMonths);
+    let newEndDate: Date;
+    let periodMonths: number;
+    let periodDays: number | undefined;
 
-    // Calculate renewal amount
+    if (dto.customEndDate) {
+      newEndDate = new Date(dto.customEndDate);
+      if (Number.isNaN(newEndDate.getTime()) || newEndDate <= newStartDate) {
+        throw new BadRequestException(
+          'customEndDate must be a valid date after the current period end',
+        );
+      }
+      // Approximate months from the chosen end date for amount/invoice math.
+      const ms = newEndDate.getTime() - newStartDate.getTime();
+      periodMonths = Math.max(1, Math.round(ms / (1000 * 60 * 60 * 24 * 30)));
+    } else if (dto.periodDays && dto.periodDays > 0) {
+      periodDays = dto.periodDays;
+      newEndDate = new Date(newStartDate);
+      newEndDate.setDate(newEndDate.getDate() + periodDays);
+      periodMonths = Math.max(1, Math.round(periodDays / 30));
+    } else {
+      periodMonths =
+        dto.periodMonths || (subscription.billingCycle === BillingCycle.YEARLY ? 12 : 1);
+      newEndDate = addMonthsUtc(newStartDate, periodMonths);
+    }
+
+    // Calculate renewal amount — แพ็กเกจ × เดือน + add-on (bill-later คิดตามช่วงที่ถึงกำหนด)
     const planPrice = Number(subscription.plan?.priceMonthly || 0);
-    const addons = await this.subscriptionFeaturesRepository.find({
-      where: { subscriptionId: subscription.id, isActive: true },
+    const featureRows = await this.prisma.subscription_features.findMany({
+      where: { subscription_id: subscription.id, is_active: 1 },
+      include: { features: { select: { name: true, code: true } } },
     });
-    const addonAmount = addons.reduce((sum, a) => sum + Number(a.price || 0), 0);
-    const monthlyTotal = planPrice + addonAmount;
-    const renewalAmount =
-      dto.customPrice !== undefined ? dto.customPrice : monthlyTotal * periodMonths;
+    const charges = addonChargesForRenewal(
+      featureRows.map((f) => ({
+        id: f.id,
+        price: Number(f.price || 0),
+        billingMode: f.billing_mode,
+        billingStartsOn: f.billing_starts_on,
+        billedThrough: f.billed_through,
+        cancelAt: f.cancel_at,
+      })),
+      utcMidnight(newStartDate),
+      utcMidnight(newEndDate),
+      periodMonths,
+    );
+    const addonAmount = charges.reduce((sum, c) => sum + c.amount, 0);
+    const planAmount = periodDays
+      ? Math.round((planPrice / 30) * periodDays)
+      : planPrice * periodMonths;
+
+    // For sub-month (week) renewals, prorate by days; otherwise multiply by months.
+    // customPrice = ยอดรวมสุดท้ายที่แอดมินกำหนด (รวม VAT แล้ว)
+    const computed = vatOnTop(planAmount + addonAmount);
+    const renewalAmount = dto.customPrice !== undefined ? dto.customPrice : computed.total;
 
     // Create invoice if requested
     let invoiceNo: string | undefined;
+    let invoiceId: string | undefined;
     const createInvoice = dto.createInvoice !== false;
 
     if (createInvoice) {
-      const invoice = await this.createRenewalInvoice(subscription, renewalAmount, periodMonths);
+      // Block double-billing: refuse to issue a new subscription invoice while
+      // the tenant still has an outstanding (unpaid) one.
+      await this.assertNoOutstandingSubscriptionInvoices(subscription.tenantId);
+      const names = new Map(featureRows.map((f) => [f.id, f.features?.name ?? 'Add-on']));
+      const invoice = await this.createRenewalInvoice(subscription, {
+        planAmount,
+        planLabel: `${subscription.plan?.name ?? 'แพ็กเกจ'} — ${
+          periodDays ? `${periodDays} วัน` : `${periodMonths} เดือน`
+        }`,
+        charges: charges.map((c) => ({ ...c, name: names.get(c.id) ?? 'Add-on' })),
+        featureRefs: new Map(featureRows.map((f) => [f.id, f.feature_id])),
+        customTotal: dto.customPrice,
+        periodMonths,
+      });
       invoiceNo = invoice.invoiceNo;
+      invoiceId = invoice.id;
     }
 
     // Update subscription
@@ -229,9 +336,7 @@ export class AdminBillingCycleService {
       newAmount: renewalAmount,
       periodStart: newStartDate,
       periodEnd: newEndDate,
-      invoiceId: invoiceNo
-        ? (await this.invoicesRepository.findOne({ where: { invoiceNo } }))?.id
-        : undefined,
+      invoiceId,
       createdBy: adminId,
       metadata: { periodMonths, notes: dto.notes },
     });
@@ -376,10 +481,7 @@ export class AdminBillingCycleService {
       hotelName: subscription.tenant?.name || 'N/A',
       currentPlan: subscription.plan?.name || 'No Plan',
       billingCycle: subscription.billingCycle || 'monthly',
-      nextBillingDate:
-        this.formatDate(subscription.nextBillingDate) ||
-        this.formatDate(subscription.endDate) ||
-        'N/A',
+      nextBillingDate: this.formatDate(this.computeNextBillingDate(subscription)),
       history: historyItems,
       total: historyItems.length,
     };
@@ -486,31 +588,145 @@ export class AdminBillingCycleService {
     return Math.round(dailyRate * remainingDays);
   }
 
+  /**
+   * Refuse to create a new subscription invoice while the tenant still owes on
+   * an outstanding (pending/finalized) one. Mirrors
+   * InvoicesService.assertNoOutstandingSubscriptionInvoices for the TypeORM path.
+   */
+  private async assertNoOutstandingSubscriptionInvoices(tenantId: string): Promise<void> {
+    const outstanding = await this.invoicesRepository.find({
+      where: {
+        tenantId,
+        bookingId: IsNull(),
+        subscriptionId: Not(IsNull()),
+        status: In(['pending', 'finalized'] as InvoiceStatus[]),
+      },
+      order: { createdAt: 'ASC' },
+    });
+    if (outstanding.length > 0) {
+      const total = outstanding.reduce((sum, inv) => sum + Number(inv.amount), 0);
+      throw new ConflictException({
+        success: false,
+        error: {
+          code: 'OUTSTANDING_INVOICE_EXISTS',
+          message:
+            'มีใบแจ้งหนี้ที่ยังค้างชำระอยู่ กรุณาชำระหรือยกเลิกใบแจ้งหนี้เดิมก่อนจึงจะออกใบแจ้งหนี้ใหม่ได้',
+          outstandingCount: outstanding.length,
+          outstandingTotal: total,
+          invoices: outstanding.map((inv) => ({
+            id: inv.id,
+            invoiceNo: inv.invoiceNo,
+            amount: Number(inv.amount),
+            status: inv.status,
+            dueDate: inv.dueDate,
+          })),
+        },
+      });
+    }
+  }
+
+  /**
+   * ใบต่ออายุแบบแยกรายการ: แพ็กเกจ + add-on แต่ละตัว, VAT 7% บวกเพิ่ม (เหมือนหน้าชำระแพ็กเกจ)
+   * บันทึก billed_through ของ add-on bill-later ใน transaction เดียวกับการออกใบ
+   * — ใบไม่ออก = ไม่ถือว่าเก็บแล้ว รอบหน้าจะคิดย้อนให้ครบ
+   */
   private async createRenewalInvoice(
     subscription: Subscription,
-    amount: number,
-    periodMonths: number,
-  ): Promise<Invoice> {
+    input: {
+      planAmount: number;
+      planLabel: string;
+      charges: Array<AddonCharge & { name: string }>;
+      featureRefs: Map<string, string>;
+      customTotal?: number;
+      periodMonths: number;
+    },
+  ): Promise<{ id: string; invoiceNo: string; amount: number }> {
     const invoiceNo = `INV-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
-    const dueDate = new Date();
-    dueDate.setDate(dueDate.getDate() + 15);
+    const dueDate = utcMidnight(new Date());
+    dueDate.setUTCDate(dueDate.getUTCDate() + 15);
 
-    const invoice = this.invoicesRepository.create({
-      tenantId: subscription.tenantId,
-      subscriptionId: subscription.id,
-      invoiceNo,
-      amount,
-      originalAmount: amount,
-      status: InvoiceStatus.PENDING,
-      dueDate,
-      notes: `Renewal for ${periodMonths} month(s)`,
+    const net = input.planAmount + input.charges.reduce((sum, c) => sum + c.amount, 0);
+    const totals =
+      input.customTotal !== undefined
+        ? // ยอดที่แอดมินกำหนดถือว่ารวม VAT แล้ว — ถอด VAT ออกเพื่อแสดงรายการ
+          (() => {
+            const subtotal =
+              Math.round((input.customTotal / (1 + SAAS_VAT_RATE / 100)) * 100) / 100;
+            return {
+              subtotal,
+              vatRate: SAAS_VAT_RATE,
+              vatAmount: Math.round((input.customTotal - subtotal) * 100) / 100,
+              total: input.customTotal,
+            };
+          })()
+        : vatOnTop(net);
+
+    const items: Prisma.invoice_itemsCreateWithoutInvoicesInput[] = [];
+    if (input.planAmount > 0) {
+      items.push({
+        type: 'plan',
+        quantity: 1,
+        unit_price: input.planAmount,
+        amount: input.planAmount,
+        ref_id: subscription.planId ?? null,
+        description: input.planLabel.slice(0, 255),
+      });
+    }
+    for (const c of input.charges) {
+      items.push({
+        type: 'feature',
+        quantity: c.months,
+        unit_price: c.amount / c.months,
+        amount: c.amount,
+        ref_id: input.featureRefs.get(c.id) ?? null,
+        description: `${c.name} — ${c.months} เดือน`.slice(0, 255),
+      });
+    }
+    if (
+      input.customTotal !== undefined &&
+      Math.round(totals.subtotal * 100) !== Math.round(net * 100)
+    ) {
+      const diff = Math.round((totals.subtotal - net) * 100) / 100;
+      items.push({
+        type: 'adjustment',
+        quantity: 1,
+        unit_price: diff,
+        amount: diff,
+        description: 'ปรับยอดโดยทีมงาน',
+      });
+    }
+
+    const invoice = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.invoices.create({
+        data: {
+          tenant_id: subscription.tenantId,
+          subscription_id: subscription.id,
+          invoice_no: invoiceNo,
+          amount: totals.total,
+          original_amount: totals.total,
+          subtotal: totals.subtotal,
+          vat_rate: totals.vatRate,
+          vat_amount: totals.vatAmount,
+          status: 'pending',
+          due_date: dueDate,
+          notes: `Renewal for ${input.periodMonths} month(s)`,
+          invoice_items: { create: items },
+        },
+        select: { id: true, invoice_no: true },
+      });
+      for (const c of input.charges) {
+        if (!c.billedThrough) continue;
+        await tx.subscription_features.update({
+          where: { id: c.id },
+          data: { billed_through: c.billedThrough },
+        });
+      }
+      return created;
     });
 
-    await this.invoicesRepository.save(invoice);
+    this.logger.log(`Created renewal invoice ${invoiceNo} for ${totals.total}`);
 
-    this.logger.log(`Created renewal invoice ${invoiceNo} for ${amount}`);
-
-    return invoice;
+    return { id: invoice.id, invoiceNo: invoice.invoice_no, amount: totals.total };
   }
 
   private async createBillingHistory(data: Partial<BillingHistory>): Promise<void> {
@@ -529,6 +745,21 @@ export class AdminBillingCycleService {
         return date.split('T')[0];
       }
       return date.toISOString().split('T')[0];
+    } catch {
+      return 'N/A';
+    }
+  }
+
+  /**
+   * Like formatDate but keeps the time component (full ISO). Used for period
+   * boundaries that represent a real expiry moment so the client can display
+   * date + time. Returns 'N/A' when there is no date.
+   */
+  private formatDateTimeOrNa(date: Date | string | null | undefined): string {
+    if (!date) return 'N/A';
+    try {
+      const d = typeof date === 'string' ? new Date(date) : date;
+      return Number.isNaN(d.getTime()) ? 'N/A' : d.toISOString();
     } catch {
       return 'N/A';
     }

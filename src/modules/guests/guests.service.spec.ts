@@ -2,6 +2,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { GuestsService } from './guests.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AuditLogService } from '../../audit-log/audit-log.service';
+import { mockAuditLogService } from '../../common/test/mock-providers';
 
 describe('GuestsService', () => {
   let service: GuestsService;
@@ -29,6 +31,7 @@ describe('GuestsService', () => {
           provide: PrismaService,
           useValue: mockPrismaService,
         },
+        { provide: AuditLogService, useValue: mockAuditLogService() },
       ],
     }).compile();
 
@@ -196,6 +199,70 @@ describe('GuestsService', () => {
         where: { id: '1' },
         data: updateDto,
       });
+    });
+
+    it('should accept specialNotes when updating', async () => {
+      const updateDto = {
+        firstName: 'Emma',
+        specialNotes: 'Allergic to seafood. Prefers high floor.',
+      };
+      mockPrismaService.guest.findFirst.mockResolvedValue({ id: '1', tenantId: testTenantId });
+      mockPrismaService.guest.update.mockResolvedValue({ id: '1', ...updateDto });
+
+      await service.update('1', updateDto, testTenantId);
+
+      expect(mockPrismaService.guest.update).toHaveBeenCalledWith({
+        where: { id: '1' },
+        data: expect.objectContaining({
+          firstName: 'Emma',
+          specialNotes: 'Allergic to seafood. Prefers high floor.',
+        }),
+      });
+    });
+
+    it('should strip unknown fields before passing to Prisma (defense-in-depth)', async () => {
+      // Simulate an internal caller bypassing the ValidationPipe and sending
+      // a field that does not exist on the Guest table. The service must
+      // sanitize this away to avoid PrismaClientValidationError.
+      const updateDtoWithJunk = {
+        firstName: 'Jane',
+        specialNotes: 'OK note',
+        bogusField: 'should-not-reach-prisma',
+        anotherJunk: { nested: true },
+      } as any;
+
+      mockPrismaService.guest.findFirst.mockResolvedValue({ id: '1', tenantId: testTenantId });
+      mockPrismaService.guest.update.mockResolvedValue({ id: '1', firstName: 'Jane' });
+
+      await service.update('1', updateDtoWithJunk, testTenantId);
+
+      const callArgs = mockPrismaService.guest.update.mock.calls[0][0];
+      expect(callArgs.data).toEqual({
+        firstName: 'Jane',
+        specialNotes: 'OK note',
+      });
+      expect(callArgs.data).not.toHaveProperty('bogusField');
+      expect(callArgs.data).not.toHaveProperty('anotherJunk');
+    });
+
+    it('should drop undefined fields without sending them to Prisma', async () => {
+      const updateDto = {
+        firstName: 'Jane',
+        email: undefined,
+        phone: undefined,
+        specialNotes: 'note',
+      } as any;
+
+      mockPrismaService.guest.findFirst.mockResolvedValue({ id: '1', tenantId: testTenantId });
+      mockPrismaService.guest.update.mockResolvedValue({ id: '1' });
+
+      await service.update('1', updateDto, testTenantId);
+
+      const sentData = mockPrismaService.guest.update.mock.calls[0][0].data;
+      expect(sentData).not.toHaveProperty('email');
+      expect(sentData).not.toHaveProperty('phone');
+      expect(sentData).toHaveProperty('firstName', 'Jane');
+      expect(sentData).toHaveProperty('specialNotes', 'note');
     });
   });
 

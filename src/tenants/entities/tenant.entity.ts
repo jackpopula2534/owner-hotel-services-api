@@ -13,8 +13,11 @@ import { Invoice } from '../../invoices/entities/invoice.entity';
 export enum TenantStatus {
   TRIAL = 'trial',
   ACTIVE = 'active',
+  PAST_DUE = 'past_due',
   SUSPENDED = 'suspended',
   EXPIRED = 'expired',
+  CANCELLED = 'cancelled',
+  ARCHIVED = 'archived',
 }
 
 @Entity('tenants')

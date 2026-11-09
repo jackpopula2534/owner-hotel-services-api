@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ใบเทียบราคา {{comparisonNumber}} ถูกปฏิเสธ</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #f4f4f4;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f4f4f4; padding: 20px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+          <tr>
+            <td style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); padding: 28px; text-align: center;">
+              <h1 style="color: #ffffff; margin: 0; font-size: 22px;">{{hotelName}}</h1>
+              <p style="color: rgba(255,255,255,0.9); margin: 8px 0 0 0; font-size: 14px;">ใบเทียบราคาถูกปฏิเสธ</p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding: 32px 28px;">
+              <h2 style="color: #333; margin: 0 0 14px 0; font-size: 18px;">เรียน {{requesterName}}</h2>
+
+              <p style="color: #555; line-height: 1.7; margin: 0 0 16px 0;">
+                ใบเทียบราคา <strong>{{comparisonNumber}}</strong> ของท่านไม่ผ่านการอนุมัติ — กรุณาแก้ไขแล้วส่งขออนุมัติอีกครั้ง
+              </p>
+
+              <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; margin: 20px 0;">
+                <tr>
+                  <td style="padding: 20px;">
+                    <p style="margin: 0 0 8px 0; color: #b91c1c; font-weight: 600;">เหตุผลที่ปฏิเสธ:</p>
+                    <p style="margin: 0; color: #555; line-height: 1.6; white-space: pre-wrap;">{{rejectionReason}}</p>
+                  </td>
+                </tr>
+              </table>
+
+              <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8f9fa; border-radius: 8px; margin: 16px 0;">
+                <tr>
+                  <td style="padding: 18px;">
+                    <p style="margin: 0 0 6px 0; color: #333;"><strong>เลขที่ PR:</strong> {{prNumber}}</p>
+                    <p style="margin: 0 0 6px 0; color: #333;"><strong>ปฏิเสธโดย:</strong> {{approverName}}</p>
+                    <p style="margin: 0; color: #333;"><strong>เมื่อ:</strong> {{rejectedAt}}</p>
+                  </td>
+                </tr>
+              </table>
+
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin: 24px 0 12px 0;">
+                <tr>
+                  <td align="center">
+                    <a href="{{comparisonUrl}}" style="display: inline-block; background: #dc2626; color: #ffffff; padding: 12px 28px; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 15px;">
+                      ดูและแก้ไข
+                    </a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="background: #f8f9fa; padding: 18px; text-align: center; color: #888; font-size: 12px;">
+              <p style="margin: 0;">{{hotelName}}</p>
+              <p style="margin: 4px 0 0 0;">อีเมลนี้ถูกส่งจากระบบอัตโนมัติ กรุณาอย่าตอบกลับ</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

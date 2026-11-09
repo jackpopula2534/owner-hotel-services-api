@@ -1,33 +1,142 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ForbiddenException,
+  Logger,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 import { AuditLogService } from '../../audit-log/audit-log.service';
+import { StorageService } from '../../common/storage/storage.service';
+import { UserStatus } from './constants/user-status.enum';
+import { UpdateUserStatusDto } from './dto/update-user-status.dto';
+import { SetUserExpirationDto } from './dto/set-user-expiration.dto';
+import { SuspendUserDto } from './dto/suspend-user.dto';
+import { AdminListUsersQueryDto } from './dto/admin-list-users-query.dto';
+import { UpdateMyProfileDto } from './dto/update-my-profile.dto';
+import { ChangeMyPasswordDto } from './dto/change-my-password.dto';
+import * as bcrypt from 'bcrypt';
+import { AuditAction, AuditCategory, AuditResource } from '../../audit-log/dto/audit-log.dto';
+
+const SAFE_USER_SELECT = {
+  id: true,
+  email: true,
+  firstName: true,
+  lastName: true,
+  role: true,
+  status: true,
+  expiresAt: true,
+  suspendedAt: true,
+  suspendedBy: true,
+  suspendedReason: true,
+  deactivatedAt: true,
+  lastLoginAt: true,
+  lastLoginIp: true,
+  tenantId: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
+
+/** What a user sees of their own account. */
+const MY_PROFILE_SELECT = {
+  id: true,
+  email: true,
+  firstName: true,
+  lastName: true,
+  phone: true,
+  avatarUrl: true,
+  role: true,
+  status: true,
+  tenantId: true,
+  language: true,
+  timezone: true,
+  lastLoginAt: true,
+  createdAt: true,
+} as const;
+
+/** Avatar formats accepted, keyed by the extension we store them under. */
+const AVATAR_SIGNATURES: Array<{ ext: string; mimetype: string; matches: (b: Buffer) => boolean }> = [
+  { ext: 'jpg', mimetype: 'image/jpeg', matches: (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff },
+  {
+    ext: 'png',
+    mimetype: 'image/png',
+    matches: (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+  },
+  {
+    ext: 'webp',
+    mimetype: 'image/webp',
+    matches: (b) => b.subarray(0, 4).toString('ascii') === 'RIFF' && b.subarray(8, 12).toString('ascii') === 'WEBP',
+  },
+];
+const AVATAR_FOLDER = 'avatars';
+export const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+
+type CallerContext = {
+  callerId?: string;
+  callerRole?: string;
+  ipAddress?: string;
+};
+
+/** Only the fields `withTenantExpiry` needs — the rows carry the full SAFE_USER_SELECT. */
+type SafeUser = { tenantId: string | null } & Record<string, unknown>;
+
+/**
+ * A user's own `expiresAt` is an optional override an admin sets by hand, so it
+ * is null for almost every account. What actually ends someone's access is their
+ * hotel's subscription — that is the date the console has to show, otherwise the
+ * "วันหมดอายุ" column reads "—" for the entire platform and the "expiring soon"
+ * counter can never be anything but zero.
+ */
+type TenantExpiry = {
+  /** End of the tenant's furthest-reaching subscription. */
+  tenantExpiresAt: Date | null;
+  /** trial | pending | active | expired | cancelled — lets the UI label the date. */
+  tenantSubscriptionStatus: string | null;
+};
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     private prisma: PrismaService,
     private auditLogService: AuditLogService,
+    private storage: StorageService,
   ) {}
 
-  async findAll(query: any, tenantId?: string) {
-    if (!tenantId) {
+  /**
+   * List users — `tenantId` กำหนดจาก controller
+   * - tenant_admin / admin: tenantId = ของตัวเอง (required)
+   * - platform_admin: tenantId = undefined (cross-tenant) แต่ส่งใน query ได้เพื่อ filter
+   */
+  async findAll(query: AdminListUsersQueryDto, tenantId?: string) {
+    const isCrossTenant = tenantId === undefined;
+
+    // ถ้าไม่ใช่ platform_admin ต้องบังคับ tenantId
+    if (!isCrossTenant && !tenantId) {
       throw new BadRequestException('Tenant ID is required');
     }
 
-    const page = parseInt(query.page) || 1;
-    const limit = parseInt(query.limit) || 10;
-    const { role, status, search } = query;
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
     const skip = (page - 1) * limit;
 
-    const where: any = { tenantId };
-    if (role) where.role = role;
-    if (status) where.status = status;
-    if (search) {
+    const where: Prisma.UserWhereInput = {};
+    // platform_admin override → ใช้ tenantId จาก query ได้
+    if (!isCrossTenant) {
+      where.tenantId = tenantId;
+    } else if (query.tenantId) {
+      where.tenantId = query.tenantId;
+    }
+
+    if (query.role) where.role = query.role;
+    if (query.status) where.status = query.status;
+    if (query.search) {
       where.OR = [
-        { firstName: { contains: search } },
-        { lastName: { contains: search } },
-        { email: { contains: search } },
+        { firstName: { contains: query.search } },
+        { lastName: { contains: query.search } },
+        { email: { contains: query.search } },
       ];
     }
 
@@ -38,62 +147,82 @@ export class UsersService {
           skip,
           take: limit,
           orderBy: { createdAt: 'desc' },
-          select: {
-            id: true,
-            email: true,
-            firstName: true,
-            lastName: true,
-            role: true,
-            status: true,
-            tenantId: true,
-            createdAt: true,
-            updatedAt: true,
-            // ไม่ส่ง password ออกไป
-          },
+          select: SAFE_USER_SELECT as any,
         }),
         this.prisma.user.count({ where }),
       ]);
 
+      // `select: SAFE_USER_SELECT as any` leaves Prisma's inferred row type
+      // unusable here; the shape is pinned by SAFE_USER_SELECT itself.
       return {
-        data,
+        data: await this.withTenantExpiry(data as unknown as SafeUser[]),
         total,
         page,
         limit,
       };
     } catch (error) {
-      // ถ้าเกิด database error ให้ส่ง empty data
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === 'P2021' || error.code === 'P2022') {
-          return {
-            data: [],
-            total: 0,
-            page,
-            limit,
-          };
+          return { data: [], total: 0, page, limit };
         }
       }
       throw error;
     }
   }
 
+  /**
+   * Attach each row's tenant expiry in one extra query, whatever the page size.
+   * Subscriptions are read straight through — this runs for platform admins who
+   * are deliberately looking across tenants, and the rows are keyed back to the
+   * users we already fetched, so nothing leaks beyond the page.
+   */
+  private async withTenantExpiry<T extends SafeUser>(users: T[]): Promise<(T & TenantExpiry)[]> {
+    const tenantIds = [...new Set(users.map((u) => u.tenantId).filter((id): id is string => !!id))];
+    if (tenantIds.length === 0) {
+      return users.map((u) => ({ ...u, tenantExpiresAt: null, tenantSubscriptionStatus: null }));
+    }
+
+    const byTenant = new Map<string, TenantExpiry>();
+    try {
+      const subscriptions = await this.prisma.subscriptions.findMany({
+        where: { tenant_id: { in: tenantIds } },
+        // Furthest-reaching subscription first: a tenant that renewed early has
+        // both the old and the new row, and access runs to the later end date.
+        orderBy: { end_date: 'desc' },
+        select: { tenant_id: true, end_date: true, status: true },
+      });
+
+      for (const sub of subscriptions) {
+        if (byTenant.has(sub.tenant_id)) continue;
+        byTenant.set(sub.tenant_id, {
+          tenantExpiresAt: sub.end_date,
+          tenantSubscriptionStatus: sub.status,
+        });
+      }
+    } catch (error) {
+      // The list must still render if the subscriptions table is unavailable.
+      this.logger.warn(
+        `Could not resolve tenant expiry: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    return users.map((u) => ({
+      ...u,
+      ...(byTenant.get(u.tenantId ?? '') ?? {
+        tenantExpiresAt: null,
+        tenantSubscriptionStatus: null,
+      }),
+    }));
+  }
+
   async findOne(id: string, tenantId?: string) {
-    const where: any = { id };
+    const where: Prisma.UserWhereInput = { id };
     if (tenantId != null) where.tenantId = tenantId;
 
-    const user = await this.prisma.user.findFirst({
+    const user = (await this.prisma.user.findFirst({
       where,
-      select: {
-        id: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-        role: true,
-        status: true,
-        tenantId: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
+      select: SAFE_USER_SELECT as any,
+    })) as any;
 
     if (!user) {
       throw new NotFoundException(`User with ID ${id} not found`);
@@ -102,37 +231,358 @@ export class UsersService {
     return user;
   }
 
+  /**
+   * Same row as `findOne`, plus the tenant expiry the console shows. Kept apart
+   * from `findOne` because that one feeds the audit-log diff, which must compare
+   * stored columns only — not fields we compute for display.
+   */
+  async findOneDetailed(id: string, tenantId?: string) {
+    const user = (await this.findOne(id, tenantId)) as SafeUser;
+    const [detailed] = await this.withTenantExpiry([user]);
+    return detailed;
+  }
+
   async update(id: string, updateUserDto: any, tenantId?: string, userId?: string) {
     const oldData = await this.findOne(id, tenantId);
 
-    // ไม่ให้อัพเดท password ผ่าน endpoint นี้ (ใช้ password reset แทน)
-    const { password, ...safeData } = updateUserDto;
+    // ห้ามแก้ password / status / expiration ผ่าน endpoint นี้ (ใช้ endpoint เฉพาะ)
+    const {
+      password,
+      status,
+      expiresAt,
+      suspendedAt,
+      suspendedBy,
+      suspendedReason,
+      deactivatedAt,
+      ...safeData
+    } = updateUserDto;
 
     const result = await this.prisma.user.update({
       where: { id },
       data: safeData,
-      select: {
-        id: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-        role: true,
-        status: true,
-        tenantId: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+      select: SAFE_USER_SELECT,
     });
 
-    this.auditLogService.logUserUpdate(id, oldData, result, userId, tenantId);
+    await this.auditLogService.logUserUpdate(id, oldData, result, userId, tenantId);
     return result;
+  }
+
+  // ==========================================================================
+  // Self-service — the logged-in user's own account (/users/me)
+  // ==========================================================================
+
+  private myAccountWhere(userId: string, tenantId?: string): Prisma.UserWhereInput {
+    const where: Prisma.UserWhereInput = { id: userId };
+    if (tenantId != null) where.tenantId = tenantId;
+    return where;
+  }
+
+  async getMyProfile(userId: string, tenantId?: string) {
+    const user = await this.prisma.user.findFirst({
+      where: this.myAccountWhere(userId, tenantId),
+      select: MY_PROFILE_SELECT,
+    });
+    if (!user) throw new NotFoundException('ไม่พบบัญชีผู้ใช้');
+    return user;
+  }
+
+  async updateMyProfile(userId: string, dto: UpdateMyProfileDto, tenantId?: string) {
+    const before = await this.getMyProfile(userId, tenantId);
+
+    const data: Prisma.UserUpdateInput = {};
+    if (dto.firstName !== undefined) {
+      const firstName = dto.firstName.trim();
+      if (!firstName) throw new BadRequestException('กรุณากรอกชื่อ');
+      data.firstName = firstName;
+    }
+    if (dto.lastName !== undefined) data.lastName = dto.lastName.trim() || null;
+    if (dto.phone !== undefined) data.phone = dto.phone.trim() || null;
+
+    const result = await this.prisma.user.update({
+      where: { id: before.id },
+      data,
+      select: MY_PROFILE_SELECT,
+    });
+
+    await this.auditLogService.logUserUpdate(userId, before, result, userId, tenantId);
+    return result;
+  }
+
+  /**
+   * Replace my profile picture. The type is decided from the file's own bytes —
+   * the client-sent mimetype and filename are not trusted (an SVG/HTML file
+   * renamed to .png would otherwise be served from our origin).
+   */
+  async setMyAvatar(userId: string, file: { buffer: Buffer; size?: number } | undefined, tenantId?: string) {
+    if (!file?.buffer?.length) throw new BadRequestException('กรุณาเลือกไฟล์รูปภาพ');
+    if (file.buffer.length > AVATAR_MAX_BYTES) {
+      throw new BadRequestException('รูปภาพต้องมีขนาดไม่เกิน 2 MB');
+    }
+    const format = AVATAR_SIGNATURES.find((signature) => signature.matches(file.buffer));
+    if (!format) throw new BadRequestException('รองรับเฉพาะไฟล์ JPG, PNG หรือ WebP');
+
+    const before = await this.getMyProfile(userId, tenantId);
+    const saved = await this.storage.save({
+      folder: AVATAR_FOLDER,
+      prefix: 'avatar',
+      file: { buffer: file.buffer, originalname: `avatar.${format.ext}`, mimetype: format.mimetype },
+    });
+
+    const result = await this.prisma.user.update({
+      where: { id: before.id },
+      data: { avatarUrl: saved.path },
+      select: MY_PROFILE_SELECT,
+    });
+    await this.removeAvatarFile(before.avatarUrl);
+    await this.auditLogService.log({
+      action: AuditAction.USER_UPDATE,
+      resource: AuditResource.USER,
+      category: AuditCategory.USERS,
+      resourceId: before.id,
+      userId: before.id,
+      tenantId,
+      description: 'User updated their own profile picture',
+    });
+    return result;
+  }
+
+  async removeMyAvatar(userId: string, tenantId?: string) {
+    const before = await this.getMyProfile(userId, tenantId);
+    if (!before.avatarUrl) return before;
+
+    const result = await this.prisma.user.update({
+      where: { id: before.id },
+      data: { avatarUrl: null },
+      select: MY_PROFILE_SELECT,
+    });
+    await this.removeAvatarFile(before.avatarUrl);
+    await this.auditLogService.log({
+      action: AuditAction.USER_UPDATE,
+      resource: AuditResource.USER,
+      category: AuditCategory.USERS,
+      resourceId: before.id,
+      userId: before.id,
+      tenantId,
+      description: 'User removed their own profile picture',
+    });
+    return result;
+  }
+
+  /** Only ever deletes inside the avatars folder, whatever the stored value says. */
+  private async removeAvatarFile(storedPath: string | null): Promise<void> {
+    const filename = storedPath?.match(/\/avatars\/([A-Za-z0-9._-]+)$/)?.[1];
+    if (filename) await this.storage.remove(`${AVATAR_FOLDER}/${filename}`);
+  }
+
+  async changeMyPassword(userId: string, dto: ChangeMyPasswordDto, tenantId?: string) {
+    const user = await this.prisma.user.findFirst({
+      where: this.myAccountWhere(userId, tenantId),
+      select: { id: true, password: true },
+    });
+    if (!user) throw new NotFoundException('ไม่พบบัญชีผู้ใช้');
+
+    const matches = await bcrypt.compare(dto.currentPassword, user.password);
+    if (!matches) throw new BadRequestException('รหัสผ่านปัจจุบันไม่ถูกต้อง');
+    if (dto.currentPassword === dto.newPassword) {
+      throw new BadRequestException('รหัสผ่านใหม่ต้องไม่ซ้ำกับรหัสผ่านเดิม');
+    }
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { password: await bcrypt.hash(dto.newPassword, 10) },
+    });
+    // Sign out every other device; the current access token lives until it expires.
+    await this.revokeAllUserRefreshTokens(user.id);
+    await this.auditLogService.log({
+      action: AuditAction.PASSWORD_CHANGE,
+      resource: AuditResource.USER,
+      category: AuditCategory.AUTH,
+      resourceId: user.id,
+      userId: user.id,
+      tenantId,
+      description: 'User changed their own password',
+    });
+
+    return { message: 'เปลี่ยนรหัสผ่านเรียบร้อยแล้ว' };
   }
 
   async remove(id: string, tenantId?: string) {
     await this.findOne(id, tenantId);
+    return this.prisma.user.delete({ where: { id } });
+  }
 
-    return this.prisma.user.delete({
+  // ==========================================================================
+  // Lifecycle endpoints (status / suspend / activate / deactivate / expiration)
+  // ==========================================================================
+
+  /**
+   * เปลี่ยน status แบบ generic (รองรับทั้ง 4 ค่า)
+   * — ส่ง reason ได้เมื่อ status = suspended
+   */
+  async updateStatus(
+    id: string,
+    dto: UpdateUserStatusDto,
+    tenantId: string | undefined,
+    caller: CallerContext,
+  ) {
+    if (caller.callerId === id) {
+      throw new ForbiddenException('ไม่สามารถเปลี่ยนสถานะของบัญชีตนเองได้');
+    }
+
+    const oldUser = await this.findOne(id, tenantId);
+
+    if (oldUser.status === dto.status) {
+      // idempotent: ไม่ทำอะไร แต่ส่งสถานะปัจจุบันกลับ
+      return oldUser;
+    }
+
+    const data = this.buildStatusTransition(dto.status, dto.reason, caller.callerId);
+
+    const updated = await this.prisma.user.update({
       where: { id },
+      data: data as Prisma.UserUpdateInput,
+      select: SAFE_USER_SELECT as any,
     });
+
+    // Invalidate refresh tokens เมื่อ user ถูก suspend / inactive / expired
+    if (dto.status !== UserStatus.ACTIVE) {
+      await this.revokeAllUserRefreshTokens(id);
+    }
+
+    await this.auditLogService.logUserStatusChange(
+      id,
+      oldUser.status,
+      dto.status,
+      caller.callerId ?? 'system',
+      { reason: dto.reason, tenantId, ipAddress: caller.ipAddress },
+    );
+
+    return updated;
+  }
+
+  async suspend(
+    id: string,
+    dto: SuspendUserDto,
+    tenantId: string | undefined,
+    caller: CallerContext,
+  ) {
+    return this.updateStatus(
+      id,
+      { status: UserStatus.SUSPENDED, reason: dto.reason },
+      tenantId,
+      caller,
+    );
+  }
+
+  async activate(id: string, tenantId: string | undefined, caller: CallerContext) {
+    return this.updateStatus(id, { status: UserStatus.ACTIVE }, tenantId, caller);
+  }
+
+  async deactivate(id: string, tenantId: string | undefined, caller: CallerContext) {
+    return this.updateStatus(id, { status: UserStatus.INACTIVE }, tenantId, caller);
+  }
+
+  async setExpiration(
+    id: string,
+    dto: SetUserExpirationDto,
+    tenantId: string | undefined,
+    caller: CallerContext,
+  ) {
+    const oldUser = await this.findOne(id, tenantId);
+
+    const newExpiresAt = dto.expiresAt ? new Date(dto.expiresAt) : null;
+
+    if (newExpiresAt && Number.isNaN(newExpiresAt.getTime())) {
+      throw new BadRequestException('expiresAt ไม่ใช่วันที่ที่ถูกต้อง');
+    }
+
+    // ถ้ากำหนดเวลาในอดีต → set status = expired ทันที
+    // ใช้ any เพราะ Prisma client อาจยังไม่ regenerate หลัง schema change
+    const updateData: Record<string, any> = { expiresAt: newExpiresAt };
+    if (newExpiresAt && newExpiresAt.getTime() <= Date.now()) {
+      updateData.status = UserStatus.EXPIRED;
+    } else if (
+      oldUser.status === UserStatus.EXPIRED &&
+      (!newExpiresAt || newExpiresAt.getTime() > Date.now())
+    ) {
+      // ขยายอายุของ user ที่หมดอายุไปแล้ว → กลับมา active
+      updateData.status = UserStatus.ACTIVE;
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id },
+      data: updateData as Prisma.UserUpdateInput,
+      select: SAFE_USER_SELECT as any,
+    });
+
+    if (updateData.status === UserStatus.EXPIRED) {
+      await this.revokeAllUserRefreshTokens(id);
+    }
+
+    await this.auditLogService.logUserExpirationSet(
+      id,
+      oldUser.expiresAt ?? null,
+      newExpiresAt,
+      caller.callerId ?? 'system',
+      tenantId,
+      caller.ipAddress,
+    );
+
+    return updated;
+  }
+
+  // ==========================================================================
+  // Internal helpers
+  // ==========================================================================
+
+  // ใช้ Record<string, any> เพราะ Prisma client อาจยังไม่ regenerate
+  // หลัง schema change — caller ต้อง cast เป็น Prisma.UserUpdateInput อีกที
+  private buildStatusTransition(
+    status: UserStatus,
+    reason: string | undefined,
+    actorId: string | undefined,
+  ): Record<string, any> {
+    switch (status) {
+      case UserStatus.ACTIVE:
+        return {
+          status,
+          suspendedAt: null,
+          suspendedBy: null,
+          suspendedReason: null,
+          deactivatedAt: null,
+        };
+      case UserStatus.SUSPENDED:
+        return {
+          status,
+          suspendedAt: new Date(),
+          suspendedBy: actorId ?? null,
+          suspendedReason: reason ?? null,
+        };
+      case UserStatus.INACTIVE:
+        return {
+          status,
+          deactivatedAt: new Date(),
+        };
+      case UserStatus.EXPIRED:
+        return { status };
+      default:
+        throw new BadRequestException(`Unsupported status: ${status}`);
+    }
+  }
+
+  private async revokeAllUserRefreshTokens(userId: string): Promise<void> {
+    try {
+      const result = await this.prisma.refreshToken.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      if (result.count > 0) {
+        this.logger.log(`Revoked ${result.count} refresh token(s) for user ${userId}`);
+      }
+    } catch (error) {
+      this.logger.error(
+        `Failed to revoke refresh tokens for user ${userId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 }

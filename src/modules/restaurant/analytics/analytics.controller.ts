@@ -8,6 +8,8 @@ import {
   ApiQuery,
 } from '@nestjs/swagger';
 import { RestaurantAnalyticsService } from './analytics.service';
+import { RestaurantDailySalesService } from './daily-sales.service';
+import { RestaurantMonthlySalesService } from './monthly-sales.service';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../../common/guards/roles.guard';
 import { AddonGuard } from '../../../common/guards/addon.guard';
@@ -21,7 +23,66 @@ import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 @RequireAddon('RESTAURANT_MODULE')
 @Controller('restaurants/:restaurantId/analytics')
 export class RestaurantAnalyticsController {
-  constructor(private readonly analyticsService: RestaurantAnalyticsService) {}
+  constructor(
+    private readonly analyticsService: RestaurantAnalyticsService,
+    private readonly dailySalesService: RestaurantDailySalesService,
+    private readonly monthlySalesService: RestaurantMonthlySalesService,
+  ) {}
+
+  @Get('monthly-sales')
+  @ApiOperation({
+    summary: 'Monthly sales overview for one outlet (Bangkok calendar month)',
+    description:
+      'The month view behind the sales dashboard: the same receipt-reconcilable totals as ' +
+      'daily-sales aggregated over the month, a per-day row for every calendar day (zeros ' +
+      'included, used to drill into daily-sales), payment/order-type splits, top items and a ' +
+      'previous-month comparison. Counts only COMPLETED + PAID orders, keyed on completedAt ' +
+      'inside an Asia/Bangkok month.',
+  })
+  @ApiParam({ name: 'restaurantId', description: 'Restaurant ID' })
+  @ApiQuery({
+    name: 'month',
+    required: false,
+    description: 'Bangkok calendar month (YYYY-MM). Defaults to the current month.',
+    example: '2026-08',
+  })
+  @ApiResponse({ status: 200, description: 'Monthly sales report' })
+  @ApiResponse({ status: 404, description: 'Restaurant not found for this tenant' })
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager', 'accountant')
+  async getMonthlySales(
+    @Param('restaurantId') restaurantId: string,
+    @Query('month') month?: string,
+    @CurrentUser() user?: { tenantId: string },
+  ) {
+    return this.monthlySalesService.getMonthlySales(restaurantId, user!.tenantId, month);
+  }
+
+  @Get('daily-sales')
+  @ApiOperation({
+    summary: 'Daily sales report for one outlet (Bangkok calendar day)',
+    description:
+      'Receipt-reconcilable revenue for a single day: gross/net sales, discount, service ' +
+      'charge, tax and collected total, plus payment/order-type splits, an hourly curve, ' +
+      'top items and a previous-day comparison. Counts only COMPLETED + PAID orders, keyed ' +
+      'on completedAt inside an Asia/Bangkok day.',
+  })
+  @ApiParam({ name: 'restaurantId', description: 'Restaurant ID' })
+  @ApiQuery({
+    name: 'date',
+    required: false,
+    description: 'Bangkok calendar day (YYYY-MM-DD). Defaults to today.',
+    example: '2026-08-14',
+  })
+  @ApiResponse({ status: 200, description: 'Daily sales report' })
+  @ApiResponse({ status: 404, description: 'Restaurant not found for this tenant' })
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager', 'accountant')
+  async getDailySales(
+    @Param('restaurantId') restaurantId: string,
+    @Query('date') date?: string,
+    @CurrentUser() user?: { tenantId: string },
+  ) {
+    return this.dailySalesService.getDailySales(restaurantId, user!.tenantId, date);
+  }
 
   @Get('revenue')
   @ApiOperation({ summary: 'Get revenue summary with timeline breakdown' })
@@ -48,7 +109,7 @@ export class RestaurantAnalyticsController {
     status: 200,
     description: 'Revenue summary with timeline, payment breakdown, and order type breakdown',
   })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'accountant')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager', 'accountant')
   async getRevenueSummary(
     @Param('restaurantId') restaurantId: string,
     @Query('from') from?: string,
@@ -76,7 +137,15 @@ export class RestaurantAnalyticsController {
     status: 200,
     description: 'Daily summary: revenue, orders, guests, kitchen, table stats',
   })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'accountant')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'chef',
+    'accountant',
+  )
   async getDailySummary(
     @Param('restaurantId') restaurantId: string,
     @Query('date') date?: string,
@@ -97,7 +166,15 @@ export class RestaurantAnalyticsController {
     example: 10,
   })
   @ApiResponse({ status: 200, description: 'Ranked menu items with quantity and revenue data' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'accountant')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'chef',
+    'accountant',
+  )
   async getTopMenuItems(
     @Param('restaurantId') restaurantId: string,
     @Query('from') from?: string,
@@ -121,7 +198,7 @@ export class RestaurantAnalyticsController {
     status: 200,
     description: 'Per-table stats: orders served, revenue, avg turnover time',
   })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'accountant')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager', 'accountant')
   async getTableUtilization(
     @Param('restaurantId') restaurantId: string,
     @Query('from') from?: string,
@@ -140,7 +217,7 @@ export class RestaurantAnalyticsController {
     status: 200,
     description: 'Heatmap grid: orders and revenue per [dayOfWeek, hour] cell',
   })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'accountant')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager', 'accountant')
   async getHourlyHeatmap(
     @Param('restaurantId') restaurantId: string,
     @Query('from') from?: string,

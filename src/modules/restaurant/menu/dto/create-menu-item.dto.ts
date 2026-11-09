@@ -1,18 +1,24 @@
+import { IsIn } from 'class-validator';
+import { KITCHEN_STATIONS, type KitchenStation } from '../../kitchen/kitchen-station';
 import {
   IsString,
   IsNotEmpty,
+  IsEnum,
   IsOptional,
   IsInt,
   IsBoolean,
   IsNumber,
   IsArray,
   IsPositive,
+  IsUUID,
   Min,
   Max,
   IsUrl,
+  ValidateIf,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { MenuItemKind } from '@prisma/client';
 
 export class CreateMenuItemDto {
   @ApiProperty({ example: 'uuid-category-id' })
@@ -48,9 +54,12 @@ export class CreateMenuItemDto {
   @IsOptional()
   image?: string;
 
-  @ApiPropertyOptional({ example: 20, description: 'Estimated preparation time in minutes' })
+  @ApiPropertyOptional({
+    example: 20,
+    description: 'Estimated preparation time in minutes (0 for ready-made goods)',
+  })
   @IsInt()
-  @Min(1)
+  @Min(0)
   @IsOptional()
   preparationTime?: number;
 
@@ -107,4 +116,64 @@ export class CreateMenuItemDto {
   @Min(0)
   @IsOptional()
   displayOrder?: number;
+
+  @ApiPropertyOptional({
+    example: 'uuid-inventory-item-id',
+    description:
+      'Link a ready-made (retail) menu item — e.g. bottled water — directly to an ' +
+      'inventory item. Completing an order deducts 1 stock unit per menu qty. ' +
+      'Send null to unlink; omit/null for cooked dishes (those deduct via recipe).',
+  })
+  @IsOptional()
+  @ValidateIf((o) => o.inventoryItemId !== null)
+  @IsUUID()
+  inventoryItemId?: string | null;
+
+  @ApiPropertyOptional({
+    enum: MenuItemKind,
+    example: 'COOKED',
+    default: 'COOKED',
+    description:
+      'COOKED = ต้องปรุง ส่งเข้าจอครัว · READY_MADE = สินค้าสำเร็จรูป (น้ำขวด ขนม ไอศกรีม) ' +
+      'หยิบเสิร์ฟได้เลย ไม่ขึ้นจอครัว',
+  })
+  @IsEnum(MenuItemKind)
+  @IsOptional()
+  itemKind?: MenuItemKind;
+
+  @ApiPropertyOptional({
+    enum: KITCHEN_STATIONS,
+    nullable: true,
+    example: 'BAR',
+    description: 'สถานีบนจอครัว · null = ตามหมวด',
+  })
+  @ValidateIf((_o, v) => v !== null)
+  @IsIn(KITCHEN_STATIONS)
+  @IsOptional()
+  kitchenStation?: KitchenStation | null;
+
+  @ApiPropertyOptional({
+    example: false,
+    description:
+      'นับสต๊อกในตัวเมนูเอง สำหรับร้านที่ไม่ได้ซื้อระบบคลัง — เปิดพร้อม inventoryItemId ไม่ได้',
+  })
+  @IsBoolean()
+  @IsOptional()
+  trackStock?: boolean;
+
+  @ApiPropertyOptional({ example: 24, description: 'ยอดยกมาตอนสร้างเมนู (ใช้เมื่อ trackStock = true)' })
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  stockQty?: number;
+
+  @ApiPropertyOptional({
+    example: 6,
+    description: 'คงเหลือเท่านี้หรือน้อยกว่าถือว่าใกล้หมด (ไม่ส่ง = ไม่เตือน)',
+  })
+  @IsOptional()
+  @ValidateIf((o) => o.lowStockThreshold !== null)
+  @IsInt()
+  @Min(0)
+  lowStockThreshold?: number | null;
 }

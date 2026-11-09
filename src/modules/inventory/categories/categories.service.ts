@@ -71,8 +71,8 @@ export class CategoriesService {
    */
   async findOne(id: string, tenantId: string): Promise<any> {
     try {
-      const category = await this.prisma.itemCategory.findUnique({
-        where: { id },
+      const category = await this.prisma.itemCategory.findFirst({
+        where: { id, tenantId },
         include: {
           parent: true,
           children: {
@@ -122,8 +122,8 @@ export class CategoriesService {
 
       // Validate parentId exists if provided
       if (dto.parentId) {
-        const parent = await this.prisma.itemCategory.findUnique({
-          where: { id: dto.parentId },
+        const parent = await this.prisma.itemCategory.findFirst({
+          where: { id: dto.parentId, tenantId },
         });
 
         if (!parent || parent.tenantId !== tenantId) {
@@ -195,8 +195,8 @@ export class CategoriesService {
         }
 
         // Validate parent exists
-        const parent = await this.prisma.itemCategory.findUnique({
-          where: { id: dto.parentId },
+        const parent = await this.prisma.itemCategory.findFirst({
+          where: { id: dto.parentId, tenantId },
         });
 
         if (!parent || parent.tenantId !== tenantId) {
@@ -292,8 +292,8 @@ export class CategoriesService {
     potentialParentId: string,
     tenantId: string,
   ): Promise<boolean> {
-    const parent = await this.prisma.itemCategory.findUnique({
-      where: { id: potentialParentId },
+    const parent = await this.prisma.itemCategory.findFirst({
+      where: { id: potentialParentId, tenantId },
       include: { parent: true },
     });
 

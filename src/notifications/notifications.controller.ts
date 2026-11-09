@@ -1,3 +1,4 @@
+import { AllowSystems } from '../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Get,
@@ -14,6 +15,8 @@ import { NotificationQueryDto } from './dto/notification.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 
+// Hotel Terminal (bell) — H1 allow-list, audit 2026-11-09
+@AllowSystems('hotel-terminal', 'hr', 'accounting', 'procurement', 'warehouse', 'camp-terminal', 'retail', 'crm')
 @Controller({ path: 'notifications', version: '1' })
 @UseGuards(JwtAuthGuard)
 export class NotificationsController {
@@ -30,8 +33,11 @@ export class NotificationsController {
   }
 
   @Patch('read-all')
-  async markAllAsRead(@CurrentUser() user: { userId: string }) {
-    return this.notificationsService.markAllAsRead(user.userId);
+  async markAllAsRead(
+    @CurrentUser() user: { userId: string },
+    @Query('category') category?: string,
+  ) {
+    return this.notificationsService.markAllAsRead(user.userId, category);
   }
 
   @Delete(':id')

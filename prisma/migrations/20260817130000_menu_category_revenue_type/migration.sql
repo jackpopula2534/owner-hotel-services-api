@@ -1,0 +1,28 @@
+-- Tell food revenue apart from beverage revenue.
+--
+-- The revenue ledger records a restaurant bill as one row per revenue type, but
+-- nothing in the schema said which type a dish was. Every F&B figure the system
+-- reports — the F&B segment total, Food Cost % (whose denominator must be food
+-- revenue, not the whole bill), the beverage-mix view an owner uses to decide
+-- what to stock — needs that split, and until now it did not exist anywhere.
+--
+-- The split lives on the category, not the item, because that is how a kitchen
+-- already organises its menu ("เครื่องดื่ม", "ของหวาน") and how staff will
+-- maintain it. One switch on a category is a decision a restaurant manager can
+-- make; a switch on 400 individual dishes is a decision nobody will ever make,
+-- and an unmaintained column is worse than no column.
+--
+-- DEFAULT 'FOOD' is a deliberate guess, applied to every existing row. Most
+-- categories in a hotel restaurant really are food, and guessing wrong toward
+-- food distorts Food Cost % less than guessing wrong toward beverage (food cost
+-- is the larger numerator). Tenants correct their beverage categories in the
+-- menu screen; the ledger picks the change up on the next bill.
+--
+-- The column reuses the ledger's own RevenueType enum rather than a narrower
+-- menu-only enum, so a category and a ledger row speak the same vocabulary and
+-- cannot drift apart in a mapping table. The price is that MySQL would accept
+-- ROOM here; the API refuses anything outside FOOD | BEVERAGE | OTHER
+-- (MENU_REVENUE_TYPES) and the order mapper falls back to FOOD if it ever meets
+-- one, so a bad value cannot silently move food money into the Rooms segment.
+
+ALTER TABLE `menu_categories` ADD COLUMN `revenueType` ENUM('ROOM', 'FOOD', 'BEVERAGE', 'RETAIL_GOODS', 'SERVICE_CHARGE', 'OTHER') NOT NULL DEFAULT 'FOOD';

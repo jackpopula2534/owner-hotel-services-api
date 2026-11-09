@@ -1,5 +1,11 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  buildBangkokDateTime,
+  DEFAULT_CHECK_IN_TIME,
+  DEFAULT_CHECK_OUT_TIME,
+  DEFAULT_CLEANING_BUFFER_MINUTES,
+} from '../../common/availability/availability.util';
 
 interface AvailabilityResult {
   available: boolean;
@@ -73,13 +79,16 @@ export class RoomAvailabilityService {
       });
 
       // Build list of blocked time periods
+      // ทุก booking active block ช่วงเวลาของตัวเอง + cleaning buffer ด้านท้าย
+      // เพื่อให้แม่บ้านมีเวลาทำความสะอาดก่อนแขกคนถัดไปเช็คอิน
+      const cleaningBufferMs = cleaningBufferMinutes * 60 * 1000;
       const blockedPeriods: Array<{ start: Date; end: Date; reason: string }> = [];
 
       for (const booking of bookings) {
         if (booking.status === 'checked_out' && booking.actualCheckOut) {
           // Room is blocked until: actualCheckOut + cleaningBufferMinutes
           const cleaningEndTime = new Date(
-            new Date(booking.actualCheckOut).getTime() + cleaningBufferMinutes * 60 * 1000,
+            new Date(booking.actualCheckOut).getTime() + cleaningBufferMs,
           );
           blockedPeriods.push({
             start: new Date(booking.actualCheckOut),
@@ -87,11 +96,14 @@ export class RoomAvailabilityService {
             reason: `Cleaning buffer after booking ${booking.id}`,
           });
         } else {
-          // For pending, confirmed, or checked_in: block the scheduled period
+          // For pending, confirmed, or checked_in: block scheduled period + cleaning buffer
+          const blockedEnd = new Date(
+            new Date(booking.scheduledCheckOut).getTime() + cleaningBufferMs,
+          );
           blockedPeriods.push({
             start: new Date(booking.scheduledCheckIn),
-            end: new Date(booking.scheduledCheckOut),
-            reason: `Booking ${booking.id}`,
+            end: blockedEnd,
+            reason: `Booking ${booking.id} (incl. cleaning buffer)`,
           });
         }
       }
@@ -148,9 +160,10 @@ export class RoomAvailabilityService {
         throw new NotFoundException(`Property with ID ${propertyId} not found`);
       }
 
-      const standardCheckInTime = property.standardCheckInTime ?? '14:00';
-      const standardCheckOutTime = property.standardCheckOutTime ?? '11:00';
-      const cleaningBufferMinutes = property.cleaningBufferMinutes ?? 60;
+      const standardCheckInTime = property.standardCheckInTime ?? DEFAULT_CHECK_IN_TIME;
+      const standardCheckOutTime = property.standardCheckOutTime ?? DEFAULT_CHECK_OUT_TIME;
+      const cleaningBufferMinutes =
+        property.cleaningBufferMinutes ?? DEFAULT_CLEANING_BUFFER_MINUTES;
 
       // Get all rooms in the property
       const allRooms = await this.prisma.room.findMany({
@@ -202,7 +215,11 @@ export class RoomAvailabilityService {
 
   /**
    * Build a scheduled DateTime from a date-only string (YYYY-MM-DD)
-   * Uses the appropriate time based on timeType (checkIn or checkOut)
+   * Uses the appropriate time based on timeType (checkIn or checkOut).
+   *
+   * Returns a Date interpreted in Bangkok timezone (UTC+7) so the result
+   * is identical regardless of the machine's local timezone (important
+   * for CI/server reliability).
    */
   async buildScheduledDateTime(
     dateStr: string,
@@ -231,17 +248,11 @@ export class RoomAvailabilityService {
 
       const timeStr =
         timeType === 'checkIn'
-          ? (property.standardCheckInTime ?? '14:00')
-          : (property.standardCheckOutTime ?? '11:00');
+          ? (property.standardCheckInTime ?? DEFAULT_CHECK_IN_TIME)
+          : (property.standardCheckOutTime ?? DEFAULT_CHECK_OUT_TIME);
 
-      // Parse time (format: HH:mm)
-      const [hours, minutes] = timeStr.split(':').map(Number);
-
-      // Create date
-      const date = new Date(dateStr);
-      date.setHours(hours, minutes, 0, 0);
-
-      return date;
+      // Delegate to the shared util — TZ-independent, returns Date in Bangkok TZ
+      return buildBangkokDateTime(dateStr, timeStr);
     } catch (error) {
       if (error instanceof (NotFoundException || BadRequestException)) {
         throw error;

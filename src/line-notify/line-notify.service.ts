@@ -1,7 +1,6 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
-import { httpClient } from '@internal/http-client';
 import {
   LineNotifyEventType,
   SendLineNotifyDto,
@@ -32,6 +31,36 @@ export class LineNotifyService {
     this.callbackUrl = this.configService.get<string>('LINE_NOTIFY_CALLBACK_URL', '');
   }
 
+  // ── Internal HTTP helpers (uses Node 20 built-in fetch, enforces HTTPS) ────
+
+  private async fetchPost<T = unknown>(
+    url: string,
+    body: string,
+    headers: Record<string, string>,
+  ): Promise<T> {
+    if (!url.startsWith('https://')) {
+      throw new Error(`HTTPS required — blocked non-HTTPS URL: ${url}`);
+    }
+    const res = await fetch(url, { method: 'POST', body, headers });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    }
+    return res.json() as Promise<T>;
+  }
+
+  private async fetchGet<T = unknown>(url: string, headers: Record<string, string>): Promise<T> {
+    if (!url.startsWith('https://')) {
+      throw new Error(`HTTPS required — blocked non-HTTPS URL: ${url}`);
+    }
+    const res = await fetch(url, { method: 'GET', headers });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    }
+    return res.json() as Promise<T>;
+  }
+
+  // ────────────────────────────────────────────────────────────────────────────
+
   /**
    * Generate OAuth authorization URL
    */
@@ -60,18 +89,9 @@ export class LineNotifyService {
         client_secret: this.clientSecret,
       });
 
-      const response = await httpClient.post<LineNotifyTokenResponseDto>(
-        this.tokenUrl,
-        params.toString(),
-        {
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-          enforceHttps: true,
-        },
-      );
-
-      return response.data;
+      return await this.fetchPost<LineNotifyTokenResponseDto>(this.tokenUrl, params.toString(), {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      });
     } catch (error) {
       this.logger.error(`Failed to exchange code for token: ${error.message}`);
       throw new BadRequestException('Failed to connect Line Notify');
@@ -83,13 +103,9 @@ export class LineNotifyService {
    */
   async getTokenStatus(accessToken: string): Promise<LineNotifyStatusResponseDto> {
     try {
-      const response = await httpClient.get<LineNotifyStatusResponseDto>(this.statusUrl, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-        enforceHttps: true,
+      return await this.fetchGet<LineNotifyStatusResponseDto>(this.statusUrl, {
+        Authorization: `Bearer ${accessToken}`,
       });
-      return response.data;
     } catch (error) {
       this.logger.error(`Failed to get token status: ${error.message}`);
       throw new BadRequestException('Invalid or expired token');
@@ -131,6 +147,11 @@ export class LineNotifyService {
       },
     });
 
+    await this.recordThirdPartyAudit(tenantId, userId, 'line_notify_connected', {
+      targetType,
+      enabledEventCount: Object.values(LineNotifyEventType).length,
+    });
+
     this.logger.log(`Line Notify connected for tenant ${tenantId}, user ${userId}`);
   }
 
@@ -138,12 +159,10 @@ export class LineNotifyService {
    * Get connection status for a user
    */
   async getStatus(tenantId: string, userId: string): Promise<LineNotifyStatusDto> {
-    const token = await this.prisma.lineNotifyToken.findUnique({
+    const token = await this.prisma.lineNotifyToken.findFirst({
       where: {
-        tenantId_userId: {
-          tenantId,
-          userId,
-        },
+        tenantId,
+        userId,
       },
     });
 
@@ -186,24 +205,17 @@ export class LineNotifyService {
    * Disconnect Line Notify
    */
   async disconnect(tenantId: string, userId: string): Promise<void> {
-    const token = await this.prisma.lineNotifyToken.findUnique({
+    const token = await this.prisma.lineNotifyToken.findFirst({
       where: {
-        tenantId_userId: {
-          tenantId,
-          userId,
-        },
+        tenantId,
+        userId,
       },
     });
 
     if (token) {
       // Revoke token on Line side
       try {
-        await httpClient.post(this.revokeUrl, null, {
-          headers: {
-            Authorization: `Bearer ${token.accessToken}`,
-          },
-          enforceHttps: true,
-        });
+        await this.fetchPost(this.revokeUrl, '', { Authorization: `Bearer ${token.accessToken}` });
       } catch (error) {
         this.logger.warn(`Failed to revoke Line Notify token: ${error.message}`);
       }
@@ -212,6 +224,9 @@ export class LineNotifyService {
       await this.prisma.lineNotifyToken.update({
         where: { id: token.id },
         data: { isActive: false },
+      });
+      await this.recordThirdPartyAudit(tenantId, userId, 'line_notify_disconnected', {
+        targetType: token.targetType,
       });
     }
 
@@ -226,12 +241,10 @@ export class LineNotifyService {
     userId: string,
     dto: SendLineNotifyDto,
   ): Promise<boolean> {
-    const token = await this.prisma.lineNotifyToken.findUnique({
+    const token = await this.prisma.lineNotifyToken.findFirst({
       where: {
-        tenantId_userId: {
-          tenantId,
-          userId,
-        },
+        tenantId,
+        userId,
       },
     });
 
@@ -240,7 +253,11 @@ export class LineNotifyService {
       return false;
     }
 
-    return this.sendMessage(token.accessToken, dto);
+    const sent = await this.sendMessage(token.accessToken, dto);
+    await this.recordThirdPartyAudit(tenantId, userId, 'line_notify_message_sent', {
+      status: sent ? 'sent' : 'failed',
+    });
+    return sent;
   }
 
   /**
@@ -317,18 +334,40 @@ export class LineNotifyService {
         params.append('stickerId', dto.stickerId);
       }
 
-      await httpClient.post(this.notifyApiUrl, params.toString(), {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          Authorization: `Bearer ${accessToken}`,
-        },
-        enforceHttps: true,
+      await this.fetchPost(this.notifyApiUrl, params.toString(), {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: `Bearer ${accessToken}`,
       });
 
       return true;
     } catch (error) {
       this.logger.error(`Failed to send Line Notify message: ${error.message}`);
       return false;
+    }
+  }
+
+  private async recordThirdPartyAudit(
+    tenantId: string,
+    userId: string,
+    action: string,
+    metadata: Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      await this.prisma.analyticsEvent.create({
+        data: {
+          tenantId,
+          userId,
+          eventName: `third_party_dpa.${action}`,
+          metadata: {
+            provider: 'line_notify',
+            ...metadata,
+          },
+        },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Failed to record LINE DPA audit: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 

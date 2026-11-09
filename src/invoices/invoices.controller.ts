@@ -4,6 +4,7 @@ import { InvoicesService } from './invoices.service';
 import { SkipSubscriptionCheck } from '../common/decorators/skip-subscription-check.decorator';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { UpdateInvoiceDto } from './dto/update-invoice.dto';
+import { VoidInvoiceDto } from './dto/void-invoice.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -31,6 +32,18 @@ export class InvoicesController {
     return this.invoicesService.findAll(user?.tenantId);
   }
 
+  @Get('outstanding')
+  @ApiOperation({
+    summary: "Get the current tenant's outstanding (unpaid) subscription invoices",
+  })
+  @Roles('admin', 'manager', 'tenant_admin', 'platform_admin')
+  async findOutstanding(@CurrentUser() user: { tenantId?: string }) {
+    const invoices = user?.tenantId
+      ? await this.invoicesService.findOutstandingSubscriptionInvoices(user.tenantId)
+      : [];
+    return { success: true, data: invoices, meta: { total: invoices.length } };
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get invoice by ID' })
   @Roles('admin', 'manager', 'tenant_admin', 'platform_admin')
@@ -43,6 +56,20 @@ export class InvoicesController {
   @Roles('admin', 'manager', 'tenant_admin', 'platform_admin')
   findByTenantId(@Param('tenantId') tenantId: string) {
     return this.invoicesService.findByTenantId(tenantId);
+  }
+
+  @Post(':id/void')
+  @ApiOperation({
+    summary: 'Void (cancel) an outstanding subscription invoice for the current tenant',
+  })
+  @Roles('admin', 'tenant_admin', 'platform_admin')
+  async voidInvoice(
+    @Param('id') id: string,
+    @Body() dto: VoidInvoiceDto,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    const invoice = await this.invoicesService.voidInvoice(id, dto.reason, user?.tenantId);
+    return { success: true, data: invoice };
   }
 
   @Patch(':id')

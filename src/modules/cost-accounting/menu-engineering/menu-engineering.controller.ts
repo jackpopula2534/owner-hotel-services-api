@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Get,
@@ -64,6 +65,8 @@ interface SnapshotResponse {
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, AddonGuard)
 @RequireAddon('COST_ACCOUNTING_MODULE')
+// Accounting Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('accounting')
 @Controller({ path: 'cost-accounting/menu-engineering', version: '1' })
 export class MenuEngineeringController {
   constructor(private readonly menuEngineeringService: MenuEngineeringService) {}

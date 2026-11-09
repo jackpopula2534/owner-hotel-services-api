@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Get,
@@ -24,6 +25,7 @@ import {
   CreateHrLeaveRequestDto,
   UpdateHrLeaveRequestDto,
   RejectLeaveRequestDto,
+  ApproveLeaveStepDto,
 } from './dto/create-hr-leave-request.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { HrAddonGuard } from '../../common/guards/hr-addon.guard';
@@ -33,6 +35,8 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @ApiTags('hr / leave')
 @ApiBearerAuth('JWT-auth')
+// HR Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('hr')
 @Controller({ path: 'hr/leave', version: '1' })
 @UseGuards(JwtAuthGuard, HrAddonGuard, RolesGuard)
 export class HrLeaveController {
@@ -144,6 +148,21 @@ export class HrLeaveController {
   @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
   async approve(@Param('id') id: string, @CurrentUser() user: { tenantId?: string; id?: string }) {
     return this.leaveService.approve(id, user.id ?? 'system', user.tenantId!);
+  }
+
+  @Post(':id/approve-step')
+  @ApiOperation({ summary: 'Approve the current step of a multi-step leave approval chain' })
+  @ApiParam({ name: 'id', description: 'Leave request ID' })
+  @ApiResponse({ status: 200, description: 'Approval step recorded' })
+  @ApiResponse({ status: 400, description: 'Not pending or chain complete' })
+  @HttpCode(HttpStatus.OK)
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'hr')
+  async approveStep(
+    @Param('id') id: string,
+    @Body() dto: ApproveLeaveStepDto,
+    @CurrentUser() user: { tenantId?: string; id?: string },
+  ) {
+    return this.leaveService.approveStep(id, user.id ?? 'system', user.tenantId!, dto.note);
   }
 
   @Post(':id/reject')

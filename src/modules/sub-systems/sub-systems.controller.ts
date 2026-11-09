@@ -1,0 +1,53 @@
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
+import { Controller, Get, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
+
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { SubSystemsService } from './sub-systems.service';
+
+interface AuthenticatedCaller {
+  userId: string;
+  tenantId: string;
+  role: string;
+  email?: string;
+}
+
+@ApiTags('Sub Systems')
+@ApiBearerAuth('JWT-auth')
+@UseGuards(JwtAuthGuard)
+// Hotel Terminal (readiness) — H1 allow-list, audit 2026-11-09
+@AllowSystems('hotel-terminal', 'camp-terminal', 'retail', 'crm')
+@Controller({ path: 'sub-systems', version: '1' })
+export class SubSystemsController {
+  constructor(private readonly service: SubSystemsService) {}
+
+  @Get()
+  @Throttle({ default: { limit: 60, ttl: 60 } })
+  @ApiOperation({
+    summary: 'List sub-system terminals available to the current tenant',
+    description:
+      'Returns the terminal cards for the "ระบบย่อย / Sub Systems" page. ' +
+      'Each card is unlocked by a core entitlement or an active add-on. ' +
+      'Frontend should fetch this instead of hard-coding the card list.',
+  })
+  @ApiResponse({ status: 200, description: 'Sub-system cards (available + locked)' })
+  async list(@CurrentUser() caller: AuthenticatedCaller) {
+    return this.service.getForTenant(caller?.tenantId ?? '');
+  }
+
+  @Get('readiness')
+  @Throttle({ default: { limit: 60, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Setup readiness of each terminal for the current tenant',
+    description:
+      'Keyed by sub-system id. `ready: false` means the terminal has no master data yet ' +
+      '(e.g. POS with no restaurant); `missing` lists what to set up and where. ' +
+      'SSO launch endpoints refuse (409 SUB_SYSTEM_NOT_READY) while a terminal is not ready.',
+  })
+  @ApiResponse({ status: 200, description: 'Readiness map keyed by sub-system id' })
+  async readiness(@CurrentUser() caller: AuthenticatedCaller) {
+    return this.service.getReadiness(caller?.tenantId ?? '');
+  }
+}

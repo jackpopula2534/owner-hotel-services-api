@@ -15,8 +15,8 @@ export interface QRPayloadData {
 }
 
 export interface SignedQRPayload extends QRPayloadData {
-  v: number;       // Version
-  sig: string;     // HMAC signature (first 16 chars)
+  v: number; // Version
+  sig: string; // HMAC signature (first 16 chars)
 }
 
 @Injectable()

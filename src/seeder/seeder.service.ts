@@ -1,7 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
+import { BookingsService } from '../modules/bookings/bookings.service';
+import { CampAccountingService } from '../modules/camp/camp-accounting.service';
+import { ensureDefaultChartOfAccounts } from '../modules/accounting/chart-of-accounts/default-chart-of-accounts';
 import { PlansService } from '../plans/plans.service';
 import { FeaturesService } from '../features/features.service';
 import { PlanFeaturesService } from '../plan-features/plan-features.service';
+import { AddonService, isAddonAvailableForSystem } from '../modules/addons/addon.service';
+import { AddonBillingCycle } from '../modules/addons/dto/create-addon.dto';
 import { AdminsService } from '../admins/admins.service';
 import { TenantsService } from '../tenants/tenants.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
@@ -14,9 +20,46 @@ import { SubscriptionStatus } from '../subscriptions/entities/subscription.entit
 import { InvoiceStatus } from '../invoices/entities/invoice.entity';
 import { PaymentMethod, PaymentStatus } from '../payments/entities/payment.entity';
 import { PrismaService } from '../prisma/prisma.service';
-import { CostCenterType, CostCategory, WarehouseType, PurchaseRequisitionStatus, PurchaseOrderStatus, SupplierQuoteStatus } from '@prisma/client';
+import { ReadyMadeGoodsSeeder } from './ready-made-goods.seeder';
+import { RetailPromotionsSeeder } from './retail-promotions.seeder';
+import { SeedLotsSeeder } from './seed-lots.seeder';
+import { WarehouseGroupsSeeder } from './warehouse-groups.seeder';
+import { CAMP_PREMIUM_TENANT_NAME, CampPremiumSeeder } from './camp-premium.seeder';
+import { CampSuppliersSeeder } from './camp-suppliers.seeder';
+import { Hotel3dDemoSeeder } from './hotel-3d-demo.seeder';
+import {
+  CostCenterType,
+  CostCategory,
+  WarehouseType,
+  PurchaseRequisitionStatus,
+  PurchaseOrderStatus,
+  SupplierQuoteStatus,
+  InventoryLotStatus,
+  RevenueType,
+  Prisma,
+} from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import { DEFAULT_HR_PERMISSIONS as HR_DEFAULT_PERMISSIONS } from '../modules/hr-terminal-users/dto/create-hr-terminal-user.dto';
+import { SUB_SYSTEM_ADDON_META } from '../modules/sub-systems/sub-systems.catalog';
 import { v4 as uuidv4 } from 'uuid';
+import {
+  buildBangkokDateTime,
+  DEFAULT_CHECK_IN_TIME,
+  DEFAULT_CHECK_OUT_TIME,
+} from '../common/availability/availability.util';
+import {
+  sanitizeSeo,
+  sanitizeSiteContent,
+  sanitizeTheme,
+} from '../modules/website/website-content';
+import {
+  MOUNTAIN_VIEW_PROPERTY,
+  MOUNTAIN_VIEW_REVIEWS,
+  MOUNTAIN_VIEW_SEO,
+  MOUNTAIN_VIEW_THEME,
+  ROOM_TYPE_SEED,
+  buildMountainViewContent,
+} from './website-demo.seed-data';
 
 @Injectable()
 export class SeederService {
@@ -32,8 +75,40 @@ export class SeederService {
     private invoicesService: InvoicesService,
     private paymentsService: PaymentsService,
     private subscriptionFeaturesService: SubscriptionFeaturesService,
+    private addonService: AddonService,
     private prisma: PrismaService,
+    private readyMadeGoods: ReadyMadeGoodsSeeder,
+    private retailPromotions: RetailPromotionsSeeder,
+    private seedLots: SeedLotsSeeder,
+    private warehouseGroups: WarehouseGroupsSeeder,
+    private campPremium: CampPremiumSeeder,
+    private campSuppliers: CampSuppliersSeeder,
+    private hotel3dDemo: Hotel3dDemoSeeder,
+    private moduleRef: ModuleRef,
   ) {}
+
+  /**
+   * ผังบัญชีมาตรฐานให้ทุก tenant + ลงสมุดรายวันย้อนหลังจากการจองที่เช็คเอาต์แล้ว/การชำระของลาน
+   * ไม่งั้นหลัง db:refresh หน้าระบบบัญชีจะเป็น 0 ทุกช่องทั้งที่มีรายได้เดโมอยู่เต็ม
+   * ใช้ service จริง (ไม่เขียน JE เอง) เพื่อให้เลขที่เอกสาร/ledger_balances ถูกต้องเหมือนใช้งานจริง
+   */
+  private async seedAccounting(): Promise<void> {
+    this.logger.log('📒 Seeding chart of accounts + backfilling journal entries...');
+    const bookings = this.moduleRef.get(BookingsService, { strict: false });
+    const camp = this.moduleRef.get(CampAccountingService, { strict: false });
+    const tenants = await this.prisma.tenants.findMany({ select: { id: true, name: true } });
+
+    for (const tenant of tenants) {
+      const accounts = await ensureDefaultChartOfAccounts(this.prisma, tenant.id);
+      const hotel = await bookings.backfillJournalEntries(tenant.id);
+      const campResult = await camp.backfillJournals(tenant.id);
+      if (accounts || hotel.created || campResult.created) {
+        this.logger.log(
+          `  ${tenant.name}: ผังบัญชี ${accounts} บัญชี, JE การจอง ${hotel.created}, JE ลาน ${campResult.created}`,
+        );
+      }
+    }
+  }
 
   /**
    * รัน seeder ทั้งหมด
@@ -44,23 +119,51 @@ export class SeederService {
     try {
       await this.seedPlans();
       await this.seedFeatures();
+      await this.seedAddOns();
+      await this.seedAddonUsageQuotas();
+      await this.seedModuleFeatures();
       await this.seedPlanFeatures();
+      await this.seedPlanAddons();
       await this.seedAdmins();
       await this.seedUsers();
       await this.seedAdminPanelTestData();
       await this.seedDemoGuests();
       await this.seedDemoBookings();
+      // ต้องมาก่อน seedDemoReviews — รีวิวสุ่มจะข้าม tenant ที่มีรีวิวอยู่แล้ว ทำให้คะแนนเว็บเดโมนิ่ง
+      await this.seedMountainViewWebsite();
       await this.seedDemoReviews();
       await this.seedHrMasterData();
       await this.seedEmployeesForAllTenants();
       await this.seedKpiTemplates();
       await this.seedHotelStaff();
+      // ห้อง/การจอง/งานแม่บ้าน-ซ่อม "วันนี้" + ฉาก 3D ของ Mountain View — รีเฟรชรายวันด้วย npm run seed:hotel-3d
+      await this.hotel3dDemo.seed();
+      await this.seedOperationalStaff();
       await this.seedPremiumHrData();
       await this.seedHrPerformanceData();
       await this.seedRestaurantData();
       await this.seedInventoryData();
+      // ต้องอยู่หลังคลัง — เมนูของสำเร็จรูปผูกกับสินค้าในคลัง จึงต้องมีสินค้าก่อน
+      await this.readyMadeGoods.seed();
+      // ลาน/โซน/จุดกาง/อุปกรณ์เช่า/การจอง/เว็บจองลาน ของ premium.camp — หลังคลัง/HR เพื่อให้ tenant มีครบ
+      await this.campPremium.seed();
+      // ซัพพลายเออร์ของลาน — ขอใบเสนอราคาต้องมีอย่างน้อย 1 ราย
+      await this.campSuppliers.seed();
+      // คลังของแถม + โปรตัวอย่าง — ต้องมีคลังร้านขายของ (WH-RETAIL) ก่อน
+      await this.retailPromotions.seed();
+      // กลุ่มคลัง — ต้องอยู่หลังคลังทุกตัวถูกสร้าง (คลังร้าน/มินิบาร์มาจาก readyMadeGoods)
+      await this.warehouseGroups.seed();
+      await this.seedRestaurantRecipes();
+      await this.seedProcurementUsersAndFlows();
       await this.seedPurchaseRequisitionData();
       await this.seedCostAccountingData();
+      await this.seedDepartmentCostCenterMapping();
+      await this.seedOpCostCategories();
+      await this.seedRecruitmentPipeline();
+      // ท้ายสุด — ต้องมีการจองที่เช็คเอาต์แล้ว/การจองลานครบก่อนถึงลงบัญชีย้อนหลังได้
+      await this.seedAccounting();
+      // ท้ายสุดจริง ๆ — หลังทุกตัวที่เขียนยอดคลัง: ให้ของที่ซีดไว้มี lot ครบ (ยอด lot = ยอดคลัง)
+      await this.seedLots.seed();
 
       this.logger.log('✅ Database seeding completed successfully!');
     } catch (error) {
@@ -80,19 +183,20 @@ export class SeederService {
       {
         code: 'FREE',
         name: 'ทดลองฟรี',
+        system: 'HOTEL',
         priceMonthly: 0,
         yearlyDiscountPercent: 0,
         maxRooms: 5,
         maxUsers: 2,
         maxProperties: 2,
         isActive: true,
-        description: 'ลองใช้ทุกฟีเจอร์ได้เต็มที่ 14 วัน ไม่ต้องผูกบัตรเครดิต',
+        description: 'ลองใช้ทุกฟีเจอร์ได้เต็มที่ 15 วัน ไม่ต้องผูกบัตรเครดิต',
         subtitle: 'เริ่มต้นใน 2 นาที ไม่มีค่าใช้จ่าย',
         targetAudience: 'สำหรับทุกโรงแรมที่อยากลองก่อนตัดสินใจ',
         pricePerRoom: null,
         displayOrder: 0,
         isPopular: false,
-        badge: 'ฟรี 14 วัน',
+        badge: 'ฟรี 15 วัน',
         highlightColor: null,
         features: JSON.stringify([
           'ฟีเจอร์ครบทุกระบบ ไม่มีกั๊ก',
@@ -107,8 +211,9 @@ export class SeederService {
       {
         code: 'S',
         name: 'Starter',
-        priceMonthly: 1990,
-        yearlyDiscountPercent: 10,
+        system: 'HOTEL',
+        priceMonthly: 590,
+        yearlyDiscountPercent: 15,
         maxRooms: 20,
         maxUsers: 3,
         maxProperties: 1,
@@ -116,17 +221,17 @@ export class SeederService {
         description: 'ลดงานซ้ำซ้อน จัดการจองและห้องพักได้จากที่เดียว',
         subtitle: 'เปลี่ยนจากสมุดจดมาเป็นระบบมืออาชีพ',
         targetAudience: 'โรงแรมขนาดเล็ก · เกสต์เฮาส์ · โฮสเทล 1-20 ห้อง',
-        pricePerRoom: '~฿100/ห้อง/เดือน',
+        pricePerRoom: '~฿30/ห้อง/เดือน',
         displayOrder: 1,
         isPopular: false,
         badge: null,
         highlightColor: null,
         features: JSON.stringify([
-          'จัดการจองออนไลน์ ลด no-show',
-          'Front Desk ดิจิทัล เช็คอิน/เอาท์ง่าย',
-          'มอบหมายงาน Housekeeping อัตโนมัติ',
-          'รายงานรายได้ + ยอดจองรายวัน',
-          'แจ้งเตือนอีเมลอัตโนมัติ',
+          'Front Desk + จองออนไลน์',
+          'เช็คอิน / เช็คเอาท์ดิจิทัล',
+          'แจ้งเตือนผ่าน LINE Notify',
+          'รับชำระด้วย PromptPay QR',
+          'รายงานรายได้รายวัน',
           'Email Support ตอบภายใน 24 ชม.',
         ]),
         buttonText: 'เริ่มใช้งาน Starter',
@@ -134,60 +239,150 @@ export class SeederService {
       {
         code: 'M',
         name: 'Professional',
-        priceMonthly: 4990,
+        system: 'HOTEL',
+        priceMonthly: 1290,
         yearlyDiscountPercent: 15,
-        maxRooms: 50,
-        maxUsers: 10,
+        maxRooms: 80,
+        maxUsers: 5,
         maxProperties: 3,
         isActive: true,
         description: 'ระบบจัดการครบวงจร เพิ่มรายได้ ลดต้นทุน วิเคราะห์ข้อมูลเชิงลึก',
         subtitle: 'ฟีเจอร์ครบ คุ้มที่สุด สำหรับโรงแรมที่พร้อมเติบโต',
-        targetAudience: 'โรงแรม · รีสอร์ท · บูทีค 21-50 ห้อง',
-        pricePerRoom: '~฿100/ห้อง/เดือน',
+        targetAudience: 'โรงแรม · รีสอร์ท · บูทีค 21-80 ห้อง',
+        pricePerRoom: '~฿16/ห้อง/เดือน',
         displayOrder: 2,
         isPopular: true,
-        badge: 'คุ้มค่าที่สุด',
+        badge: 'ขายดีที่สุด',
         highlightColor: '#8B5CF6',
         features: JSON.stringify([
           'ทุกฟีเจอร์ของ Starter +',
-          'ระบบ HR จัดการพนักงาน เวร ลางาน',
-          'ระบบร้านอาหาร (F&B) ลิงก์กับ Folio แขก',
-          'รายงานเชิงลึก + Revenue Analytics',
-          'Channel Manager เชื่อม OTA อัตโนมัติ',
-          'ส่งรีวิวรีเควสต์หลังเช็คเอาท์',
-          'Loyalty Program สะสมแต้มแขกประจำ',
+          'Housekeeping + Maintenance',
+          'ระบบร้านอาหาร (F&B) + POS + Kitchen',
+          'CRM & Guest 360 + Loyalty สะสมแต้ม',
           'Priority Support ตอบภายใน 4 ชม.',
         ]),
         buttonText: 'เริ่มใช้งาน Professional',
       },
       {
         code: 'L',
-        name: 'Enterprise',
-        priceMonthly: 9990,
-        yearlyDiscountPercent: 20,
+        name: 'Business',
+        system: 'HOTEL',
+        priceMonthly: 2490,
+        yearlyDiscountPercent: 15,
         maxRooms: 200,
         maxUsers: 50,
         maxProperties: 5,
         isActive: true,
-        description: 'สำหรับเชนโรงแรมและกลุ่มธุรกิจ บริหารหลาย property จากที่เดียว',
+        description: 'สำหรับโรงแรมกลาง-ใหญ่และกลุ่มธุรกิจ บริหารหลาย property จากที่เดียว',
         subtitle: 'ควบคุมทุกสาขาจาก Dashboard เดียว',
-        targetAudience: 'เชนโรงแรม · กลุ่มธุรกิจ 51-200+ ห้อง · หลาย property',
-        pricePerRoom: '~฿50/ห้อง/เดือน',
+        targetAudience: 'โรงแรมกลาง-ใหญ่ · เชน · กลุ่มธุรกิจ 81-200+ ห้อง',
+        pricePerRoom: '~฿12/ห้อง/เดือน',
         displayOrder: 3,
         isPopular: false,
         badge: 'ประหยัดสุด/ห้อง',
         highlightColor: null,
         features: JSON.stringify([
           'ทุกฟีเจอร์ของ Professional +',
+          'Inventory + จัดซื้อ + คลังสินค้า',
+          'ระบบ HR ครบวงจร',
+          'ระบบบัญชี + Cost Accounting (USALI)',
           'Multi-property Dashboard รวมศูนย์',
-          'API Access เชื่อมระบบภายนอก',
-          'Custom Integration ตามธุรกิจ',
-          'Dedicated Account Manager ดูแลเฉพาะ',
-          'PromptPay QR Payment ในระบบ',
-          'Audit Log + Security ระดับองค์กร',
-          '24/7 Premium Support โทร + แชท',
+          'Audit Log + API + Security ระดับองค์กร',
+          '24/7 Priority Support โทร + แชท',
         ]),
-        buttonText: 'ติดต่อทีมขาย',
+        buttonText: 'เริ่มใช้งาน Business',
+      },
+      // ─── ระบบลานกางเต็นท์ (CAMP) ──────────────────────────────
+      {
+        code: 'CAMP_FREE',
+        name: 'ทดลองฟรี (ลานกางเต็นท์)',
+        system: 'CAMP',
+        priceMonthly: 0,
+        yearlyDiscountPercent: 0,
+        maxRooms: 10,
+        maxUsers: 2,
+        maxProperties: 1,
+        isActive: true,
+        description: 'ลองใช้ระบบจัดการลานกางเต็นท์ได้เต็มที่ 15 วัน ไม่ต้องผูกบัตรเครดิต',
+        subtitle: 'เริ่มต้นใน 2 นาที ไม่มีค่าใช้จ่าย',
+        targetAudience: 'สำหรับลานกางเต็นท์ที่อยากลองก่อนตัดสินใจ',
+        pricePerRoom: null,
+        displayOrder: 0,
+        isPopular: false,
+        badge: 'ฟรี 15 วัน',
+        highlightColor: null,
+        features: JSON.stringify([
+          'จัดการลาน / โซน / จุดกางเต็นท์',
+          'จอง + แผนผังลาน 2D',
+          'อุปกรณ์ให้เช่า (เต็นท์/ถุงนอน/เก้าอี้)',
+          'Retail POS หน้าลาน',
+          'รับชำระด้วย PromptPay QR',
+          'ลองสร้างเว็บไซต์จองลาน (ออกแบบ + ดูตัวอย่าง)',
+          'ยกเลิกได้ตลอดเวลา',
+        ]),
+        buttonText: 'เริ่มทดลองฟรี — ไม่มีค่าใช้จ่าย',
+      },
+      {
+        code: 'CAMP',
+        name: 'Camp',
+        system: 'CAMP',
+        priceMonthly: 199,
+        yearlyDiscountPercent: 15,
+        maxRooms: 100,
+        maxUsers: 5,
+        maxProperties: 1,
+        isActive: true,
+        description: 'ระบบจัดการลานกางเต็นท์ครบวงจร ราคาเดียวจบ',
+        subtitle: 'คุ้มที่สุดสำหรับลานกางเต็นท์',
+        targetAudience: 'ลานกางเต็นท์ · แคมป์ไซต์ · กลามปิ้ง',
+        pricePerRoom: null,
+        displayOrder: 1,
+        isPopular: true,
+        badge: 'ราคาเดียวจบ',
+        highlightColor: '#10B981',
+        features: JSON.stringify([
+          'จัดการลาน / โซน / จุดกางเต็นท์',
+          'จอง + แผนผังลาน 2D',
+          'อุปกรณ์ให้เช่า (เต็นท์/ถุงนอน/เก้าอี้)',
+          'Retail POS หน้าลาน',
+          'รับชำระด้วย PromptPay QR',
+          'รายงานรายได้รายวัน',
+          'ร้านอาหาร & F&B ในลาน',
+          'เว็บไซต์จองลานซื้อเพิ่มได้ (฿590/เดือน)',
+        ]),
+        buttonText: 'เริ่มใช้งาน Camp',
+      },
+      {
+        code: 'CAMP_PLUS',
+        name: 'Camp Plus',
+        system: 'CAMP',
+        // ฿999 → ฿1,290 เมื่อรวมเว็บไซต์จองลาน (add-on ฿590): มูลค่ารวม ฿7,240 ยังลด ~82%
+        // และยังห่างจาก Camp + เว็บ (฿199 + ฿590 = ฿789) พอให้คุ้มที่จะอัปเกรด
+        priceMonthly: 1290,
+        yearlyDiscountPercent: 15,
+        maxRooms: 300,
+        maxUsers: 20,
+        maxProperties: 3,
+        isActive: true,
+        description: 'ลานกางเต็นท์ที่ต้องการระบบหลังบ้านครบ + เว็บไซต์ให้ลูกค้าจองลานเอง',
+        subtitle: 'ครบทุกโมดูลสำหรับลานขนาดใหญ่',
+        targetAudience: 'ลานกางเต็นท์หลายสาขา · รีสอร์ทแคมป์ · กลามปิ้งขนาดใหญ่',
+        pricePerRoom: null,
+        displayOrder: 2,
+        isPopular: false,
+        badge: 'ครบทุกโมดูล',
+        highlightColor: '#0EA5E9',
+        features: JSON.stringify([
+          'ทุกอย่างในแพ็ก Camp',
+          'เว็บไซต์จองลานออนไลน์ + รับโอน PromptPay',
+          'ระบบบัญชี (Accounting)',
+          'ระบบพนักงาน / HR',
+          'จัดการสต๊อก (Inventory)',
+          'งานซ่อมบำรุง (Maintenance)',
+          'CRM & Guest 360',
+          'รองรับหลายลาน (สูงสุด 3 แห่ง)',
+        ]),
+        buttonText: 'อัปเกรดเป็น Camp Plus',
       },
     ];
 
@@ -207,236 +402,847 @@ export class SeederService {
   }
 
   /**
-   * 2️⃣ Seed Features (Add-ons)
+   * 2️⃣ Seed Features (Master catalog)
+   *
+   * Each feature now carries a `category` and `icon` so the admin UI can group
+   * the catalog instead of showing a flat list of N/A cells. Categories follow
+   * the StaySync taxonomy: CORE / PMS / RESTAURANT / HR / HOUSEKEEPING /
+   * MAINTENANCE / REPORTING / INTEGRATION / ADVANCED.
+   *
+   * The seeder upserts by code so re-running keeps the catalog in sync with
+   * the latest definitions (renaming a feature, retagging a category, etc.).
    */
   private async seedFeatures(): Promise<void> {
-    this.logger.log('⚙️ Seeding Features...');
+    this.logger.log('⚙️ Seeding Features (master catalog — toggle/limit only)...');
 
+    /**
+     * Features = ความสามารถพื้นฐานของระบบ (system capabilities).
+     * เก็บเฉพาะ type = TOGGLE (เปิด/ปิด) และ LIMIT (เพิ่ม cap) เท่านั้น
+     * type = MODULE ย้ายไปเก็บใน `add_ons` table (ดู seedAddOns) เพื่อไม่ให้
+     * ข้อมูลซ้ำกับ Add-on catalog
+     *
+     * Code style: lower_snake_case
+     * Categories: CORE, PMS, REPORTING, ADVANCED (4 หมวด — ไม่ทับ Add-ons)
+     */
     const features = [
+      // ─── CORE ─────────────────────────────────────────────
       {
-        code: 'ota_booking',
-        name: 'OTA Booking Integration',
-        description: 'เชื่อมต่อกับ Booking.com, Agoda, และ OTA อื่นๆ',
-        type: FeatureType.MODULE,
-        priceMonthly: 990,
-        isActive: true,
-      },
-      {
-        code: 'extra_analytics',
-        name: 'Extra Analytics',
-        description: 'รายงานและ Analytics ขั้นสูง',
-        type: FeatureType.MODULE,
-        priceMonthly: 990,
-        isActive: true,
-      },
-      {
-        code: 'custom_branding',
-        name: 'Custom Branding',
-        description: 'กำหนด branding และ logo ของโรงแรม',
-        type: FeatureType.MODULE,
-        priceMonthly: 1490,
-        isActive: true,
-      },
-      {
-        code: 'automation',
-        name: 'Automation System',
-        description: 'ระบบอัตโนมัติสำหรับจัดการ booking และ workflow',
-        type: FeatureType.MODULE,
-        priceMonthly: 990,
-        isActive: true,
-      },
-      {
-        code: 'tax_invoice',
-        name: 'Tax Invoice',
-        description: 'ระบบออกใบกำกับภาษีอัตโนมัติ',
+        code: 'basic_report',
+        name: 'Basic Report',
+        description: 'รายงานพื้นฐานสำหรับการดำเนินงานประจำวัน',
         type: FeatureType.TOGGLE,
-        priceMonthly: 500,
+        category: 'CORE',
+        icon: 'FileText',
+        displayOrder: 10,
+        priceMonthly: 0,
         isActive: true,
       },
       {
         code: 'extra_user',
         name: 'Extra User',
-        description: 'เพิ่มจำนวน user ที่ใช้งานได้',
+        description: 'เพิ่มจำนวน user ที่ใช้งานได้เกิน cap ของแผน',
         type: FeatureType.LIMIT,
+        category: 'CORE',
+        icon: 'Users',
+        displayOrder: 20,
         priceMonthly: 200,
         isActive: true,
       },
       {
+        code: 'audit_log',
+        name: 'Audit Log',
+        description: 'บันทึกประวัติการแก้ไขข้อมูลเพื่อ compliance และ traceability',
+        type: FeatureType.TOGGLE,
+        category: 'CORE',
+        icon: 'FileText',
+        displayOrder: 30,
+        priceMonthly: 290,
+        isActive: true,
+      },
+
+      // ─── PMS ──────────────────────────────────────────────
+      {
+        code: 'tax_invoice',
+        name: 'Tax Invoice',
+        description: 'ระบบออกใบกำกับภาษีอัตโนมัติ พร้อม e-Tax',
+        type: FeatureType.TOGGLE,
+        category: 'PMS',
+        icon: 'Receipt',
+        displayOrder: 10,
+        priceMonthly: 500,
+        isActive: true,
+      },
+      {
+        code: 'multi_property',
+        name: 'Multi-Property Management',
+        description: 'จัดการโรงแรมหลายสาขาภายใต้บัญชีเดียว สลับ property ได้รวดเร็ว',
+        type: FeatureType.LIMIT,
+        category: 'PMS',
+        icon: 'Layers',
+        displayOrder: 20,
+        priceMonthly: 0,
+        isActive: true,
+      },
+
+      // ─── REPORTING ────────────────────────────────────────
+      {
+        code: 'advanced_report',
+        name: 'Advanced Report',
+        description: 'รายงานขั้นสูงและ analytics สำหรับผู้บริหาร',
+        type: FeatureType.TOGGLE,
+        category: 'REPORTING',
+        icon: 'BarChart3',
+        displayOrder: 10,
+        priceMonthly: 500,
+        isActive: true,
+      },
+      {
+        code: 'daily_manager_report',
+        name: 'Daily Manager Report',
+        description: 'รายงานสรุปประจำวันส่งอัตโนมัติทุกเช้าให้ GM พร้อม KPI ครบ',
+        type: FeatureType.TOGGLE,
+        category: 'REPORTING',
+        icon: 'BarChart3',
+        displayOrder: 20,
+        priceMonthly: 290,
+        isActive: true,
+      },
+
+      // ─── ADVANCED ─────────────────────────────────────────
+      {
         code: 'api_access',
         name: 'API Access',
-        description: 'เข้าถึง API สำหรับ integration กับระบบอื่น',
-        type: FeatureType.MODULE,
+        description: 'เข้าถึง API สำหรับ integration กับระบบอื่น (REST + Webhooks)',
+        type: FeatureType.TOGGLE,
+        category: 'ADVANCED',
+        icon: 'Plug',
+        displayOrder: 10,
         priceMonthly: 1500,
         isActive: true,
       },
       {
-        code: 'advanced_report',
-        name: 'Advanced Report',
-        description: 'รายงานขั้นสูงและ analytics',
-        type: FeatureType.MODULE,
-        priceMonthly: 500,
-        isActive: true,
-      },
-      {
-        code: 'housekeeping',
-        name: 'Housekeeping Management',
-        description: 'ระบบจัดการงานทำความสะอาด',
+        code: 'webhook_events',
+        name: 'Webhook Events',
+        description: 'ส่ง webhook events ออกไประบบภายนอกเมื่อมี booking/payment events',
         type: FeatureType.TOGGLE,
-        priceMonthly: 500,
-        isActive: true,
-      },
-      {
-        code: 'basic_report',
-        name: 'Basic Report',
-        description: 'รายงานพื้นฐาน',
-        type: FeatureType.TOGGLE,
-        priceMonthly: 0,
-        isActive: true,
-      },
-      {
-        // HR Add-on: paid module add-on — sold separately
-        code: 'HR_MODULE',
-        name: 'HR Module',
-        description:
-          'ระบบ HR ครบวงจร: จัดการพนักงาน เงินเดือน การลา และเชื่อมข้อมูลกับทีมแม่บ้าน/ช่าง',
-        type: FeatureType.MODULE,
-        priceMonthly: 1200,
-        isActive: true,
-      },
-      {
-        // Restaurant Add-on: F&B management with table reservations and menu management
-        code: 'RESTAURANT_MODULE',
-        name: 'Restaurant & F&B Module',
-        description: 'ระบบจัดการร้านอาหาร F&B: เมนู หมวดหมู่ จองโต๊ะ และเชื่อม Folio แขก',
-        type: FeatureType.MODULE,
+        category: 'ADVANCED',
+        icon: 'Network',
+        displayOrder: 20,
         priceMonthly: 990,
         isActive: true,
       },
+
+      // ─── COMMUNICATION ────────────────────────────────────
       {
-        // POS Add-on: full POS system with kitchen display and cashier
-        code: 'POS_MODULE',
-        name: 'POS System',
-        description: 'ระบบ POS ครบวงจร: รับออเดอร์ ส่งครัว (KDS) ชำระเงิน และจัดการ User POS',
-        type: FeatureType.MODULE,
-        priceMonthly: 790,
+        code: 'messaging_inbox',
+        name: 'แชทรวม FB/LINE (Omnichannel Inbox)',
+        description:
+          'กล่องข้อความรวมจาก Facebook Messenger และ LINE ในที่เดียว — ตอบแชทลูกค้าได้ครบทุกช่องทาง ขายแยก ไม่รวมในแพ็กใด',
+        type: FeatureType.TOGGLE,
+        category: 'COMMUNICATION',
+        icon: 'MessageCircle',
+        displayOrder: 10,
+        priceMonthly: 390,
         isActive: true,
       },
+
+      // ─── STANDALONE MODULE GRANT ──────────────────────────
+      // ข้อยกเว้นของกติกา "toggle/limit only": add-on ที่ขายแยก (ไม่ bundle ในแพลนไหน)
+      // ให้สิทธิ์ได้ทางเดียวคือ subscription_features → features(type=module, code = add_ons.code)
+      // (ดู AddonService.getActiveAddons ขั้นที่ 3) ไม่มีแถวนี้ = ซื้อแล้วก็ไม่ได้สิทธิ์
+      // module_code ปล่อย null → ไม่โผล่ซ้ำใน /addons/public (catalog ดึงจาก add_ons)
       {
-        // Channel Manager Add-on
-        code: 'CHANNEL_MANAGER',
-        name: 'Channel Manager',
-        description: 'เชื่อมต่อกับ OTA อัตโนมัติ sync ราคาและห้องพักแบบ real-time',
+        code: 'WEBSITE_BUILDER',
+        name: 'เว็บไซต์โรงแรม (Website Builder)',
+        description: 'สิทธิ์ใช้ add-on WEBSITE_BUILDER เมื่อซื้อแยกผ่าน subscription',
         type: FeatureType.MODULE,
-        priceMonthly: 1490,
-        isActive: true,
-      },
-      {
-        // Loyalty Module Add-on
-        code: 'LOYALTY_MODULE',
-        name: 'Loyalty & Rewards',
-        description: 'โปรแกรมสะสมแต้มแขกประจำ ส่วนลด และ reward tiers',
-        type: FeatureType.MODULE,
+        category: 'MARKETING',
+        icon: 'Globe',
+        displayOrder: 10,
         priceMonthly: 590,
         isActive: true,
       },
       {
-        // Inventory Management Add-on
-        code: 'INVENTORY_MODULE',
-        name: 'Inventory Management',
-        description:
-          'ระบบคลังสินค้าครบวงจร: คุมสต็อก เบิก-รับสินค้า สั่งซื้อ นับสต็อก และแจ้งเตือนสต็อกต่ำ',
+        code: 'CAMP_3D_MAP',
+        name: 'แผนที่ลาน 3D (Campground 3D Map)',
+        description: 'สิทธิ์ใช้ add-on CAMP_3D_MAP เมื่อซื้อแยกผ่าน subscription',
         type: FeatureType.MODULE,
-        priceMonthly: 990,
-        isActive: true,
-      },
-      {
-        // Cost Accounting Add-on (requires Inventory)
-        code: 'COST_ACCOUNTING_MODULE',
-        name: 'Cost Accounting',
-        description:
-          'ระบบบัญชีต้นทุน USALI: ติดตามต้นทุนรายแผนก P&L ปิดงวดรายเดือน วิเคราะห์ food cost และ dashboard KPI โรงแรม',
-        type: FeatureType.MODULE,
-        priceMonthly: 1490,
+        category: 'CAMP',
+        icon: 'Box',
+        displayOrder: 20,
+        priceMonthly: 790,
         isActive: true,
       },
     ];
 
     for (const featureData of features) {
-      const existing = await this.featuresService.findByCode(featureData.code);
-      if (!existing) {
-        await this.featuresService.create(featureData);
-        this.logger.log(
-          `  ✓ Created feature: ${featureData.code} (฿${featureData.priceMonthly}/mo)`,
-        );
-      } else {
-        this.logger.log(`  ⊙ Feature already exists: ${featureData.code}`);
+      await this.featuresService.upsertByCode(featureData);
+      this.logger.log(
+        `  ✓ Upserted feature: ${featureData.code} [${featureData.category}/${featureData.type}] (฿${featureData.priceMonthly}/mo)`,
+      );
+    }
+
+    this.logger.log(
+      `  ✅ Seeded ${features.length} features (toggle/limit + standalone module grants)`,
+    );
+  }
+
+  /**
+   * 2️⃣A′ Seed Module Sub-Features (feature ย่อยที่อยู่ "ใต้" module แม่)
+   *
+   * ตาม pricing restructure: **ซื้อ module = ได้ครบทุก feature ในนั้น**
+   * feature กลุ่มนี้จึง priceMonthly = 0 (แถมมากับ module) และผูก `moduleCode`
+   * ชี้ไปที่ `add_ons.code` ของ module แม่ เพื่อให้ `/addons/public`
+   * (listPublicCatalog) group เป็น tree `module ▸ feature` ได้จริง
+   *
+   * ต่างจาก seedFeatures() ที่เก็บ feature ทั่วไป "ขายแยก" (moduleCode = null)
+   * — ที่นี่เก็บเฉพาะ capability ภายในแต่ละ module (ดู Bundle Matrix ในแผน)
+   */
+  private async seedModuleFeatures(): Promise<void> {
+    this.logger.log('🌳 Seeding Module Sub-Features (feature ย่อยใต้ module แม่)...');
+
+    // spec แบบกระชับ: [moduleCode, category, icon, [ {code,name,description} ... ]]
+    // ทุกตัว type = TOGGLE, priceMonthly = 0 (รวมอยู่ในราคา module แม่)
+    const moduleFeatureGroups: Array<{
+      moduleCode: string;
+      category: string;
+      icon: string;
+      features: Array<{ code: string; name: string; description: string }>;
+    }> = [
+      {
+        moduleCode: 'RESTAURANT_MODULE',
+        category: 'RESTAURANT',
+        icon: 'UtensilsCrossed',
+        features: [
+          { code: 'restaurant_pos', name: 'Restaurant POS', description: 'ระบบขายหน้าร้านอาหาร (POS) สั่งอาหาร เปิดโต๊ะ เก็บเงิน เชื่อม Folio แขก' },
+          { code: 'kitchen_display', name: 'Kitchen Display (KDS)', description: 'จอครัวแสดงออร์เดอร์ real-time จัดคิวทำอาหารตามลำดับ' },
+          { code: 'table_management', name: 'จัดการโต๊ะ', description: 'ผังโต๊ะ สถานะโต๊ะ ว่าง/ไม่ว่าง ย้าย/รวมโต๊ะ' },
+          { code: 'table_reservation', name: 'จองโต๊ะ', description: 'รับจองโต๊ะล่วงหน้า จัดการรอบ และแจ้งเตือน' },
+          { code: 'menu_management', name: 'จัดการเมนู', description: 'สร้าง/แก้ไขเมนู หมวดหมู่ ราคา ตัวเลือกเสริม (modifier)' },
+        ],
+      },
+      {
+        moduleCode: 'INVENTORY_MODULE',
+        category: 'INVENTORY',
+        icon: 'Package',
+        features: [
+          { code: 'purchasing_pr_po', name: 'จัดซื้อ (PR/RFQ/PO)', description: 'ใบขอซื้อ (PR) ขอราคา (RFQ) และใบสั่งซื้อ (PO) ครบวงจร' },
+          { code: 'warehouse_stock', name: 'คลังสินค้า (Warehouse)', description: 'จัดการสต็อก รับ/จ่าย นับสต็อก โอนย้าย และแจ้งเตือนสต็อกต่ำ' },
+          { code: 'retail_pos', name: 'Retail POS', description: 'ระบบขายหน้าร้านค้าปลีก (มินิมาร์ท/ของที่ระลึก) ตัดสต็อกอัตโนมัติ' },
+        ],
+      },
+      {
+        moduleCode: 'HR_MODULE',
+        category: 'HR',
+        icon: 'Briefcase',
+        features: [
+          { code: 'hr_payroll', name: 'พนักงาน/เงินเดือน', description: 'จัดการข้อมูลพนักงานและคำนวณเงินเดือน หัก/เพิ่ม รายการต่าง ๆ' },
+          { code: 'leave_management', name: 'การลา', description: 'ระบบขอลา อนุมัติลา และยอดวันลาคงเหลือ' },
+          { code: 'hr_kpi', name: 'KPI', description: 'ประเมินผลงานพนักงานด้วย KPI template' },
+          { code: 'gov_documents', name: 'เอกสารราชการ', description: 'จัดทำเอกสารราชการ (ภ.ง.ด. ประกันสังคม ฯลฯ)' },
+          // งานแม่บ้าน/แจ้งซ่อมเป็นการจัดการ "คน" ของแผนกปฏิบัติการ จึงอยู่ในระบบ HR
+          // (เดิมแยกขายเป็น HOUSEKEEPING_MODULE / MAINTENANCE_MODULE ซึ่งถอดออกจาก catalog แล้ว)
+          { code: 'hk_task_assignment', name: 'มอบหมายงานแม่บ้าน', description: 'สร้างและมอบหมายงานทำความสะอาดห้องให้ทีมแม่บ้าน' },
+          { code: 'room_inspection', name: 'ตรวจห้อง', description: 'เช็กลิสต์ตรวจห้องหลังทำความสะอาด อนุมัติห้องพร้อมขาย' },
+          { code: 'room_status_realtime', name: 'สถานะห้อง real-time', description: 'ติดตามสถานะห้อง (ว่าง/กำลังทำ/พร้อมขาย/ซ่อม) แบบ real-time' },
+          { code: 'maintenance_ticket', name: 'ใบแจ้งซ่อม', description: 'แจ้งซ่อม/งานบำรุงรักษา ติดตามสถานะ มอบหมายช่าง' },
+          { code: 'preventive_schedule', name: 'Preventive Schedule', description: 'ตารางบำรุงรักษาเชิงป้องกันตามรอบเวลา แจ้งเตือนล่วงหน้า' },
+          { code: 'asset_register', name: 'Asset Register', description: 'ทะเบียนสินทรัพย์/อุปกรณ์ พร้อม QR code และประวัติการซ่อม' },
+        ],
+      },
+      {
+        moduleCode: 'CRM_MODULE',
+        category: 'CRM',
+        icon: 'Users',
+        features: [
+          { code: 'guest_360', name: 'Guest 360', description: 'มุมมองลูกค้า 360 องศา ประวัติเข้าพัก การใช้จ่าย และ preference' },
+          { code: 'crm_campaign', name: 'Campaign', description: 'สร้างและส่งแคมเปญการตลาดถึงลูกค้าตาม segment' },
+          { code: 'sales_pipeline', name: 'Sales Pipeline', description: 'จัดการดีลการขาย (MICE/กรุ๊ป) ตาม stage แบบ pipeline' },
+          { code: 'service_desk', name: 'Service Desk', description: 'รับเรื่องร้องเรียน/คำขอบริการจากแขก ติดตามจนปิดงาน' },
+          { code: 'loyalty_rewards', name: 'Loyalty & Rewards', description: 'โปรแกรมสะสมแต้ม ระดับสมาชิก และแลกรางวัล' },
+          { code: 'nps_csat', name: 'NPS / CSAT', description: 'สำรวจความพึงพอใจแขก (NPS/CSAT) และวิเคราะห์คะแนน' },
+        ],
+      },
+      {
+        moduleCode: 'ACCOUNTING_MODULE',
+        category: 'ACCOUNTING',
+        icon: 'BookOpen',
+        features: [
+          { code: 'chart_of_accounts', name: 'ผังบัญชี', description: 'จัดการผังบัญชี (Chart of Accounts) ตามมาตรฐาน' },
+          { code: 'general_journal', name: 'สมุดรายวัน', description: 'บันทึกรายการบัญชีในสมุดรายวันทั่วไป (GL/Journal)' },
+          { code: 'ar_ap', name: 'AR / AP', description: 'ลูกหนี้ (AR) และเจ้าหนี้ (AP) ติดตามยอดค้างและกำหนดชำระ' },
+          { code: 'financial_statements', name: 'งบการเงิน', description: 'ออกงบการเงิน งบดุล งบกำไรขาดทุน และกระแสเงินสด' },
+          { code: 'night_audit', name: 'Night Audit', description: 'ปิดยอดประจำวัน ตรวจสอบรายได้และกระทบยอดอัตโนมัติ' },
+          { code: 'cost_accounting_usali', name: 'Cost Accounting (USALI)', description: 'บัญชีต้นทุนรายแผนกตามมาตรฐาน USALI พร้อม P&L รายแผนก' },
+        ],
+      },
+      {
+        moduleCode: 'CAMP_MODULE',
+        category: 'CAMP',
+        icon: 'Tent',
+        features: [
+          { code: 'camp_zone_management', name: 'จัดการลาน/โซน', description: 'จัดการลานกางเต็นท์ โซน และจุดกางเต็นท์' },
+          { code: 'camp_booking_map2d', name: 'จอง + แผนผัง 2D', description: 'รับจองจุดกางเต็นท์ผ่านผังแผนที่ 2D แบบเห็นภาพ' },
+          { code: 'camp_equipment_rental', name: 'อุปกรณ์ให้เช่า', description: 'จัดการอุปกรณ์แคมป์ปิ้งให้เช่า ติดตามสต็อกและการคืน' },
+          { code: 'camp_retail_pos', name: 'Retail POS หน้าลาน', description: 'ระบบขายหน้าลาน (ของกิน/ของใช้/ของที่ระลึก)' },
+          { code: 'camp_promptpay', name: 'PromptPay', description: 'รับชำระเงินผ่าน PromptPay QR หน้าลาน' },
+        ],
+      },
+    ];
+
+    let count = 0;
+    for (const group of moduleFeatureGroups) {
+      let displayOrder = 10;
+      for (const feature of group.features) {
+        await this.featuresService.upsertByCode({
+          code: feature.code,
+          name: feature.name,
+          description: feature.description,
+          type: FeatureType.TOGGLE,
+          category: group.category,
+          icon: group.icon,
+          displayOrder,
+          priceMonthly: 0,
+          isActive: true,
+          moduleCode: group.moduleCode,
+        });
+        displayOrder += 10;
+        count += 1;
       }
+      this.logger.log(
+        `  ✓ ${group.moduleCode} ← ${group.features.length} sub-features`,
+      );
+    }
+
+    this.logger.log(
+      `  ✅ Seeded ${count} module sub-features across ${moduleFeatureGroups.length} modules (moduleCode set)`,
+    );
+  }
+
+  /**
+   * 2️⃣B Seed Add-ons (Master catalog for the SaaS billing/upsell flows)
+   *
+   * Add-ons are billable items attached to a tenant's subscription. They live
+   * in their own `add_ons` table (separate from `features`) so the billing
+   * system can price/quote them independently.
+   *
+   * Catalog sources:
+   *   • 8 paid module add-ons (HR/POS/RESTAURANT/HOUSEKEEPING/CHANNEL_MANAGER/
+   *     LOYALTY/INVENTORY/COST_ACCOUNTING) — these mirror the feature codes
+   *     used by the AddonGate UI.
+   *   • 5 platform add-ons (OTA Booking, Automation, API Access, Extra
+   *     Analytics, Custom Branding) — these match what tenants see in the
+   *     subscription detail modal (see Mountain View Resort example).
+   */
+  private async seedAddOns(): Promise<void> {
+    this.logger.log('🔌 Seeding Add-ons (master catalog — sellable modules only)...');
+
+    /**
+     * Add-ons = โมดูลที่ขายเป็นแพ็กเกจ (sellable modules).
+     * แต่ละ add-on เป็น "module ใหญ่" ที่ลูกค้าซื้อทับบนแผนหลัก เช่น POS, HR
+     *
+     * Code style: UPPER_SNAKE_CASE (ตรงกับ AddonCode constants ที่ AddonGuard
+     *   ใช้ผ่าน `@RequireAddon('POS_MODULE')`)
+     * Categories: RESTAURANT, HR, HOUSEKEEPING, MAINTENANCE, INTEGRATION,
+     *   ADVANCED, REPORTING (7 หมวด — ไม่ทับ Features)
+     */
+    const addons = [
+      // ─── RESTAURANT (รวม POS + Kitchen) ────────────────────
+      {
+        code: 'RESTAURANT_MODULE',
+        name: 'Restaurant & F&B Module',
+        system: 'BOTH',
+        description:
+          'ระบบจัดการร้านอาหาร F&B ครบวงจร: Restaurant POS, Kitchen Display (KDS), จัดการโต๊ะ, จองโต๊ะ, จัดการเมนู และเชื่อม Folio แขก',
+        price: 990,
+        billingCycle: AddonBillingCycle.MONTHLY,
+        category: 'RESTAURANT',
+        icon: 'UtensilsCrossed',
+        displayOrder: 110,
+        minQuantity: 1,
+        maxQuantity: 1,
+        isActive: true,
+      },
+
+      // HOUSEKEEPING_MODULE / MAINTENANCE_MODULE ถูกถอดออกจาก catalog แล้ว
+      // งานแม่บ้านและงานแจ้งซ่อมเป็นความสามารถของ HR_MODULE ไม่ขายแยก
+      // (ลบแถวเดิมในฐานข้อมูลด้วย migration 20260826060000)
+
+      // ─── INVENTORY (รวม จัดซื้อ + คลัง + Retail POS) ───────
+      {
+        code: 'INVENTORY_MODULE',
+        name: 'Inventory Management',
+        system: 'BOTH',
+        description:
+          'ระบบคลังสินค้าครบวงจร: จัดซื้อ (PR/RFQ/PO), คลังสินค้า (Warehouse), Retail POS หน้าร้าน, คุมสต็อก นับสต็อก และแจ้งเตือนสต็อกต่ำ',
+        price: 990,
+        billingCycle: AddonBillingCycle.MONTHLY,
+        category: 'INVENTORY',
+        icon: 'Package',
+        displayOrder: 410,
+        minQuantity: 1,
+        maxQuantity: 1,
+        isActive: true,
+      },
+
+      // ─── HR ───────────────────────────────────────────────
+      {
+        code: 'HR_MODULE',
+        name: 'HR Module',
+        system: 'BOTH',
+        description:
+          'ระบบ HR ครบวงจร: จัดการพนักงาน เงินเดือน การลา KPI เอกสารราชการ รวมถึงงานแม่บ้านและใบแจ้งซ่อม',
+        price: 1200,
+        billingCycle: AddonBillingCycle.MONTHLY,
+        category: 'HR',
+        icon: 'Briefcase',
+        displayOrder: 510,
+        minQuantity: 1,
+        maxQuantity: 1,
+        isActive: true,
+      },
+
+      // ─── CRM (รวม Loyalty) ────────────────────────────────
+      {
+        code: 'CRM_MODULE',
+        name: 'CRM & Guest 360',
+        system: 'BOTH',
+        description:
+          'ระบบ CRM ครบวงจร: Guest 360, Campaign, Sales Pipeline, Service Desk, Loyalty & Rewards (สะสมแต้ม) และ NPS/CSAT',
+        price: 890,
+        billingCycle: AddonBillingCycle.MONTHLY,
+        category: 'CRM',
+        icon: 'Users',
+        displayOrder: 610,
+        minQuantity: 1,
+        maxQuantity: 1,
+        isActive: true,
+      },
+
+      // ─── WEBSITE BUILDER (เว็บไซต์โรงแรม) ─────────────────
+      // ราคาชั่วคราว (MVP เว็บ + รับคำขอจอง ~490–590) — รอสรุป pricing source of truth
+      {
+        code: 'WEBSITE_BUILDER',
+        name: 'เว็บไซต์ + จองออนไลน์ (Website Builder)',
+        // ใช้ได้ทั้งสองสายธุรกิจ: โรงแรม (จองห้อง) และลานกางเต็นท์ (จองจุดกางเต็นท์)
+        system: 'BOTH',
+        description:
+          'สร้างเว็บไซต์ของโรงแรม/ลานกางเต็นท์เองที่ <ชื่อ>.staysync.io: เลือกเทมเพลต ห้องพักหรือโซนลานพร้อมราคาดึงจากระบบอัตโนมัติ แกลเลอรี โปรโมชัน แผนที่ ลูกค้าจองและโอน PromptPay ได้เองบนเว็บ พร้อมฟอร์มติดต่อที่เด้งเข้ากล่องคำขอ (ช่วงทดลองใช้แก้และดูตัวอย่างได้ เปิดเว็บสาธารณะหลังชำระเงิน)',
+        price: 590,
+        billingCycle: AddonBillingCycle.MONTHLY,
+        category: 'MARKETING',
+        icon: 'Globe',
+        displayOrder: 620,
+        minQuantity: 1,
+        maxQuantity: 1,
+        isActive: true,
+      },
+
+      // ─── ACCOUNTING (รวม Cost Accounting USALI) ────────────
+      {
+        code: 'ACCOUNTING_MODULE',
+        name: 'Accounting Module',
+        system: 'BOTH',
+        description:
+          'ระบบบัญชีครบวงจร: ผังบัญชี, สมุดรายวัน, AR/AP, Night Audit, งบการเงิน, สินทรัพย์ถาวร, ภาษี และ Cost Accounting (USALI) ต้นทุนรายแผนก P&L',
+        price: 1990,
+        billingCycle: AddonBillingCycle.MONTHLY,
+        category: 'ACCOUNTING',
+        icon: 'BookOpen',
+        displayOrder: 710,
+        minQuantity: 1,
+        maxQuantity: 1,
+        isActive: true,
+      },
+
+      // ─── CAMP (ลานกางเต็นท์) ────────────────────────────────
+      // system: 'CAMP' — โมดูลนี้เป็นของ product line ลานกางเต็นท์ล้วน ไม่ใช่
+      // add-on ที่แผนโรงแรมซื้อเสริมได้ ค่านี้คือสิ่งที่ทำให้ CAMP_MODULE หายไป
+      // จาก /addons/public?system=HOTEL และจากตัวเลือก add-on ของแผนโรงแรม
+      {
+        code: 'CAMP_MODULE',
+        name: 'Campground Module',
+        system: 'CAMP',
+        description:
+          'ระบบจัดการลานกางเต็นท์ครบวงจร: จัดการลาน โซน จุดกางเต็นท์ ผังแผนที่ 2D อุปกรณ์ให้เช่า และการจอง — รวมอยู่ในแผนลานกางเต็นท์ (CAMP) โดยอัตโนมัติ',
+        price: 590,
+        billingCycle: AddonBillingCycle.MONTHLY,
+        category: 'CAMP',
+        icon: 'Tent',
+        displayOrder: 810,
+        minQuantity: 1,
+        maxQuantity: 1,
+        isActive: true,
+      },
+      // ขายแยกบนแผนลานกางเต็นท์ — สิทธิ์มาทาง subscription_features → features(CAMP_3D_MAP)
+      // โควตา AI ร่างฉากอยู่ที่ addon_quota_configs (ดู seedAddonUsageQuotas)
+      {
+        code: 'CAMP_3D_MAP',
+        name: 'แผนที่ลาน 3D (Campground 3D Map)',
+        system: 'CAMP',
+        description:
+          'แผนผังลานกางเต็นท์แบบ 3D หมุน/ซูมได้ ผูกกับโซนและจุดกางเต็นท์จริง เห็นสถานะว่าง/จองในแผนที่ พร้อม AI ร่างฉากจากรูปแผนผังที่อัปโหลด (มีโควตาต่อเดือน ใช้เกินคิดเป็นครั้ง)',
+        price: 790,
+        billingCycle: AddonBillingCycle.MONTHLY,
+        category: 'CAMP',
+        icon: 'Box',
+        displayOrder: 820,
+        minQuantity: 1,
+        maxQuantity: 1,
+        isActive: true,
+      },
+    ];
+
+    // Add-on codes ที่เลิกขายแล้ว (placeholder ยังไม่มีของจริง หรือถูกยุบเป็น
+    // feature ใต้ module อื่น) — deactivate ใน DB เพื่อไม่ให้โผล่ใน catalog อีก
+    //   • OTA/Channel Manager : ระบบ OTA ยังไม่พร้อม
+    //   • Extra Analytics/Automation/Custom Branding : placeholder
+    //   • POS → Restaurant, Loyalty → CRM, Cost Accounting → Accounting (fold)
+    const RETIRED_ADDON_CODES = [
+      'OTA_INTEGRATION',
+      'CHANNEL_MANAGER',
+      'EXTRA_ANALYTICS',
+      'AUTOMATION_MODULE',
+      'CUSTOM_BRANDING',
+      'POS_MODULE',
+      'LOYALTY_MODULE',
+      'COST_ACCOUNTING_MODULE',
+    ];
+    const addOnsClientForRetire = (
+      this.prisma as unknown as {
+        add_ons: { updateMany: (a: Record<string, unknown>) => Promise<{ count: number }> };
+      }
+    ).add_ons;
+    const retired = await addOnsClientForRetire.updateMany({
+      where: { code: { in: RETIRED_ADDON_CODES } },
+      data: { is_active: 0 },
+    });
+    this.logger.log(`  ⊘ Deactivated ${retired.count} retired add-on(s)`);
+
+    for (const addonData of addons) {
+      // Flag Sub-System (Terminal) add-ons + attach their card metadata so the
+      // Sub Systems page can be rendered data-driven from the add-on catalog.
+      const subSystemMeta = SUB_SYSTEM_ADDON_META[addonData.code];
+      if (subSystemMeta) {
+        (addonData as typeof addonData & { isSubSystem?: boolean }).isSubSystem = true;
+        (addonData as typeof addonData & { subSystemMeta?: unknown }).subSystemMeta = subSystemMeta;
+      }
+      await this.addonService.upsertByCode(addonData);
+      this.logger.log(
+        `  ✓ Upserted add-on: ${addonData.code} [${addonData.category}]` +
+          (subSystemMeta ? ' [sub-system]' : '') +
+          ` (฿${addonData.price}/${addonData.billingCycle})`,
+      );
+    }
+
+    this.logger.log(`  ✅ Seeded ${addons.length} sellable module add-ons (HOTEL/CAMP)`);
+  }
+
+  /**
+   * 2️⃣B′ Usage metric + โควตาของ add-on ที่คิดตามจำนวนครั้ง (CAMP_3D_MAP)
+   *
+   * ราคาส่วนเกินเก็บที่ addon_quota_configs ที่เดียว — usage_metric_definitions
+   * ตั้ง overage_unit_price = 0 ไว้ ไม่ให้ OverageBillingService คิดซ้ำทางแผน
+   * update ไม่ทับค่าที่แอดมินแก้ไว้แล้ว (seed ซ้ำบน production ได้)
+   */
+  private async seedAddonUsageQuotas(): Promise<void> {
+    this.logger.log('📏 Seeding add-on usage metrics + quotas...');
+    const metricCode = 'CAMP_3D_AI_EXTRACT';
+
+    await this.prisma.usage_metric_definitions.upsert({
+      where: { code: metricCode },
+      update: { name: 'AI ร่างฉาก 3D', unit: 'count', is_active: 1 },
+      create: {
+        code: metricCode,
+        name: 'AI ร่างฉาก 3D',
+        description: 'จำนวนครั้งที่ลูกค้าใช้ AI ร่างฉาก 3D จากรูปแผนผังลาน (add-on CAMP_3D_MAP)',
+        unit: 'count',
+        aggregation: 'sum_per_period',
+        overage_unit_price: 0,
+        is_active: 1,
+      },
+    });
+
+    await this.prisma.addonQuotaConfig.upsert({
+      where: { addonCode: 'CAMP_3D_MAP' },
+      update: { metricCode },
+      create: {
+        addonCode: 'CAMP_3D_MAP',
+        metricCode,
+        includedPerPeriod: 3,
+        overageUnitPriceThb: 79,
+        maxOveragePerPeriod: 20,
+        trialDays: 14,
+        trialIncluded: 1,
+        rateLimitPerMinute: 5,
+        refundOnFailure: true,
+      },
+    });
+
+    this.logger.log(`  ✓ CAMP_3D_MAP ↔ ${metricCode}`);
+  }
+
+  /**
+   * 3️⃣ Seed Plan Features (toggle/limit features bundled with each plan)
+   *
+   * Modules ที่เป็น sellable add-on (HR, POS, Restaurant, …) ไม่ได้ผูกผ่าน
+   * plan_features — ใช้ plan_addons แทน (ดู seedPlanAddons ด้านล่าง)
+   */
+  private async seedPlanFeatures(): Promise<void> {
+    this.logger.log('🔗 Seeding Plan Features (toggle/limit bundling)...');
+
+    const planFree = await this.plansService.findByCode('FREE');
+    const planS = await this.plansService.findByCode('S');
+    const planM = await this.plansService.findByCode('M');
+    const planL = await this.plansService.findByCode('L');
+    const planCampFree = await this.plansService.findByCode('CAMP_FREE');
+    const planCamp = await this.plansService.findByCode('CAMP');
+    const planCampPlus = await this.plansService.findByCode('CAMP_PLUS');
+
+    const basicReport = await this.featuresService.findByCode('basic_report');
+    const taxInvoice = await this.featuresService.findByCode('tax_invoice');
+    const advancedReport = await this.featuresService.findByCode('advanced_report');
+    const auditLog = await this.featuresService.findByCode('audit_log');
+    const dailyManagerReport = await this.featuresService.findByCode('daily_manager_report');
+    const apiAccess = await this.featuresService.findByCode('api_access');
+    const multiProperty = await this.featuresService.findByCode('multi_property');
+
+    // Plan FREE — ลองใช้ฟรี: basic report
+    await this.assignPlanFeatures(planFree?.id, [basicReport]);
+
+    // Plan S — basic + tax invoice
+    await this.assignPlanFeatures(planS?.id, [basicReport, taxInvoice]);
+
+    // Plan M — basic + tax + advanced + audit log
+    await this.assignPlanFeatures(planM?.id, [basicReport, taxInvoice, advancedReport, auditLog]);
+
+    // Plan L (Business) — ทุก toggle/limit features (รวม multi-property + audit + API)
+    await this.assignPlanFeatures(planL?.id, [
+      basicReport,
+      taxInvoice,
+      advancedReport,
+      auditLog,
+      dailyManagerReport,
+      apiAccess,
+      multiProperty,
+    ]);
+
+    // ── ลานกางเต็นท์ ────────────────────────────────────────
+    // CAMP_FREE — ทดลอง: basic + advanced report
+    await this.assignPlanFeatures(planCampFree?.id, [basicReport, advancedReport]);
+    // CAMP ฿199 — basic report (แชท FB/LINE ขายแยก ไม่รวมในแพ็ก)
+    await this.assignPlanFeatures(planCamp?.id, [basicReport]);
+    // CAMP_PLUS ฿1,290 — รายงานเชิงลึก + audit log + หลายลาน
+    await this.assignPlanFeatures(planCampPlus?.id, [
+      basicReport,
+      advancedReport,
+      auditLog,
+      dailyManagerReport,
+      multiProperty,
+    ]);
+  }
+
+  private async assignPlanFeatures(
+    planId: string | undefined,
+    features: Array<{ id: string; code?: string } | null | undefined>,
+  ): Promise<void> {
+    if (!planId) return;
+    const existing = await this.planFeaturesService.findByPlanId(planId);
+    const existingFeatureIds = new Set(existing.map((pf: any) => pf.featureId ?? pf.feature_id));
+
+    for (const feature of features) {
+      if (!feature) continue;
+      if (existingFeatureIds.has(feature.id)) continue;
+      await this.planFeaturesService.create({ planId, featureId: feature.id });
+      this.logger.log(`  ✓ plan_features: ${planId} ← ${feature.code ?? feature.id}`);
     }
   }
 
   /**
-   * 3️⃣ Seed Plan Features (ฟีเจอร์ที่แถมมากับ plan)
+   * 3️⃣B Seed Plan Add-ons (sellable modules bundled with each plan)
+   *
+   * Bundles modules from `add_ons` into specific plans via the `plan_addons`
+   * join table. Tenants on those plans get module entitlement automatically
+   * — see AddonService.getActiveAddons() which unions plan_features +
+   * plan_addons + subscription_features.
    */
-  private async seedPlanFeatures(): Promise<void> {
-    this.logger.log('🔗 Seeding Plan Features...');
+  private async seedPlanAddons(): Promise<void> {
+    this.logger.log('🧩 Seeding Plan Add-ons (sellable modules per plan)...');
 
+    const planFree = await this.plansService.findByCode('FREE');
     const planS = await this.plansService.findByCode('S');
     const planM = await this.plansService.findByCode('M');
     const planL = await this.plansService.findByCode('L');
+    const planCampFree = await this.plansService.findByCode('CAMP_FREE');
+    const planCamp = await this.plansService.findByCode('CAMP');
+    const planCampPlus = await this.plansService.findByCode('CAMP_PLUS');
 
-    const basicReport = await this.featuresService.findByCode('basic_report');
-    const housekeeping = await this.featuresService.findByCode('housekeeping');
-
-    // Plan S - แถม Basic Report
-    if (planS && basicReport) {
-      const existing = await this.planFeaturesService.findByPlanId(planS.id);
-      if (existing.length === 0) {
-        await this.planFeaturesService.create({
-          planId: planS.id,
-          featureId: basicReport.id,
-        });
-        this.logger.log(`  ✓ Added basic_report to Plan S`);
+    // Resolve add-ons by code through Prisma since AddonService.findByCode
+    // does not exist; the catalog was just upserted in seedAddOns.
+    const addOnsClient = (
+      this.prisma as unknown as {
+        add_ons: { findUnique: (a: Record<string, unknown>) => Promise<any | null> };
       }
+    ).add_ons;
+    const findAddon = async (code: string) => addOnsClient.findUnique({ where: { code } });
+
+    // 5 sellable modules (POS/Loyalty/USALI ยุบเข้า Restaurant/CRM/Accounting,
+    //  Housekeeping/Maintenance ยุบเข้า HR)
+    const restaurantModule = await findAddon('RESTAURANT_MODULE');
+    const hrModule = await findAddon('HR_MODULE');
+    const inventoryModule = await findAddon('INVENTORY_MODULE');
+    const accountingModule = await findAddon('ACCOUNTING_MODULE');
+    const crmModule = await findAddon('CRM_MODULE');
+    const campModule = await findAddon('CAMP_MODULE');
+    const websiteBuilder = await findAddon('WEBSITE_BUILDER');
+
+    const allHotelModules = [
+      restaurantModule,
+      hrModule,
+      inventoryModule,
+      accountingModule,
+      crmModule,
+    ];
+    // โมดูลที่ใช้กับลานได้ (ไม่รวม Housekeeping ซึ่งเป็นของโรงแรมล้วน)
+    const campApplicableModules = [
+      restaurantModule,
+      hrModule,
+      inventoryModule,
+      accountingModule,
+      crmModule,
+    ];
+
+    // ── โรงแรม ──────────────────────────────────────────────
+    // แผนโรงแรมไม่มี CAMP_MODULE ทุกระดับ — ลานกางเต็นท์เป็นคนละ product line
+    // ขายแยกด้วยแผน CAMP ของตัวเอง ไม่ใช่ add-on ที่แถมหรือซื้อเสริมบนแผนโรงแรม
+    // ("ฟีเจอร์ครบทุกระบบ" ของแผน FREE หมายถึงครบทุกระบบ *ของโรงแรม*)
+    await this.assignPlanAddons(planFree?.id, allHotelModules);
+
+    // Starter — ไม่มี module add-on แถม (เดิมแถม Housekeeping ซึ่งยุบเข้า HR แล้ว)
+    // ยังไม่ผูก HR ให้แทน เพราะเป็นการตัดสินใจเรื่องราคา ไม่ใช่การย้ายโมดูล
+
+    // Professional — Restaurant (POS+Kitchen) + CRM (รวม Loyalty)
+    // งานแม่บ้าน/แจ้งซ่อมไม่อยู่ในนี้แล้ว — เป็นความสามารถของ HR_MODULE
+    await this.assignPlanAddons(planM?.id, [restaurantModule, crmModule]);
+
+    // Business — ครบทุก module ของโรงแรม (รวม Inventory + HR + Accounting/USALI)
+    await this.assignPlanAddons(planL?.id, allHotelModules);
+
+    // ── ลานกางเต็นท์ ────────────────────────────────────────
+    // แผนลานแบ่งเป็น 3 ระดับ: ฟรี / Camp ฿199 / Camp Plus ฿1,290
+    // ฟรีกับ ฿199 ได้เฉพาะแกนหลักของลาน (Campground + Restaurant/F&B)
+    // ส่วนโมดูลหลังบ้านที่เหลือ + เว็บไซต์จองลาน เป็นจุดขายของ Camp Plus
+    // (แผน ฿199 ซื้อเว็บไซต์แยกได้ ฿590/เดือน)
+    const campCoreModules = [campModule, restaurantModule];
+
+    // ทดลองใช้ได้เว็บไซต์ด้วย — ออกแบบ/ดูตัวอย่างได้ แต่เผยแพร่ไม่ได้จนกว่าจะชำระเงิน
+    // (WebsiteEntitlementService บล็อก subscription สถานะ trial กัน spam ใต้โดเมนเรา)
+    await this.syncPlanAddons(planCampFree?.id, [...campCoreModules, websiteBuilder]);
+    await this.syncPlanAddons(planCamp?.id, campCoreModules);
+
+    // CAMP_PLUS — ทุก module ที่ใช้กับลานได้ + เว็บไซต์จองลาน
+    await this.syncPlanAddons(planCampPlus?.id, [
+      campModule,
+      ...campApplicableModules,
+      websiteBuilder,
+    ]);
+
+    await this.pruneCrossSystemPlanAddons();
+  }
+
+  /**
+   * `assignPlanAddons` only ever inserts, so a DB seeded before Campground was
+   * split out still carries `plan_addons` rows tying CAMP_MODULE to the hotel
+   * FREE/Business plans — the tenants in those plans would keep the entitlement
+   * forever. Drop every row whose add-on belongs to a different product line
+   * than its plan, which both cleans up that legacy bundling and enforces the
+   * invariant on any future mis-assignment.
+   */
+  private async pruneCrossSystemPlanAddons(): Promise<void> {
+    const rows = (await (this.prisma as unknown as { plan_addons: any }).plan_addons.findMany({
+      include: { plans: { select: { code: true, system: true } }, add_ons: { select: { code: true, system: true } } },
+    })) as Array<{
+      plan_id: string;
+      addon_id: string;
+      plans?: { code: string; system: string } | null;
+      add_ons?: { code: string; system: string } | null;
+    }>;
+
+    const stale = rows.filter(
+      (row) =>
+        row.plans &&
+        row.add_ons &&
+        !isAddonAvailableForSystem(row.add_ons.system, row.plans.system),
+    );
+
+    for (const row of stale) {
+      await (this.prisma as unknown as { plan_addons: any }).plan_addons.deleteMany({
+        where: { plan_id: row.plan_id, addon_id: row.addon_id },
+      });
+      this.logger.log(
+        `  ⊘ plan_addons: removed ${row.add_ons?.code} (${row.add_ons?.system}) from plan ` +
+          `${row.plans?.code} (${row.plans?.system}) — cross product line`,
+      );
     }
 
-    // Plan M - แถม Basic Report + Housekeeping
-    if (planM && basicReport && housekeeping) {
-      const existing = await this.planFeaturesService.findByPlanId(planM.id);
-      if (existing.length === 0) {
-        await this.planFeaturesService.create({
-          planId: planM.id,
-          featureId: basicReport.id,
-        });
-        await this.planFeaturesService.create({
-          planId: planM.id,
-          featureId: housekeeping.id,
-        });
-        this.logger.log(`  ✓ Added basic_report + housekeeping to Plan M`);
-      }
+    if (stale.length === 0) {
+      this.logger.log('  ✓ plan_addons: no cross-product-line bundling found');
     }
+  }
 
-    // Plan L - แถม Basic Report + Housekeeping + Advanced Report
-    if (planL && basicReport && housekeeping) {
-      const existing = await this.planFeaturesService.findByPlanId(planL.id);
-      if (existing.length === 0) {
-        const advancedReport = await this.featuresService.findByCode('advanced_report');
+  private async assignPlanAddons(
+    planId: string | undefined,
+    addons: Array<{ id: string; code?: string } | null>,
+  ): Promise<void> {
+    if (!planId) return;
 
-        await this.planFeaturesService.create({
-          planId: planL.id,
-          featureId: basicReport.id,
-        });
-        await this.planFeaturesService.create({
-          planId: planL.id,
-          featureId: housekeeping.id,
-        });
-        if (advancedReport) {
-          await this.planFeaturesService.create({
-            planId: planL.id,
-            featureId: advancedReport.id,
-          });
-        }
-        this.logger.log(`  ✓ Added basic_report + housekeeping + advanced_report to Plan L`);
+    const planAddonsClient = (
+      this.prisma as unknown as {
+        plan_addons: {
+          findUnique: (a: Record<string, unknown>) => Promise<any | null>;
+          create: (a: Record<string, unknown>) => Promise<any>;
+        };
       }
+    ).plan_addons;
+
+    for (const addon of addons) {
+      if (!addon) continue;
+      const existing = await planAddonsClient.findUnique({
+        where: { plan_id_addon_id: { plan_id: planId, addon_id: addon.id } },
+      });
+      if (existing) continue;
+      await planAddonsClient.create({
+        data: { plan_id: planId, addon_id: addon.id },
+      });
+      this.logger.log(`  ✓ plan_addons: ${planId} ← ${addon.code ?? addon.id}`);
+    }
+  }
+
+  /**
+   * `assignPlanAddons` only inserts, so trimming a plan's bundle in the seeder
+   * would leave the removed rows behind on any database seeded earlier — the
+   * tenants on that plan keep the entitlement forever. Use this instead when a
+   * plan's add-on list is authoritative: it inserts what's missing and deletes
+   * whatever the plan carries beyond `addons`.
+   */
+  private async syncPlanAddons(
+    planId: string | undefined,
+    addons: Array<{ id: string; code?: string } | null>,
+  ): Promise<void> {
+    if (!planId) return;
+
+    await this.assignPlanAddons(planId, addons);
+
+    const keepIds = addons.filter(Boolean).map((addon) => (addon as { id: string }).id);
+    const planAddonsClient = (this.prisma as unknown as { plan_addons: any }).plan_addons;
+    const removed = await planAddonsClient.deleteMany({
+      where: { plan_id: planId, addon_id: { notIn: keepIds } },
+    });
+    if (removed?.count) {
+      this.logger.log(`  ✂ plan_addons: ${planId} → removed ${removed.count} stale add-on(s)`);
+      // Entitlements are cached per tenant for 5 minutes — without this, tenants
+      // on this plan keep passing the gate for add-ons they just lost.
+      await this.addonService.invalidateAddonCacheForPlan(planId);
     }
   }
 
@@ -446,44 +1252,74 @@ export class SeederService {
   private async seedAdmins(): Promise<void> {
     this.logger.log('👤 Seeding Admins...');
 
+    // menuAccess = รายการ href ของเมนูใน Admin Panel ที่ admin คนนั้นเข้าถึงได้
+    // ต้องตรงกับ href ใน frontend: lib/constants/adminMenu.ts
+    // ค่า [] (ว่าง) = เข้าถึงได้ทุกเมนู (full access)
+    const FINANCE_MENUS = [
+      '/admin',
+      '/admin/analytics',
+      '/admin/subscriptions',
+      '/admin/invoices',
+      '/admin/invoice-settings',
+      '/admin/payment-approvals',
+      '/admin/refunds',
+      '/admin/dunning',
+      '/admin/coupons',
+      '/admin/bank-accounts',
+      '/admin/operating-costs',
+      '/admin/operating-costs/budgets',
+      '/admin/operating-costs/categories',
+      '/admin/operating-costs/vendors',
+      '/admin/operating-costs/campaigns',
+    ];
+    const SUPPORT_MENUS = [
+      '/admin',
+      '/admin/hotels',
+      '/admin/users',
+      '/admin/audit-logs',
+      '/admin/email-templates',
+    ];
+
     const admins = [
       {
-        id: uuidv4(),
         firstName: 'Super',
         lastName: 'Admin',
         email: 'admin@hotelservices.com',
         role: 'platform_admin',
         password: 'Admin@123',
+        menuAccess: [] as string[], // full access
       },
       {
-        id: uuidv4(),
         firstName: 'Finance',
         lastName: 'Admin',
         email: 'finance@hotelservices.com',
         role: 'platform_admin',
         password: 'Finance@123',
+        menuAccess: FINANCE_MENUS,
       },
       {
-        id: uuidv4(),
         firstName: 'Support',
         lastName: 'Admin',
         email: 'support@hotelservices.com',
         role: 'platform_admin',
         password: 'Support@123',
+        menuAccess: SUPPORT_MENUS,
       },
     ];
 
     for (const adminData of admins) {
+      // create()/update() ของ AdminsService จะ hash password ให้เอง → ส่ง plaintext
       const existing = await this.adminsService.findByEmail(adminData.email);
+      const accessLabel =
+        adminData.menuAccess.length === 0 ? 'full access' : `${adminData.menuAccess.length} menus`;
+
       if (!existing) {
-        const hashedPassword = await bcrypt.hash(adminData.password, 10);
-        await this.adminsService.create({
-          ...adminData,
-          password: hashedPassword,
-        });
-        this.logger.log(`  ✓ Created admin: ${adminData.email} (${adminData.role})`);
+        await this.adminsService.create(adminData);
+        this.logger.log(`  ✓ Created admin: ${adminData.email} (${accessLabel})`);
       } else {
-        this.logger.log(`  ⊙ Admin already exists: ${adminData.email}`);
+        // อัพเดทฟิลด์ต่างๆ ของ admin เดิม (ชื่อ, role, menuAccess) + reset password
+        await this.adminsService.update(existing.id, adminData);
+        this.logger.log(`  ↻ Updated admin: ${adminData.email} (${accessLabel})`);
       }
     }
   }
@@ -509,41 +1345,24 @@ export class SeederService {
     const planS = await this.plansService.findByCode('S');
     const planM = await this.plansService.findByCode('M');
     const planL = await this.plansService.findByCode('L');
+    const planCampPlus = await this.plansService.findByCode('CAMP_PLUS');
 
     if (!planS || !planM || !planL) {
       this.logger.warn('  ⚠️ Plans not found, skipping Admin Panel test data');
       return;
     }
 
-    // Get features for add-ons
-    const extraAnalytics = await this.featuresService.findByCode('extra_analytics');
-    const customBranding = await this.featuresService.findByCode('custom_branding');
-    const otaBooking = await this.featuresService.findByCode('ota_booking');
-    const automation = await this.featuresService.findByCode('automation');
+    // Lookup the toggle/limit features that test hotels can be charged extra
+    // for via subscription_features. Module entitlements (HR, POS, …) are
+    // delivered through plan_addons (see seedPlanAddons), so we don't fetch
+    // them here.
     const apiAccess = await this.featuresService.findByCode('api_access');
     const taxInvoice = await this.featuresService.findByCode('tax_invoice');
     const extraUser = await this.featuresService.findByCode('extra_user');
     const advancedReport = await this.featuresService.findByCode('advanced_report');
-    const housekeeping = await this.featuresService.findByCode('housekeeping');
-    const hrModule = await this.featuresService.findByCode('HR_MODULE');
-    const restaurantModule = await this.featuresService.findByCode('RESTAURANT_MODULE');
-    const posModule = await this.featuresService.findByCode('POS_MODULE');
-    const inventoryModule = await this.featuresService.findByCode('INVENTORY_MODULE');
-    const costAccountingModule = await this.featuresService.findByCode('COST_ACCOUNTING_MODULE');
-
-    // ข้อมูลโรงแรมตาม UI Screenshot
-    const allFeatures = [
-      { feature: extraAnalytics, price: 990 },
-      { feature: customBranding, price: 1490 },
-      { feature: otaBooking, price: 990 },
-      { feature: automation, price: 990 },
-      { feature: apiAccess, price: 1990 },
-      { feature: taxInvoice, price: 500 },
-      { feature: extraUser, price: 200 },
-      { feature: advancedReport, price: 500 },
-      { feature: housekeeping, price: 500 },
-      { feature: hrModule, price: 1200 },
-    ];
+    const auditLog = await this.featuresService.findByCode('audit_log');
+    const dailyManagerReport = await this.featuresService.findByCode('daily_manager_report');
+    const websiteBuilder = await this.featuresService.findByCode('WEBSITE_BUILDER');
 
     // Dynamic dates based on current date — subscriptions always valid when seeding
     const now = new Date();
@@ -554,10 +1373,18 @@ export class SeederService {
     const activeEnd = new Date(now);
     activeEnd.setMonth(activeEnd.getMonth() + 1);
 
-    // TRIAL: started today, expires in 14 days
+    // VIP (premium.test): annual plan that keeps the dashboard clear of the
+    // 30-day-renewal Trial banner so QA can exercise full Enterprise UX.
+    // Started 1 month ago, renews 1 YEAR from now.
+    const vipStart = new Date(now);
+    vipStart.setMonth(vipStart.getMonth() - 1);
+    const vipEnd = new Date(now);
+    vipEnd.setFullYear(vipEnd.getFullYear() + 1);
+
+    // TRIAL: started today, expires in 15 days (StaySync trial = 15 วัน)
     const trialStart = new Date(now);
     const trialEnd = new Date(now);
-    trialEnd.setDate(trialEnd.getDate() + 14);
+    trialEnd.setDate(trialEnd.getDate() + 15);
 
     // PENDING: starts today, cycle ends in 1 month
     const pendingStart = new Date(now);
@@ -588,14 +1415,19 @@ export class SeederService {
           firstName: 'Somchai',
           lastName: 'Jaidee',
         },
+        // Tenant-level extras (subscription_features). Module add-ons are
+        // delivered through the plan itself via seedPlanAddons.
         addons: [
-          { feature: extraAnalytics, price: 990 },
-          { feature: customBranding, price: 1490 },
+          { feature: taxInvoice, price: 500 },
+          { feature: advancedReport, price: 500 },
         ],
         invoices: [{ amount: 7470, status: InvoiceStatus.PAID, daysAgo: 0 }],
       },
       {
-        // SUB-002: Mountain View Resort - Enterprise + ALL add-ons
+        // SUB-002: Mountain View Resort - Enterprise + ALL add-ons (VIP test account)
+        // Uses vipStart/vipEnd (annual term) so the dashboard never shows the
+        // "Trial / renewal in N days" banner — premium.test@email.com must demo
+        // a fully-paid VIP experience.
         code: 'SUB-002',
         slug: 'mountain',
         name: 'Mountain View Resort (Premium Test)',
@@ -606,8 +1438,8 @@ export class SeederService {
         plan: planL,
         previousPlan: null,
         subscriptionStatus: SubscriptionStatus.ACTIVE,
-        startDate: activeStart.toISOString().split('T')[0],
-        endDate: activeEnd.toISOString().split('T')[0],
+        startDate: vipStart.toISOString().split('T')[0],
+        endDate: vipEnd.toISOString().split('T')[0],
         email: 'info.mountain@hotel.test',
         phone: '053-123-456',
         address: '456 Mountain Rd, Chiang Mai',
@@ -616,21 +1448,18 @@ export class SeederService {
           firstName: 'Premium',
           lastName: 'Tester',
         },
+        // Tenant-level extras (subscription_features). Mountain View tests
+        // the "all toggles on" path — modules are wired through plan_addons
+        // for plan L (see seedPlanAddons), so they don't appear here.
         addons: [
-          { feature: otaBooking, price: 990 },
-          { feature: automation, price: 990 },
-          { feature: apiAccess, price: 1990 },
-          { feature: extraAnalytics, price: 990 },
-          { feature: customBranding, price: 1490 },
+          { feature: apiAccess, price: 1500 },
           { feature: extraUser, price: 200 },
           { feature: taxInvoice, price: 500 },
           { feature: advancedReport, price: 500 },
-          { feature: housekeeping, price: 500 },
-          { feature: hrModule, price: 1200 },
-          { feature: restaurantModule, price: 990 },
-          { feature: posModule, price: 790 },
-          { feature: inventoryModule, price: 990 },
-          { feature: costAccountingModule, price: 1490 },
+          { feature: auditLog, price: 290 },
+          { feature: dailyManagerReport, price: 290 },
+          // ซื้อแยก (ไม่อยู่ในแพลน L) — ให้ demo สร้าง/เผยแพร่เว็บโรงแรมได้ครบวงจร
+          { feature: websiteBuilder, price: 590 },
         ],
         invoices: [{ amount: 23200, status: InvoiceStatus.PAID, daysAgo: 0 }],
       },
@@ -684,6 +1513,42 @@ export class SeederService {
         addons: [],
         invoices: [{ amount: 4990, status: InvoiceStatus.PENDING, daysAgo: 0 }],
       },
+      // SUB-005: Pine Valley Camp — คู่แฝดของ premium.test ฝั่งลานกางเต็นท์
+      // แพ็กใหญ่สุด (CAMP_PLUS: ทุกโมดูล + เว็บไซต์จองลาน) แบบรายปี ไม่มีแบนเนอร์ทดลองใช้
+      // ข้อมูลลาน/โซน/จุดกาง/การจอง/เว็บ มาจาก CampPremiumSeeder
+      ...(planCampPlus
+        ? [
+            {
+              code: 'SUB-005',
+              slug: 'pinevalley',
+              name: CAMP_PREMIUM_TENANT_NAME,
+              nameEn: 'Pine Valley Camp',
+              customerName: 'Pine Valley Outdoor Co., Ltd.',
+              roomCount: 0,
+              propertyType: 'campground',
+              status: TenantStatus.ACTIVE,
+              plan: planCampPlus,
+              previousPlan: null,
+              subscriptionStatus: SubscriptionStatus.ACTIVE,
+              startDate: vipStart.toISOString().split('T')[0],
+              endDate: vipEnd.toISOString().split('T')[0],
+              email: 'info.pinevalley@camp.test',
+              phone: '044-123-456',
+              address: '88 หมู่ 5 ต.หมูสี อ.ปากช่อง จ.นครราชสีมา',
+              owner: {
+                email: 'premium.camp@email.com',
+                firstName: 'Premium',
+                lastName: 'Camper',
+              },
+              addons: [
+                { feature: taxInvoice, price: 500 },
+                { feature: advancedReport, price: 500 },
+                { feature: auditLog, price: 290 },
+              ],
+              invoices: [{ amount: 13158, status: InvoiceStatus.PAID, daysAgo: 0 }],
+            },
+          ]
+        : []),
     ];
 
     let invoiceCounter = 1;
@@ -702,7 +1567,7 @@ export class SeederService {
         // สร้าง tenant
         const trialEndsAt = new Date();
         if (hotelData.status === TenantStatus.TRIAL) {
-          trialEndsAt.setDate(trialEndsAt.getDate() + 14);
+          trialEndsAt.setDate(trialEndsAt.getDate() + 15);
         } else {
           trialEndsAt.setDate(trialEndsAt.getDate() - 30);
         }
@@ -710,6 +1575,7 @@ export class SeederService {
         const tenant = await this.tenantsService.create({
           name: hotelData.name,
           nameEn: hotelData.nameEn,
+          propertyType: hotelData.propertyType,
           customerName: hotelData.customerName,
           email: hotelData.email,
           phone: hotelData.phone,
@@ -752,7 +1618,8 @@ export class SeederService {
 
         // ... (owner creation script remains same)
         const ownerData = hotelData.owner;
-        const hashedPassword = await bcrypt.hash('password123', 10);
+        const seedPassword = process.env.SEED_DEFAULT_PASSWORD || 'SeedDev@2026!';
+        const hashedPassword = await bcrypt.hash(seedPassword, 10);
 
         try {
           const existingOwner = await this.prisma.user.findUnique({
@@ -852,14 +1719,19 @@ export class SeederService {
           const dueDate = new Date(createdDate);
           dueDate.setDate(dueDate.getDate() + 15);
 
-          const invoice = await this.invoicesService.create({
-            tenantId: tenant.id,
-            subscriptionId: subscription.id,
-            invoiceNo,
-            amount: invoiceData.amount,
-            status: invoiceData.status,
-            dueDate,
-          });
+          const invoice = await this.invoicesService.create(
+            {
+              tenantId: tenant.id,
+              subscriptionId: subscription.id,
+              invoiceNo,
+              amount: invoiceData.amount,
+              status: invoiceData.status,
+              dueDate: dueDate.toISOString(),
+            },
+            // Seeder intentionally creates multiple invoices per tenant for
+            // demo data — bypass the outstanding-invoice guard here only.
+            { skipOutstandingCheck: true },
+          );
 
           this.logger.log(
             `    ✓ Created invoice: ${invoiceNo} (฿${invoiceData.amount}) - ${invoiceData.status}`,
@@ -919,6 +1791,34 @@ export class SeederService {
    * 7️⃣ Seed Demo Guests
    * สร้างแขกตัวอย่าง (Thai + International names)
    */
+  /**
+   * Hotel-only seeders (rooms + bookings, hotel staff, housekeeping roster) must
+   * skip Campground tenants — otherwise re-running the seeder plants hotel rooms
+   * and housekeepers into a camp tenant registered in the same DB.
+   * A tenant is CAMP when its latest subscription's plan is on the CAMP line,
+   * or (no subscription yet) when it signed up as a campground.
+   */
+  private isCampTenant(tenant: any): boolean {
+    const subs: any[] = Array.isArray(tenant?.subscriptions) ? [...tenant.subscriptions] : [];
+    subs.sort((a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime());
+    const plan = subs[0]?.plans_subscriptions_plan_idToplans;
+    if (plan) {
+      return (
+        String(plan.system ?? '').toUpperCase() === 'CAMP' ||
+        String(plan.code ?? '').toUpperCase().startsWith('CAMP')
+      );
+    }
+    return String(tenant?.property_type ?? '').toLowerCase() === 'campground';
+  }
+
+  private async findHotelTenants(): Promise<any[]> {
+    const all = await this.tenantsService.findAll();
+    const hotels = all.filter((t) => !this.isCampTenant(t));
+    const skipped = all.length - hotels.length;
+    if (skipped > 0) this.logger.log(`  ⊘ Skipping ${skipped} campground tenant(s) (hotel-only seed)`);
+    return hotels;
+  }
+
   private async seedDemoGuests(): Promise<void> {
     this.logger.log('👥 Seeding Demo Guests...');
 
@@ -1041,7 +1941,7 @@ export class SeederService {
 
     try {
       // ดึง tenant ทั้งหมด
-      const allTenants = await this.tenantsService.findAll();
+      const allTenants = await this.findHotelTenants();
       if (allTenants.length === 0) {
         this.logger.warn('  ⚠️ No tenants found, skipping demo bookings');
         return;
@@ -1057,6 +1957,9 @@ export class SeederService {
 
       let bookingCount = 0;
       const today = new Date();
+      // เที่ยงคืนของวันนี้แบบ UTC — ใช้เทียบว่าการเข้าพักยังคร่อมวันนี้อยู่ไหม
+      // ต้องเป็นฐานเดียวกับที่ checkIn/checkOut ถูกเขียน (midnight UTC) ไม่งั้นเพี้ยนไปหนึ่งวัน
+      const todayUtcMidnight = new Date(`${today.toISOString().split('T')[0]}T00:00:00.000Z`);
 
       // สร้างการจองสำหรับแต่ละโรงแรม
       for (const tenant of allTenants) {
@@ -1083,6 +1986,7 @@ export class SeederService {
           for (let i = 1; i <= 4; i++) {
             const roomType = roomTypes[i - 1];
             const basePrice = 1000 + i * 500;
+            const detail = ROOM_TYPE_SEED[roomType];
 
             const r = await this.prisma.room.create({
               data: {
@@ -1094,7 +1998,12 @@ export class SeederService {
                 floor: 1,
                 price: basePrice,
                 status: 'available',
-                description: `${roomType} room created by seeder`,
+                description: detail?.description ?? `${roomType} room`,
+                size: detail?.size ?? null,
+                bedType: detail?.bedType ?? null,
+                maxOccupancy: detail?.maxOccupancy ?? 2,
+                amenities: detail?.amenities ?? [],
+                images: detail?.images ?? [],
               },
             });
             newRooms.push(r);
@@ -1105,31 +2014,57 @@ export class SeederService {
 
         // สร้าง 3-5 การจองต่อโรงแรม
         const bookingsPerHotel = Math.floor(Math.random() * 3) + 3; // 3-5 bookings
+
+        // สองใบแรกของทุกโรงแรมล็อกไว้ว่าต้องเป็นแขกที่นอนอยู่จริง "วันนี้"
+        // วันที่สุ่มได้คือ -30..+30 ซึ่งตกในช่วง checked_in แค่ 4 ค่า (~6% ต่อใบ)
+        // เดโมส่วนใหญ่จึงไม่มีแขกอยู่ในห้องเลยสักคน แล้วทุกอย่างที่ต้องมีคนอยู่ในห้อง
+        // (มินิบาร์ ลงบิลห้อง เซ็นชื่อลงห้องจากหน้าร้าน) ก็เปิดมาเจอจอว่างเปล่า ทดสอบไม่ได้
+        const forcedInHouse = Math.min(2, rooms.length);
+
         for (let b = 0; b < bookingsPerHotel && rooms.length > 0; b++) {
-          const room = rooms[Math.floor(Math.random() * rooms.length)];
+          const inHouse = b < forcedInHouse;
+          const room = inHouse ? rooms[b] : rooms[Math.floor(Math.random() * rooms.length)];
           const guest = allGuests[Math.floor(Math.random() * allGuests.length)];
 
-          // สร้างวันที่จองหลาก ๆ (อดีต, ปัจจุบัน, อนาคต)
-          const daysOffset = Math.floor(Math.random() * 60) - 30; // -30 to +30 days
-          const checkInDate = new Date(today);
-          checkInDate.setDate(checkInDate.getDate() + daysOffset);
+          // สร้างวันที่จอง — ใช้เวลามาตรฐาน Bangkok (14:00 เช็คอิน, 12:00 เช็คเอาท์)
+          // เพื่อให้ availability check (overlap + cleaning buffer) ทำงานถูกต้อง
+          // ห้าม use raw `new Date(today)` เพราะจะติด time ของวินาทีที่ seed รัน
+          // ทำให้ scheduledCheckIn/Out ผิด และห้องดูเหมือนถูกจองทั้งวัน
+          // เข้าเมื่อวาน อยู่ยาว 3 คืน — คร่อมวันนี้แน่นอน ไม่ว่าจะ seed ตอนกี่โมง
+          const daysOffset = inHouse ? -1 : Math.floor(Math.random() * 60) - 30; // -30 to +30 days
+          const nightCount = inHouse ? 3 : Math.floor(Math.random() * 4) + 1; // 1-4 nights
 
-          const checkOutDate = new Date(checkInDate);
-          checkOutDate.setDate(checkOutDate.getDate() + (Math.floor(Math.random() * 4) + 1)); // 1-4 nights
+          // Build date-only strings (YYYY-MM-DD) based on today + offset (in UTC-safe way)
+          const checkInBase = new Date(today);
+          checkInBase.setUTCDate(checkInBase.getUTCDate() + daysOffset);
+          const checkInDateStr = checkInBase.toISOString().split('T')[0];
+
+          const checkOutBase = new Date(checkInBase);
+          checkOutBase.setUTCDate(checkOutBase.getUTCDate() + nightCount);
+          const checkOutDateStr = checkOutBase.toISOString().split('T')[0];
+
+          // Standard Bangkok times for scheduled fields — single source of truth
+          const scheduledCheckInDate = buildBangkokDateTime(checkInDateStr, DEFAULT_CHECK_IN_TIME);
+          const scheduledCheckOutDate = buildBangkokDateTime(
+            checkOutDateStr,
+            DEFAULT_CHECK_OUT_TIME,
+          );
+
+          // Legacy checkIn/checkOut fields: store as midnight UTC for consistency
+          const checkInDate = new Date(`${checkInDateStr}T00:00:00.000Z`);
+          const checkOutDate = new Date(`${checkOutDateStr}T00:00:00.000Z`);
 
           // กำหนด status ตามวันที่
           let status = 'confirmed';
           if (daysOffset < -2)
-            status = 'completed'; // อดีตมากกว่า 2 วัน = completed
+            // สถานะหลังเช็คเอาต์ของจริงคือ checked_out — 'completed' ไม่มีในระบบ
+            // หน้าจอ/สถิติ/ลงบัญชีย้อนหลังจึงมองไม่เห็นการจองเดโมพวกนี้
+            status = 'checked_out'; // อดีตมากกว่า 2 วัน = เช็คเอาต์แล้ว
           else if (daysOffset <= 1)
             status = 'checked_in'; // ใน 1 วัน = checked_in
           else status = 'confirmed'; // อนาคต = confirmed
 
-          const nights = Math.max(
-            1,
-            Math.ceil((checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24)),
-          );
-          const totalPrice = Number(room.price) * nights;
+          const totalPrice = Number(room.price) * nightCount;
 
           try {
             const createdBooking = await this.prisma.booking.create({
@@ -1145,12 +2080,25 @@ export class SeederService {
                 guestPhone: guest.phone || '+66-8-0000-0000',
                 checkIn: checkInDate,
                 checkOut: checkOutDate,
+                scheduledCheckIn: scheduledCheckInDate,
+                scheduledCheckOut: scheduledCheckOutDate,
                 status: status,
                 totalPrice: totalPrice,
                 notes: 'Demo booking created by seeder',
               },
             });
             bookingCount++;
+
+            // แขกที่ยังเช็คอินค้างอยู่ต้องทำให้ห้องเป็น "ไม่ว่าง" ด้วย
+            // ตอนเช็คอินจริง bookings.service อัปเดตให้เอง แต่ seeder เขียน booking ตรงเข้าตาราง
+            // จึงข้ามขั้นนั้นไป ผลคือจอจัดการห้องพักขึ้น "ว่าง" ทั้งที่มีคนนอนอยู่
+            // ส่วนหน้าที่อ่านจาก booking (มินิบาร์ / ลงบิลห้อง) กลับเห็นแขก — สองจอเถียงกันเอง
+            if (status === 'checked_in' && checkOutDate >= todayUtcMidnight) {
+              await this.prisma.room.update({
+                where: { id: room.id },
+                data: { status: 'occupied' },
+              });
+            }
 
             // Create Audit Log for Activity Feed (WOW moment for dashboard)
             await this.prisma.auditLog
@@ -1185,12 +2133,13 @@ export class SeederService {
     this.logger.log('⭐ Seeding Demo Reviews...');
 
     try {
-      // ดึง booking ที่เป็น completed
+      // ดึง booking ที่เช็คเอาต์แล้ว
       const completedBookings: any[] = await this.prisma.$queryRaw`
         SELECT b.id, b.tenantId
         FROM bookings b
         LEFT JOIN reviews r ON r.bookingId = b.id
-        WHERE b.status = 'completed' AND r.id IS NULL
+        WHERE b.status = 'checked_out' AND r.id IS NULL
+          AND NOT EXISTS (SELECT 1 FROM reviews r2 WHERE r2.tenantId = b.tenantId)
         LIMIT 50
       `;
 
@@ -1245,6 +2194,194 @@ export class SeederService {
   }
 
   /**
+   * 🌐 เว็บไซต์โรงแรมเดโมของ Mountain View Resort (SUB-002, add-on WEBSITE_BUILDER)
+   * - เติมข้อมูลที่พัก/ที่อยู่ให้ครบ (หน้าเว็บโชว์ตรง ๆ)
+   * - การเข้าพักย้อนหลัง 14 ครั้ง + รีวิว (เฉลี่ย ~4.6) ผูกกับ property นี้
+   * - website_sites สถานะ PUBLISHED — เนื้อหา/ธีม/SEO ผ่าน sanitize* ก่อนเขียนเสมอ
+   * ไม่สร้างเว็บให้ SUB-003 (seaside) — ต้องว่างไว้ทดสอบ wizard สร้างเว็บ
+   */
+  private async seedMountainViewWebsite(): Promise<void> {
+    this.logger.log('🌐 Seeding Mountain View hotel website...');
+
+    try {
+      const tenant = await this.prisma.tenants.findFirst({
+        where: { name: 'Mountain View Resort (Premium Test)' },
+        select: { id: true },
+      });
+      if (!tenant) {
+        this.logger.warn('  ⚠️ Mountain View tenant not found, skipping website');
+        return;
+      }
+      const property = await this.prisma.property.findFirst({
+        where: { tenantId: tenant.id, isDefault: true, deletedAt: null },
+      });
+      if (!property) {
+        this.logger.warn('  ⚠️ Mountain View property not found, skipping website');
+        return;
+      }
+      if (await this.prisma.websiteSite.findFirst({ where: { propertyId: property.id } })) {
+        this.logger.log('  ⊙ Website already exists for Mountain View');
+        return;
+      }
+
+      // ── ข้อมูลที่พัก/ที่อยู่ (หน้าเว็บอ่านจาก property + tenants) ──
+      const updatedProperty = await this.prisma.property.update({
+        where: { id: property.id },
+        data: {
+          name: MOUNTAIN_VIEW_PROPERTY.name,
+          location: MOUNTAIN_VIEW_PROPERTY.location,
+          description: MOUNTAIN_VIEW_PROPERTY.description,
+        },
+      });
+      await this.prisma.tenants.update({
+        where: { id: tenant.id },
+        data: {
+          address: MOUNTAIN_VIEW_PROPERTY.tenantAddress,
+          district: MOUNTAIN_VIEW_PROPERTY.district,
+          province: MOUNTAIN_VIEW_PROPERTY.province,
+          postal_code: MOUNTAIN_VIEW_PROPERTY.postalCode,
+          description: MOUNTAIN_VIEW_PROPERTY.description,
+        },
+      });
+
+      // ── การเข้าพักย้อนหลัง + รีวิว ──
+      const rooms = await this.prisma.room.findMany({
+        where: { tenantId: tenant.id, propertyId: property.id },
+        select: { id: true, type: true, price: true },
+      });
+      if (rooms.length === 0) {
+        this.logger.warn('  ⚠️ Mountain View has no rooms, skipping website');
+        return;
+      }
+
+      const today = new Date();
+      const featuredReviewIds: string[] = [];
+      let reviewCount = 0;
+
+      for (const seed of MOUNTAIN_VIEW_REVIEWS) {
+        const room = rooms.find((r) => r.type === seed.roomType) ?? rooms[0];
+
+        // วันที่แบบ date-only (UTC midnight) + เวลาเช็คอิน/เอาท์มาตรฐานไทย — เหมือน seedDemoBookings
+        const checkInBase = new Date(today);
+        checkInBase.setUTCDate(checkInBase.getUTCDate() - seed.daysAgo);
+        const checkInStr = checkInBase.toISOString().split('T')[0];
+        const checkOutBase = new Date(checkInBase);
+        checkOutBase.setUTCDate(checkOutBase.getUTCDate() + seed.nights);
+        const checkOutStr = checkOutBase.toISOString().split('T')[0];
+        const scheduledCheckIn = buildBangkokDateTime(checkInStr, DEFAULT_CHECK_IN_TIME);
+        const scheduledCheckOut = buildBangkokDateTime(checkOutStr, DEFAULT_CHECK_OUT_TIME);
+        const totalPrice = Number(room.price) * seed.nights;
+
+        const guest = await this.prisma.guest.create({
+          data: {
+            tenantId: tenant.id,
+            firstName: seed.firstName,
+            lastName: seed.lastName,
+            email: seed.email,
+            nationality: seed.nationality,
+          },
+        });
+
+        const booking = await this.prisma.booking.create({
+          data: {
+            tenantId: tenant.id,
+            property: { connect: { id: property.id } },
+            room: { connect: { id: room.id } },
+            guest: { connect: { id: guest.id } },
+            guestFirstName: seed.firstName,
+            guestLastName: seed.lastName,
+            guestEmail: seed.email,
+            checkIn: new Date(`${checkInStr}T00:00:00.000Z`),
+            checkOut: new Date(`${checkOutStr}T00:00:00.000Z`),
+            scheduledCheckIn,
+            scheduledCheckOut,
+            actualCheckIn: scheduledCheckIn,
+            actualCheckOut: scheduledCheckOut,
+            status: 'checked_out',
+            totalPrice,
+            grandTotal: totalPrice,
+            amountPaid: totalPrice,
+            paymentStatus: 'paid',
+            paymentMethod: 'credit_card',
+            adults: 2,
+            numberOfGuests: 2,
+            source: 'website',
+            notes: 'Demo stay created by seeder (website reviews)',
+          },
+        });
+
+        // รีวิวเขียนหลังเช็คเอาท์ 1 วัน
+        const reviewAt = new Date(scheduledCheckOut.getTime() + 24 * 60 * 60 * 1000);
+        const review = await this.prisma.review.create({
+          data: {
+            tenantId: tenant.id,
+            bookingId: booking.id,
+            rating: seed.rating,
+            comment: seed.comment,
+            createdAt: reviewAt,
+            updatedAt: reviewAt,
+          },
+        });
+        reviewCount++;
+        if (seed.featured && seed.rating === 5) featuredReviewIds.push(review.id);
+      }
+
+      // ── เว็บไซต์ (เนื้อหาผ่าน sanitizer ให้ตรงกับที่ editor/API เขียนจริง) ──
+      const hotelName = updatedProperty.name;
+      const content = sanitizeSiteContent(
+        buildMountainViewContent({
+          featuredReviewIds,
+          phone: updatedProperty.phone,
+          email: updatedProperty.email,
+        }),
+        hotelName,
+      );
+      const theme = sanitizeTheme(MOUNTAIN_VIEW_THEME, 'classic');
+      const seo = sanitizeSeo(MOUNTAIN_VIEW_SEO, hotelName);
+      const asJson = <T>(v: T): Prisma.InputJsonValue => v as unknown as Prisma.InputJsonValue;
+
+      const site = await this.prisma.websiteSite.create({
+        data: {
+          tenantId: tenant.id,
+          propertyId: property.id,
+          slug: 'mountain-view',
+          status: 'PUBLISHED',
+          templateKey: 'classic',
+          defaultLang: 'th',
+          theme: asJson(theme),
+          seo: asJson(seo),
+          draftContent: asJson(content),
+          publishedContent: asJson(content),
+          publishedTheme: asJson(theme),
+          publishedSeo: asJson(seo),
+          publishedAt: new Date(),
+        },
+      });
+
+      // บัญชีรับเงินของโรงแรมเอง — เว็บใช้ PromptPay default ของ property สร้าง QR ให้แขก
+      // (เบอร์ทดสอบ ไม่ใช่บัญชีจริง; PROMPTPAY_ID ใน env เป็นของแพลตฟอร์ม ห้ามใช้รับเงินแขก)
+      if (!(await this.prisma.paymentAccount.findFirst({ where: { propertyId: property.id, kind: 'promptpay' } }))) {
+        await this.prisma.paymentAccount.create({
+          data: {
+            propertyId: property.id,
+            kind: 'promptpay',
+            label: 'PromptPay หน้าเว็บ',
+            promptpayId: '0812345678',
+            accountName: MOUNTAIN_VIEW_PROPERTY.name,
+            isDefault: true,
+          },
+        });
+      }
+
+      this.logger.log(
+        `  ✓ Website ${site.slug} (${site.id}) + ${reviewCount} reviews, ${featuredReviewIds.length} featured`,
+      );
+    } catch (error) {
+      this.logger.warn(`  ⚠️ Error seeding Mountain View website: ${(error as Error).message}`);
+    }
+  }
+
+  /**
    * 🔟 Seed Hotel Staff (User table → login ผ่าน /login)
    * สร้างพนักงานตำแหน่งต่างๆ ให้แต่ละโรงแรม
    */
@@ -1252,7 +2389,7 @@ export class SeederService {
     this.logger.log('👷 Seeding Hotel Staff (User table)...');
 
     // ดึง tenant ทั้งหมดที่มีอยู่
-    const allTenants = await this.tenantsService.findAll();
+    const allTenants = await this.findHotelTenants();
 
     if (allTenants.length === 0) {
       this.logger.warn('  ⚠️ No tenants found, skipping hotel staff seeding');
@@ -1277,7 +2414,7 @@ export class SeederService {
       },
     ];
 
-    const defaultPassword = 'Staff@123';
+    const defaultPassword = process.env.SEED_STAFF_PASSWORD || 'StaffDev@2026!';
     const hashedPassword = await bcrypt.hash(defaultPassword, 10);
     let staffCount = 0;
 
@@ -1404,14 +2541,17 @@ export class SeederService {
     this.logger.log('  ⚠️  เฉพาะ subscription customers เท่านั้น (ห้าม admin roles)');
     this.logger.log('');
     this.logger.log('  🏨 Demo Hotel Owners:');
-    this.logger.log('  premium.test@email.com      / password123   (Mountain View - Premium)');
-    this.logger.log('  somchai@email.com           / password123   (Sukjai Hotel)');
-    this.logger.log('  seaside@email.com           / password123   (Seaside Stay)');
-    this.logger.log('  garden@email.com            / password123   (Garden Resort)');
+    this.logger.log('  premium.test@email.com      (Mountain View - Premium)');
+    this.logger.log('  somchai@email.com           (Sukjai Hotel)');
+    this.logger.log('  seaside@email.com           (Seaside Stay)');
+    this.logger.log('  garden@email.com            (Garden Resort)');
+    this.logger.log('  🏕️  premium.camp@email.com   (Pine Valley Camp - Camp Plus)');
+    this.logger.log('  📌 Password: ดูที่ SEED_DEFAULT_PASSWORD ใน .env (ไม่แสดง log)');
     this.logger.log('');
     this.logger.log('  👷 Hotel Staff:');
-    this.logger.log(`  manager*.hotel.test        / Staff@123     (General Manager)`);
-    this.logger.log(`  receptionist*.hotel.test   / Staff@123     (Front Desk Agent)`);
+    this.logger.log(`  manager*.hotel.test        (General Manager)`);
+    this.logger.log(`  receptionist*.hotel.test   (Front Desk Agent)`);
+    this.logger.log(`  📌 Staff password: ดูที่ SEED_STAFF_PASSWORD ใน .env (ไม่แสดง log)`);
     this.logger.log('');
     this.logger.log('  👥 Demo Guests (for booking tests):');
     this.logger.log('  somchai.jaidia@example.com (Somchai Jaidee - Thailand)');
@@ -1431,6 +2571,219 @@ export class SeederService {
   }
 
   /**
+   * 🧹 Seed Operational Staff (staff table → ทะเบียนพนักงานที่หน้ามอบหมายงานอ่าน)
+   *
+   * `staff` เป็นคนละตารางกับ `users` (บัญชีล็อกอิน) และ `employees` (ประวัติ HR)
+   * ถ้าไม่หว่านตารางนี้ หน้ามอบหมายงานแม่บ้าน/ซ่อมบำรุงจะว่างเปล่าบน DB ใหม่ทุกครั้ง
+   *
+   * หว่านให้ครบทั้งสองเคสที่ระบบต้องรองรับ:
+   *  - **ต่อ HR**: แถวทะเบียนผูก FK `employeeId` → `employees.id` และบัญชีล็อกอินผูกกลับ
+   *    ด้วย `metadata.hrEmployeeId` + `users.employeeId` = รหัสพนักงาน
+   *  - **ไม่ต่อ HR**: บัญชีล็อกอินที่ไม่มีประวัติ HR เลย แต่ยังมีแถวทะเบียนของตัวเอง
+   *    (สภาพเดียวกับที่ปุ่ม "ซิงก์จากบัญชีผู้ใช้" สร้างให้)
+   */
+  private async seedOperationalStaff(): Promise<void> {
+    this.logger.log('🧹 Seeding Operational Staff (staff table)...');
+
+    const allTenants = await this.findHotelTenants();
+    if (allTenants.length === 0) {
+      this.logger.warn('  ⚠️ No tenants found, skipping operational staff seeding');
+      return;
+    }
+
+    // แผนก HK/ENG ใน HR → บทบาทในทะเบียนปฏิบัติการ
+    const rosterPlan = [
+      { deptCode: 'HK', role: 'housekeeper', department: 'housekeeping', take: 4, accounts: 2 },
+      { deptCode: 'ENG', role: 'technician', department: 'maintenance', take: 3, accounts: 1 },
+    ] as const;
+
+    // ผู้ใช้ระบบเทอร์มินัลใช้ role คนละคำกับทะเบียน (maintenance ↔ technician)
+    const terminalRoleFor: Record<string, string> = {
+      housekeeper: 'housekeeper',
+      technician: 'maintenance',
+    };
+    const terminalPermissions: Record<string, string[]> = {
+      housekeeper: ['housekeeping.view', 'housekeeping.manage', 'rooms.view'],
+      maintenance: ['maintenance.view', 'maintenance.manage', 'rooms.view'],
+    };
+
+    const defaultPassword = process.env.SEED_STAFF_PASSWORD || 'StaffDev@2026!';
+    const hashedPassword = await bcrypt.hash(defaultPassword, 10);
+    const allowedSystems = JSON.stringify(['main', 'hotel-terminal']);
+
+    let rosterCount = 0;
+    let accountCount = 0;
+
+    /** สร้างบัญชีล็อกอินถ้ายังไม่มี — email ของ users เป็น unique ทั้งระบบ */
+    const createLogin = async (params: {
+      tenantId: string;
+      email: string;
+      firstName: string;
+      lastName: string;
+      terminalRole: string;
+      employeeCode: string | null;
+      hrEmployeeId: string | null;
+    }): Promise<void> => {
+      const existing = await this.prisma.$queryRaw`
+        SELECT id FROM users WHERE email = ${params.email} LIMIT 1
+      `;
+      if (Array.isArray(existing) && existing.length > 0) return;
+
+      const metadata = JSON.stringify({
+        hrEmployeeId: params.hrEmployeeId,
+        propertyId: null,
+        permissions: terminalPermissions[params.terminalRole] ?? [],
+      });
+      await this.prisma.$executeRaw`
+        INSERT INTO users (id, email, password, firstName, lastName, role, status, tenantId, employeeId, allowedSystems, metadata, createdAt, updatedAt)
+        VALUES (
+          ${uuidv4()}, ${params.email}, ${hashedPassword}, ${params.firstName}, ${params.lastName},
+          ${params.terminalRole}, 'active', ${params.tenantId}, ${params.employeeCode},
+          ${allowedSystems}, ${metadata}, NOW(), NOW()
+        )
+      `;
+      accountCount++;
+    };
+
+    /** สร้างแถวทะเบียนถ้ายังไม่มี — employeeId เป็น unique ห้ามผูกซ้ำคน */
+    const createRosterRow = async (params: {
+      tenantId: string;
+      firstName: string;
+      lastName: string;
+      email: string;
+      phone: string | null;
+      role: string;
+      department: string;
+      employeeCode: string | null;
+      hrEmployeeId: string | null;
+    }): Promise<boolean> => {
+      const existing = await this.prisma.$queryRaw`
+        SELECT id FROM staff WHERE tenantId = ${params.tenantId} AND email = ${params.email} LIMIT 1
+      `;
+      if (Array.isArray(existing) && existing.length > 0) return false;
+
+      if (params.hrEmployeeId) {
+        const linked = await this.prisma.$queryRaw`
+          SELECT id FROM staff WHERE employeeId = ${params.hrEmployeeId} LIMIT 1
+        `;
+        if (Array.isArray(linked) && linked.length > 0) return false;
+      }
+
+      await this.prisma.$executeRaw`
+        INSERT INTO staff (id, tenantId, firstName, lastName, email, phone, role, department, employeeCode, status, employeeId, createdAt, updatedAt)
+        VALUES (
+          ${uuidv4()}, ${params.tenantId}, ${params.firstName}, ${params.lastName}, ${params.email},
+          ${params.phone}, ${params.role}, ${params.department}, ${params.employeeCode}, 'active',
+          ${params.hrEmployeeId}, NOW(3), NOW(3)
+        )
+      `;
+      rosterCount++;
+      return true;
+    };
+
+    for (const tenant of allTenants) {
+      const match = tenant.name.match(/\(([^)]+)\)/);
+      const engName = match ? match[1] : tenant.name;
+      const tenantSlug = engName
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '')
+        .substring(0, 10);
+
+      for (const plan of rosterPlan) {
+        let employees: Array<{
+          id: string;
+          firstName: string;
+          lastName: string;
+          email: string;
+          phone: string | null;
+          employeeCode: string | null;
+        }> = [];
+        try {
+          employees = (await this.prisma.$queryRaw`
+            SELECT e.id, e.firstName, e.lastName, e.email, e.phone, e.employeeCode
+            FROM employees e
+            JOIN hr_departments d ON e.departmentId = d.id
+            WHERE e.tenantId = ${tenant.id} AND d.code = ${plan.deptCode}
+            ORDER BY e.employeeCode
+            LIMIT ${plan.take}
+          `) as typeof employees;
+        } catch (error: any) {
+          this.logger.warn(
+            `    ⚠️  Could not read ${plan.deptCode} employees for ${tenant.name}: ${error.message}`,
+          );
+          continue;
+        }
+
+        for (let i = 0; i < employees.length; i++) {
+          const employee = employees[i];
+          try {
+            await createRosterRow({
+              tenantId: tenant.id,
+              firstName: employee.firstName,
+              lastName: employee.lastName,
+              email: employee.email,
+              phone: employee.phone ?? null,
+              role: plan.role,
+              department: plan.department,
+              employeeCode: employee.employeeCode ?? null,
+              hrEmployeeId: employee.id,
+            });
+
+            // ให้บางคนล็อกอินเข้าเทอร์มินัลได้จริง จะได้ทดสอบสายงานครบวง
+            if (i < plan.accounts) {
+              await createLogin({
+                tenantId: tenant.id,
+                email: employee.email,
+                firstName: employee.firstName,
+                lastName: employee.lastName,
+                terminalRole: terminalRoleFor[plan.role],
+                employeeCode: employee.employeeCode ?? null,
+                hrEmployeeId: employee.id,
+              });
+            }
+          } catch (error: any) {
+            this.logger.warn(
+              `    ⚠️  Could not seed roster row for ${employee.email}: ${error.message}`,
+            );
+          }
+        }
+      }
+
+      // เคส "ไม่เชื่อมระบบ HR": บัญชีแม่บ้านที่ไม่มีประวัติ HR แต่ยังมีแถวทะเบียนของตัวเอง
+      const standaloneEmail = `housekeeper.${tenantSlug}@hotel.test`;
+      try {
+        await createLogin({
+          tenantId: tenant.id,
+          email: standaloneEmail,
+          firstName: 'มาลี',
+          lastName: 'ขยันงาน',
+          terminalRole: 'housekeeper',
+          employeeCode: `HK-LOCAL-${tenantSlug.toUpperCase().substring(0, 4)}`,
+          hrEmployeeId: null,
+        });
+        await createRosterRow({
+          tenantId: tenant.id,
+          firstName: 'มาลี',
+          lastName: 'ขยันงาน',
+          email: standaloneEmail,
+          phone: null,
+          role: 'housekeeper',
+          department: 'housekeeping',
+          employeeCode: `HK-LOCAL-${tenantSlug.toUpperCase().substring(0, 4)}`,
+          hrEmployeeId: null,
+        });
+      } catch (error: any) {
+        this.logger.warn(
+          `    ⚠️  Could not seed standalone housekeeper for ${tenant.name}: ${error.message}`,
+        );
+      }
+    }
+
+    this.logger.log(`  ✓ Operational roster rows created: ${rosterCount}`);
+    this.logger.log(`  ✓ Terminal login accounts created: ${accountCount}`);
+  }
+
+  /**
    * 🏢 Seed HR Master Data สำหรับ Demo Tenants
    * - แผนก (Departments)
    * - ตำแหน่งงาน (Positions)
@@ -1439,7 +2792,7 @@ export class SeederService {
    * - ประเภทเบี้ยเลี้ยง (Allowance Types)
    * - ประเภทการหักเงิน (Deduction Types)
    */
-  private async seedHrMasterData(): Promise<void> {
+  async seedHrMasterData(): Promise<void> {
     this.logger.log('👥 Seeding HR Master Data...');
 
     const allTenants = await this.tenantsService.findAll();
@@ -1529,6 +2882,39 @@ export class SeederService {
         color: '#1D4ED8',
         sortOrder: 10,
         description: 'ผู้บริหารระดับสูง ผู้จัดการทั่วไป',
+      },
+      // ─── แผนกของระบบย่อยอื่น (นอกเหนือจากงานโรงแรม) ─────────────────────
+      {
+        name: 'ฝ่ายคลังสินค้า',
+        nameEn: 'Warehouse & Inventory',
+        code: 'INV',
+        color: '#0EA5E9',
+        sortOrder: 11,
+        description: 'รับ-จ่ายสินค้า ตรวจนับสต๊อก จัดการคลังและ Lots',
+      },
+      {
+        name: 'ฝ่ายจัดซื้อ',
+        nameEn: 'Procurement',
+        code: 'PROC',
+        color: '#14B8A6',
+        sortOrder: 12,
+        description: 'จัดซื้อจัดหา ขอใบเสนอราคา ออก PO ดูแลผู้ขาย',
+      },
+      {
+        name: 'ฝ่ายต้นทุนและควบคุม',
+        nameEn: 'Cost Control',
+        code: 'COST',
+        color: '#7C3AED',
+        sortOrder: 13,
+        description: 'วิเคราะห์ต้นทุน ควบคุมงบ ต้นทุนวัตถุดิบและการดำเนินงาน',
+      },
+      {
+        name: 'ฝ่ายร้านอาหาร (POS)',
+        nameEn: 'Restaurant Operations',
+        code: 'POS',
+        color: '#F43F5E',
+        sortOrder: 14,
+        description: 'ปฏิบัติการร้านอาหาร ครัว เสิร์ฟ และระบบ POS',
       },
     ];
 
@@ -1647,6 +3033,29 @@ export class SeederService {
           level: 8,
           sortOrder: 4,
         },
+      ],
+      // ─── ตำแหน่งของระบบย่อยอื่น ───────────────────────────────────────
+      INV: [
+        { name: 'ผู้จัดการคลังสินค้า', nameEn: 'Warehouse Manager', level: 8, sortOrder: 1 },
+        { name: 'หัวหน้าคลัง', nameEn: 'Inventory Supervisor', level: 6, sortOrder: 2 },
+        { name: 'เจ้าหน้าที่คลังสินค้า', nameEn: 'Inventory Officer', level: 4, sortOrder: 3 },
+        { name: 'พนักงานรับ-จ่ายสินค้า', nameEn: 'Stock Clerk', level: 3, sortOrder: 4 },
+      ],
+      PROC: [
+        { name: 'ผู้จัดการฝ่ายจัดซื้อ', nameEn: 'Procurement Manager', level: 8, sortOrder: 1 },
+        { name: 'หัวหน้าจัดซื้อ', nameEn: 'Purchasing Supervisor', level: 6, sortOrder: 2 },
+        { name: 'เจ้าหน้าที่จัดซื้อ', nameEn: 'Purchasing Officer', level: 4, sortOrder: 3 },
+      ],
+      COST: [
+        { name: 'ผู้จัดการต้นทุน', nameEn: 'Cost Controller', level: 8, sortOrder: 1 },
+        { name: 'นักวิเคราะห์ต้นทุน', nameEn: 'Cost Analyst', level: 5, sortOrder: 2 },
+      ],
+      POS: [
+        { name: 'ผู้จัดการร้านอาหาร', nameEn: 'Restaurant Manager', level: 8, sortOrder: 1 },
+        { name: 'หัวหน้าเชฟ', nameEn: 'Head Chef', level: 7, sortOrder: 2 },
+        { name: 'เชฟประจำสถานี', nameEn: 'Chef de Partie', level: 5, sortOrder: 3 },
+        { name: 'พนักงานเสิร์ฟ', nameEn: 'Waiter/Waitress', level: 3, sortOrder: 4 },
+        { name: 'แคชเชียร์ POS', nameEn: 'POS Cashier', level: 3, sortOrder: 5 },
       ],
     };
 
@@ -4034,7 +5443,11 @@ export class SeederService {
       openTime?: string;
       closeTime?: string;
     }) => {
-      const existing = await this.prisma.restaurant.findUnique({ where: { code: data.code } });
+      // Codes are unique per tenant now, so the lookup has to name the tenant
+      // too — otherwise seeding a second tenant would find the first one's row.
+      const existing = await this.prisma.restaurant.findFirst({
+        where: { code: data.code, tenantId },
+      });
       if (existing) return existing;
       return this.prisma.restaurant.create({
         data: {
@@ -4385,6 +5798,10 @@ export class SeederService {
         name: 'เครื่องดื่ม',
         description: 'เครื่องดื่มร้อน เย็น และผลไม้ปั่น',
         displayOrder: 4,
+        // หมวดเครื่องดื่มต้องลงรายได้เป็น BEVERAGE ไม่ใช่ค่า default FOOD — สมุด
+        // รายได้แยกอาหารกับเครื่องดื่มเพื่อคิด Food Cost% ถ้าชาไทยไปกองรวมกับ
+        // ข้าวผัด ตัวหารจะโตขึ้นแล้วเปอร์เซ็นต์ต้นทุนอาหารจะดูดีเกินจริง
+        revenueType: RevenueType.BEVERAGE,
         restaurantId: mainRestaurant.id,
         items: [
           {
@@ -4433,6 +5850,71 @@ export class SeederService {
           },
         ],
       },
+      {
+        // ของสำเร็จรูป: หยิบจากตู้ ไม่ผ่านครัว และนับสต๊อกในตัวเมนูเอง
+        // (โหมดนี้ใช้ได้โดยไม่ต้องซื้อ INVENTORY_MODULE — ร้านที่ซื้อแล้วค่อยย้ายไป
+        // ผูก inventoryItemId ให้คลังกลางเป็นเจ้าของยอดแทน)
+        name: 'ของสำเร็จรูป & ของทานเล่น',
+        description: 'น้ำดื่ม เครื่องดื่มกระป๋อง ไอศกรีม ขนม — หยิบเสิร์ฟได้ทันที',
+        displayOrder: 6,
+        revenueType: RevenueType.RETAIL_GOODS,
+        items: [
+          {
+            name: 'น้ำดื่ม 600 มล.',
+            description: 'น้ำดื่มบรรจุขวด',
+            price: 20,
+            cost: 7,
+            preparationTime: 0,
+            isVegetarian: true,
+            isVegan: true,
+            isGlutenFree: true,
+            isAvailable: true,
+            itemKind: 'READY_MADE',
+            trackStock: true,
+            stockQty: 120,
+            lowStockThreshold: 24,
+          },
+          {
+            name: 'โค้กกระป๋อง',
+            description: 'น้ำอัดลมกระป๋อง 325 มล. แช่เย็น',
+            price: 30,
+            cost: 14,
+            preparationTime: 0,
+            isVegetarian: true,
+            isAvailable: true,
+            itemKind: 'READY_MADE',
+            trackStock: true,
+            stockQty: 72,
+            lowStockThreshold: 12,
+          },
+          {
+            name: 'ไอศกรีมแท่ง',
+            description: 'ไอศกรีมแท่งจากตู้แช่หน้าร้าน',
+            price: 35,
+            cost: 18,
+            preparationTime: 0,
+            isVegetarian: true,
+            isAvailable: true,
+            itemKind: 'READY_MADE',
+            trackStock: true,
+            stockQty: 48,
+            lowStockThreshold: 10,
+          },
+          {
+            name: 'ขนมถุง',
+            description: 'ขนมขบเคี้ยวบรรจุถุง',
+            price: 25,
+            cost: 12,
+            preparationTime: 0,
+            isVegetarian: true,
+            isAvailable: true,
+            itemKind: 'READY_MADE',
+            trackStock: true,
+            stockQty: 60,
+            lowStockThreshold: 12,
+          },
+        ],
+      },
     ];
 
     let categoryCount = 0;
@@ -4446,6 +5928,7 @@ export class SeederService {
           name: catData.name,
           description: catData.description,
           displayOrder: catData.displayOrder,
+          revenueType: catData.revenueType ?? RevenueType.FOOD,
           isActive: true,
         },
       });
@@ -4453,7 +5936,7 @@ export class SeederService {
 
       for (let i = 0; i < catData.items.length; i++) {
         const item = catData.items[i];
-        await this.prisma.menuItem.create({
+        const created = await this.prisma.menuItem.create({
           data: {
             tenantId,
             restaurantId: mainRestaurant.id,
@@ -4469,8 +5952,32 @@ export class SeederService {
             spicyLevel: (item as any).spicyLevel ?? null,
             isAvailable: item.isAvailable,
             displayOrder: i + 1,
+            itemKind: (item as any).itemKind ?? 'COOKED',
+            // ของสำเร็จรูปต้องมีต้นทุน ไม่งั้นรายงานกำไรอ่านเป็น 100% ทุกตัว
+            cost: (item as any).cost ?? null,
+            trackStock: (item as any).trackStock ?? false,
+            stockQty: (item as any).stockQty ?? 0,
+            lowStockThreshold: (item as any).lowStockThreshold ?? null,
           },
         });
+
+        // ยอดยกมาต้องมีบรรทัดในสมุดเดินสต๊อก ไม่งั้นหน้าประวัติจะโชว์ยอดที่อธิบายที่มาไม่ได้
+        if (created.trackStock && created.stockQty > 0) {
+          await this.prisma.menuItemStockMovement.create({
+            data: {
+              tenantId,
+              menuItemId: created.id,
+              type: 'OPENING',
+              quantity: created.stockQty,
+              balanceAfter: created.stockQty,
+              unitCost: created.cost ?? undefined,
+              referenceType: 'manual',
+              note: 'ยอดยกมาตอนเปิดร้าน (ข้อมูลตัวอย่าง)',
+              createdBy: 'seeder',
+            },
+          });
+        }
+
         itemCount++;
       }
     }
@@ -4488,6 +5995,7 @@ export class SeederService {
           name: 'ค็อกเทลและเครื่องดื่มแอลกอฮอล์',
           description: 'ค็อกเทลทำสด ไวน์ เบียร์ สปิริต',
           displayOrder: 1,
+          revenueType: RevenueType.BEVERAGE,
           isActive: true,
         },
       });
@@ -4548,7 +6056,7 @@ export class SeederService {
     // ── POS staff accounts ────────────────────────────────────────────────────
     // Each staff member gets allowedSystems scoped to their role:
     //   waiter / chef / cashier → ["pos"] only
-    //   manager (restaurant manager) → ["main","pos"]
+    //   restaurant_manager → ["main","pos"]
     const posStaff = [
       {
         email: 'waiter1@mountainviewresort.test',
@@ -4586,7 +6094,7 @@ export class SeederService {
         email: 'restaurant.manager@mountainviewresort.test',
         firstName: 'ประสิทธิ์',
         lastName: 'บริหารเก่ง',
-        role: 'manager',
+        role: 'restaurant_manager',
         employeeId: 'MVR-M001',
         allowedSystems: '["main","pos"]',
       },
@@ -4632,6 +6140,69 @@ export class SeederService {
         ` (password: pos123456, systems: waiter/chef/cashier → POS only, manager → main+POS)`,
     );
 
+    // ── HR Terminal staff accounts ────────────────────────────────────────────
+    // Login via POST /auth/hr/login → systemContext="hr".
+    // Permissions reuse the warehousePermissions column (same as accounting-users).
+    const hrStaff = [
+      {
+        email: 'hr.manager@mountainviewresort.test',
+        firstName: 'อารยา',
+        lastName: 'บริหารคน',
+        role: 'hr_manager',
+        employeeId: 'MVR-HR001',
+        permissions: HR_DEFAULT_PERMISSIONS.hr_manager,
+      },
+      {
+        email: 'payroll@mountainviewresort.test',
+        firstName: 'เกศรา',
+        lastName: 'จ่ายตรง',
+        role: 'payroll_officer',
+        employeeId: 'MVR-HR002',
+        permissions: HR_DEFAULT_PERMISSIONS.payroll_officer,
+      },
+    ];
+
+    const hashedHrPassword = await bcrypt.hash('hr123456', 10);
+    let hrCreated = 0;
+    let hrUpdated = 0;
+
+    for (const staff of hrStaff) {
+      const existing = await this.prisma.user.findUnique({ where: { email: staff.email } });
+      if (!existing) {
+        await this.prisma.user.create({
+          data: {
+            email: staff.email,
+            password: hashedHrPassword,
+            firstName: staff.firstName,
+            lastName: staff.lastName,
+            role: staff.role,
+            employeeId: staff.employeeId,
+            tenantId,
+            status: 'active',
+            allowedSystems: '["main","hr"]',
+            warehousePermissions: JSON.stringify(staff.permissions),
+          } as any,
+        });
+        hrCreated++;
+      } else {
+        await this.prisma.user.update({
+          where: { id: existing.id },
+          data: {
+            tenantId,
+            allowedSystems: '["main","hr"]',
+            password: hashedHrPassword,
+            warehousePermissions: JSON.stringify(staff.permissions),
+          } as any,
+        });
+        hrUpdated++;
+      }
+    }
+
+    this.logger.log(
+      `  ✓ HR staff: ${hrCreated} created, ${hrUpdated} updated` +
+        ` (password: hr123456, systems: main+HR, login via /auth/hr/login)`,
+    );
+
     // ── Backfill allowedSystems for existing hotel owner/admins ───────────────
     // tenant_admin and manager (non-restaurant) who were created before this migration
     // should be allowed into both systems.
@@ -4668,12 +6239,492 @@ export class SeederService {
    * Creates: item categories, inventory items, suppliers, warehouses,
    * room-type amenity templates, and demo stock balances.
    */
+  /**
+   * Canonical cooking-ingredient catalogue for the premium demo tenant.
+   * These become tracked InventoryItems (kitchen warehouse) and are the ONLY
+   * ingredients recipes/the mockup button may reference — so every ingredient
+   * shows as in-stock ("นับสต๊อก") rather than free-text ("นอกคลัง").
+   * Names intentionally match the frontend mock-recipe ingredient names so the
+   * "Mockup Recipe" button links them automatically.
+   */
+  private cookingIngredientCatalog(): Array<{
+    sku: string;
+    name: string;
+    catCode: string;
+    unit: string;
+    reorderPoint: number;
+    reorderQty: number;
+    minStock: number;
+    isPerishable: boolean;
+    shelfLifeDays: number | null;
+    qty: number;
+    avgCost: number;
+  }> {
+    const veg = 'CAT-FB-VEG';
+    const dry = 'CAT-FB-DRY';
+    const meat = 'CAT-FB-MEAT';
+    const dairy = 'CAT-FB-DAIRY';
+    // [sku, name, catCode, unit, reorderPoint, reorderQty, minStock, perishable, shelfLifeDays, qty, avgCost]
+    const rows: Array<
+      [string, string, string, string, number, number, number, boolean, number | null, number, number]
+    > = [
+      // — ผักและผลไม้ (CAT-FB-VEG) —
+      ['ING-PAPAYA', 'มะละกอดิบ', veg, 'KG', 3, 8, 2, true, 14, 8, 25],
+      ['ING-TOMATO-CHERRY', 'มะเขือเทศราชินี', veg, 'KG', 2, 5, 1, true, 10, 5, 40],
+      ['ING-LONGBEAN', 'ถั่วฝักยาว', veg, 'KG', 2, 4, 1, true, 7, 4, 30],
+      ['ING-GARLIC', 'กระเทียม', veg, 'KG', 2, 6, 1, false, 60, 6, 90],
+      ['ING-CHILI', 'พริกขี้หนู', veg, 'KG', 1, 3, 0.5, true, 10, 3, 120],
+      ['ING-CHILI-SUAN', 'พริกขี้หนูสวน', veg, 'KG', 1, 2, 0.5, true, 10, 2, 150],
+      ['ING-LIME', 'มะนาว', veg, 'KG', 2, 5, 1, true, 14, 5, 60],
+      ['ING-SPRING-ONION', 'ต้นหอม', veg, 'KG', 1, 3, 0.5, true, 7, 3, 40],
+      ['ING-BEANSPROUT', 'ถั่วงอก', veg, 'KG', 2, 4, 1, true, 3, 4, 25],
+      ['ING-LEMONGRASS', 'ตะไคร้', veg, 'KG', 1, 3, 0.5, true, 14, 3, 35],
+      ['ING-GALANGAL', 'ข่า', veg, 'KG', 1, 2, 0.5, true, 21, 2, 45],
+      ['ING-KAFFIR-LEAF', 'ใบมะกรูด', veg, 'KG', 0.5, 1, 0.2, true, 14, 1, 120],
+      ['ING-EGGPLANT-THAI', 'มะเขือไทย', veg, 'KG', 1, 3, 0.5, true, 10, 3, 35],
+      ['ING-EGGPLANT-PEA', 'มะเขือพวง', veg, 'KG', 0.5, 1, 0.2, true, 7, 1, 80],
+      ['ING-BASIL-SWEET', 'ใบโหระพา', veg, 'KG', 0.5, 1, 0.2, true, 5, 1, 60],
+      ['ING-BASIL-HOLY', 'ใบกะเพรา', veg, 'KG', 0.5, 1, 0.2, true, 5, 1, 70],
+      ['ING-BELLPEPPER', 'พริกหยวก', veg, 'KG', 1, 3, 0.5, true, 14, 3, 60],
+      ['ING-MANGO-RIPE', 'มะม่วงสุก', veg, 'KG', 3, 6, 1, true, 7, 6, 80],
+      ['ING-ONION', 'หัวหอมใหญ่', veg, 'KG', 2, 5, 1, false, 30, 5, 35],
+      ['ING-POTATO', 'มันฝรั่ง', veg, 'KG', 3, 6, 1, false, 30, 6, 40],
+      ['ING-MUSHROOM-STRAW', 'เห็ดฟาง', veg, 'KG', 1, 3, 0.5, true, 4, 3, 90],
+      ['ING-GINGER', 'ขิง', veg, 'KG', 1, 3, 0.5, false, 21, 3, 50],
+      ['ING-CORIANDER', 'ผักชี', veg, 'KG', 0.5, 1, 0.2, true, 5, 1, 80],
+      ['ING-SHALLOT', 'หอมแดง', veg, 'KG', 2, 4, 1, false, 30, 4, 60],
+      // — ของแห้ง / เครื่องปรุง (CAT-FB-DRY) —
+      ['ING-NOODLE-CHAN', 'เส้นจันท์', dry, 'KG', 4, 10, 2, false, 180, 10, 55],
+      ['ING-STICKY-RICE', 'ข้าวเหนียว', dry, 'KG', 8, 20, 4, false, 365, 20, 40],
+      ['ING-JASMINE-RICE', 'ข้าวสาร', dry, 'KG', 10, 30, 5, false, 365, 30, 45],
+      ['ING-PEANUT-ROASTED', 'ถั่วลิสงคั่ว', dry, 'KG', 2, 5, 1, false, 120, 5, 90],
+      ['ING-DRIED-SHRIMP', 'กุ้งแห้ง', dry, 'KG', 1, 3, 0.5, false, 120, 3, 320],
+      ['ING-SESAME-WHITE', 'งาขาวคั่ว', dry, 'KG', 1, 2, 0.5, false, 120, 2, 150],
+      ['ING-SUGAR-WHITE', 'น้ำตาลทราย', dry, 'KG', 5, 15, 3, false, 365, 15, 28],
+      ['ING-PALM-SUGAR', 'น้ำตาลปี๊บ', dry, 'KG', 3, 8, 2, false, 365, 8, 55],
+      ['ING-SALT', 'เกลือ', dry, 'KG', 4, 10, 2, false, 730, 10, 15],
+      ['ING-PEPPER-BLACK', 'พริกไทยดำ', dry, 'KG', 1, 2, 0.5, false, 365, 2, 400],
+      ['ING-FISH-SAUCE', 'น้ำปลา', dry, 'L', 4, 12, 2, false, 365, 12, 45],
+      ['ING-SOY-LIGHT', 'ซีอิ๊วขาว', dry, 'L', 3, 8, 2, false, 365, 8, 40],
+      ['ING-SOY-DARK', 'ซีอิ๊วดำ', dry, 'L', 2, 6, 1, false, 365, 6, 45],
+      ['ING-OYSTER-SAUCE', 'น้ำมันหอย', dry, 'L', 2, 6, 1, false, 365, 6, 90],
+      ['ING-VEG-OIL', 'น้ำมันพืช', dry, 'L', 5, 15, 3, false, 365, 15, 55],
+      ['ING-TAMARIND', 'น้ำมะขามเปียก', dry, 'KG', 2, 4, 1, false, 180, 4, 70],
+      ['ING-CURRY-GREEN', 'พริกแกงเขียวหวาน', dry, 'KG', 1, 3, 0.5, false, 120, 3, 120],
+      ['ING-CURRY-MASSAMAN', 'พริกแกงมัสมั่น', dry, 'KG', 1, 3, 0.5, false, 120, 3, 130],
+      ['ING-COCONUT-MILK', 'กะทิ', dry, 'L', 8, 20, 4, false, 180, 20, 45],
+      ['ING-COFFEE-ROAST', 'กาแฟคั่วบด', dry, 'KG', 2, 4, 1, false, 180, 4, 350],
+      ['ING-THAI-TEA', 'ชาไทย', dry, 'KG', 2, 4, 1, false, 180, 4, 180],
+      // — เนื้อสัตว์และอาหารทะเล (CAT-FB-MEAT) —
+      ['ING-SHRIMP-RIVER', 'กุ้งแม่น้ำ', meat, 'KG', 3, 6, 1, true, 3, 6, 450],
+      ['ING-CHICKEN', 'เนื้อไก่', meat, 'KG', 4, 8, 2, true, 3, 8, 85],
+      ['ING-PORK-MINCED', 'หมูสับ', meat, 'KG', 3, 6, 1, true, 3, 6, 120],
+      ['ING-FISH-FILLET', 'เนื้อปลา', meat, 'KG', 2, 5, 1, true, 3, 5, 150],
+      ['ING-SQUID', 'ปลาหมึก', meat, 'KG', 2, 4, 1, true, 3, 4, 220],
+      ['ING-MUSSEL', 'หอยแมลงภู่', meat, 'KG', 2, 4, 1, true, 2, 4, 120],
+      ['ING-TOFU-FIRM', 'เต้าหู้แข็ง', meat, 'KG', 2, 5, 1, true, 7, 5, 45],
+      ['ING-LAMB-SHOULDER', 'เนื้อแกะ', meat, 'KG', 2, 4, 1, true, 3, 4, 480],
+      // — ผลิตภัณฑ์นมและไข่ (CAT-FB-DAIRY) —
+      ['ING-EGG', 'ไข่ไก่', dairy, 'PIECE', 48, 120, 24, true, 21, 120, 4],
+      ['ING-BUTTER', 'เนย', dairy, 'KG', 2, 4, 1, true, 60, 4, 220],
+      ['ING-MILK-FRESH', 'นมสด', dairy, 'L', 4, 12, 2, true, 10, 12, 35],
+      ['ING-CONDENSED-MILK', 'นมข้นหวาน', dairy, 'L', 3, 9, 1.5, false, 365, 9, 58],
+    ];
+    return rows.map((r) => ({
+      sku: r[0],
+      name: r[1],
+      catCode: r[2],
+      unit: r[3],
+      reorderPoint: r[4],
+      reorderQty: r[5],
+      minStock: r[6],
+      isPerishable: r[7],
+      shelfLifeDays: r[8],
+      qty: r[9],
+      avgCost: r[10],
+    }));
+  }
+
+  /**
+   * Seed MenuItemRecipe + RecipeIngredient for the premium demo tenant's menu,
+   * linking every ingredient to a tracked InventoryItem (itemId) seeded by
+   * seedInventoryData. Runs AFTER seedInventoryData so the items exist. Scoped
+   * strictly to premium.test@email.com. Idempotent (skips menu items that
+   * already have a recipe).
+   */
+  private async seedRestaurantRecipes(): Promise<void> {
+    this.logger.log('🍳 Seeding restaurant recipes (inventory-linked)...');
+
+    const ownerUser = await this.prisma.user.findFirst({
+      where: { email: 'premium.test@email.com' },
+    });
+    if (!ownerUser?.tenantId) {
+      this.logger.warn('  ⚠️  premium.test@email.com not found, skipping recipe seed');
+      return;
+    }
+    const tenantId = ownerUser.tenantId;
+
+    const mainRestaurant = await this.prisma.restaurant.findFirst({
+      where: { tenantId, code: 'MVR-MAIN' },
+    });
+    if (!mainRestaurant) {
+      this.logger.warn('  ⚠️  Main restaurant (MVR-MAIN) not found, skipping recipe seed');
+      return;
+    }
+
+    // Inventory item lookup by SKU (the source of truth for itemId links).
+    const invItems = await this.prisma.inventoryItem.findMany({
+      where: { tenantId },
+      select: { id: true, sku: true, name: true, unit: true },
+    });
+    const itemBySku = new Map(invItems.map((it) => [it.sku, it]));
+
+    // menuName → recipe. Every ingredient references a cooking-ingredient SKU so
+    // it is inventory-backed. Menu names must match seedRestaurantData exactly.
+    type Ing = { sku: string; quantity: number; unit: string; notes?: string };
+    const recipes: Array<{
+      menu: string;
+      servings: number;
+      instructions: string;
+      notes: string;
+      ingredients: Ing[];
+    }> = [
+      {
+        menu: 'ผัดไทยกุ้งสด',
+        servings: 2,
+        instructions:
+          '1. แช่เส้นจันท์ในน้ำอุ่นจนนุ่ม สะเด็ดน้ำ\n2. ผัดกุ้งจนสุก ตักพัก\n3. ผัดเส้นกับน้ำผัดไท (มะขาม+น้ำตาล+ซีอิ๊ว)\n4. เขี่ยเส้น ทอดไข่แล้วคลุก\n5. ใส่ถั่วงอก ต้นหอม โรยถั่วลิสง',
+        notes: 'ใช้เส้นจันท์เบอร์ 3 ไฟแรงได้ wok hei',
+        ingredients: [
+          { sku: 'ING-NOODLE-CHAN', quantity: 200, unit: 'กรัม', notes: 'แช่น้ำอุ่นก่อนผัด' },
+          { sku: 'ING-SHRIMP-RIVER', quantity: 150, unit: 'กรัม', notes: 'ปอกเปลือก ผ่าหลัง' },
+          { sku: 'ING-EGG', quantity: 2, unit: 'ฟอง' },
+          { sku: 'ING-BEANSPROUT', quantity: 80, unit: 'กรัม' },
+          { sku: 'ING-SPRING-ONION', quantity: 20, unit: 'กรัม', notes: 'หั่นท่อน' },
+          { sku: 'ING-PEANUT-ROASTED', quantity: 30, unit: 'กรัม', notes: 'ป่น' },
+          { sku: 'ING-TAMARIND', quantity: 45, unit: 'กรัม' },
+          { sku: 'ING-SUGAR-WHITE', quantity: 15, unit: 'กรัม' },
+          { sku: 'ING-SOY-LIGHT', quantity: 30, unit: 'มล.' },
+          { sku: 'ING-VEG-OIL', quantity: 45, unit: 'มล.' },
+        ],
+      },
+      {
+        menu: 'ต้มยำกุ้ง',
+        servings: 2,
+        instructions:
+          '1. ต้มน้ำใส่ตะไคร้ ข่า ใบมะกรูด\n2. ใส่กุ้ง เคี่ยวจนสุก\n3. ใส่เห็ดฟาง\n4. ปรุงรสน้ำปลา มะนาว พริก\n5. ปิดไฟ โรยผักชี',
+        notes: 'ใส่มะนาวตอนปิดไฟ กันขม',
+        ingredients: [
+          { sku: 'ING-SHRIMP-RIVER', quantity: 200, unit: 'กรัม' },
+          { sku: 'ING-LEMONGRASS', quantity: 20, unit: 'กรัม', notes: 'ทุบ หั่นท่อน' },
+          { sku: 'ING-GALANGAL', quantity: 15, unit: 'กรัม' },
+          { sku: 'ING-KAFFIR-LEAF', quantity: 3, unit: 'กรัม', notes: 'ฉีก' },
+          { sku: 'ING-MUSHROOM-STRAW', quantity: 100, unit: 'กรัม', notes: 'ผ่าครึ่ง' },
+          { sku: 'ING-CHILI-SUAN', quantity: 10, unit: 'กรัม', notes: 'ทุบ' },
+          { sku: 'ING-FISH-SAUCE', quantity: 30, unit: 'มล.' },
+          { sku: 'ING-LIME', quantity: 40, unit: 'มล.', notes: 'คั้นน้ำ' },
+          { sku: 'ING-CORIANDER', quantity: 5, unit: 'กรัม' },
+        ],
+      },
+      {
+        menu: 'แกงเขียวหวานไก่',
+        servings: 3,
+        instructions:
+          '1. เคี่ยวกะทิจนแตกมัน ผัดพริกแกง\n2. ใส่ไก่ ผัดจนสุก\n3. เติมกะทิ+น้ำ เคี่ยว 10 นาที\n4. ใส่มะเขือ เคี่ยวต่อ\n5. ปรุงรส ใส่ใบโหระพา',
+        notes: 'ใส่ใบโหระพาหลังปิดไฟ',
+        ingredients: [
+          { sku: 'ING-CHICKEN', quantity: 300, unit: 'กรัม', notes: 'หั่นพอดีคำ' },
+          { sku: 'ING-CURRY-GREEN', quantity: 45, unit: 'กรัม' },
+          { sku: 'ING-COCONUT-MILK', quantity: 400, unit: 'มล.', notes: 'แบ่ง 2 ส่วน' },
+          { sku: 'ING-EGGPLANT-THAI', quantity: 100, unit: 'กรัม', notes: 'หั่นครึ่ง' },
+          { sku: 'ING-EGGPLANT-PEA', quantity: 50, unit: 'กรัม' },
+          { sku: 'ING-BASIL-SWEET', quantity: 10, unit: 'กรัม' },
+          { sku: 'ING-FISH-SAUCE', quantity: 30, unit: 'มล.' },
+          { sku: 'ING-PALM-SUGAR', quantity: 10, unit: 'กรัม' },
+        ],
+      },
+      {
+        menu: 'ข้าวมันไก่',
+        servings: 2,
+        instructions:
+          '1. หุงข้าวกับน้ำมันไก่ กระเทียม ขิง\n2. ต้มไก่จนสุก แช่น้ำเย็น\n3. สับไก่ จัดจานคู่ข้าว\n4. เสิร์ฟพร้อมน้ำจิ้มและซุป',
+        notes: 'ข้าวต้องหอมมันแต่ไม่เละ',
+        ingredients: [
+          { sku: 'ING-JASMINE-RICE', quantity: 300, unit: 'กรัม' },
+          { sku: 'ING-CHICKEN', quantity: 350, unit: 'กรัม' },
+          { sku: 'ING-GARLIC', quantity: 20, unit: 'กรัม' },
+          { sku: 'ING-GINGER', quantity: 20, unit: 'กรัม' },
+          { sku: 'ING-VEG-OIL', quantity: 30, unit: 'มล.' },
+          { sku: 'ING-SOY-LIGHT', quantity: 30, unit: 'มล.' },
+          { sku: 'ING-CORIANDER', quantity: 5, unit: 'กรัม' },
+        ],
+      },
+      {
+        menu: 'ข้าวต้มปลา',
+        servings: 1,
+        instructions:
+          '1. ต้มข้าวสวยกับน้ำซุปจนเดือด\n2. ใส่เนื้อปลา ขิงซอย\n3. ปรุงรสน้ำปลา\n4. โรยต้นหอม ผักชี พริกไทย',
+        notes: 'ปลาสดลวกพอสุก เนื้อไม่แข็ง',
+        ingredients: [
+          { sku: 'ING-JASMINE-RICE', quantity: 150, unit: 'กรัม', notes: 'ข้าวสวย' },
+          { sku: 'ING-FISH-FILLET', quantity: 150, unit: 'กรัม', notes: 'หั่นชิ้น' },
+          { sku: 'ING-GINGER', quantity: 15, unit: 'กรัม', notes: 'ซอย' },
+          { sku: 'ING-GARLIC', quantity: 10, unit: 'กรัม', notes: 'เจียว' },
+          { sku: 'ING-SPRING-ONION', quantity: 10, unit: 'กรัม' },
+          { sku: 'ING-CORIANDER', quantity: 5, unit: 'กรัม' },
+          { sku: 'ING-FISH-SAUCE', quantity: 15, unit: 'มล.' },
+        ],
+      },
+      {
+        menu: 'โจ๊กหมูสับ',
+        servings: 1,
+        instructions:
+          '1. เคี่ยวข้าวจนเป็นโจ๊กเนียน\n2. ปั้นหมูสับหยอดลงต้ม\n3. ตอกไข่\n4. โรยขิงซอย ต้นหอม พริกไทย',
+        notes: 'คนบ่อย ๆ กันข้าวติดก้นหม้อ',
+        ingredients: [
+          { sku: 'ING-JASMINE-RICE', quantity: 120, unit: 'กรัม' },
+          { sku: 'ING-PORK-MINCED', quantity: 150, unit: 'กรัม' },
+          { sku: 'ING-EGG', quantity: 1, unit: 'ฟอง' },
+          { sku: 'ING-GINGER', quantity: 15, unit: 'กรัม', notes: 'ซอย' },
+          { sku: 'ING-SPRING-ONION', quantity: 10, unit: 'กรัม' },
+          { sku: 'ING-SOY-LIGHT', quantity: 15, unit: 'มล.' },
+          { sku: 'ING-PEPPER-BLACK', quantity: 1, unit: 'กรัม' },
+        ],
+      },
+      {
+        menu: 'ไข่กระทะ',
+        servings: 1,
+        instructions:
+          '1. ตั้งกระทะร้อน ใส่น้ำมัน\n2. ตอกไข่ ใส่หมูสับ\n3. ปรุงรส โรยต้นหอม พริกไทย\n4. เสิร์ฟร้อนในกระทะ',
+        notes: 'ไข่แดงเยิ้มกำลังดี',
+        ingredients: [
+          { sku: 'ING-EGG', quantity: 2, unit: 'ฟอง' },
+          { sku: 'ING-PORK-MINCED', quantity: 50, unit: 'กรัม' },
+          { sku: 'ING-SPRING-ONION', quantity: 10, unit: 'กรัม' },
+          { sku: 'ING-VEG-OIL', quantity: 15, unit: 'มล.' },
+          { sku: 'ING-PEPPER-BLACK', quantity: 0.5, unit: 'กรัม' },
+        ],
+      },
+      {
+        // English-named variant present in some seeded menus (demo parity).
+        menu: 'Som Tum Thai',
+        servings: 1,
+        instructions:
+          '1. โขลกกระเทียม พริก\n2. ใส่มะเขือเทศ ถั่วฝักยาว โขลกเบา ๆ\n3. ใส่มะละกอขูด คลุกเคล้า\n4. ปรุงรสน้ำปลา มะนาว น้ำตาลปี๊บ กุ้งแห้ง\n5. โรยถั่วลิสงคั่ว',
+        notes: 'มะละกอสดกรอบ ใส่มะนาวท้ายสุดรักษาสี',
+        ingredients: [
+          { sku: 'ING-PAPAYA', quantity: 200, unit: 'กรัม', notes: 'ขูดเส้น' },
+          { sku: 'ING-TOMATO-CHERRY', quantity: 50, unit: 'กรัม', notes: 'ผ่าครึ่ง' },
+          { sku: 'ING-LONGBEAN', quantity: 30, unit: 'กรัม', notes: 'หั่นท่อน' },
+          { sku: 'ING-DRIED-SHRIMP', quantity: 15, unit: 'กรัม' },
+          { sku: 'ING-PEANUT-ROASTED', quantity: 20, unit: 'กรัม' },
+          { sku: 'ING-GARLIC', quantity: 10, unit: 'กรัม' },
+          { sku: 'ING-CHILI', quantity: 5, unit: 'กรัม', notes: 'ปรับตามชอบ' },
+          { sku: 'ING-FISH-SAUCE', quantity: 22, unit: 'มล.' },
+          { sku: 'ING-PALM-SUGAR', quantity: 15, unit: 'กรัม' },
+          { sku: 'ING-LIME', quantity: 30, unit: 'มล.', notes: 'คั้นน้ำ' },
+        ],
+      },
+      {
+        // English-named variant present in some seeded menus (demo parity).
+        menu: 'Massaman Lamb',
+        servings: 4,
+        instructions:
+          '1. ผัดพริกแกงมัสมั่นกับกะทิจนหอม\n2. ใส่เนื้อแกะ ผัดจนผิวเหลือง\n3. เติมกะทิ+น้ำ เคี่ยวไฟอ่อน 45 นาที\n4. ใส่มันฝรั่ง หัวหอม ถั่วลิสง เคี่ยวต่อ\n5. ปรุงรสน้ำปลา น้ำตาลปี๊บ น้ำมะขาม จนซอสข้น',
+        notes: 'เคี่ยวไฟอ่อนนาน ๆ เนื้อนุ่มละลาย',
+        ingredients: [
+          { sku: 'ING-LAMB-SHOULDER', quantity: 600, unit: 'กรัม', notes: 'หั่นชิ้นใหญ่' },
+          { sku: 'ING-CURRY-MASSAMAN', quantity: 60, unit: 'กรัม' },
+          { sku: 'ING-COCONUT-MILK', quantity: 400, unit: 'มล.' },
+          { sku: 'ING-POTATO', quantity: 200, unit: 'กรัม', notes: 'หั่นสี่เหลี่ยม' },
+          { sku: 'ING-ONION', quantity: 100, unit: 'กรัม', notes: 'หั่น 4 ส่วน' },
+          { sku: 'ING-PEANUT-ROASTED', quantity: 50, unit: 'กรัม' },
+          { sku: 'ING-TAMARIND', quantity: 30, unit: 'กรัม' },
+          { sku: 'ING-PALM-SUGAR', quantity: 22, unit: 'กรัม' },
+          { sku: 'ING-FISH-SAUCE', quantity: 30, unit: 'มล.' },
+        ],
+      },
+      {
+        menu: 'ข้าวเหนียวมะม่วง',
+        servings: 2,
+        instructions:
+          '1. แช่ข้าวเหนียวข้ามคืน แล้วนึ่ง\n2. ต้มกะทิ+เกลือ+น้ำตาล\n3. ราดกะทิลงข้าวเหนียวร้อน พัก 15 นาที\n4. จัดจานคู่มะม่วง โรยงา',
+        notes: 'มะม่วงน้ำดอกไม้สุกกำลังดี',
+        ingredients: [
+          { sku: 'ING-STICKY-RICE', quantity: 200, unit: 'กรัม', notes: 'แช่น้ำข้ามคืน' },
+          { sku: 'ING-MANGO-RIPE', quantity: 200, unit: 'กรัม', notes: 'หั่นชิ้น' },
+          { sku: 'ING-COCONUT-MILK', quantity: 250, unit: 'มล.' },
+          { sku: 'ING-SUGAR-WHITE', quantity: 45, unit: 'กรัม' },
+          { sku: 'ING-SALT', quantity: 3, unit: 'กรัม' },
+          { sku: 'ING-SESAME-WHITE', quantity: 5, unit: 'กรัม', notes: 'โรยหน้า' },
+        ],
+      },
+      {
+        menu: 'ชาไทยเย็น',
+        servings: 1,
+        instructions:
+          '1. ชงชาไทยกับน้ำร้อน กรองใบชา\n2. เติมน้ำตาลและนมข้น คนละลาย\n3. ใส่น้ำแข็ง ราดนมสด',
+        notes: 'ชาเข้มข้นก่อนใส่น้ำแข็ง',
+        ingredients: [
+          { sku: 'ING-THAI-TEA', quantity: 20, unit: 'กรัม' },
+          { sku: 'ING-SUGAR-WHITE', quantity: 30, unit: 'กรัม' },
+          { sku: 'ING-CONDENSED-MILK', quantity: 30, unit: 'มล.' },
+          { sku: 'ING-MILK-FRESH', quantity: 50, unit: 'มล.', notes: 'ราดหน้า' },
+        ],
+      },
+      {
+        menu: 'กาแฟดำร้อน',
+        servings: 1,
+        instructions: '1. บดกาแฟ ชงกับน้ำร้อน\n2. เติมน้ำตาลตามชอบ',
+        notes: 'อัตราส่วน 1:15 กาแฟต่อน้ำ',
+        ingredients: [
+          { sku: 'ING-COFFEE-ROAST', quantity: 18, unit: 'กรัม' },
+          { sku: 'ING-SUGAR-WHITE', quantity: 5, unit: 'กรัม', notes: 'ตามชอบ' },
+        ],
+      },
+      {
+        menu: 'Latte',
+        servings: 1,
+        instructions:
+          '1. สกัดช็อตเอสเพรสโซ่จากกาแฟบด\n2. สตีมนมสดให้เป็นไมโครโฟม\n3. เทนมลงบนช็อต',
+        notes: 'นมสดเย็นสตีมฟองละเอียด',
+        ingredients: [
+          { sku: 'ING-COFFEE-ROAST', quantity: 18, unit: 'กรัม' },
+          { sku: 'ING-MILK-FRESH', quantity: 200, unit: 'มล.' },
+        ],
+      },
+    ];
+
+    let recipeCount = 0;
+    let relinkedCount = 0;
+    let ingredientCount = 0;
+    let missingItemWarnings = 0;
+    for (const rec of recipes) {
+      const menuItem = await this.prisma.menuItem.findFirst({
+        where: { tenantId, restaurantId: mainRestaurant.id, name: rec.menu },
+      });
+      if (!menuItem) {
+        this.logger.warn(`  ⚠️  Menu item "${rec.menu}" not found, skipping recipe`);
+        continue;
+      }
+
+      const existingRecipe = await this.prisma.menuItemRecipe.findUnique({
+        where: { menuItemId: menuItem.id },
+        include: { ingredients: { select: { itemId: true } } },
+      });
+
+      let recipeId: string;
+      if (existingRecipe) {
+        // Leave a fully inventory-linked recipe alone (may be curated/edited).
+        // Upgrade a stale free-text one ("นอกคลัง", e.g. old FE mockup) to be
+        // inventory-linked so nothing stays untracked for the demo tenant.
+        const fullyLinked =
+          existingRecipe.ingredients.length > 0 &&
+          existingRecipe.ingredients.every((i) => i.itemId);
+        if (fullyLinked) {
+          continue;
+        }
+        await this.prisma.recipeIngredient.deleteMany({
+          where: { recipeId: existingRecipe.id },
+        });
+        await this.prisma.menuItemRecipe.update({
+          where: { id: existingRecipe.id },
+          data: {
+            servings: rec.servings,
+            instructions: rec.instructions,
+            notes: rec.notes,
+          },
+        });
+        recipeId = existingRecipe.id;
+        relinkedCount++;
+      } else {
+        const created = await this.prisma.menuItemRecipe.create({
+          data: {
+            menuItemId: menuItem.id,
+            servings: rec.servings,
+            instructions: rec.instructions,
+            notes: rec.notes,
+          },
+        });
+        recipeId = created.id;
+        recipeCount++;
+      }
+
+      const rows = rec.ingredients
+        .map((ing, idx) => {
+          const item = itemBySku.get(ing.sku);
+          if (!item) {
+            missingItemWarnings++;
+            this.logger.warn(
+              `  ⚠️  Ingredient SKU ${ing.sku} for "${rec.menu}" has no inventory item`,
+            );
+            return null;
+          }
+          // The readiness calc (recipe-readiness.service) divides raw stock qty
+          // by raw recipe qty WITHOUT any unit conversion, so both must share the
+          // item's stocking unit. Recipes are authored in culinary units
+          // (กรัม/มล.); convert to the item's base unit (KG/L → ÷1000) and label
+          // it with that unit so "ทำได้กี่จาน" and stock deduction are correct.
+          const conv = this.toStockUnit(ing.quantity, ing.unit, item.unit ?? '');
+          return {
+            recipeId,
+            name: item.name,
+            itemId: item.id,
+            quantity: conv.quantity,
+            unit: conv.unit,
+            wastagePercent: 0,
+            notes: ing.notes ?? null,
+            displayOrder: idx + 1,
+          };
+        })
+        .filter((r): r is NonNullable<typeof r> => r !== null);
+
+      if (rows.length > 0) {
+        await this.prisma.recipeIngredient.createMany({ data: rows });
+        ingredientCount += rows.length;
+      }
+    }
+
+    this.logger.log(
+      `  ✓ ${recipeCount} new + ${relinkedCount} re-linked recipes / ` +
+        `${ingredientCount} inventory-linked ingredients seeded` +
+        (missingItemWarnings ? ` (${missingItemWarnings} missing item warnings)` : ''),
+    );
+  }
+
+  /**
+   * Convert a culinary recipe quantity into the item's stocking unit so the
+   * readiness calc (which does no unit conversion) stays correct.
+   *   กรัม → KG, มล. → L : ÷1000, labelled with the item's unit.
+   *   Anything already in the item's base (ฟอง↔PIECE, matching unit) is kept
+   *   as-is with the recipe's own label for readability.
+   * Quantities are rounded to 3 decimals (RecipeIngredient.quantity is
+   * Decimal(10,3)).
+   */
+  private toStockUnit(
+    qty: number,
+    recipeUnit: string,
+    itemUnit: string,
+  ): { quantity: number; unit: string } {
+    const u = (itemUnit || '').toUpperCase();
+    const r = recipeUnit || '';
+    if ((u === 'KG' || u === 'L') && (r === 'กรัม' || r === 'มล.')) {
+      return { quantity: Math.round((qty / 1000) * 1000) / 1000, unit: u };
+    }
+    return { quantity: qty, unit: recipeUnit || itemUnit };
+  }
+
   private async seedInventoryData(): Promise<void> {
     this.logger.log('📦 Seeding Inventory data...');
 
     // Only seed for the premium demo tenant (SUB-002)
     const allTenants = await this.tenantsService.findAll();
-    const tenant = allTenants.find(t => (t as any).name_en === 'Mountain View Resort' || (t as any).slug === 'mountain' || t.name === 'Mountain View Resort (Premium Test)');
+    const tenant = allTenants.find(
+      (t) =>
+        (t as any).name_en === 'Mountain View Resort' ||
+        (t as any).slug === 'mountain' ||
+        t.name === 'Mountain View Resort (Premium Test)',
+    );
     if (!tenant) {
       this.logger.warn('  ⚠️ Demo tenant (mountain) not found — skipping inventory seed');
       return;
@@ -4692,15 +6743,24 @@ export class SeederService {
 
     // ── 1. Item Categories (hierarchical) ────────────────────────────────────
     const categoryDefs = [
-      { code: 'CAT-FB',    name: 'F&B วัตถุดิบ',        parentCode: null },
-      { code: 'CAT-FB-DRY',name: 'ของแห้ง',              parentCode: 'CAT-FB' },
-      { code: 'CAT-FB-VEG',name: 'ผักและผลไม้',           parentCode: 'CAT-FB' },
-      { code: 'CAT-FB-BEV',name: 'เครื่องดื่ม',            parentCode: 'CAT-FB' },
-      { code: 'CAT-ROOM',  name: 'ของใช้ห้องพัก',         parentCode: null },
-      { code: 'CAT-ROOM-BED', name: 'ผ้าปูและผ้าห่ม',    parentCode: 'CAT-ROOM' },
-      { code: 'CAT-ROOM-AMEN',name: 'Amenities',          parentCode: 'CAT-ROOM' },
-      { code: 'CAT-CLEAN', name: 'น้ำยาทำความสะอาด',      parentCode: null },
-      { code: 'CAT-MAINT', name: 'อุปกรณ์ซ่อมบำรุง',       parentCode: null },
+      { code: 'CAT-FB', name: 'F&B วัตถุดิบ', parentCode: null },
+      { code: 'CAT-FB-DRY', name: 'ของแห้ง', parentCode: 'CAT-FB' },
+      { code: 'CAT-FB-VEG', name: 'ผักและผลไม้', parentCode: 'CAT-FB' },
+      { code: 'CAT-FB-BEV', name: 'เครื่องดื่ม', parentCode: 'CAT-FB' },
+      { code: 'CAT-FB-MEAT', name: 'เนื้อสัตว์และอาหารทะเล', parentCode: 'CAT-FB' },
+      { code: 'CAT-FB-DAIRY', name: 'ผลิตภัณฑ์นมและไข่', parentCode: 'CAT-FB' },
+      { code: 'CAT-RETAIL', name: 'สินค้าร้านค้า / Mini Mart', parentCode: null },
+      { code: 'CAT-RETAIL-DRINK', name: 'เครื่องดื่มร้านค้า', parentCode: 'CAT-RETAIL' },
+      { code: 'CAT-RETAIL-SNACK', name: 'ขนมและของทานเล่น', parentCode: 'CAT-RETAIL' },
+      { code: 'CAT-RETAIL-DAILY', name: 'ของใช้จำเป็น', parentCode: 'CAT-RETAIL' },
+      { code: 'CAT-RETAIL-SOUV', name: 'ของฝากและสินค้ารีสอร์ต', parentCode: 'CAT-RETAIL' },
+      { code: 'CAT-ROOM', name: 'ของใช้ห้องพัก', parentCode: null },
+      { code: 'CAT-ROOM-BED', name: 'ผ้าปูและผ้าห่ม', parentCode: 'CAT-ROOM' },
+      { code: 'CAT-ROOM-AMEN', name: 'Amenities', parentCode: 'CAT-ROOM' },
+      { code: 'CAT-CLEAN', name: 'น้ำยาทำความสะอาด', parentCode: null },
+      { code: 'CAT-MAINT', name: 'อุปกรณ์ซ่อมบำรุง', parentCode: null },
+      { code: 'CAT-STAFF', name: 'อุปกรณ์พนักงาน (Staff Equipment)', parentCode: null },
+      { code: 'CAT-RENTAL', name: 'อุปกรณ์ให้เช่า (ลานกางเต็นท์)', parentCode: null },
     ];
 
     const categoryMap: Record<string, string> = {};
@@ -4711,7 +6771,14 @@ export class SeederService {
       });
       if (!existing) {
         const created = await this.prisma.itemCategory.create({
-          data: { tenantId, code: cat.code, name: cat.name, parentId, isActive: true, sortOrder: 0 },
+          data: {
+            tenantId,
+            code: cat.code,
+            name: cat.name,
+            parentId,
+            isActive: true,
+            sortOrder: 0,
+          },
         });
         categoryMap[cat.code] = created.id;
         this.logger.log(`  ✓ Category: ${cat.name}`);
@@ -4723,24 +6790,49 @@ export class SeederService {
     // ── 2. Suppliers ─────────────────────────────────────────────────────────
     const supplierDefs = [
       {
-        code: 'SUP-MAKRO',  name: 'แม็คโคร (Makro)', contactPerson: 'จัดซื้อส่วนกลาง',
-        email: 'order@makro.co.th', phone: '02-999-9999', paymentTerms: 'NET30',
+        code: 'SUP-MAKRO',
+        name: 'แม็คโคร (Makro)',
+        contactPerson: 'จัดซื้อส่วนกลาง',
+        email: 'order@makro.co.th',
+        phone: '02-999-9999',
+        paymentTerms: 'NET30',
         leadTimeDays: 2,
       },
       {
-        code: 'SUP-BIGC',   name: 'บิ๊กซี ซัพพลาย', contactPerson: 'ฝ่ายขายส่ง',
-        email: 'wholesale@bigc.co.th', phone: '02-888-8888', paymentTerms: 'COD',
+        code: 'SUP-BIGC',
+        name: 'บิ๊กซี ซัพพลาย',
+        contactPerson: 'ฝ่ายขายส่ง',
+        email: 'wholesale@bigc.co.th',
+        phone: '02-888-8888',
+        paymentTerms: 'COD',
         leadTimeDays: 1,
       },
       {
-        code: 'SUP-CLEAN',  name: 'บริษัท ซัพพลายคลีน จำกัด', contactPerson: 'คุณสมหวัง',
-        email: 'sales@supplyclean.th', phone: '086-111-2222', paymentTerms: 'NET15',
+        code: 'SUP-CLEAN',
+        name: 'บริษัท ซัพพลายคลีน จำกัด',
+        contactPerson: 'คุณสมหวัง',
+        email: 'sales@supplyclean.th',
+        phone: '086-111-2222',
+        paymentTerms: 'NET15',
         leadTimeDays: 3,
       },
       {
-        code: 'SUP-HOTEL',  name: 'Hotel Amenities TH', contactPerson: 'คุณนารี',
-        email: 'info@hotelamenities.th', phone: '088-555-6666', paymentTerms: 'NET30',
+        code: 'SUP-HOTEL',
+        name: 'Hotel Amenities TH',
+        contactPerson: 'คุณนารี',
+        email: 'info@hotelamenities.th',
+        phone: '088-555-6666',
+        paymentTerms: 'NET30',
         leadTimeDays: 5,
+      },
+      {
+        code: 'SUP-RETAIL',
+        name: 'Village Mini Mart Wholesale',
+        contactPerson: 'คุณมินตรา',
+        email: 'retail@supply-village.th',
+        phone: '081-234-5678',
+        paymentTerms: 'COD',
+        leadTimeDays: 1,
       },
     ];
 
@@ -4762,10 +6854,11 @@ export class SeederService {
 
     // ── 3. Warehouses ─────────────────────────────────────────────────────────
     const warehouseDefs = [
-      { code: 'WH-MAIN',  name: 'คลังกลาง',       type: 'GENERAL',      isDefault: true },
-      { code: 'WH-KITCH', name: 'คลังครัว',        type: 'KITCHEN',      isDefault: false },
-      { code: 'WH-HK',    name: 'คลัง Housekeeping', type: 'HOUSEKEEPING', isDefault: false },
-      { code: 'WH-MAINT', name: 'คลังช่างซ่อม',    type: 'MAINTENANCE',  isDefault: false },
+      { code: 'WH-MAIN', name: 'คลังกลาง', type: 'GENERAL', isDefault: true },
+      { code: 'WH-KITCH', name: 'คลังครัว', type: 'KITCHEN', isDefault: false },
+      { code: 'WH-HK', name: 'คลัง Housekeeping', type: 'HOUSEKEEPING', isDefault: false },
+      { code: 'WH-MAINT', name: 'คลังช่างซ่อม', type: 'MAINTENANCE', isDefault: false },
+      { code: 'WH-RETAIL', name: 'คลังร้านขายของ', type: 'GENERAL', isDefault: false },
     ];
 
     const warehouseMap: Record<string, string> = {};
@@ -4785,103 +6878,730 @@ export class SeederService {
     }
 
     // ── 4. Inventory Items ────────────────────────────────────────────────────
+    // Cooking raw materials (วัตถุดิบปรุงอาหาร) — the single source of truth that
+    // recipe ingredients (seedRestaurantRecipes) link to via itemId, and that the
+    // menu-detail "Mockup Recipe" button draws from so every ingredient is
+    // in-stock ("นับสต๊อก") instead of free-text ("นอกคลัง"). Premium tenant only.
+    const cookingIngredients = this.cookingIngredientCatalog();
     const itemDefs = [
+      // — Cooking raw ingredients (kitchen) —
+      ...cookingIngredients.map((c) => ({
+        sku: c.sku,
+        name: c.name,
+        catCode: c.catCode,
+        unit: c.unit,
+        reorderPoint: c.reorderPoint,
+        reorderQty: c.reorderQty,
+        minStock: c.minStock,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: c.isPerishable,
+        supplierCode: 'SUP-MAKRO',
+        unitPrice: c.avgCost,
+        defaultShelfLifeDays: c.shelfLifeDays,
+        barcode: null as string | null,
+        brand: null as string | null,
+      })),
       // Room Amenities
       {
-        sku: 'SOAP-75G',   name: 'สบู่ก้อน 75g',         catCode: 'CAT-ROOM-AMEN', unit: 'PIECE',
-        reorderPoint: 200, reorderQty: 500, minStock: 50, costMethod: 'WEIGHTED_AVG',
-        isPerishable: false, supplierCode: 'SUP-HOTEL', unitPrice: 18,
+        sku: 'SOAP-75G',
+        name: 'สบู่ก้อน 75g',
+        catCode: 'CAT-ROOM-AMEN',
+        unit: 'PIECE',
+        reorderPoint: 200,
+        reorderQty: 500,
+        minStock: 50,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-HOTEL',
+        unitPrice: 18,
       },
       {
-        sku: 'SHAMP-30ML', name: 'แชมพู 30ml',            catCode: 'CAT-ROOM-AMEN', unit: 'BOTTLE',
-        reorderPoint: 150, reorderQty: 400, minStock: 30, costMethod: 'WEIGHTED_AVG',
-        isPerishable: false, supplierCode: 'SUP-HOTEL', unitPrice: 22,
+        sku: 'SHAMP-30ML',
+        name: 'แชมพู 30ml',
+        catCode: 'CAT-ROOM-AMEN',
+        unit: 'BOTTLE',
+        reorderPoint: 150,
+        reorderQty: 400,
+        minStock: 30,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-HOTEL',
+        unitPrice: 22,
       },
       {
-        sku: 'COND-30ML',  name: 'ครีมนวด 30ml',           catCode: 'CAT-ROOM-AMEN', unit: 'BOTTLE',
-        reorderPoint: 150, reorderQty: 400, minStock: 30, costMethod: 'WEIGHTED_AVG',
-        isPerishable: false, supplierCode: 'SUP-HOTEL', unitPrice: 22,
+        sku: 'COND-30ML',
+        name: 'ครีมนวด 30ml',
+        catCode: 'CAT-ROOM-AMEN',
+        unit: 'BOTTLE',
+        reorderPoint: 150,
+        reorderQty: 400,
+        minStock: 30,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-HOTEL',
+        unitPrice: 22,
       },
       {
-        sku: 'TOWEL-BATH', name: 'ผ้าเช็ดตัว',             catCode: 'CAT-ROOM-BED',  unit: 'PIECE',
-        reorderPoint: 100, reorderQty: 200, minStock: 50, costMethod: 'WEIGHTED_AVG',
-        isPerishable: false, supplierCode: 'SUP-HOTEL', unitPrice: 120,
+        sku: 'TOWEL-BATH',
+        name: 'ผ้าเช็ดตัว',
+        catCode: 'CAT-ROOM-BED',
+        unit: 'PIECE',
+        reorderPoint: 100,
+        reorderQty: 200,
+        minStock: 50,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-HOTEL',
+        unitPrice: 120,
       },
       {
-        sku: 'TOWEL-FACE', name: 'ผ้าเช็ดหน้า',            catCode: 'CAT-ROOM-BED',  unit: 'PIECE',
-        reorderPoint: 100, reorderQty: 200, minStock: 50, costMethod: 'WEIGHTED_AVG',
-        isPerishable: false, supplierCode: 'SUP-HOTEL', unitPrice: 60,
+        sku: 'TOWEL-FACE',
+        name: 'ผ้าเช็ดหน้า',
+        catCode: 'CAT-ROOM-BED',
+        unit: 'PIECE',
+        reorderPoint: 100,
+        reorderQty: 200,
+        minStock: 50,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-HOTEL',
+        unitPrice: 60,
       },
       {
-        sku: 'SHEET-STD',  name: 'ผ้าปูที่นอน (Standard)',  catCode: 'CAT-ROOM-BED',  unit: 'SET',
-        reorderPoint: 30,  reorderQty: 60,  minStock: 15, costMethod: 'WEIGHTED_AVG',
-        isPerishable: false, supplierCode: 'SUP-HOTEL', unitPrice: 350,
+        sku: 'SHEET-STD',
+        name: 'ผ้าปูที่นอน (Standard)',
+        catCode: 'CAT-ROOM-BED',
+        unit: 'SET',
+        reorderPoint: 30,
+        reorderQty: 60,
+        minStock: 15,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-HOTEL',
+        unitPrice: 350,
       },
       // F&B Dry goods
       {
-        sku: 'RICE-25KG',  name: 'ข้าวหอมมะลิ 25kg',       catCode: 'CAT-FB-DRY',    unit: 'BAG',
-        reorderPoint: 10,  reorderQty: 20,  minStock: 5,  costMethod: 'WEIGHTED_AVG',
-        isPerishable: true, defaultShelfLifeDays: 365, supplierCode: 'SUP-MAKRO', unitPrice: 780,
+        sku: 'RICE-25KG',
+        name: 'ข้าวหอมมะลิ 25kg',
+        catCode: 'CAT-FB-DRY',
+        unit: 'BAG',
+        reorderPoint: 10,
+        reorderQty: 20,
+        minStock: 5,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: true,
+        defaultShelfLifeDays: 365,
+        supplierCode: 'SUP-MAKRO',
+        unitPrice: 780,
       },
       {
-        sku: 'FLOUR-1KG',  name: 'แป้งอเนกประสงค์ 1kg',    catCode: 'CAT-FB-DRY',    unit: 'KG',
-        reorderPoint: 20,  reorderQty: 50,  minStock: 5,  costMethod: 'WEIGHTED_AVG',
-        isPerishable: true, defaultShelfLifeDays: 180, supplierCode: 'SUP-MAKRO', unitPrice: 32,
+        sku: 'FLOUR-1KG',
+        name: 'แป้งอเนกประสงค์ 1kg',
+        catCode: 'CAT-FB-DRY',
+        unit: 'KG',
+        reorderPoint: 20,
+        reorderQty: 50,
+        minStock: 5,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: true,
+        defaultShelfLifeDays: 180,
+        supplierCode: 'SUP-MAKRO',
+        unitPrice: 32,
       },
       {
-        sku: 'OIL-5L',     name: 'น้ำมันพืช 5 ลิตร',        catCode: 'CAT-FB-DRY',    unit: 'BOTTLE',
-        reorderPoint: 10,  reorderQty: 24,  minStock: 3,  costMethod: 'WEIGHTED_AVG',
-        isPerishable: true, defaultShelfLifeDays: 365, supplierCode: 'SUP-MAKRO', unitPrice: 220,
+        sku: 'OIL-5L',
+        name: 'น้ำมันพืช 5 ลิตร',
+        catCode: 'CAT-FB-DRY',
+        unit: 'BOTTLE',
+        reorderPoint: 10,
+        reorderQty: 24,
+        minStock: 3,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: true,
+        defaultShelfLifeDays: 365,
+        supplierCode: 'SUP-MAKRO',
+        unitPrice: 220,
       },
       {
-        sku: 'SUGAR-1KG',  name: 'น้ำตาลทราย 1kg',          catCode: 'CAT-FB-DRY',    unit: 'KG',
-        reorderPoint: 10,  reorderQty: 30,  minStock: 5,  costMethod: 'WEIGHTED_AVG',
-        isPerishable: true, defaultShelfLifeDays: 730, supplierCode: 'SUP-MAKRO', unitPrice: 28,
+        sku: 'SUGAR-1KG',
+        name: 'น้ำตาลทราย 1kg',
+        catCode: 'CAT-FB-DRY',
+        unit: 'KG',
+        reorderPoint: 10,
+        reorderQty: 30,
+        minStock: 5,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: true,
+        defaultShelfLifeDays: 730,
+        supplierCode: 'SUP-MAKRO',
+        unitPrice: 28,
       },
       // Beverages
       {
-        sku: 'WATER-600',  name: 'น้ำดื่ม 600ml (ลัง 24)',   catCode: 'CAT-FB-BEV',    unit: 'BOX',
-        reorderPoint: 20,  reorderQty: 50,  minStock: 10, costMethod: 'WEIGHTED_AVG',
-        isPerishable: true, defaultShelfLifeDays: 365, supplierCode: 'SUP-MAKRO', unitPrice: 90,
+        sku: 'WATER-600',
+        name: 'น้ำดื่ม 600ml (ลัง 24)',
+        catCode: 'CAT-FB-BEV',
+        unit: 'BOX',
+        reorderPoint: 20,
+        reorderQty: 50,
+        minStock: 10,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: true,
+        defaultShelfLifeDays: 365,
+        supplierCode: 'SUP-MAKRO',
+        unitPrice: 90,
       },
       {
-        sku: 'COLA-330',   name: 'น้ำอัดลม 330ml (ลัง 24)', catCode: 'CAT-FB-BEV',    unit: 'BOX',
-        reorderPoint: 10,  reorderQty: 20,  minStock: 5,  costMethod: 'WEIGHTED_AVG',
-        isPerishable: true, defaultShelfLifeDays: 365, supplierCode: 'SUP-BIGC', unitPrice: 180,
+        sku: 'COLA-330',
+        name: 'น้ำอัดลม 330ml (ลัง 24)',
+        catCode: 'CAT-FB-BEV',
+        unit: 'BOX',
+        reorderPoint: 10,
+        reorderQty: 20,
+        minStock: 5,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: true,
+        defaultShelfLifeDays: 365,
+        supplierCode: 'SUP-BIGC',
+        unitPrice: 180,
+      },
+      // Retail / Mini Mart products
+      {
+        sku: 'RT-WATER-600',
+        name: 'น้ำดื่ม 600ml',
+        catCode: 'CAT-RETAIL-DRINK',
+        unit: 'BOTTLE',
+        barcode: '8850001000011',
+        brand: 'StaySync',
+        reorderPoint: 48,
+        reorderQty: 120,
+        minStock: 24,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: true,
+        defaultShelfLifeDays: 365,
+        supplierCode: 'SUP-RETAIL',
+        unitPrice: 6,
+      },
+      {
+        sku: 'RT-SPARKLING-LEMON',
+        name: 'โซดามะนาว 325ml',
+        catCode: 'CAT-RETAIL-DRINK',
+        unit: 'CAN',
+        barcode: '8850001000028',
+        brand: 'Fresh Pop',
+        reorderPoint: 24,
+        reorderQty: 72,
+        minStock: 12,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: true,
+        defaultShelfLifeDays: 365,
+        supplierCode: 'SUP-RETAIL',
+        unitPrice: 14,
+      },
+      {
+        sku: 'RT-ICED-TEA',
+        name: 'ชาเย็นพร้อมดื่ม 350ml',
+        catCode: 'CAT-RETAIL-DRINK',
+        unit: 'BOTTLE',
+        barcode: '8850001000035',
+        brand: 'Thai Tea Co.',
+        reorderPoint: 24,
+        reorderQty: 72,
+        minStock: 12,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: true,
+        defaultShelfLifeDays: 180,
+        supplierCode: 'SUP-RETAIL',
+        unitPrice: 18,
+      },
+      {
+        sku: 'RT-CHIPS-SALT',
+        name: 'มันฝรั่งทอดรสเกลือ 50g',
+        catCode: 'CAT-RETAIL-SNACK',
+        unit: 'BAG',
+        barcode: '8850002000010',
+        brand: 'Crispy Hill',
+        reorderPoint: 20,
+        reorderQty: 60,
+        minStock: 10,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: true,
+        defaultShelfLifeDays: 180,
+        supplierCode: 'SUP-RETAIL',
+        unitPrice: 16,
+      },
+      {
+        sku: 'RT-NUTS-CASHEW',
+        name: 'เม็ดมะม่วงหิมพานต์อบ 40g',
+        catCode: 'CAT-RETAIL-SNACK',
+        unit: 'BAG',
+        barcode: '8850002000027',
+        brand: 'Mountain Snack',
+        reorderPoint: 15,
+        reorderQty: 45,
+        minStock: 8,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: true,
+        defaultShelfLifeDays: 240,
+        supplierCode: 'SUP-RETAIL',
+        unitPrice: 28,
+      },
+      {
+        sku: 'RT-COOKIE-BOX',
+        name: 'คุกกี้กล่องเล็ก',
+        catCode: 'CAT-RETAIL-SNACK',
+        unit: 'BOX',
+        barcode: '8850002000034',
+        brand: 'Resort Bakery',
+        reorderPoint: 12,
+        reorderQty: 36,
+        minStock: 6,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: true,
+        defaultShelfLifeDays: 90,
+        supplierCode: 'SUP-RETAIL',
+        unitPrice: 45,
+      },
+      {
+        sku: 'RT-TOOTHBRUSH',
+        name: 'แปรงสีฟันพกพา',
+        catCode: 'CAT-RETAIL-DAILY',
+        unit: 'PIECE',
+        barcode: '8850003000019',
+        brand: 'Travel Kit',
+        reorderPoint: 15,
+        reorderQty: 50,
+        minStock: 8,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-RETAIL',
+        unitPrice: 12,
+      },
+      {
+        sku: 'RT-TOOTHPASTE',
+        name: 'ยาสีฟันหลอดเล็ก 40g',
+        catCode: 'CAT-RETAIL-DAILY',
+        unit: 'PIECE',
+        barcode: '8850003000026',
+        brand: 'Travel Kit',
+        reorderPoint: 15,
+        reorderQty: 50,
+        minStock: 8,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-RETAIL',
+        unitPrice: 18,
+      },
+      {
+        sku: 'RT-RAINCOAT',
+        name: 'เสื้อกันฝนพกพา',
+        catCode: 'CAT-RETAIL-DAILY',
+        unit: 'PIECE',
+        barcode: '8850003000033',
+        brand: 'Travel Care',
+        reorderPoint: 10,
+        reorderQty: 30,
+        minStock: 5,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-RETAIL',
+        unitPrice: 22,
+      },
+      {
+        sku: 'RT-REPELLENT',
+        name: 'สเปรย์กันยุง 60ml',
+        catCode: 'CAT-RETAIL-DAILY',
+        unit: 'BOTTLE',
+        barcode: '8850003000040',
+        brand: 'Outdoor Safe',
+        reorderPoint: 12,
+        reorderQty: 36,
+        minStock: 6,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-RETAIL',
+        unitPrice: 42,
+      },
+      {
+        sku: 'RT-POSTCARD-MV',
+        name: 'โปสการ์ด Mountain View',
+        catCode: 'CAT-RETAIL-SOUV',
+        unit: 'PIECE',
+        barcode: '8850004000018',
+        brand: 'Mountain View',
+        reorderPoint: 20,
+        reorderQty: 100,
+        minStock: 10,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-RETAIL',
+        unitPrice: 8,
+      },
+      {
+        sku: 'RT-MAGNET-MV',
+        name: 'แม่เหล็กติดตู้เย็น Mountain View',
+        catCode: 'CAT-RETAIL-SOUV',
+        unit: 'PIECE',
+        barcode: '8850004000025',
+        brand: 'Mountain View',
+        reorderPoint: 15,
+        reorderQty: 60,
+        minStock: 8,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-RETAIL',
+        unitPrice: 25,
       },
       // Cleaning Supplies
       {
-        sku: 'DETERGENT',  name: 'น้ำยาซักผ้า 5L',           catCode: 'CAT-CLEAN',     unit: 'BOTTLE',
-        reorderPoint: 10,  reorderQty: 24,  minStock: 3,  costMethod: 'WEIGHTED_AVG',
-        isPerishable: false, supplierCode: 'SUP-CLEAN', unitPrice: 180,
+        sku: 'DETERGENT',
+        name: 'น้ำยาซักผ้า 5L',
+        catCode: 'CAT-CLEAN',
+        unit: 'BOTTLE',
+        reorderPoint: 10,
+        reorderQty: 24,
+        minStock: 3,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-CLEAN',
+        unitPrice: 180,
       },
       {
-        sku: 'FLOOR-CLN',  name: 'น้ำยาถูพื้น 5L',            catCode: 'CAT-CLEAN',     unit: 'BOTTLE',
-        reorderPoint: 8,   reorderQty: 20,  minStock: 2,  costMethod: 'WEIGHTED_AVG',
-        isPerishable: false, supplierCode: 'SUP-CLEAN', unitPrice: 150,
+        sku: 'FLOOR-CLN',
+        name: 'น้ำยาถูพื้น 5L',
+        catCode: 'CAT-CLEAN',
+        unit: 'BOTTLE',
+        reorderPoint: 8,
+        reorderQty: 20,
+        minStock: 2,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-CLEAN',
+        unitPrice: 150,
       },
       {
-        sku: 'TOILET-CLN', name: 'น้ำยาล้างห้องน้ำ 750ml',    catCode: 'CAT-CLEAN',     unit: 'BOTTLE',
-        reorderPoint: 20,  reorderQty: 48,  minStock: 5,  costMethod: 'WEIGHTED_AVG',
-        isPerishable: false, supplierCode: 'SUP-CLEAN', unitPrice: 65,
+        sku: 'TOILET-CLN',
+        name: 'น้ำยาล้างห้องน้ำ 750ml',
+        catCode: 'CAT-CLEAN',
+        unit: 'BOTTLE',
+        reorderPoint: 20,
+        reorderQty: 48,
+        minStock: 5,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-CLEAN',
+        unitPrice: 65,
       },
       // Maintenance Parts
       {
-        sku: 'BULB-E27',   name: 'หลอดไฟ LED E27 9W',        catCode: 'CAT-MAINT',     unit: 'PIECE',
-        reorderPoint: 20,  reorderQty: 50,  minStock: 10, costMethod: 'WEIGHTED_AVG',
-        isPerishable: false, supplierCode: 'SUP-BIGC', unitPrice: 85,
+        sku: 'BULB-E27',
+        name: 'หลอดไฟ LED E27 9W',
+        catCode: 'CAT-MAINT',
+        unit: 'PIECE',
+        reorderPoint: 20,
+        reorderQty: 50,
+        minStock: 10,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-BIGC',
+        unitPrice: 85,
       },
       {
-        sku: 'FILTER-AC',  name: 'ฟิลเตอร์แอร์',             catCode: 'CAT-MAINT',     unit: 'PIECE',
-        reorderPoint: 10,  reorderQty: 20,  minStock: 5,  costMethod: 'WEIGHTED_AVG',
-        isPerishable: false, supplierCode: 'SUP-BIGC', unitPrice: 120,
+        sku: 'FILTER-AC',
+        name: 'ฟิลเตอร์แอร์',
+        catCode: 'CAT-MAINT',
+        unit: 'PIECE',
+        reorderPoint: 10,
+        reorderQty: 20,
+        minStock: 5,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-BIGC',
+        unitPrice: 120,
+      },
+      // Staff Equipment (สำหรับทดสอบ recruitment → เบิกอุปกรณ์พนักงานใหม่)
+      {
+        sku: 'UNI-POLO-S',
+        name: 'เสื้อยูนิฟอร์มโปโล (S)',
+        catCode: 'CAT-STAFF',
+        unit: 'PIECE',
+        reorderPoint: 10,
+        reorderQty: 20,
+        minStock: 5,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-HOTEL',
+        unitPrice: 350,
+      },
+      {
+        sku: 'UNI-POLO-M',
+        name: 'เสื้อยูนิฟอร์มโปโล (M)',
+        catCode: 'CAT-STAFF',
+        unit: 'PIECE',
+        reorderPoint: 10,
+        reorderQty: 20,
+        minStock: 5,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-HOTEL',
+        unitPrice: 350,
+      },
+      {
+        sku: 'UNI-POLO-L',
+        name: 'เสื้อยูนิฟอร์มโปโล (L)',
+        catCode: 'CAT-STAFF',
+        unit: 'PIECE',
+        reorderPoint: 10,
+        reorderQty: 20,
+        minStock: 5,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-HOTEL',
+        unitPrice: 350,
+      },
+      {
+        sku: 'UNI-SUIT-FO',
+        name: 'ชุดสูทพนักงานต้อนรับ',
+        catCode: 'CAT-STAFF',
+        unit: 'SET',
+        reorderPoint: 5,
+        reorderQty: 10,
+        minStock: 2,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-HOTEL',
+        unitPrice: 1500,
+      },
+      {
+        sku: 'NAME-TAG',
+        name: 'ป้ายชื่อพนักงาน',
+        catCode: 'CAT-STAFF',
+        unit: 'PIECE',
+        reorderPoint: 15,
+        reorderQty: 30,
+        minStock: 5,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-HOTEL',
+        unitPrice: 60,
+      },
+      {
+        sku: 'APRON-STD',
+        name: 'ผ้ากันเปื้อน',
+        catCode: 'CAT-STAFF',
+        unit: 'PIECE',
+        reorderPoint: 10,
+        reorderQty: 20,
+        minStock: 3,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-HOTEL',
+        unitPrice: 120,
+      },
+      {
+        sku: 'SAFETY-SHOE',
+        name: 'รองเท้าเซฟตี้',
+        catCode: 'CAT-STAFF',
+        unit: 'PAIR',
+        reorderPoint: 5,
+        reorderQty: 10,
+        minStock: 2,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-BIGC',
+        unitPrice: 450,
+      },
+      {
+        sku: 'STAFF-CAP',
+        name: 'หมวกพนักงานครัว',
+        catCode: 'CAT-STAFF',
+        unit: 'PIECE',
+        reorderPoint: 10,
+        reorderQty: 20,
+        minStock: 3,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-HOTEL',
+        unitPrice: 80,
+      },
+      // ── Rental Equipment (ลานกางเต็นท์ — ให้ลูกค้าเช่า) ──────────────────────
+      {
+        sku: 'RENT-TENT-4P',
+        name: 'เต็นท์โดม 4 คน (ให้เช่า)',
+        catCode: 'CAT-RENTAL',
+        unit: 'SET',
+        reorderPoint: 5,
+        reorderQty: 5,
+        minStock: 2,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-BIGC',
+        unitPrice: 2200,
+      },
+      {
+        sku: 'RENT-SLEEPBAG',
+        name: 'ถุงนอน (ให้เช่า)',
+        catCode: 'CAT-RENTAL',
+        unit: 'PIECE',
+        reorderPoint: 10,
+        reorderQty: 10,
+        minStock: 4,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-BIGC',
+        unitPrice: 650,
+      },
+      {
+        sku: 'RENT-CHAIR',
+        name: 'เก้าอี้สนามพับได้ (ให้เช่า)',
+        catCode: 'CAT-RENTAL',
+        unit: 'PIECE',
+        reorderPoint: 12,
+        reorderQty: 12,
+        minStock: 6,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-BIGC',
+        unitPrice: 420,
+      },
+      {
+        sku: 'RENT-TABLE',
+        name: 'โต๊ะพับแคมป์ปิ้ง (ให้เช่า)',
+        catCode: 'CAT-RENTAL',
+        unit: 'PIECE',
+        reorderPoint: 6,
+        reorderQty: 6,
+        minStock: 2,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-BIGC',
+        unitPrice: 780,
+      },
+      {
+        sku: 'RENT-LANTERN',
+        name: 'โคมไฟ LED แคมป์ (ให้เช่า)',
+        catCode: 'CAT-RENTAL',
+        unit: 'PIECE',
+        reorderPoint: 10,
+        reorderQty: 10,
+        minStock: 4,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-BIGC',
+        unitPrice: 350,
+      },
+      {
+        sku: 'RENT-STOVE',
+        name: 'เตาแก๊สปิคนิคพกพา (ให้เช่า)',
+        catCode: 'CAT-RENTAL',
+        unit: 'PIECE',
+        reorderPoint: 6,
+        reorderQty: 6,
+        minStock: 2,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-MAKRO',
+        unitPrice: 590,
+      },
+      {
+        sku: 'RENT-COOLER',
+        name: 'กระติกน้ำแข็ง 25L (ให้เช่า)',
+        catCode: 'CAT-RENTAL',
+        unit: 'PIECE',
+        reorderPoint: 5,
+        reorderQty: 5,
+        minStock: 2,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-MAKRO',
+        unitPrice: 850,
+      },
+      {
+        sku: 'RENT-COOKSET',
+        name: 'ชุดเครื่องครัวแคมป์ปิ้ง (ให้เช่า)',
+        catCode: 'CAT-RENTAL',
+        unit: 'SET',
+        reorderPoint: 6,
+        reorderQty: 6,
+        minStock: 2,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-MAKRO',
+        unitPrice: 690,
+      },
+      {
+        sku: 'RENT-TARP',
+        name: 'ฟลายชีท/ผ้าใบกันฝน (ให้เช่า)',
+        catCode: 'CAT-RENTAL',
+        unit: 'PIECE',
+        reorderPoint: 8,
+        reorderQty: 8,
+        minStock: 3,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-BIGC',
+        unitPrice: 480,
+      },
+      {
+        sku: 'RENT-MATTRESS',
+        name: 'ที่นอนปิคนิคเป่าลม (ให้เช่า)',
+        catCode: 'CAT-RENTAL',
+        unit: 'PIECE',
+        reorderPoint: 8,
+        reorderQty: 8,
+        minStock: 3,
+        costMethod: 'WEIGHTED_AVG',
+        isPerishable: false,
+        supplierCode: 'SUP-BIGC',
+        unitPrice: 560,
       },
     ];
+
+    // Max-stock ceilings (for the OVERSTOCK / "เหลือเยอะเกิน" classification on
+    // the retail Stock Balance dashboard). Only items with a ceiling set can be
+    // flagged overstocked; the rest are treated as having no upper bound.
+    const maxStockBySku: Record<string, number> = {
+      'RT-WATER-600': 120,
+      'RT-SPARKLING-LEMON': 120,
+      'RT-ICED-TEA': 120,
+      'RT-CHIPS-SALT': 120,
+      'RT-NUTS-CASHEW': 90,
+      'RT-COOKIE-BOX': 72,
+      'RT-TOOTHBRUSH': 120,
+      'RT-TOOTHPASTE': 120,
+      'RT-RAINCOAT': 60,
+      'RT-REPELLENT': 72,
+      'RT-POSTCARD-MV': 80,
+      'RT-MAGNET-MV': 120,
+    };
+
+    // ราคาขายหน้าร้านของสินค้าสำเร็จรูป — ใช้ตั้งราคาเมนูตอนกด "สร้างเป็นเมนู"
+    // และเป็นตัวตั้งกำไรต่อชิ้นบนหน้า "สินค้าหน้าร้าน"
+    //
+    // ของฝากสองตัว (RT-POSTCARD-MV / RT-MAGNET-MV) จงใจไม่ตั้งราคา เพื่อให้ตัวนับ
+    // "ยังไม่ได้ตั้งราคาขาย" มีของให้ชี้จริง ไม่ใช่ศูนย์ตลอดเวลา
+    const retailSellingPriceBySku: Record<string, number> = {
+      'RT-WATER-600': 20,
+      'RT-SPARKLING-LEMON': 35,
+      'RT-ICED-TEA': 40,
+      'RT-CHIPS-SALT': 35,
+      'RT-NUTS-CASHEW': 60,
+      'RT-COOKIE-BOX': 90,
+      'RT-TOOTHBRUSH': 30,
+      'RT-TOOTHPASTE': 40,
+      'RT-RAINCOAT': 50,
+      'RT-REPELLENT': 90,
+    };
 
     const itemMap: Record<string, string> = {};
     let itemCount = 0;
     for (const item of itemDefs) {
       const catId = categoryMap[item.catCode];
+      const maxStock = maxStockBySku[item.sku] ?? null;
+      // ของในหมวดร้านค้าคือของที่หยิบขายได้เลย ที่เหลือเป็นวัตถุดิบ/ของใช้ภายใน
+      const itemType = item.catCode.startsWith('CAT-RETAIL') ? 'FINISHED_GOOD' : 'RAW_MATERIAL';
+      const sellingPrice = retailSellingPriceBySku[item.sku] ?? null;
       const existing = await this.prisma.inventoryItem.findFirst({
         where: { tenantId, sku: item.sku },
       });
@@ -4889,10 +7609,21 @@ export class SeederService {
       if (!existing) {
         const created = await this.prisma.inventoryItem.create({
           data: {
-            tenantId, sku: item.sku, name: item.name, categoryId: catId,
-            unit: item.unit as any, costMethod: item.costMethod as any,
-            reorderPoint: item.reorderPoint, reorderQty: item.reorderQty,
-            minStock: item.minStock, isPerishable: item.isPerishable,
+            tenantId,
+            sku: item.sku,
+            name: item.name,
+            categoryId: catId,
+            unit: item.unit as any,
+            itemType: itemType as any,
+            sellingPrice,
+            costMethod: item.costMethod as any,
+            reorderPoint: item.reorderPoint,
+            reorderQty: item.reorderQty,
+            minStock: item.minStock,
+            maxStock,
+            barcode: item.barcode ?? null,
+            brand: item.brand ?? null,
+            isPerishable: item.isPerishable,
             defaultShelfLifeDays: item.defaultShelfLifeDays ?? null,
             isActive: true,
           },
@@ -4901,6 +7632,21 @@ export class SeederService {
         itemCount++;
       } else {
         itemId = existing.id;
+        // Keep demo ceilings in sync even when re-seeding without a wipe.
+        if (maxStock != null && existing.maxStock !== maxStock) {
+          await this.prisma.inventoryItem.update({
+            where: { id: itemId },
+            data: { maxStock },
+          });
+        }
+        // เดิมทุกแถวเป็น RAW_MATERIAL ตาม default ของ migration — ซีดซ้ำโดยไม่ล้าง DB
+        // ต้องเลื่อนของหมวดร้านค้าขึ้นเป็นของสำเร็จรูป ไม่งั้นหน้า "สินค้าหน้าร้าน" ว่างเปล่า
+        if (existing.itemType !== itemType || (sellingPrice != null && existing.sellingPrice == null)) {
+          await this.prisma.inventoryItem.update({
+            where: { id: itemId },
+            data: { itemType: itemType as any, sellingPrice: sellingPrice ?? undefined },
+          });
+        }
       }
       itemMap[item.sku] = itemId;
 
@@ -4913,8 +7659,11 @@ export class SeederService {
         if (!existingLink) {
           await this.prisma.itemSupplier.create({
             data: {
-              itemId, supplierId: suppId, unitPrice: item.unitPrice,
-              currency: 'THB', isPreferred: true,
+              itemId,
+              supplierId: suppId,
+              unitPrice: item.unitPrice,
+              currency: 'THB',
+              isPreferred: true,
             },
           });
         }
@@ -4924,26 +7673,68 @@ export class SeederService {
 
     // ── 5. Warehouse Stocks (initial balances) ────────────────────────────────
     const stockDefs: Array<{ sku: string; whCode: string; qty: number; avgCost: number }> = [
+      // Cooking raw ingredients — all stocked in the kitchen warehouse so recipes
+      // can deduct + compute "ทำได้กี่จาน".
+      ...cookingIngredients.map((c) => ({
+        sku: c.sku,
+        whCode: 'WH-KITCH',
+        qty: c.qty,
+        avgCost: c.avgCost,
+      })),
       // Housekeeping warehouse stocks
-      { sku: 'SOAP-75G',   whCode: 'WH-HK',    qty: 320, avgCost: 18 },
-      { sku: 'SHAMP-30ML', whCode: 'WH-HK',    qty: 280, avgCost: 22 },
-      { sku: 'COND-30ML',  whCode: 'WH-HK',    qty: 260, avgCost: 22 },
-      { sku: 'TOWEL-BATH', whCode: 'WH-HK',    qty: 180, avgCost: 120 },
-      { sku: 'TOWEL-FACE', whCode: 'WH-HK',    qty: 180, avgCost: 60 },
-      { sku: 'SHEET-STD',  whCode: 'WH-HK',    qty: 45,  avgCost: 350 },
-      { sku: 'DETERGENT',  whCode: 'WH-HK',    qty: 18,  avgCost: 180 },
-      { sku: 'TOILET-CLN', whCode: 'WH-HK',    qty: 32,  avgCost: 65 },
+      { sku: 'SOAP-75G', whCode: 'WH-HK', qty: 320, avgCost: 18 },
+      { sku: 'SHAMP-30ML', whCode: 'WH-HK', qty: 280, avgCost: 22 },
+      { sku: 'COND-30ML', whCode: 'WH-HK', qty: 260, avgCost: 22 },
+      { sku: 'TOWEL-BATH', whCode: 'WH-HK', qty: 180, avgCost: 120 },
+      { sku: 'TOWEL-FACE', whCode: 'WH-HK', qty: 180, avgCost: 60 },
+      { sku: 'SHEET-STD', whCode: 'WH-HK', qty: 45, avgCost: 350 },
+      { sku: 'DETERGENT', whCode: 'WH-HK', qty: 18, avgCost: 180 },
+      { sku: 'TOILET-CLN', whCode: 'WH-HK', qty: 32, avgCost: 65 },
       // Kitchen warehouse stocks
-      { sku: 'RICE-25KG',  whCode: 'WH-KITCH', qty: 15,  avgCost: 780 },
-      { sku: 'FLOUR-1KG',  whCode: 'WH-KITCH', qty: 25,  avgCost: 32 },
-      { sku: 'OIL-5L',     whCode: 'WH-KITCH', qty: 12,  avgCost: 220 },
-      { sku: 'SUGAR-1KG',  whCode: 'WH-KITCH', qty: 20,  avgCost: 28 },
-      { sku: 'WATER-600',  whCode: 'WH-KITCH', qty: 35,  avgCost: 90 },
-      { sku: 'COLA-330',   whCode: 'WH-KITCH', qty: 15,  avgCost: 180 },
+      { sku: 'RICE-25KG', whCode: 'WH-KITCH', qty: 15, avgCost: 780 },
+      { sku: 'FLOUR-1KG', whCode: 'WH-KITCH', qty: 25, avgCost: 32 },
+      { sku: 'OIL-5L', whCode: 'WH-KITCH', qty: 12, avgCost: 220 },
+      { sku: 'SUGAR-1KG', whCode: 'WH-KITCH', qty: 20, avgCost: 28 },
+      { sku: 'WATER-600', whCode: 'WH-KITCH', qty: 35, avgCost: 90 },
+      { sku: 'COLA-330', whCode: 'WH-KITCH', qty: 15, avgCost: 180 },
+      // Retail shop warehouse stocks — จงใจตั้งให้หลากหลายสถานะเพื่อโชว์
+      // Stock Balance Dashboard: OVERSTOCK 🔵 / LOW 🟠 / OUT 🔴 / OK 🟢
+      { sku: 'RT-WATER-600', whCode: 'WH-RETAIL', qty: 144, avgCost: 6 }, // 🔵 OVERSTOCK (max 120)
+      { sku: 'RT-SPARKLING-LEMON', whCode: 'WH-RETAIL', qty: 60, avgCost: 14 }, // 🟢 OK
+      { sku: 'RT-ICED-TEA', whCode: 'WH-RETAIL', qty: 18, avgCost: 18 }, // 🟠 LOW (RP 24) + lot ใกล้หมดอายุ
+      { sku: 'RT-CHIPS-SALT', whCode: 'WH-RETAIL', qty: 48, avgCost: 16 }, // 🟢 OK + lot ใกล้หมดอายุ
+      { sku: 'RT-NUTS-CASHEW', whCode: 'WH-RETAIL', qty: 12, avgCost: 28 }, // 🟠 LOW (RP 15)
+      { sku: 'RT-COOKIE-BOX', whCode: 'WH-RETAIL', qty: 10, avgCost: 45 }, // 🟠 LOW (RP 12) + lot หมดอายุแล้ว
+      { sku: 'RT-TOOTHBRUSH', whCode: 'WH-RETAIL', qty: 50, avgCost: 12 }, // 🟢 OK
+      { sku: 'RT-TOOTHPASTE', whCode: 'WH-RETAIL', qty: 50, avgCost: 18 }, // 🟢 OK
+      { sku: 'RT-RAINCOAT', whCode: 'WH-RETAIL', qty: 0, avgCost: 22 }, // 🔴 OUT_OF_STOCK
+      { sku: 'RT-REPELLENT', whCode: 'WH-RETAIL', qty: 8, avgCost: 42 }, // 🟠 LOW (RP 12)
+      { sku: 'RT-POSTCARD-MV', whCode: 'WH-RETAIL', qty: 100, avgCost: 8 }, // 🔵 OVERSTOCK (max 80)
+      { sku: 'RT-MAGNET-MV', whCode: 'WH-RETAIL', qty: 60, avgCost: 25 }, // 🟢 OK
       // Maintenance warehouse stocks
-      { sku: 'BULB-E27',   whCode: 'WH-MAINT', qty: 35,  avgCost: 85 },
-      { sku: 'FILTER-AC',  whCode: 'WH-MAINT', qty: 12,  avgCost: 120 },
-      { sku: 'FLOOR-CLN',  whCode: 'WH-MAINT', qty: 10,  avgCost: 150 },
+      { sku: 'BULB-E27', whCode: 'WH-MAINT', qty: 35, avgCost: 85 },
+      { sku: 'FILTER-AC', whCode: 'WH-MAINT', qty: 12, avgCost: 120 },
+      { sku: 'FLOOR-CLN', whCode: 'WH-MAINT', qty: 10, avgCost: 150 },
+      // Staff equipment stocks (คลังกลาง) — SAFETY-SHOE จงใจให้น้อยเพื่อทดสอบ 🔴 ต้องสั่งซื้อ + auto-PR
+      { sku: 'UNI-POLO-S', whCode: 'WH-MAIN', qty: 15, avgCost: 350 },
+      { sku: 'UNI-POLO-M', whCode: 'WH-MAIN', qty: 25, avgCost: 350 },
+      { sku: 'UNI-POLO-L', whCode: 'WH-MAIN', qty: 20, avgCost: 350 },
+      { sku: 'UNI-SUIT-FO', whCode: 'WH-MAIN', qty: 8, avgCost: 1500 },
+      { sku: 'NAME-TAG', whCode: 'WH-MAIN', qty: 40, avgCost: 60 },
+      { sku: 'APRON-STD', whCode: 'WH-MAIN', qty: 18, avgCost: 120 },
+      { sku: 'SAFETY-SHOE', whCode: 'WH-MAIN', qty: 1, avgCost: 450 },
+      { sku: 'STAFF-CAP', whCode: 'WH-MAIN', qty: 15, avgCost: 80 },
+      // Rental equipment stocks (WH-MAIN) — อุปกรณ์ลานกางเต็นท์ให้ลูกค้าเช่า
+      { sku: 'RENT-TENT-4P', whCode: 'WH-MAIN', qty: 8, avgCost: 2200 },
+      { sku: 'RENT-SLEEPBAG', whCode: 'WH-MAIN', qty: 20, avgCost: 650 },
+      { sku: 'RENT-CHAIR', whCode: 'WH-MAIN', qty: 24, avgCost: 420 },
+      { sku: 'RENT-TABLE', whCode: 'WH-MAIN', qty: 10, avgCost: 780 },
+      { sku: 'RENT-LANTERN', whCode: 'WH-MAIN', qty: 18, avgCost: 350 },
+      { sku: 'RENT-STOVE', whCode: 'WH-MAIN', qty: 10, avgCost: 590 },
+      { sku: 'RENT-COOLER', whCode: 'WH-MAIN', qty: 8, avgCost: 850 },
+      { sku: 'RENT-COOKSET', whCode: 'WH-MAIN', qty: 10, avgCost: 690 },
+      { sku: 'RENT-TARP', whCode: 'WH-MAIN', qty: 12, avgCost: 480 },
+      { sku: 'RENT-MATTRESS', whCode: 'WH-MAIN', qty: 12, avgCost: 560 },
     ];
 
     let stockCount = 0;
@@ -4952,47 +7743,126 @@ export class SeederService {
       const warehouseId = warehouseMap[stock.whCode];
       if (!itemId || !warehouseId) continue;
 
-      const existing = await this.prisma.warehouseStock.findUnique({
+      // Upsert so re-seeding refreshes the demo balances (needed for the
+      // LOW/OUT/OVERSTOCK showcase to stay correct without a full DB wipe).
+      await this.prisma.warehouseStock.upsert({
         where: { warehouseId_itemId: { warehouseId, itemId } },
+        create: {
+          warehouseId,
+          itemId,
+          quantity: stock.qty,
+          avgCost: stock.avgCost,
+          totalValue: stock.qty * stock.avgCost,
+        },
+        update: {
+          quantity: stock.qty,
+          avgCost: stock.avgCost,
+          totalValue: stock.qty * stock.avgCost,
+        },
       });
-      if (!existing) {
-        await this.prisma.warehouseStock.create({
-          data: {
-            warehouseId, itemId,
-            quantity: stock.qty,
-            avgCost: stock.avgCost,
-            totalValue: stock.qty * stock.avgCost,
-          },
-        });
-        stockCount++;
-      }
+      stockCount++;
     }
     this.logger.log(`  ✓ ${stockCount} warehouse stock records seeded`);
+
+    // ── 5b. Inventory Lots (FEFO demo: หลาย lot + lot ใกล้หมดอายุ/หมดอายุแล้ว) ──
+    // มอบข้อมูลให้แท็บ "ใกล้หมดอายุ" + KPI nearExpiry/expired ของ Stock Balance
+    // Dashboard มีของจริงให้ดู. remainingQty ของแต่ละ lot รวมแล้ว = ยอดสต็อกในคลัง
+    // (จำลอง First-Expired-First-Out)
+    const lotToday = new Date();
+    lotToday.setHours(0, 0, 0, 0);
+    const shiftDays = (base: Date, d: number): Date => {
+      const next = new Date(base);
+      next.setDate(next.getDate() + d);
+      return next;
+    };
+
+    const lotDefs: Array<{
+      sku: string;
+      whCode: string;
+      suffix: string;
+      qty: number;
+      unitCost: number;
+      expiresInDays: number;
+      receivedDaysAgo: number;
+      status?: InventoryLotStatus;
+    }> = [
+      // RT-WATER-600 (144) — 2 lot สุขภาพดี
+      { sku: 'RT-WATER-600', whCode: 'WH-RETAIL', suffix: 'A', qty: 80, unitCost: 6, expiresInDays: 200, receivedDaysAgo: 60 },
+      { sku: 'RT-WATER-600', whCode: 'WH-RETAIL', suffix: 'B', qty: 64, unitCost: 6, expiresInDays: 330, receivedDaysAgo: 10 },
+      // RT-SPARKLING-LEMON (60) — 2 lot
+      { sku: 'RT-SPARKLING-LEMON', whCode: 'WH-RETAIL', suffix: 'A', qty: 30, unitCost: 14, expiresInDays: 150, receivedDaysAgo: 40 },
+      { sku: 'RT-SPARKLING-LEMON', whCode: 'WH-RETAIL', suffix: 'B', qty: 30, unitCost: 14, expiresInDays: 300, receivedDaysAgo: 5 },
+      // RT-ICED-TEA (18, LOW) — lot ใกล้หมดอายุด่วน + lot ปกติ
+      { sku: 'RT-ICED-TEA', whCode: 'WH-RETAIL', suffix: 'A', qty: 6, unitCost: 18, expiresInDays: 5, receivedDaysAgo: 80 }, // 🔴 เหลือ 5 วัน
+      { sku: 'RT-ICED-TEA', whCode: 'WH-RETAIL', suffix: 'B', qty: 12, unitCost: 18, expiresInDays: 60, receivedDaysAgo: 20 },
+      // RT-CHIPS-SALT (48) — lot ใกล้หมดอายุ + lot ปกติ
+      { sku: 'RT-CHIPS-SALT', whCode: 'WH-RETAIL', suffix: 'A', qty: 18, unitCost: 16, expiresInDays: 12, receivedDaysAgo: 70 }, // 🟠 เหลือ 12 วัน
+      { sku: 'RT-CHIPS-SALT', whCode: 'WH-RETAIL', suffix: 'B', qty: 30, unitCost: 16, expiresInDays: 90, receivedDaysAgo: 15 },
+      // RT-NUTS-CASHEW (12, LOW) — lot เดียว
+      { sku: 'RT-NUTS-CASHEW', whCode: 'WH-RETAIL', suffix: 'A', qty: 12, unitCost: 28, expiresInDays: 120, receivedDaysAgo: 30 },
+      // RT-COOKIE-BOX (10, LOW) — lot หมดอายุแล้ว + lot ใกล้หมดอายุ
+      { sku: 'RT-COOKIE-BOX', whCode: 'WH-RETAIL', suffix: 'A', qty: 4, unitCost: 45, expiresInDays: -3, receivedDaysAgo: 95, status: InventoryLotStatus.EXPIRED }, // ⛔ หมดอายุแล้ว 3 วัน
+      { sku: 'RT-COOKIE-BOX', whCode: 'WH-RETAIL', suffix: 'B', qty: 6, unitCost: 45, expiresInDays: 20, receivedDaysAgo: 25 }, // 🟠 เหลือ 20 วัน
+    ];
+
+    let lotCount = 0;
+    for (const lot of lotDefs) {
+      const itemId = itemMap[lot.sku];
+      const warehouseId = warehouseMap[lot.whCode];
+      if (!itemId || !warehouseId) continue;
+
+      const lotNumber = `LOT-${lot.sku}-${lot.suffix}`;
+      const existing = await this.prisma.inventoryLot.findFirst({
+        where: { tenantId, lotNumber },
+      });
+      if (existing) continue;
+
+      const receivedDate = shiftDays(lotToday, -lot.receivedDaysAgo);
+      await this.prisma.inventoryLot.create({
+        data: {
+          tenantId,
+          itemId,
+          warehouseId,
+          lotNumber,
+          batchNumber: `${lot.sku}-${lot.suffix}`,
+          receivedDate,
+          manufactureDate: receivedDate,
+          expiryDate: shiftDays(lotToday, lot.expiresInDays),
+          initialQty: lot.qty,
+          remainingQty: lot.qty,
+          unitCost: lot.unitCost,
+          status: lot.status ?? InventoryLotStatus.ACTIVE,
+          notes: 'Seed demo lot (Stock Balance showcase)',
+        },
+      });
+      lotCount++;
+    }
+    this.logger.log(`  ✓ ${lotCount} inventory lots seeded (multi-lot + near/expired demo)`);
 
     // ── 6. Room Type Amenity Templates ────────────────────────────────────────
     // Define what gets auto-deducted per room type per housekeeping task
     const templateDefs = [
       // Standard room checkout
-      { roomType: 'standard',  taskType: 'checkout', sku: 'SOAP-75G',   qty: 2 },
-      { roomType: 'standard',  taskType: 'checkout', sku: 'SHAMP-30ML', qty: 1 },
-      { roomType: 'standard',  taskType: 'checkout', sku: 'COND-30ML',  qty: 1 },
-      { roomType: 'standard',  taskType: 'checkout', sku: 'TOWEL-BATH', qty: 1 },
-      { roomType: 'standard',  taskType: 'checkout', sku: 'TOWEL-FACE', qty: 1 },
+      { roomType: 'standard', taskType: 'checkout', sku: 'SOAP-75G', qty: 2 },
+      { roomType: 'standard', taskType: 'checkout', sku: 'SHAMP-30ML', qty: 1 },
+      { roomType: 'standard', taskType: 'checkout', sku: 'COND-30ML', qty: 1 },
+      { roomType: 'standard', taskType: 'checkout', sku: 'TOWEL-BATH', qty: 1 },
+      { roomType: 'standard', taskType: 'checkout', sku: 'TOWEL-FACE', qty: 1 },
       // Deluxe room checkout
-      { roomType: 'deluxe',    taskType: 'checkout', sku: 'SOAP-75G',   qty: 2 },
-      { roomType: 'deluxe',    taskType: 'checkout', sku: 'SHAMP-30ML', qty: 2 },
-      { roomType: 'deluxe',    taskType: 'checkout', sku: 'COND-30ML',  qty: 2 },
-      { roomType: 'deluxe',    taskType: 'checkout', sku: 'TOWEL-BATH', qty: 2 },
-      { roomType: 'deluxe',    taskType: 'checkout', sku: 'TOWEL-FACE', qty: 2 },
+      { roomType: 'deluxe', taskType: 'checkout', sku: 'SOAP-75G', qty: 2 },
+      { roomType: 'deluxe', taskType: 'checkout', sku: 'SHAMP-30ML', qty: 2 },
+      { roomType: 'deluxe', taskType: 'checkout', sku: 'COND-30ML', qty: 2 },
+      { roomType: 'deluxe', taskType: 'checkout', sku: 'TOWEL-BATH', qty: 2 },
+      { roomType: 'deluxe', taskType: 'checkout', sku: 'TOWEL-FACE', qty: 2 },
       // Suite checkout
-      { roomType: 'suite',     taskType: 'checkout', sku: 'SOAP-75G',   qty: 4 },
-      { roomType: 'suite',     taskType: 'checkout', sku: 'SHAMP-30ML', qty: 3 },
-      { roomType: 'suite',     taskType: 'checkout', sku: 'COND-30ML',  qty: 3 },
-      { roomType: 'suite',     taskType: 'checkout', sku: 'TOWEL-BATH', qty: 3 },
-      { roomType: 'suite',     taskType: 'checkout', sku: 'TOWEL-FACE', qty: 3 },
+      { roomType: 'suite', taskType: 'checkout', sku: 'SOAP-75G', qty: 4 },
+      { roomType: 'suite', taskType: 'checkout', sku: 'SHAMP-30ML', qty: 3 },
+      { roomType: 'suite', taskType: 'checkout', sku: 'COND-30ML', qty: 3 },
+      { roomType: 'suite', taskType: 'checkout', sku: 'TOWEL-BATH', qty: 3 },
+      { roomType: 'suite', taskType: 'checkout', sku: 'TOWEL-FACE', qty: 3 },
       // Daily turndown
-      { roomType: 'standard',  taskType: 'daily',    sku: 'TOILET-CLN', qty: 1 },
-      { roomType: 'deluxe',    taskType: 'daily',    sku: 'TOILET-CLN', qty: 1 },
+      { roomType: 'standard', taskType: 'daily', sku: 'TOILET-CLN', qty: 1 },
+      { roomType: 'deluxe', taskType: 'daily', sku: 'TOILET-CLN', qty: 1 },
     ];
 
     let templateCount = 0;
@@ -5006,39 +7876,19 @@ export class SeederService {
       if (!existing) {
         await this.prisma.roomTypeAmenityTemplate.create({
           data: {
-            tenantId, roomType: tmpl.roomType, taskType: tmpl.taskType,
-            itemId, quantity: tmpl.qty, warehouseId, isActive: true,
+            tenantId,
+            roomType: tmpl.roomType,
+            taskType: tmpl.taskType,
+            itemId,
+            quantity: tmpl.qty,
+            warehouseId,
+            isActive: true,
           },
         });
         templateCount++;
       }
     }
     this.logger.log(`  ✓ ${templateCount} room type amenity templates seeded`);
-
-    // ── 7. Inventory Recipes (F&B BOM) ────────────────────────────────────────
-    // Seed a simple recipe for demo (links to a restaurant menu item by ID placeholder)
-    const existingRecipe = await this.prisma.inventoryRecipe.findFirst({
-      where: { tenantId, menuItemId: 'DEMO-KAOPAT-001' },
-    });
-    if (!existingRecipe) {
-      const recipe = await this.prisma.inventoryRecipe.create({
-        data: {
-          tenantId, menuItemId: 'DEMO-KAOPAT-001', menuItemName: 'ข้าวผัดกุ้ง',
-          servings: 1, isActive: true, notes: 'สูตรมาตรฐาน',
-        },
-      });
-      const riceId = itemMap['RICE-25KG'];
-      const oilId  = itemMap['OIL-5L'];
-      if (riceId && oilId) {
-        await this.prisma.inventoryRecipeIngredient.createMany({
-          data: [
-            { recipeId: recipe.id, itemId: riceId, quantity: 0.2, unit: 'กก.', wastagePercent: 5 },
-            { recipeId: recipe.id, itemId: oilId,  quantity: 0.02, unit: 'ลิตร', wastagePercent: 10 },
-          ],
-        });
-        this.logger.log(`  ✓ Recipe seeded: ข้าวผัดกุ้ง`);
-      }
-    }
 
     this.logger.log(`✅ Inventory seed complete: warehouses, ${itemDefs.length} items, templates`);
   }
@@ -5084,11 +7934,11 @@ export class SeederService {
       return;
     }
 
-    const mainWarehouse = warehouses.find(w => w.code === 'WH-MAIN') || warehouses[0];
+    const mainWarehouse = warehouses.find((w) => w.code === 'WH-MAIN') || warehouses[0];
 
     // Helper: find item by SKU prefix
-    const findItem = (skuPrefix: string) => items.find(i => i.sku.startsWith(skuPrefix));
-    const findSupplier = (code: string) => suppliers.find(s => s.code === code);
+    const findItem = (skuPrefix: string) => items.find((i) => i.sku.startsWith(skuPrefix));
+    const findSupplier = (code: string) => suppliers.find((s) => s.code === code);
 
     // ── Generate document number
     const generateDocNumber = async (prefix: string, docType: string): Promise<string> => {
@@ -5133,9 +7983,27 @@ export class SeederService {
       // PR-1 Items
       await this.prisma.purchaseRequisitionItem.createMany({
         data: [
-          { purchaseRequisitionId: pr1.id, itemId: soapItem.id, quantity: 200, estimatedUnitPrice: 15, estimatedTotalPrice: 3000 },
-          { purchaseRequisitionId: pr1.id, itemId: shampooItem.id, quantity: 200, estimatedUnitPrice: 25, estimatedTotalPrice: 5000 },
-          { purchaseRequisitionId: pr1.id, itemId: towelItem.id, quantity: 50, estimatedUnitPrice: 150, estimatedTotalPrice: 7500 },
+          {
+            purchaseRequisitionId: pr1.id,
+            itemId: soapItem.id,
+            quantity: 200,
+            estimatedUnitPrice: 15,
+            estimatedTotalPrice: 3000,
+          },
+          {
+            purchaseRequisitionId: pr1.id,
+            itemId: shampooItem.id,
+            quantity: 200,
+            estimatedUnitPrice: 25,
+            estimatedTotalPrice: 5000,
+          },
+          {
+            purchaseRequisitionId: pr1.id,
+            itemId: towelItem.id,
+            quantity: 50,
+            estimatedUnitPrice: 150,
+            estimatedTotalPrice: 7500,
+          },
         ],
       });
 
@@ -5163,9 +8031,33 @@ export class SeederService {
       // Quote items for Hotel Amenities
       await this.prisma.supplierQuoteItem.createMany({
         data: [
-          { supplierQuoteId: sq1Hotel.id, itemId: soapItem.id, quantity: 200, unitPrice: 12, discount: 0, taxRate: 7, totalPrice: 2568 },
-          { supplierQuoteId: sq1Hotel.id, itemId: shampooItem.id, quantity: 200, unitPrice: 20, discount: 0, taxRate: 7, totalPrice: 4280 },
-          { supplierQuoteId: sq1Hotel.id, itemId: towelItem.id, quantity: 50, unitPrice: 140, discount: 500, taxRate: 7, totalPrice: 7167 },
+          {
+            supplierQuoteId: sq1Hotel.id,
+            itemId: soapItem.id,
+            quantity: 200,
+            unitPrice: 12,
+            discount: 0,
+            taxRate: 7,
+            totalPrice: 2568,
+          },
+          {
+            supplierQuoteId: sq1Hotel.id,
+            itemId: shampooItem.id,
+            quantity: 200,
+            unitPrice: 20,
+            discount: 0,
+            taxRate: 7,
+            totalPrice: 4280,
+          },
+          {
+            supplierQuoteId: sq1Hotel.id,
+            itemId: towelItem.id,
+            quantity: 50,
+            unitPrice: 140,
+            discount: 500,
+            taxRate: 7,
+            totalPrice: 7167,
+          },
         ],
       });
 
@@ -5192,9 +8084,33 @@ export class SeederService {
 
       await this.prisma.supplierQuoteItem.createMany({
         data: [
-          { supplierQuoteId: sq1Makro.id, itemId: soapItem.id, quantity: 200, unitPrice: 18, discount: 0, taxRate: 7, totalPrice: 3852 },
-          { supplierQuoteId: sq1Makro.id, itemId: shampooItem.id, quantity: 200, unitPrice: 28, discount: 0, taxRate: 7, totalPrice: 5992 },
-          { supplierQuoteId: sq1Makro.id, itemId: towelItem.id, quantity: 50, unitPrice: 160, discount: 0, taxRate: 7, totalPrice: 8560 },
+          {
+            supplierQuoteId: sq1Makro.id,
+            itemId: soapItem.id,
+            quantity: 200,
+            unitPrice: 18,
+            discount: 0,
+            taxRate: 7,
+            totalPrice: 3852,
+          },
+          {
+            supplierQuoteId: sq1Makro.id,
+            itemId: shampooItem.id,
+            quantity: 200,
+            unitPrice: 28,
+            discount: 0,
+            taxRate: 7,
+            totalPrice: 5992,
+          },
+          {
+            supplierQuoteId: sq1Makro.id,
+            itemId: towelItem.id,
+            quantity: 50,
+            unitPrice: 160,
+            discount: 0,
+            taxRate: 7,
+            totalPrice: 8560,
+          },
         ],
       });
 
@@ -5236,9 +8152,30 @@ export class SeederService {
           notes: 'สร้างจาก PR ' + pr1Number,
           items: {
             create: [
-              { itemId: soapItem.id, quantity: 200, unitPrice: 12, discount: 0, taxRate: 7, totalPrice: 2568 },
-              { itemId: shampooItem.id, quantity: 200, unitPrice: 20, discount: 0, taxRate: 7, totalPrice: 4280 },
-              { itemId: towelItem.id, quantity: 50, unitPrice: 140, discount: 5, taxRate: 7, totalPrice: 7167 },
+              {
+                itemId: soapItem.id,
+                quantity: 200,
+                unitPrice: 12,
+                discount: 0,
+                taxRate: 7,
+                totalPrice: 2568,
+              },
+              {
+                itemId: shampooItem.id,
+                quantity: 200,
+                unitPrice: 20,
+                discount: 0,
+                taxRate: 7,
+                totalPrice: 4280,
+              },
+              {
+                itemId: towelItem.id,
+                quantity: 50,
+                unitPrice: 140,
+                discount: 5,
+                taxRate: 7,
+                totalPrice: 7167,
+              },
             ],
           },
         },
@@ -5276,11 +8213,29 @@ export class SeederService {
       });
 
       const pr2Items = [
-        { purchaseRequisitionId: pr2.id, itemId: detergentItem.id, quantity: 30, estimatedUnitPrice: 250, estimatedTotalPrice: 7500 },
-        { purchaseRequisitionId: pr2.id, itemId: floorCleanItem.id, quantity: 20, estimatedUnitPrice: 180, estimatedTotalPrice: 3600 },
+        {
+          purchaseRequisitionId: pr2.id,
+          itemId: detergentItem.id,
+          quantity: 30,
+          estimatedUnitPrice: 250,
+          estimatedTotalPrice: 7500,
+        },
+        {
+          purchaseRequisitionId: pr2.id,
+          itemId: floorCleanItem.id,
+          quantity: 20,
+          estimatedUnitPrice: 180,
+          estimatedTotalPrice: 3600,
+        },
       ];
       if (toiletCleanItem) {
-        pr2Items.push({ purchaseRequisitionId: pr2.id, itemId: toiletCleanItem.id, quantity: 25, estimatedUnitPrice: 120, estimatedTotalPrice: 3000 });
+        pr2Items.push({
+          purchaseRequisitionId: pr2.id,
+          itemId: toiletCleanItem.id,
+          quantity: 25,
+          estimatedUnitPrice: 120,
+          estimatedTotalPrice: 3000,
+        });
       }
       await this.prisma.purchaseRequisitionItem.createMany({ data: pr2Items });
 
@@ -5305,11 +8260,35 @@ export class SeederService {
       });
 
       const sq2CleanItems = [
-        { supplierQuoteId: sq2Clean.id, itemId: detergentItem.id, quantity: 30, unitPrice: 230, discount: 5, taxRate: 7, totalPrice: 7009.5 },
-        { supplierQuoteId: sq2Clean.id, itemId: floorCleanItem.id, quantity: 20, unitPrice: 165, discount: 0, taxRate: 7, totalPrice: 3531 },
+        {
+          supplierQuoteId: sq2Clean.id,
+          itemId: detergentItem.id,
+          quantity: 30,
+          unitPrice: 230,
+          discount: 5,
+          taxRate: 7,
+          totalPrice: 7009.5,
+        },
+        {
+          supplierQuoteId: sq2Clean.id,
+          itemId: floorCleanItem.id,
+          quantity: 20,
+          unitPrice: 165,
+          discount: 0,
+          taxRate: 7,
+          totalPrice: 3531,
+        },
       ];
       if (toiletCleanItem) {
-        sq2CleanItems.push({ supplierQuoteId: sq2Clean.id, itemId: toiletCleanItem.id, quantity: 25, unitPrice: 110, discount: 0, taxRate: 7, totalPrice: 2942.5 });
+        sq2CleanItems.push({
+          supplierQuoteId: sq2Clean.id,
+          itemId: toiletCleanItem.id,
+          quantity: 25,
+          unitPrice: 110,
+          discount: 0,
+          taxRate: 7,
+          totalPrice: 2942.5,
+        });
       }
       await this.prisma.supplierQuoteItem.createMany({ data: sq2CleanItems });
 
@@ -5334,15 +8313,41 @@ export class SeederService {
       });
 
       const sq2BigcItems = [
-        { supplierQuoteId: sq2Bigc.id, itemId: detergentItem.id, quantity: 30, unitPrice: 270, discount: 0, taxRate: 7, totalPrice: 8667 },
-        { supplierQuoteId: sq2Bigc.id, itemId: floorCleanItem.id, quantity: 20, unitPrice: 200, discount: 0, taxRate: 7, totalPrice: 4280 },
+        {
+          supplierQuoteId: sq2Bigc.id,
+          itemId: detergentItem.id,
+          quantity: 30,
+          unitPrice: 270,
+          discount: 0,
+          taxRate: 7,
+          totalPrice: 8667,
+        },
+        {
+          supplierQuoteId: sq2Bigc.id,
+          itemId: floorCleanItem.id,
+          quantity: 20,
+          unitPrice: 200,
+          discount: 0,
+          taxRate: 7,
+          totalPrice: 4280,
+        },
       ];
       if (toiletCleanItem) {
-        sq2BigcItems.push({ supplierQuoteId: sq2Bigc.id, itemId: toiletCleanItem.id, quantity: 25, unitPrice: 130, discount: 0, taxRate: 7, totalPrice: 3477.5 });
+        sq2BigcItems.push({
+          supplierQuoteId: sq2Bigc.id,
+          itemId: toiletCleanItem.id,
+          quantity: 25,
+          unitPrice: 130,
+          discount: 0,
+          taxRate: 7,
+          totalPrice: 3477.5,
+        });
       }
       await this.prisma.supplierQuoteItem.createMany({ data: sq2BigcItems });
 
-      this.logger.log(`  ✓ PR-2 (${pr2Number}): น้ำยาทำความสะอาด — QUOTES_RECEIVED (2 quotes, ready to compare)`);
+      this.logger.log(
+        `  ✓ PR-2 (${pr2Number}): น้ำยาทำความสะอาด — QUOTES_RECEIVED (2 quotes, ready to compare)`,
+      );
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -5373,15 +8378,43 @@ export class SeederService {
       });
 
       const pr3Items = [
-        { purchaseRequisitionId: pr3.id, itemId: riceItem.id, quantity: 10, estimatedUnitPrice: 45, estimatedTotalPrice: 450 },
-        { purchaseRequisitionId: pr3.id, itemId: flourItem.id, quantity: 5, estimatedUnitPrice: 35, estimatedTotalPrice: 175 },
+        {
+          purchaseRequisitionId: pr3.id,
+          itemId: riceItem.id,
+          quantity: 10,
+          estimatedUnitPrice: 45,
+          estimatedTotalPrice: 450,
+        },
+        {
+          purchaseRequisitionId: pr3.id,
+          itemId: flourItem.id,
+          quantity: 5,
+          estimatedUnitPrice: 35,
+          estimatedTotalPrice: 175,
+        },
       ];
-      if (oilItem) pr3Items.push({ purchaseRequisitionId: pr3.id, itemId: oilItem.id, quantity: 8, estimatedUnitPrice: 65, estimatedTotalPrice: 520 });
-      if (sugarItem) pr3Items.push({ purchaseRequisitionId: pr3.id, itemId: sugarItem.id, quantity: 5, estimatedUnitPrice: 30, estimatedTotalPrice: 150 });
+      if (oilItem)
+        pr3Items.push({
+          purchaseRequisitionId: pr3.id,
+          itemId: oilItem.id,
+          quantity: 8,
+          estimatedUnitPrice: 65,
+          estimatedTotalPrice: 520,
+        });
+      if (sugarItem)
+        pr3Items.push({
+          purchaseRequisitionId: pr3.id,
+          itemId: sugarItem.id,
+          quantity: 5,
+          estimatedUnitPrice: 30,
+          estimatedTotalPrice: 150,
+        });
 
       await this.prisma.purchaseRequisitionItem.createMany({ data: pr3Items });
 
-      this.logger.log(`  ✓ PR-3 (${pr3Number}): วัตถุดิบอาหาร — APPROVED (ready to request quotes)`);
+      this.logger.log(
+        `  ✓ PR-3 (${pr3Number}): วัตถุดิบอาหาร — APPROVED (ready to request quotes)`,
+      );
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -5408,8 +8441,20 @@ export class SeederService {
 
       await this.prisma.purchaseRequisitionItem.createMany({
         data: [
-          { purchaseRequisitionId: pr4.id, itemId: bulbItem.id, quantity: 50, estimatedUnitPrice: 85, estimatedTotalPrice: 4250 },
-          { purchaseRequisitionId: pr4.id, itemId: filterItem.id, quantity: 20, estimatedUnitPrice: 350, estimatedTotalPrice: 7000 },
+          {
+            purchaseRequisitionId: pr4.id,
+            itemId: bulbItem.id,
+            quantity: 50,
+            estimatedUnitPrice: 85,
+            estimatedTotalPrice: 4250,
+          },
+          {
+            purchaseRequisitionId: pr4.id,
+            itemId: filterItem.id,
+            quantity: 20,
+            estimatedUnitPrice: 350,
+            estimatedTotalPrice: 7000,
+          },
         ],
       });
 
@@ -5432,7 +8477,12 @@ export class SeederService {
     this.logger.log('📊 Seeding Cost Accounting data...');
 
     const allTenants2 = await this.tenantsService.findAll();
-    const tenant = allTenants2.find(t => (t as any).name_en === 'Mountain View Resort' || (t as any).slug === 'mountain' || t.name === 'Mountain View Resort (Premium Test)');
+    const tenant = allTenants2.find(
+      (t) =>
+        (t as any).name_en === 'Mountain View Resort' ||
+        (t as any).slug === 'mountain' ||
+        t.name === 'Mountain View Resort (Premium Test)',
+    );
     if (!tenant) {
       this.logger.warn('  ⚠️ Demo tenant not found — skipping cost accounting seed');
       return;
@@ -5452,12 +8502,17 @@ export class SeederService {
 
     // ── 1. Cost Centers (USALI standard) ─────────────────────────────────────
     const centerDefs = [
-      { code: 'CC-ROOMS', name: 'Rooms Division',              type: 'ROOMS',           sortOrder: 1 },
-      { code: 'CC-FB',    name: 'Food & Beverage',             type: 'FOOD_BEVERAGE',   sortOrder: 2 },
-      { code: 'CC-ADMIN', name: 'Administrative & General',    type: 'ADMIN_GENERAL',   sortOrder: 3 },
-      { code: 'CC-SM',    name: 'Sales & Marketing',           type: 'SALES_MARKETING', sortOrder: 4 },
-      { code: 'CC-MAINT', name: 'Property Operations & Maint', type: 'MAINTENANCE_DEPT',sortOrder: 5 },
-      { code: 'CC-ENERGY',name: 'Energy / Utilities',          type: 'ENERGY',          sortOrder: 6 },
+      { code: 'CC-ROOMS', name: 'Rooms Division', type: 'ROOMS', sortOrder: 1 },
+      { code: 'CC-FB', name: 'Food & Beverage', type: 'FOOD_BEVERAGE', sortOrder: 2 },
+      { code: 'CC-ADMIN', name: 'Administrative & General', type: 'ADMIN_GENERAL', sortOrder: 3 },
+      { code: 'CC-SM', name: 'Sales & Marketing', type: 'SALES_MARKETING', sortOrder: 4 },
+      {
+        code: 'CC-MAINT',
+        name: 'Property Operations & Maint',
+        type: 'MAINTENANCE_DEPT',
+        sortOrder: 5,
+      },
+      { code: 'CC-ENERGY', name: 'Energy / Utilities', type: 'ENERGY', sortOrder: 6 },
     ];
 
     const centerMap: Record<string, string> = {};
@@ -5479,24 +8534,25 @@ export class SeederService {
     // ── 2. Cost Types ─────────────────────────────────────────────────────────
     const typeDefs = [
       // Material
-      { code: 'CT-AMEN',  name: 'Room Amenities',    category: 'MATERIAL',  sortOrder: 1 },
-      { code: 'CT-INGR',  name: 'F&B Ingredients',   category: 'MATERIAL',  sortOrder: 2 },
-      { code: 'CT-PARTS', name: 'Maintenance Parts',  category: 'MATERIAL',  sortOrder: 3 },
-      { code: 'CT-CLEAN', name: 'Cleaning Supplies',  category: 'MATERIAL',  sortOrder: 4 },
+      { code: 'CT-AMEN', name: 'Room Amenities', category: 'MATERIAL', sortOrder: 1 },
+      { code: 'CT-INGR', name: 'F&B Ingredients', category: 'MATERIAL', sortOrder: 2 },
+      { code: 'CT-PARTS', name: 'Maintenance Parts', category: 'MATERIAL', sortOrder: 3 },
+      { code: 'CT-CLEAN', name: 'Cleaning Supplies', category: 'MATERIAL', sortOrder: 4 },
+      { code: 'CT-EQUIP', name: 'Staff Equipment', category: 'MATERIAL', sortOrder: 16 },
       // Labor
-      { code: 'CT-SAL',   name: 'Staff Salary',       category: 'LABOR',     sortOrder: 5 },
-      { code: 'CT-BEN',   name: 'Staff Benefits',     category: 'LABOR',     sortOrder: 6 },
-      { code: 'CT-OT',    name: 'Overtime Pay',        category: 'LABOR',     sortOrder: 7 },
+      { code: 'CT-SAL', name: 'Staff Salary', category: 'LABOR', sortOrder: 5 },
+      { code: 'CT-BEN', name: 'Staff Benefits', category: 'LABOR', sortOrder: 6 },
+      { code: 'CT-OT', name: 'Overtime Pay', category: 'LABOR', sortOrder: 7 },
       // Overhead
-      { code: 'CT-ELEC',  name: 'Electricity',        category: 'OVERHEAD',  sortOrder: 8 },
-      { code: 'CT-WATER', name: 'Water & Sewage',      category: 'OVERHEAD',  sortOrder: 9 },
-      { code: 'CT-DEPR',  name: 'Depreciation',        category: 'OVERHEAD',  sortOrder: 10 },
-      { code: 'CT-INS',   name: 'Insurance',           category: 'OVERHEAD',  sortOrder: 11 },
-      { code: 'CT-RENT',  name: 'Rent / Lease',        category: 'OVERHEAD',  sortOrder: 12 },
+      { code: 'CT-ELEC', name: 'Electricity', category: 'OVERHEAD', sortOrder: 8 },
+      { code: 'CT-WATER', name: 'Water & Sewage', category: 'OVERHEAD', sortOrder: 9 },
+      { code: 'CT-DEPR', name: 'Depreciation', category: 'OVERHEAD', sortOrder: 10 },
+      { code: 'CT-INS', name: 'Insurance', category: 'OVERHEAD', sortOrder: 11 },
+      { code: 'CT-RENT', name: 'Rent / Lease', category: 'OVERHEAD', sortOrder: 12 },
       // Revenue
-      { code: 'CT-RREV',  name: 'Room Revenue',        category: 'REVENUE',   sortOrder: 13 },
-      { code: 'CT-FBREV', name: 'F&B Revenue',         category: 'REVENUE',   sortOrder: 14 },
-      { code: 'CT-OREV',  name: 'Other Revenue',       category: 'REVENUE',   sortOrder: 15 },
+      { code: 'CT-RREV', name: 'Room Revenue', category: 'REVENUE', sortOrder: 13 },
+      { code: 'CT-FBREV', name: 'F&B Revenue', category: 'REVENUE', sortOrder: 14 },
+      { code: 'CT-OREV', name: 'Other Revenue', category: 'REVENUE', sortOrder: 15 },
     ];
 
     const typeMap: Record<string, string> = {};
@@ -5522,35 +8578,86 @@ export class SeederService {
     if (!entriesExist) {
       const entryDefs = [
         // Rooms Division costs
-        { centerCode: 'CC-ROOMS', typeCode: 'CT-AMEN',  amount: 18500, desc: 'Room amenities consumption' },
-        { centerCode: 'CC-ROOMS', typeCode: 'CT-CLEAN', amount: 8200,  desc: 'Cleaning supplies - rooms' },
-        { centerCode: 'CC-ROOMS', typeCode: 'CT-SAL',   amount: 95000, desc: 'Housekeeping staff salary' },
-        { centerCode: 'CC-ROOMS', typeCode: 'CT-RREV',  amount: 485000,desc: 'Room revenue this month' },
+        {
+          centerCode: 'CC-ROOMS',
+          typeCode: 'CT-AMEN',
+          amount: 18500,
+          desc: 'Room amenities consumption',
+        },
+        {
+          centerCode: 'CC-ROOMS',
+          typeCode: 'CT-CLEAN',
+          amount: 8200,
+          desc: 'Cleaning supplies - rooms',
+        },
+        {
+          centerCode: 'CC-ROOMS',
+          typeCode: 'CT-SAL',
+          amount: 95000,
+          desc: 'Housekeeping staff salary',
+        },
+        {
+          centerCode: 'CC-ROOMS',
+          typeCode: 'CT-RREV',
+          amount: 485000,
+          desc: 'Room revenue this month',
+        },
         // F&B costs
-        { centerCode: 'CC-FB',    typeCode: 'CT-INGR',  amount: 62000, desc: 'F&B ingredient cost' },
-        { centerCode: 'CC-FB',    typeCode: 'CT-SAL',   amount: 72000, desc: 'F&B staff salary' },
-        { centerCode: 'CC-FB',    typeCode: 'CT-FBREV', amount: 195000,desc: 'F&B revenue this month' },
+        { centerCode: 'CC-FB', typeCode: 'CT-INGR', amount: 62000, desc: 'F&B ingredient cost' },
+        { centerCode: 'CC-FB', typeCode: 'CT-SAL', amount: 72000, desc: 'F&B staff salary' },
+        {
+          centerCode: 'CC-FB',
+          typeCode: 'CT-FBREV',
+          amount: 195000,
+          desc: 'F&B revenue this month',
+        },
         // Admin costs
-        { centerCode: 'CC-ADMIN', typeCode: 'CT-SAL',   amount: 85000, desc: 'Admin staff salary' },
-        { centerCode: 'CC-ADMIN', typeCode: 'CT-BEN',   amount: 12000, desc: 'Staff benefits & insurance' },
+        { centerCode: 'CC-ADMIN', typeCode: 'CT-SAL', amount: 85000, desc: 'Admin staff salary' },
+        {
+          centerCode: 'CC-ADMIN',
+          typeCode: 'CT-BEN',
+          amount: 12000,
+          desc: 'Staff benefits & insurance',
+        },
         // Maintenance
-        { centerCode: 'CC-MAINT', typeCode: 'CT-PARTS', amount: 15500, desc: 'Maintenance parts used' },
-        { centerCode: 'CC-MAINT', typeCode: 'CT-SAL',   amount: 38000, desc: 'Maintenance staff salary' },
+        {
+          centerCode: 'CC-MAINT',
+          typeCode: 'CT-PARTS',
+          amount: 15500,
+          desc: 'Maintenance parts used',
+        },
+        {
+          centerCode: 'CC-MAINT',
+          typeCode: 'CT-SAL',
+          amount: 38000,
+          desc: 'Maintenance staff salary',
+        },
         // Energy
-        { centerCode: 'CC-ENERGY',typeCode: 'CT-ELEC',  amount: 52000, desc: 'Electricity bill' },
-        { centerCode: 'CC-ENERGY',typeCode: 'CT-WATER', amount: 8500,  desc: 'Water & sewage bill' },
+        { centerCode: 'CC-ENERGY', typeCode: 'CT-ELEC', amount: 52000, desc: 'Electricity bill' },
+        {
+          centerCode: 'CC-ENERGY',
+          typeCode: 'CT-WATER',
+          amount: 8500,
+          desc: 'Water & sewage bill',
+        },
       ];
 
       for (const entry of entryDefs) {
         const costCenterId = centerMap[entry.centerCode];
-        const costTypeId   = typeMap[entry.typeCode];
+        const costTypeId = typeMap[entry.typeCode];
         if (!costCenterId || !costTypeId) continue;
         await this.prisma.costEntry.create({
           data: {
-            tenantId, propertyId, costCenterId, costTypeId,
-            amount: entry.amount, period: currentPeriod,
+            tenantId,
+            propertyId,
+            costCenterId,
+            costTypeId,
+            amount: entry.amount,
+            period: currentPeriod,
             description: entry.desc,
-            sourceType: 'manual', isAutoPosted: false, status: 'posted',
+            sourceType: 'manual',
+            isAutoPosted: false,
+            status: 'posted',
             createdBy: 'seeder',
           },
         });
@@ -5566,27 +8673,33 @@ export class SeederService {
     });
     if (!budgetsExist) {
       const budgetDefs = [
-        { centerCode: 'CC-ROOMS', typeCode: 'CT-AMEN',  budget: 20000 },
+        { centerCode: 'CC-ROOMS', typeCode: 'CT-AMEN', budget: 20000 },
         { centerCode: 'CC-ROOMS', typeCode: 'CT-CLEAN', budget: 10000 },
-        { centerCode: 'CC-ROOMS', typeCode: 'CT-SAL',   budget: 100000 },
-        { centerCode: 'CC-FB',    typeCode: 'CT-INGR',  budget: 60000 },
-        { centerCode: 'CC-FB',    typeCode: 'CT-SAL',   budget: 70000 },
-        { centerCode: 'CC-ADMIN', typeCode: 'CT-SAL',   budget: 90000 },
+        { centerCode: 'CC-ROOMS', typeCode: 'CT-SAL', budget: 100000 },
+        { centerCode: 'CC-FB', typeCode: 'CT-INGR', budget: 60000 },
+        { centerCode: 'CC-FB', typeCode: 'CT-SAL', budget: 70000 },
+        { centerCode: 'CC-ADMIN', typeCode: 'CT-SAL', budget: 90000 },
         { centerCode: 'CC-MAINT', typeCode: 'CT-PARTS', budget: 20000 },
-        { centerCode: 'CC-MAINT', typeCode: 'CT-SAL',   budget: 40000 },
-        { centerCode: 'CC-ENERGY',typeCode: 'CT-ELEC',  budget: 55000 },
-        { centerCode: 'CC-ENERGY',typeCode: 'CT-WATER', budget: 10000 },
+        { centerCode: 'CC-MAINT', typeCode: 'CT-SAL', budget: 40000 },
+        { centerCode: 'CC-ENERGY', typeCode: 'CT-ELEC', budget: 55000 },
+        { centerCode: 'CC-ENERGY', typeCode: 'CT-WATER', budget: 10000 },
       ];
 
       for (const b of budgetDefs) {
         const costCenterId = centerMap[b.centerCode];
-        const costTypeId   = typeMap[b.typeCode];
+        const costTypeId = typeMap[b.typeCode];
         if (!costCenterId || !costTypeId) continue;
         await this.prisma.costBudget.create({
           data: {
-            tenantId, propertyId, costCenterId, costTypeId,
-            period: currentPeriod, budgetAmount: b.budget,
-            actualAmount: 0, variance: 0, variancePercent: 0,
+            tenantId,
+            propertyId,
+            costCenterId,
+            costTypeId,
+            period: currentPeriod,
+            budgetAmount: b.budget,
+            actualAmount: 0,
+            variance: 0,
+            variancePercent: 0,
             createdBy: 'seeder',
           },
         });
@@ -5597,5 +8710,776 @@ export class SeederService {
     }
 
     this.logger.log('✅ Cost accounting seed complete: cost centers, types, entries, budgets');
+  }
+
+  /**
+   * Seed Procurement Users + Approval Flow templates for Mountain View Resort.
+   *
+   * Creates 6 procurement accounts (manager, buyers, approvers, receiver) and
+   * 3 default approval flow templates (PR / Price Comparison / PO). All records
+   * are idempotent — re-running the seed updates in place.
+   */
+  private async seedProcurementUsersAndFlows(): Promise<void> {
+    this.logger.log('🛒 Seeding Procurement Users & Approval Flows...');
+
+    const ownerUser = await this.prisma.user.findUnique({
+      where: { email: 'premium.test@email.com' },
+    });
+    if (!ownerUser?.tenantId) {
+      this.logger.warn('  ⚠️ premium.test@email.com not found — skipping procurement seed');
+      return;
+    }
+    const tenantId = ownerUser.tenantId;
+
+    // ── 1. Procurement user accounts ────────────────────────────────────────
+    const hashedPassword = await bcrypt.hash('procure123', 10);
+
+    interface ProcUserSeed {
+      email: string;
+      firstName: string;
+      lastName: string;
+      role: 'procurement_manager' | 'buyer' | 'approver' | 'receiver';
+      employeeId: string;
+      approvalLimit: number | null;
+      permissions: string[];
+    }
+
+    const procurementUsers: ProcUserSeed[] = [
+      {
+        email: 'procurement.manager@mountainviewresort.test',
+        firstName: 'ธนพล',
+        lastName: 'จัดซื้อเก่ง',
+        role: 'procurement_manager',
+        employeeId: 'MVR-PRC-M01',
+        approvalLimit: null, // unlimited
+        permissions: [
+          'pr.create',
+          'pr.approve',
+          'rfq.create',
+          'quote.compare',
+          'po.create',
+          'po.approve',
+          'supplier.manage',
+          'grn.view',
+          'report.view',
+          'approval-flow.manage',
+          'user.manage',
+        ],
+      },
+      {
+        email: 'buyer1@mountainviewresort.test',
+        firstName: 'สุดา',
+        lastName: 'ต่อรองดี',
+        role: 'buyer',
+        employeeId: 'MVR-PRC-B01',
+        approvalLimit: 50_000,
+        permissions: [
+          'pr.create',
+          'rfq.create',
+          'quote.compare',
+          'po.create',
+          'supplier.view',
+          'report.view',
+        ],
+      },
+      {
+        email: 'buyer2@mountainviewresort.test',
+        firstName: 'อรุณ',
+        lastName: 'ซื้อคุ้ม',
+        role: 'buyer',
+        employeeId: 'MVR-PRC-B02',
+        approvalLimit: 50_000,
+        permissions: [
+          'pr.create',
+          'rfq.create',
+          'quote.compare',
+          'po.create',
+          'supplier.view',
+          'report.view',
+        ],
+      },
+      {
+        email: 'approver1@mountainviewresort.test',
+        firstName: 'ชลธี',
+        lastName: 'ผู้อนุมัติ',
+        role: 'approver',
+        employeeId: 'MVR-PRC-A01',
+        approvalLimit: 500_000,
+        permissions: ['pr.approve', 'po.approve', 'quote.compare', 'report.view'],
+      },
+      {
+        email: 'approver2@mountainviewresort.test',
+        firstName: 'มาลี',
+        lastName: 'ตรวจละเอียด',
+        role: 'approver',
+        employeeId: 'MVR-PRC-A02',
+        approvalLimit: 1_000_000,
+        permissions: ['pr.approve', 'po.approve', 'quote.compare', 'report.view'],
+      },
+      {
+        email: 'receiver1@mountainviewresort.test',
+        firstName: 'วิชัย',
+        lastName: 'รับของ',
+        role: 'receiver',
+        employeeId: 'MVR-PRC-R01',
+        approvalLimit: 0,
+        permissions: ['grn.create', 'grn.view', 'qc.inspect'],
+      },
+    ];
+
+    let created = 0;
+    let updated = 0;
+    const userByEmail: Record<string, { id: string; role: string }> = {};
+
+    for (const u of procurementUsers) {
+      const allowedSystems = '["main","procurement"]';
+      const existing = await this.prisma.user.findUnique({ where: { email: u.email } });
+      if (!existing) {
+        const fresh = await this.prisma.user.create({
+          data: {
+            email: u.email,
+            password: hashedPassword,
+            firstName: u.firstName,
+            lastName: u.lastName,
+            role: u.role,
+            tenantId,
+            status: 'active',
+            employeeId: u.employeeId,
+            allowedSystems,
+            approvalLimit: u.approvalLimit === null ? null : (u.approvalLimit as unknown as any),
+            procurementPermissions: JSON.stringify(u.permissions),
+          } as any,
+        });
+        userByEmail[u.email] = { id: fresh.id, role: u.role };
+        created++;
+      } else {
+        const refreshed = await this.prisma.user.update({
+          where: { id: existing.id },
+          data: {
+            tenantId,
+            password: hashedPassword,
+            firstName: u.firstName,
+            lastName: u.lastName,
+            role: u.role,
+            employeeId: u.employeeId,
+            status: 'active',
+            allowedSystems,
+            approvalLimit: u.approvalLimit === null ? null : (u.approvalLimit as unknown as any),
+            procurementPermissions: JSON.stringify(u.permissions),
+          } as any,
+        });
+        userByEmail[u.email] = { id: refreshed.id, role: u.role };
+        updated++;
+      }
+    }
+
+    this.logger.log(
+      `  ✓ Procurement users: ${created} created, ${updated} updated ` +
+        `(password: procure123, systems: main+procurement)`,
+    );
+
+    // ── 2. Approval Flow templates ──────────────────────────────────────────
+    const approverA = userByEmail['approver1@mountainviewresort.test'];
+    const approverB = userByEmail['approver2@mountainviewresort.test'];
+    const manager = userByEmail['procurement.manager@mountainviewresort.test'];
+
+    if (!approverA || !approverB || !manager) {
+      this.logger.warn('  ⚠️ Approver/manager users missing — skipping approval flow seed');
+      return;
+    }
+
+    interface FlowStepSeed {
+      stepOrder: number;
+      name: string;
+      approverType: 'SPECIFIC_USER' | 'ROLE' | 'DEPARTMENT_HEAD';
+      approverRole?: string | null;
+      approverUserIds?: string[];
+      minApprovals?: number;
+      isParallel?: boolean;
+      slaHours?: number | null;
+    }
+    interface FlowSeed {
+      name: string;
+      description: string;
+      documentType: 'PURCHASE_REQUISITION' | 'PRICE_COMPARISON' | 'PURCHASE_ORDER';
+      minAmount: number;
+      maxAmount: number | null;
+      isDefault: boolean;
+      steps: FlowStepSeed[];
+    }
+
+    const flows: FlowSeed[] = [
+      {
+        name: 'Flow อนุมัติ PR (มาตรฐาน)',
+        description: 'Flow อนุมัติใบขอซื้อ (PR) แบบ sequential 2 ขั้น',
+        documentType: 'PURCHASE_REQUISITION',
+        minAmount: 0,
+        maxAmount: 500_000,
+        isDefault: true,
+        steps: [
+          {
+            stepOrder: 1,
+            name: 'หัวหน้าแผนกจัดซื้ออนุมัติ',
+            approverType: 'SPECIFIC_USER',
+            approverUserIds: [manager.id],
+            slaHours: 24,
+          },
+          {
+            stepOrder: 2,
+            name: 'ผู้อนุมัติขั้นสุดท้าย',
+            approverType: 'SPECIFIC_USER',
+            approverUserIds: [approverA.id, approverB.id],
+            minApprovals: 1,
+            isParallel: true,
+            slaHours: 48,
+          },
+        ],
+      },
+      {
+        name: 'Flow เปรียบเทียบราคา (Price Comparison)',
+        description: 'Flow อนุมัติใบเปรียบเทียบราคาผู้ขาย — 1 ขั้น',
+        documentType: 'PRICE_COMPARISON',
+        minAmount: 0,
+        maxAmount: 1_000_000,
+        isDefault: true,
+        steps: [
+          {
+            stepOrder: 1,
+            name: 'หัวหน้าจัดซื้ออนุมัติการเลือกผู้ขาย',
+            approverType: 'SPECIFIC_USER',
+            approverUserIds: [manager.id],
+            slaHours: 24,
+          },
+        ],
+      },
+      {
+        name: 'Flow อนุมัติใบสั่งซื้อ (PO)',
+        description: 'Flow อนุมัติใบสั่งซื้อ — 2 ขั้น sequential',
+        documentType: 'PURCHASE_ORDER',
+        minAmount: 0,
+        maxAmount: null,
+        isDefault: true,
+        steps: [
+          {
+            stepOrder: 1,
+            name: 'Approver ระดับแผนก',
+            approverType: 'SPECIFIC_USER',
+            approverUserIds: [approverA.id],
+            slaHours: 24,
+          },
+          {
+            stepOrder: 2,
+            name: 'ผู้มีอำนาจอนุมัติ PO',
+            approverType: 'SPECIFIC_USER',
+            approverUserIds: [approverB.id, manager.id],
+            minApprovals: 1,
+            isParallel: true,
+            slaHours: 48,
+          },
+        ],
+      },
+    ];
+
+    let flowsCreated = 0;
+    let flowsUpdated = 0;
+
+    for (const f of flows) {
+      const existing = await (this.prisma as any).approvalFlow.findFirst({
+        where: { tenantId, name: f.name, documentType: f.documentType },
+      });
+
+      if (existing) {
+        // Full replace of steps
+        await (this.prisma as any).approvalFlowStep.deleteMany({
+          where: { flowId: existing.id },
+        });
+        await (this.prisma as any).approvalFlow.update({
+          where: { id: existing.id },
+          data: {
+            description: f.description,
+            minAmount: f.minAmount as unknown as any,
+            maxAmount: f.maxAmount === null ? null : (f.maxAmount as unknown as any),
+            isActive: true,
+            isDefault: f.isDefault,
+            steps: {
+              create: f.steps.map((s) => ({
+                stepOrder: s.stepOrder,
+                name: s.name,
+                approverType: s.approverType,
+                approverRole: s.approverRole ?? null,
+                minApprovals: s.minApprovals ?? 1,
+                isParallel: s.isParallel ?? false,
+                slaHours: s.slaHours ?? null,
+                approvers:
+                  s.approverType === 'SPECIFIC_USER' && s.approverUserIds
+                    ? {
+                        create: s.approverUserIds.map((userId, idx) => ({
+                          userId,
+                          order: idx,
+                        })),
+                      }
+                    : undefined,
+              })),
+            },
+          },
+        });
+        flowsUpdated++;
+      } else {
+        await (this.prisma as any).approvalFlow.create({
+          data: {
+            tenantId,
+            name: f.name,
+            description: f.description,
+            documentType: f.documentType,
+            minAmount: f.minAmount as unknown as any,
+            maxAmount: f.maxAmount === null ? null : (f.maxAmount as unknown as any),
+            isActive: true,
+            isDefault: f.isDefault,
+            createdBy: manager.id,
+            steps: {
+              create: f.steps.map((s) => ({
+                stepOrder: s.stepOrder,
+                name: s.name,
+                approverType: s.approverType,
+                approverRole: s.approverRole ?? null,
+                minApprovals: s.minApprovals ?? 1,
+                isParallel: s.isParallel ?? false,
+                slaHours: s.slaHours ?? null,
+                approvers:
+                  s.approverType === 'SPECIFIC_USER' && s.approverUserIds
+                    ? {
+                        create: s.approverUserIds.map((userId, idx) => ({
+                          userId,
+                          order: idx,
+                        })),
+                      }
+                    : undefined,
+              })),
+            },
+          },
+        });
+        flowsCreated++;
+      }
+    }
+
+    this.logger.log(
+      `  ✓ Approval flows: ${flowsCreated} created, ${flowsUpdated} updated (PR / Price Comparison / PO)`,
+    );
+    this.logger.log('✅ Procurement users & approval flows seeded successfully');
+  }
+
+  /**
+   * Map แผนก HR เดิม → cost center ที่มี (เฟส 0 recruitment-inventory-cost integration)
+   * — ตั้งเฉพาะแผนกที่ยังไม่ได้ map ไม่ทับค่าที่ตั้งเองแล้ว
+   */
+  private async seedDepartmentCostCenterMapping(): Promise<void> {
+    this.logger.log('🔗 Mapping HR departments → cost centers...');
+
+    // mapping ตาม USALI: แผนกที่ไม่เข้าหมวดใดใช้ CC-ADMIN เป็น fallback
+    const deptToCenter: Record<string, string> = {
+      FO: 'CC-ROOMS',
+      HK: 'CC-ROOMS',
+      FB: 'CC-FB',
+      POS: 'CC-FB',
+      ENG: 'CC-MAINT',
+      SM: 'CC-SM',
+    };
+    const FALLBACK_CENTER = 'CC-ADMIN';
+
+    const allTenants = await this.tenantsService.findAll();
+    let mapped = 0;
+    for (const tenant of allTenants) {
+      const costCenters = await this.prisma.costCenter.findMany({
+        where: { tenantId: tenant.id, isActive: true },
+        select: { id: true, code: true },
+      });
+      if (costCenters.length === 0) continue;
+
+      const centerByCode = new Map(costCenters.map((c) => [c.code, c.id]));
+      const departments = await this.prisma.hrDepartment.findMany({
+        where: { tenantId: tenant.id, costCenterId: null },
+        select: { id: true, code: true },
+      });
+      for (const dept of departments) {
+        const centerId =
+          centerByCode.get(deptToCenter[dept.code] ?? FALLBACK_CENTER) ??
+          centerByCode.get(FALLBACK_CENTER);
+        if (!centerId) continue;
+        await this.prisma.hrDepartment.update({
+          where: { id: dept.id },
+          data: { costCenterId: centerId },
+        });
+        mapped++;
+      }
+    }
+    this.logger.log(`  ✓ Department → cost center mapping: ${mapped} departments mapped`);
+  }
+
+  /**
+   * Seed default operating-cost categories (Platform-level)
+   * — ไม่ทับ category เดิมเมื่อรันซ้ำ
+   */
+  private async seedOpCostCategories(): Promise<void> {
+    this.logger.log('🌱 Seeding operating-cost categories...');
+
+    const defaults = [
+      {
+        code: 'infrastructure',
+        name: 'ค่าโครงสร้างพื้นฐาน',
+        nameEn: 'Infrastructure',
+        color: '#3b82f6',
+        icon: 'server',
+        isCogs: true,
+        sortOrder: 1,
+      },
+      {
+        code: 'third_party',
+        name: 'บริการภายนอก',
+        nameEn: 'Third-party APIs',
+        color: '#06b6d4',
+        icon: 'plug',
+        isCogs: true,
+        sortOrder: 2,
+      },
+      {
+        code: 'software',
+        name: 'ซอฟต์แวร์/ใบอนุญาต',
+        nameEn: 'Software & Tools',
+        color: '#8b5cf6',
+        icon: 'package',
+        isCogs: false,
+        sortOrder: 3,
+      },
+      {
+        code: 'marketing',
+        name: 'การตลาด',
+        nameEn: 'Marketing',
+        color: '#ec4899',
+        icon: 'megaphone',
+        isCogs: false,
+        sortOrder: 4,
+      },
+      {
+        code: 'people',
+        name: 'บุคลากร',
+        nameEn: 'People',
+        color: '#f59e0b',
+        icon: 'users',
+        isCogs: false,
+        sortOrder: 5,
+      },
+      {
+        code: 'operations',
+        name: 'ดำเนินงานอื่น ๆ',
+        nameEn: 'Operations',
+        color: '#64748b',
+        icon: 'briefcase',
+        isCogs: false,
+        sortOrder: 6,
+      },
+    ];
+
+    let created = 0;
+    let skipped = 0;
+    for (const c of defaults) {
+      const existing = await this.prisma.opCostCategory.findUnique({
+        where: { code: c.code },
+      });
+      if (existing) {
+        skipped++;
+        continue;
+      }
+      await this.prisma.opCostCategory.create({ data: c });
+      created++;
+    }
+
+    this.logger.log(`  ✓ Operating-cost categories: ${created} created, ${skipped} skipped`);
+  }
+
+  /**
+   * 🧑‍💼 Seed a full recruitment → probation pipeline for the premium tenant
+   * (design §7.4). Creates two manpower requests:
+   *   • MPR-SEED-COMPLETE — driven all the way to a hired employee with an
+   *     active probation round + 30/60/90 checkpoints and a first-day issuance.
+   *   • MPR-SEED-RECRUITING — mid-pipeline: budget approved, recruiting, with
+   *     candidates and a scheduled interview.
+   * Idempotent: keyed on the sentinel requestNo values.
+   */
+  private async seedRecruitmentPipeline(): Promise<void> {
+    this.logger.log('🧑‍💼 Seeding recruitment → probation pipeline...');
+    const db = this.prisma as any;
+
+    const ownerUser = await this.prisma.user.findUnique({
+      where: { email: 'premium.test@email.com' },
+    });
+    if (!ownerUser?.tenantId) {
+      this.logger.warn('  ⚠️  premium.test@email.com not found, skipping recruitment seed');
+      return;
+    }
+    const tenantId = ownerUser.tenantId;
+    const userId = ownerUser.id;
+
+    const existing = await db.hrManpowerRequest.findFirst({
+      where: { tenantId, requestNo: 'MPR-SEED-COMPLETE' },
+    });
+    if (existing) {
+      this.logger.log('  ✓ Recruitment pipeline already seeded, skipping');
+      return;
+    }
+
+    const property = await this.prisma.property.findFirst({ where: { tenantId } });
+    const deptFO = await this.prisma.hrDepartment.findUnique({
+      where: { tenantId_code: { tenantId, code: 'FO' } },
+    });
+
+    // Fully-approved 3-step chain (dept_head → hr → owner).
+    const approvedChain = (decidedBy: string) =>
+      (['dept_head', 'hr', 'owner'] as const).map((role, i) => ({
+        level: i + 1,
+        role,
+        approverId: decidedBy,
+        status: 'approved',
+        decidedAt: new Date().toISOString(),
+        note: null,
+      }));
+
+    const today = new Date();
+    const daysFromNow = (d: number) => {
+      const x = new Date(today);
+      x.setDate(x.getDate() + d);
+      return x;
+    };
+
+    // ─── 1) COMPLETE pipeline → hired + probation ─────────────────────────────
+    const complete = await db.hrManpowerRequest.create({
+      data: {
+        tenantId,
+        requestNo: 'MPR-SEED-COMPLETE',
+        propertyId: property?.id ?? null,
+        departmentId: deptFO?.id ?? null,
+        positionTitle: 'พนักงานต้อนรับส่วนหน้า (Front Desk Agent)',
+        headcount: 1,
+        employmentType: 'FULLTIME',
+        reason: 'expansion — เพิ่มอัตราช่วงไฮซีซั่น',
+        jobDescription: 'ต้อนรับและเช็คอิน-เอาท์แขก ดูแล walk-in และโทรศัพท์',
+        expectedStartDate: daysFromNow(-20),
+        salaryRangeMin: 18000,
+        salaryRangeMax: 24000,
+        budgetTotal: 26000,
+        budgetNote: 'รวมค่า onboarding + ยูนิฟอร์ม',
+        budgetApprovedAt: daysFromNow(-40),
+        budgetChain: approvedChain(userId),
+        status: 'probation',
+        approvalChain: approvedChain(userId),
+        currentApprovalLevel: 3,
+        requestedBy: userId,
+      },
+    });
+
+    const equip = await db.hrEquipmentRequest.create({
+      data: {
+        tenantId,
+        manpowerRequestId: complete.id,
+        items: [
+          { name: 'ยูนิฟอร์ม', qty: 2, estimatedCost: 1200, note: 'set บน-ล่าง' },
+          { name: 'บัตรพนักงาน + สายคล้อง', qty: 1, estimatedCost: 150 },
+          { name: 'หูฟัง headset', qty: 1, estimatedCost: 900 },
+        ],
+        totalCost: 3450,
+        status: 'approved',
+        approvalChain: approvedChain(userId),
+        requestedBy: userId,
+      },
+    });
+
+    const hiredCandidate = await db.hrCandidate.create({
+      data: {
+        tenantId,
+        manpowerRequestId: complete.id,
+        firstName: 'ศิริพร',
+        lastName: 'ใจดี',
+        email: 'siriporn.jaidee@example.com',
+        phone: '081-555-2001',
+        source: 'referral',
+        expectedSalary: 21000,
+        status: 'hired',
+        note: 'แนะนำโดยพนักงานเดิม สัมภาษณ์ผ่านสองรอบ',
+      },
+    });
+
+    await db.hrInterview.createMany({
+      data: [
+        {
+          tenantId,
+          candidateId: hiredCandidate.id,
+          round: 1,
+          scheduledAt: daysFromNow(-35),
+          location: 'ห้องประชุม HR',
+          interviewerIds: [userId],
+          status: 'completed',
+          score: 82,
+          result: 'next_round',
+          feedback: 'บุคลิกดี สื่อสารชัดเจน',
+        },
+        {
+          tenantId,
+          candidateId: hiredCandidate.id,
+          round: 2,
+          scheduledAt: daysFromNow(-30),
+          location: 'ห้อง GM',
+          interviewerIds: [userId],
+          status: 'completed',
+          score: 88,
+          result: 'pass',
+          feedback: 'ผ่าน เสนอจ้างได้',
+        },
+      ],
+    });
+
+    // Hired employee (PROBATION) + hire record + issuance + probation round.
+    const employee = await this.prisma.employee.create({
+      data: {
+        tenantId,
+        firstName: hiredCandidate.firstName,
+        lastName: hiredCandidate.lastName,
+        email: hiredCandidate.email,
+        phone: hiredCandidate.phone,
+        employeeCode: 'EMP-SEED-FD01',
+        department: 'Front Office',
+        departmentId: deptFO?.id ?? null,
+        position: 'Front Desk Agent',
+        propertyId: property?.id ?? null,
+        baseSalary: 21000,
+        employmentType: 'FULLTIME',
+        status: 'PROBATION',
+        startDate: daysFromNow(-20),
+      },
+    });
+
+    const hireRecord = await db.hrHireRecord.create({
+      data: {
+        tenantId,
+        candidateId: hiredCandidate.id,
+        employeeId: employee.id,
+        offeredSalary: 21000,
+        startDate: daysFromNow(-20),
+        startTime: '08:30',
+        probationDays: 90,
+        offerStatus: 'accepted',
+        offerSentAt: daysFromNow(-28),
+        acceptedAt: daysFromNow(-26),
+      },
+    });
+
+    await db.hrEquipmentIssuance.create({
+      data: {
+        tenantId,
+        equipmentRequestId: equip.id,
+        employeeId: employee.id,
+        items: [
+          { name: 'ยูนิฟอร์ม', qty: 2, serialNo: null, issued: true },
+          { name: 'บัตรพนักงาน + สายคล้อง', qty: 1, serialNo: 'ID-2026-0001', issued: true },
+          { name: 'หูฟัง headset', qty: 1, serialNo: 'HS-2026-0001', issued: true },
+        ],
+        status: 'issued',
+        issuedBy: userId,
+        issuedAt: daysFromNow(-20),
+        acknowledgedAt: daysFromNow(-20),
+      },
+    });
+
+    const startDate = daysFromNow(-20);
+    const round = await db.hrProbationRound.create({
+      data: {
+        tenantId,
+        employeeId: employee.id,
+        hireRecordId: hireRecord.id,
+        startDate,
+        dueDate: daysFromNow(70),
+        status: 'active',
+      },
+    });
+
+    for (const days of [30, 60, 90]) {
+      const due = new Date(startDate);
+      due.setDate(due.getDate() + days);
+      await db.hrProbationCheckpoint.create({
+        data: {
+          tenantId,
+          roundId: round.id,
+          label: `${days} วัน`,
+          dueDate: due,
+          status: days === 30 ? 'done' : 'pending',
+          score: days === 30 ? 80 : null,
+          strengths: days === 30 ? 'เรียนรู้ระบบ PMS ได้เร็ว' : null,
+          improvements: days === 30 ? 'ฝึกภาษาอังกฤษเพิ่ม' : null,
+          reviewerId: days === 30 ? userId : null,
+          reviewedAt: days === 30 ? daysFromNow(10) : null,
+        },
+      });
+    }
+
+    // ─── 2) RECRUITING pipeline → candidates + scheduled interview ────────────
+    const recruiting = await db.hrManpowerRequest.create({
+      data: {
+        tenantId,
+        requestNo: 'MPR-SEED-RECRUITING',
+        propertyId: property?.id ?? null,
+        departmentId: deptFO?.id ?? null,
+        positionTitle: 'พนักงานทำความสะอาด (Room Attendant)',
+        headcount: 2,
+        employmentType: 'FULLTIME',
+        reason: 'replacement — พนักงานลาออก 2 ตำแหน่ง',
+        expectedStartDate: daysFromNow(30),
+        salaryRangeMin: 15000,
+        salaryRangeMax: 18000,
+        budgetTotal: 40000,
+        budgetApprovedAt: daysFromNow(-5),
+        budgetChain: approvedChain(userId),
+        status: 'recruiting',
+        approvalChain: approvedChain(userId),
+        currentApprovalLevel: 3,
+        requestedBy: userId,
+      },
+    });
+
+    const c1 = await db.hrCandidate.create({
+      data: {
+        tenantId,
+        manpowerRequestId: recruiting.id,
+        firstName: 'มานพ',
+        lastName: 'รักงาน',
+        phone: '082-555-3001',
+        source: 'walk_in',
+        expectedSalary: 16000,
+        status: 'interview_scheduled',
+      },
+    });
+    await db.hrCandidate.create({
+      data: {
+        tenantId,
+        manpowerRequestId: recruiting.id,
+        firstName: 'ดวงใจ',
+        lastName: 'ขยันดี',
+        phone: '083-555-3002',
+        source: 'job_board',
+        expectedSalary: 15500,
+        status: 'screening',
+      },
+    });
+
+    await db.hrInterview.create({
+      data: {
+        tenantId,
+        candidateId: c1.id,
+        round: 1,
+        scheduledAt: daysFromNow(2),
+        location: 'ห้องประชุม HK',
+        interviewerIds: [userId],
+        status: 'scheduled',
+      },
+    });
+
+    this.logger.log('  ✓ Recruitment pipeline seeded: 2 requests (complete + recruiting)');
   }
 }

@@ -1,0 +1,64 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { OnEvent } from '@nestjs/event-emitter';
+import { JourneyService } from './journey.service';
+import { BookingEventPayload, CRM_EVENTS, PromoRedeemedEventPayload } from '../crm.events';
+import { IntegrationsService } from '../../integrations/integrations.service';
+
+/**
+ * Auto-enroll guests into matching active journeys whenever
+ * a booking event fires.
+ */
+@Injectable()
+export class JourneyEventListener {
+  private readonly logger = new Logger(JourneyEventListener.name);
+
+  constructor(
+    private readonly journeys: JourneyService,
+    private readonly integrations: IntegrationsService,
+  ) {}
+
+  @OnEvent(CRM_EVENTS.BOOKING_CREATED, { async: true })
+  async onBookingCreated(payload: BookingEventPayload): Promise<void> {
+    if (!payload?.tenantId || !payload?.guestId) return;
+    if (!(await this.integrations.isEnabled(payload.tenantId, 'booking-crm-sync'))) return;
+    const n = await this.journeys.enrollByTrigger(
+      'booking.created',
+      payload.tenantId,
+      payload.guestId,
+      { bookingId: payload.bookingId, metadata: { totalAmount: payload.totalAmount } },
+    );
+    if (n > 0) this.logger.debug(`Enrolled in ${n} pre-stay journey(s)`);
+  }
+
+  @OnEvent(CRM_EVENTS.BOOKING_CHECKED_IN, { async: true })
+  async onBookingCheckedIn(payload: BookingEventPayload): Promise<void> {
+    if (!payload?.tenantId || !payload?.guestId) return;
+    if (!(await this.integrations.isEnabled(payload.tenantId, 'booking-crm-sync'))) return;
+    await this.journeys.enrollByTrigger('booking.checked_in', payload.tenantId, payload.guestId, {
+      bookingId: payload.bookingId,
+    });
+  }
+
+  @OnEvent(CRM_EVENTS.BOOKING_CHECKED_OUT, { async: true })
+  async onBookingCheckedOut(payload: BookingEventPayload): Promise<void> {
+    if (!payload?.tenantId || !payload?.guestId) return;
+    if (!(await this.integrations.isEnabled(payload.tenantId, 'booking-crm-sync'))) return;
+    await this.journeys.enrollByTrigger('booking.checked_out', payload.tenantId, payload.guestId, {
+      bookingId: payload.bookingId,
+      metadata: { totalAmount: payload.totalAmount },
+    });
+  }
+
+  /** สมาชิกใช้โค้ดโปรร้านค้า → เข้า journey ที่ตั้ง trigger 'retail.promo_redeemed' (เช่น ขอบคุณ/ชวนกลับมาซื้อ) */
+  @OnEvent(CRM_EVENTS.PROMO_REDEEMED, { async: true })
+  async onPromoRedeemed(payload: PromoRedeemedEventPayload): Promise<void> {
+    if (!payload?.tenantId || !payload?.guestId) return;
+    try {
+      await this.journeys.enrollByTrigger('retail.promo_redeemed', payload.tenantId, payload.guestId, {
+        metadata: { saleId: payload.saleId, promotionId: payload.promotionId, code: payload.code },
+      });
+    } catch (error) {
+      this.logger.warn(`retail.promo.redeemed journey enroll failed: ${(error as Error).message}`);
+    }
+  }
+}

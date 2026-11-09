@@ -12,10 +12,14 @@ import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateReservationDto {
-  @ApiProperty({ example: 'uuid-table-id' })
+  @ApiPropertyOptional({
+    example: 'uuid-table-id',
+    description: 'Leave out to book without a table — one is picked when the party orders',
+  })
   @IsString()
   @IsNotEmpty()
-  tableId: string;
+  @IsOptional()
+  tableId?: string;
 
   @ApiProperty({ example: 'John Smith' })
   @IsString()

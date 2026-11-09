@@ -10,8 +10,10 @@ import {
   UseGuards,
   ForbiddenException,
   Req,
+  Res,
+  UseInterceptors,
 } from '@nestjs/common';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
@@ -19,17 +21,61 @@ import { RegisterDto } from './dto/register.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { CreatePosUserDto } from './dto/create-pos-user.dto';
 import { PosLaunchDto } from './dto/pos-launch.dto';
+import { LaunchExchangeDto } from './dto/launch-exchange.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { SkipSubscriptionCheck } from '../../common/decorators/skip-subscription-check.decorator';
 import { Throttle } from '@nestjs/throttler';
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
+import { AuthErrors } from './auth-errors';
+import { TerminalRefreshCookieInterceptor } from './terminal-refresh-cookie.interceptor';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { AddonGuard } from '../../common/guards/addon.guard';
+import { RequireAddon } from '../../common/decorators/require-addon.decorator';
+import { Roles, UserRole } from '../../common/decorators/roles.decorator';
+import {
+  type SessionContext,
+  clearTerminalRefreshCookie,
+  readCookie,
+  refreshCookieName,
+} from './terminal-refresh-cookie';
+
+/**
+ * ใครออก launch token ของ Terminal ได้ — ชุดเดียวกับ ADMIN_SSO_ROLES ฝั่งหน้าเว็บ
+ *
+ * token พวกนี้ "ยกระดับ" role (procurement_manager / warehouse_manager / accounting_manager /
+ * hr_manager / hotel_manager + permissions เต็ม) ถ้าไม่กั้นตรงนี้ แม่บ้านที่ล็อกอินระบบหลัก
+ * ยิง POST /auth/accounting-launch ตรง ๆ ก็ได้ session ผู้จัดการบัญชี (ปุ่มที่ซ่อนบนหน้าเว็บไม่ใช่ด่าน)
+ * pos-launch ไม่อยู่ในชุดนี้เพราะ token ถือ role เดิมของผู้เรียก ไม่ได้ยกระดับ
+ */
+const TERMINAL_SSO_LAUNCHERS: UserRole[] = ['platform_admin', 'tenant_admin', 'admin', 'manager'];
 
 @ApiTags('auth')
 @Controller({ path: 'auth', version: '1' })
 @SkipSubscriptionCheck()
+@UseInterceptors(TerminalRefreshCookieInterceptor)
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
+
+  /**
+   * Terminal logout: revoke the refresh token (body, else the terminal's
+   * httpOnly cookie) and drop the cookie so a reload cannot restore the session.
+   */
+  private async terminalLogout(
+    user: any,
+    body: { refreshToken?: string } | undefined,
+    req: Request,
+    res: Response,
+    ctx: SessionContext,
+  ): Promise<void> {
+    const refreshToken = body?.refreshToken ?? readCookie(req, refreshCookieName(ctx));
+    try {
+      await this.authService.logout(user.userId, refreshToken, ctx);
+    } finally {
+      clearTerminalRefreshCookie(res, ctx);
+    }
+  }
 
   @Post('register')
   @Public()
@@ -113,8 +159,34 @@ export class AuthController {
   @ApiOperation({ summary: 'Refresh access token' })
   @ApiResponse({ status: 200, description: 'Token refreshed successfully' })
   @ApiResponse({ status: 401, description: 'Invalid or expired refresh token' })
-  async refresh(@Body() refreshTokenDto: RefreshTokenDto) {
-    return this.authService.refreshToken(refreshTokenDto);
+  async refresh(
+    @Body() refreshTokenDto: RefreshTokenDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const ctx = refreshTokenDto.context;
+    const cookieToken = ctx ? readCookie(req, refreshCookieName(ctx)) : undefined;
+    const bodyToken = refreshTokenDto.refreshToken;
+
+    if (bodyToken) {
+      try {
+        return await this.authService.refreshToken({ refreshToken: bodyToken });
+      } catch (error) {
+        // Another tab rotated the token this one still holds in memory — the
+        // cookie has the newest one.
+        if (!ctx || !cookieToken || cookieToken === bodyToken) throw error;
+      }
+    }
+    // Reload / stale in-memory token: the refresh token only exists as this
+    // session's httpOnly cookie. Pinned to the context — a POS cookie can never
+    // mint a main-dashboard session.
+    if (!ctx || !cookieToken) {
+      throw AuthErrors.refreshTokenInvalid();
+    }
+    // A failed refresh does NOT clear the cookie: with two tabs reloading at
+    // once, the loser's 401 would otherwise delete the cookie the winner just
+    // rotated, signing both out. A dead cookie simply expires / is replaced.
+    return this.authService.refreshToken({ refreshToken: cookieToken }, ctx);
   }
 
   @Post('logout')
@@ -127,12 +199,24 @@ export class AuthController {
     description: 'Revokes only the main-dashboard session tokens. POS sessions remain active.',
   })
   @ApiResponse({ status: 200, description: 'User successfully logged out' })
-  async logout(@CurrentUser() user: any, @Body() body?: { refreshToken?: string }) {
-    await this.authService.logout(user.userId, body?.refreshToken, 'main');
+  async logout(
+    @CurrentUser() user: any,
+    @Body() body?: { refreshToken?: string },
+    @Req() req?: Request,
+    @Res({ passthrough: true }) res?: Response,
+  ) {
+    const refreshToken = body?.refreshToken ?? (req ? readCookie(req, refreshCookieName('main')) : undefined);
+    try {
+      await this.authService.logout(user.userId, refreshToken, 'main');
+    } finally {
+      if (res) clearTerminalRefreshCookie(res, 'main');
+    }
     return { success: true, message: 'Logged out from hotel management dashboard' };
   }
 
+  // The one endpoint a POS terminal must reach outside the restaurant module.
   @Post('pos/logout')
+  @AllowSystems('pos')
   @UseGuards(JwtAuthGuard)
   @Throttle({ default: { limit: 50, ttl: 60 } })
   @ApiBearerAuth('JWT-auth')
@@ -144,9 +228,341 @@ export class AuthController {
       'This is the correct logout for POS terminals.',
   })
   @ApiResponse({ status: 200, description: 'POS session ended' })
-  async posLogout(@CurrentUser() user: any, @Body() body?: { refreshToken?: string }) {
-    await this.authService.logout(user.userId, body?.refreshToken, 'pos');
+  async posLogout(
+    @CurrentUser() user: any,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Body() body?: { refreshToken?: string },
+  ) {
+    await this.terminalLogout(user, body, req, res, 'pos');
     return { success: true, message: 'Logged out from POS system' };
+  }
+
+  // ─── Purchasing / Procurement Sub-System ────────────────────────────────────
+
+  @Post('purchasing/login')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Login to Procurement Terminal',
+    description:
+      'Creates a session tagged systemContext="procurement". ' +
+      'Validates that the user has "procurement" in their allowedSystems. ' +
+      'Tokens issued here are scoped to the procurement sub-system only. ' +
+      'Logging out from this terminal will NOT affect the main dashboard session.',
+  })
+  @ApiResponse({ status: 200, description: 'Procurement login successful' })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized or account not allowed to access Procurement system',
+  })
+  async purchasingLogin(@Body() loginDto: LoginDto, @Req() req: Request) {
+    return this.authService.login(
+      loginDto,
+      {
+        ipAddress: req.ip ?? req.socket?.remoteAddress,
+        userAgent: req.headers['user-agent'],
+      },
+      'procurement',
+    );
+  }
+
+  @Post('purchasing/logout')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 50, ttl: 60 } })
+  @ApiBearerAuth('JWT-auth')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Logout from Procurement Terminal only',
+    description:
+      'Revokes only procurement session tokens. ' +
+      'The main hotel management dashboard session stays active.',
+  })
+  @ApiResponse({ status: 200, description: 'Procurement session ended' })
+  async purchasingLogout(
+    @CurrentUser() user: any,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Body() body?: { refreshToken?: string },
+  ) {
+    await this.terminalLogout(user, body, req, res, 'procurement');
+    return { success: true, message: 'Logged out from Procurement system' };
+  }
+
+  // ─── Warehouse / Inventory Operations Sub-System ───────────────────────────
+
+  @Post('warehouse/login')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Login to Warehouse Terminal',
+    description:
+      'Creates a session tagged systemContext="warehouse". ' +
+      'Validates that the user has "warehouse" in their allowedSystems. ' +
+      'Tokens issued here are scoped to the warehouse sub-system only. ' +
+      'Logging out from this terminal will NOT affect the main dashboard or procurement sessions.',
+  })
+  @ApiResponse({ status: 200, description: 'Warehouse login successful' })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized or account not allowed to access Warehouse system',
+  })
+  async warehouseLogin(@Body() loginDto: LoginDto, @Req() req: Request) {
+    return this.authService.login(
+      loginDto,
+      {
+        ipAddress: req.ip ?? req.socket?.remoteAddress,
+        userAgent: req.headers['user-agent'],
+      },
+      'warehouse',
+    );
+  }
+
+  @Post('warehouse/logout')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 50, ttl: 60 } })
+  @ApiBearerAuth('JWT-auth')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Logout from Warehouse Terminal only',
+    description:
+      'Revokes only warehouse session tokens. ' +
+      'The main hotel management dashboard and procurement sessions stay active.',
+  })
+  @ApiResponse({ status: 200, description: 'Warehouse session ended' })
+  async warehouseLogout(
+    @CurrentUser() user: any,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Body() body?: { refreshToken?: string },
+  ) {
+    await this.terminalLogout(user, body, req, res, 'warehouse');
+    return { success: true, message: 'Logged out from Warehouse system' };
+  }
+
+  // ─── Hotel Management Terminal Sub-System ───────────────────────────────────
+
+  @Post('hotel-terminal/login')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Login to Hotel Management Terminal',
+    description:
+      'Creates a session tagged systemContext="hotel-terminal". ' +
+      'Validates that the user has "hotel-terminal" in their allowedSystems. ' +
+      'Tokens issued here are scoped to the hotel terminal sub-system only. ' +
+      'Logging out from this terminal will NOT affect the main dashboard, ' +
+      'POS, procurement, or warehouse sessions.',
+  })
+  @ApiResponse({ status: 200, description: 'Hotel terminal login successful' })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized or account not allowed to access Hotel Terminal',
+  })
+  async hotelTerminalLogin(@Body() loginDto: LoginDto, @Req() req: Request) {
+    return this.authService.login(
+      loginDto,
+      {
+        ipAddress: req.ip ?? req.socket?.remoteAddress,
+        userAgent: req.headers['user-agent'],
+      },
+      'hotel-terminal',
+    );
+  }
+
+  @Post('hotel-terminal/logout')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 50, ttl: 60 } })
+  @ApiBearerAuth('JWT-auth')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Logout from Hotel Management Terminal only',
+    description:
+      'Revokes only hotel terminal session tokens. ' +
+      'The main hotel management dashboard, POS, procurement, and warehouse ' +
+      'sessions stay active.',
+  })
+  @ApiResponse({ status: 200, description: 'Hotel terminal session ended' })
+  async hotelTerminalLogout(
+    @CurrentUser() user: any,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Body() body?: { refreshToken?: string },
+  ) {
+    await this.terminalLogout(user, body, req, res, 'hotel-terminal');
+    return { success: true, message: 'Logged out from Hotel Management Terminal' };
+  }
+
+  // ─── Accounting Sub-System ──────────────────────────────────────────────────
+
+  @Post('accounting/login')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Login to Accounting Terminal',
+    description:
+      'Creates a session tagged systemContext="accounting". ' +
+      'Tokens issued here are scoped to the accounting sub-system only. ' +
+      'Logging out from this terminal will NOT affect the main dashboard session.',
+  })
+  @ApiResponse({ status: 200, description: 'Accounting login successful' })
+  async accountingLogin(@Body() loginDto: LoginDto, @Req() req: Request) {
+    return this.authService.login(
+      loginDto,
+      {
+        ipAddress: req.ip ?? req.socket?.remoteAddress,
+        userAgent: req.headers['user-agent'],
+      },
+      'accounting',
+    );
+  }
+
+  @Post('accounting/logout')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 50, ttl: 60 } })
+  @ApiBearerAuth('JWT-auth')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Logout from Accounting Terminal only',
+    description:
+      'Revokes only accounting session tokens. ' +
+      'The main hotel management dashboard session stays active.',
+  })
+  @ApiResponse({ status: 200, description: 'Accounting session ended' })
+  async accountingLogout(
+    @CurrentUser() user: any,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Body() body?: { refreshToken?: string },
+  ) {
+    await this.terminalLogout(user, body, req, res, 'accounting');
+    return { success: true, message: 'Logged out from Accounting system' };
+  }
+
+  @Post('accounting-launch')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...TERMINAL_SSO_LAUNCHERS)
+  @ApiBearerAuth('JWT-auth')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 30, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Generate a short-lived deep-link token to open Accounting terminal pre-authenticated',
+    description: 'Returns a 5-minute JWT. User is logged in as accounting_manager.',
+  })
+  @ApiResponse({ status: 200, description: 'Accounting launch token generated' })
+  async accountingLaunch(@CurrentUser() caller: any, @Req() req: Request) {
+    return this.authService.generateAccountingLaunchToken(
+      { userId: caller.userId, email: caller.email, role: caller.role, tenantId: caller.tenantId },
+      req.ip ?? req.socket?.remoteAddress,
+    );
+  }
+
+  @Post('accounting-launch/exchange')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 30, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Trade a Accounting deep-link token for a full Accounting session',
+    description:
+      'Same hand-off as the other terminal exchanges: the 5-minute launch token carries no ' +
+      'refresh token, so the terminal trades it once on open for access + refresh tokens tagged ' +
+      'systemContext="accounting" that /auth/refresh can renew all day.',
+  })
+  @ApiResponse({ status: 200, description: 'Accounting session issued' })
+  @ApiResponse({ status: 401, description: 'Launch token invalid, expired, or account not active' })
+  async accountingLaunchExchange(@Body() dto: LaunchExchangeDto, @Req() req: Request) {
+    return this.authService.exchangeAccountingLaunchToken(dto.token, {
+      ipAddress: req.ip ?? req.socket?.remoteAddress,
+      userAgent: req.headers['user-agent'],
+    });
+  }
+
+  @Post('hr/login')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Login to HR Terminal',
+    description:
+      'Creates a session tagged systemContext="hr". ' +
+      'Validates that the user has "hr" in their allowedSystems. ' +
+      'Tokens issued here are scoped to the HR sub-system only. ' +
+      'Logging out from this terminal will NOT affect the main dashboard session.',
+  })
+  @ApiResponse({ status: 200, description: 'HR login successful' })
+  async hrLogin(@Body() loginDto: LoginDto, @Req() req: Request) {
+    return this.authService.login(
+      loginDto,
+      {
+        ipAddress: req.ip ?? req.socket?.remoteAddress,
+        userAgent: req.headers['user-agent'],
+      },
+      'hr',
+    );
+  }
+
+  @Post('hr/logout')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 50, ttl: 60 } })
+  @ApiBearerAuth('JWT-auth')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Logout from HR Terminal only',
+    description:
+      'Revokes only HR session tokens. ' +
+      'The main hotel management dashboard session stays active.',
+  })
+  @ApiResponse({ status: 200, description: 'HR session ended' })
+  async hrLogout(
+    @CurrentUser() user: any,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Body() body?: { refreshToken?: string },
+  ) {
+    await this.terminalLogout(user, body, req, res, 'hr');
+    return { success: true, message: 'Logged out from HR system' };
+  }
+
+  @Post('hr-launch')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...TERMINAL_SSO_LAUNCHERS)
+  @ApiBearerAuth('JWT-auth')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 30, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Generate a short-lived deep-link token to open HR terminal pre-authenticated',
+    description: 'Returns a 5-minute JWT. User is logged in as hr_manager.',
+  })
+  @ApiResponse({ status: 200, description: 'HR launch token generated' })
+  async hrLaunch(@CurrentUser() caller: any, @Req() req: Request) {
+    return this.authService.generateHrLaunchToken(
+      { userId: caller.userId, email: caller.email, role: caller.role, tenantId: caller.tenantId },
+      req.ip ?? req.socket?.remoteAddress,
+    );
+  }
+
+  @Post('hr-launch/exchange')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 30, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Trade a HR deep-link token for a full HR session',
+    description:
+      'Same hand-off as the other terminal exchanges: the 5-minute launch token carries no ' +
+      'refresh token, so the terminal trades it once on open for access + refresh tokens tagged ' +
+      'systemContext="hr" that /auth/refresh can renew all day.',
+  })
+  @ApiResponse({ status: 200, description: 'HR session issued' })
+  @ApiResponse({ status: 401, description: 'Launch token invalid, expired, or account not active' })
+  async hrLaunchExchange(@Body() dto: LaunchExchangeDto, @Req() req: Request) {
+    return this.authService.exchangeHrLaunchToken(dto.token, {
+      ipAddress: req.ip ?? req.socket?.remoteAddress,
+      userAgent: req.headers['user-agent'],
+    });
   }
 
   @Post('forgot-password')
@@ -219,7 +635,10 @@ export class AuthController {
   // ─── POS Deep-link Launch ───────────────────────────────────────────────────
 
   @Post('pos-launch')
-  @UseGuards(JwtAuthGuard)
+  // POS/KDS ใช้ข้อมูลร้านซึ่ง /restaurants กั้นด้วย RESTAURANT_MODULE ทั้ง controller —
+  // ไม่กั้นตรงนี้ tenant ที่ไม่มี add-on ได้ token ไปเปิด Terminal ที่ทุก request โดน 403 (BUG-13)
+  @UseGuards(JwtAuthGuard, AddonGuard)
+  @RequireAddon('RESTAURANT_MODULE')
   @ApiBearerAuth('JWT-auth')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 30, ttl: 60 } })
@@ -231,6 +650,7 @@ export class AuthController {
   })
   @ApiResponse({ status: 200, description: 'POS launch token generated' })
   @ApiResponse({ status: 400, description: 'Restaurant not found in your account' })
+  @ApiResponse({ status: 403, description: 'RESTAURANT_MODULE add-on required' })
   async posLaunch(@Body() dto: PosLaunchDto, @CurrentUser() caller: any, @Req() req: Request) {
     return this.authService.generatePosLaunchToken(
       dto,
@@ -242,6 +662,151 @@ export class AuthController {
       },
       req.ip ?? req.socket?.remoteAddress,
     );
+  }
+
+  @Post('pos-launch/exchange')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 30, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Trade a POS deep-link token for a full POS session',
+    description:
+      'The launch token lives 5 minutes and has no refresh token, so a POS that held on to it ' +
+      'died mid-shift. The POS calls this once on open and stores the returned access + refresh ' +
+      'tokens instead, giving it a renewable session tagged systemContext="pos".',
+  })
+  @ApiResponse({ status: 200, description: 'POS session issued' })
+  @ApiResponse({ status: 401, description: 'Launch token invalid, expired, or account not active' })
+  async posLaunchExchange(@Body() dto: LaunchExchangeDto, @Req() req: Request) {
+    return this.authService.exchangePosLaunchToken(dto.token, {
+      ipAddress: req.ip ?? req.socket?.remoteAddress,
+      userAgent: req.headers['user-agent'],
+    });
+  }
+
+  // ─── Purchasing Sub-System Deep-link Launch ──────────────────────────────────
+
+  @Post('purchasing-launch')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...TERMINAL_SSO_LAUNCHERS)
+  @ApiBearerAuth('JWT-auth')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 30, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Generate a short-lived deep-link token to open Purchasing terminal pre-authenticated',
+    description:
+      'Returns a 5-minute JWT. User is logged in as procurement_manager (highest level).',
+  })
+  @ApiResponse({ status: 200, description: 'Purchasing launch token generated' })
+  async purchasingLaunch(@CurrentUser() caller: any, @Req() req: Request) {
+    return this.authService.generatePurchasingLaunchToken(
+      { userId: caller.userId, email: caller.email, role: caller.role, tenantId: caller.tenantId },
+      req.ip ?? req.socket?.remoteAddress,
+    );
+  }
+
+  @Post('purchasing-launch/exchange')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 30, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Trade a Purchasing deep-link token for a full procurement session',
+    description:
+      'The launch token lives 5 minutes and has no refresh token, so a terminal that held on ' +
+      'to it went dead a few minutes in. The purchasing shell calls this once on open and ' +
+      'stores the returned access + refresh tokens instead, giving it a renewable session ' +
+      'tagged systemContext="procurement".',
+  })
+  @ApiResponse({ status: 200, description: 'Procurement session issued' })
+  @ApiResponse({ status: 401, description: 'Launch token invalid, expired, or account not active' })
+  async purchasingLaunchExchange(@Body() dto: LaunchExchangeDto, @Req() req: Request) {
+    return this.authService.exchangePurchasingLaunchToken(dto.token, {
+      ipAddress: req.ip ?? req.socket?.remoteAddress,
+      userAgent: req.headers['user-agent'],
+    });
+  }
+
+  // ─── Warehouse Sub-System Deep-link Launch ───────────────────────────────────
+
+  @Post('warehouse-launch')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...TERMINAL_SSO_LAUNCHERS)
+  @ApiBearerAuth('JWT-auth')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 30, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Generate a short-lived deep-link token to open Warehouse terminal pre-authenticated',
+    description: 'Returns a 5-minute JWT. User is logged in as warehouse_manager (highest level).',
+  })
+  @ApiResponse({ status: 200, description: 'Warehouse launch token generated' })
+  async warehouseLaunch(@CurrentUser() caller: any, @Req() req: Request) {
+    return this.authService.generateWarehouseLaunchToken(
+      { userId: caller.userId, email: caller.email, role: caller.role, tenantId: caller.tenantId },
+      req.ip ?? req.socket?.remoteAddress,
+    );
+  }
+
+  @Post('warehouse-launch/exchange')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 30, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Trade a Warehouse deep-link token for a full Warehouse session',
+    description:
+      'Same hand-off as the other terminal exchanges: the 5-minute launch token carries no ' +
+      'refresh token, so the terminal trades it once on open for access + refresh tokens tagged ' +
+      'systemContext="warehouse" that /auth/refresh can renew all day.',
+  })
+  @ApiResponse({ status: 200, description: 'Warehouse session issued' })
+  @ApiResponse({ status: 401, description: 'Launch token invalid, expired, or account not active' })
+  async warehouseLaunchExchange(@Body() dto: LaunchExchangeDto, @Req() req: Request) {
+    return this.authService.exchangeWarehouseLaunchToken(dto.token, {
+      ipAddress: req.ip ?? req.socket?.remoteAddress,
+      userAgent: req.headers['user-agent'],
+    });
+  }
+
+  // ─── Hotel Management Terminal Deep-link Launch ─────────────────────────────
+
+  @Post('hotel-terminal-launch')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...TERMINAL_SSO_LAUNCHERS)
+  @ApiBearerAuth('JWT-auth')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 30, ttl: 60 } })
+  @ApiOperation({
+    summary:
+      'Generate a short-lived deep-link token to open Hotel Management Terminal pre-authenticated',
+    description:
+      'Returns a 5-minute JWT. The user is logged in as hotel_manager (highest level) ' +
+      'with the full permission set so they can navigate every menu item.',
+  })
+  @ApiResponse({ status: 200, description: 'Hotel Terminal launch token generated' })
+  async hotelTerminalLaunch(@CurrentUser() caller: any, @Req() req: Request) {
+    return this.authService.generateHotelTerminalLaunchToken(
+      { userId: caller.userId, email: caller.email, role: caller.role, tenantId: caller.tenantId },
+      req.ip ?? req.socket?.remoteAddress,
+    );
+  }
+
+  @Post('hotel-terminal-launch/exchange')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 30, ttl: 60 } })
+  @ApiOperation({
+    summary: 'Trade a Hotel Terminal deep-link token for a full terminal session',
+    description:
+      'Same hand-off as the POS and Purchasing exchanges: the 5-minute launch token carries no ' +
+      'refresh token, so the terminal trades it once on open for access + refresh tokens tagged ' +
+      'systemContext="hotel-terminal" that /auth/refresh can renew all day.',
+  })
+  @ApiResponse({ status: 200, description: 'Hotel Terminal session issued' })
+  @ApiResponse({ status: 401, description: 'Launch token invalid, expired, or account not active' })
+  async hotelTerminalLaunchExchange(@Body() dto: LaunchExchangeDto, @Req() req: Request) {
+    return this.authService.exchangeHotelTerminalLaunchToken(dto.token, {
+      ipAddress: req.ip ?? req.socket?.remoteAddress,
+      userAgent: req.headers['user-agent'],
+    });
   }
 
   // ────────────────────────────────────────────────────────────────────────────

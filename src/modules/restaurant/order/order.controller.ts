@@ -31,11 +31,13 @@ import { Roles } from '../../../common/decorators/roles.decorator';
 import { RequireAddon } from '../../../common/decorators/require-addon.decorator';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import { OrderStatus } from '@prisma/client';
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 
 @ApiTags('restaurant / orders')
 @ApiBearerAuth('JWT-auth')
 @UseGuards(JwtAuthGuard, RolesGuard, AddonGuard)
 @RequireAddon('RESTAURANT_MODULE')
+@AllowSystems('pos')
 @Controller({ path: 'restaurants/:restaurantId/orders', version: '1' })
 export class OrderController {
   constructor(private readonly orderService: OrderService) {}
@@ -45,7 +47,17 @@ export class OrderController {
   @ApiParam({ name: 'restaurantId' })
   @ApiQuery({ name: 'search', required: false, description: 'Search by room number or guest name' })
   @ApiResponse({ status: 200, description: 'List of booked rooms' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'waiter', 'staff')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'waiter',
+    'staff',
+    'cashier',
+    'bartender',
+  )
   async getBookedRooms(
     @Param('restaurantId') restaurantId: string,
     @Query('search') search: string | undefined,
@@ -64,7 +76,18 @@ export class OrderController {
   @ApiQuery({ name: 'date', required: false, example: '2026-04-15' })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'waiter', 'staff')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'chef',
+    'waiter',
+    'staff',
+    'cashier',
+    'bartender',
+  )
   async findAll(
     @Param('restaurantId') restaurantId: string,
     @Query()
@@ -86,7 +109,16 @@ export class OrderController {
   @ApiOperation({ summary: 'Get order by ID' })
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'orderId' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'waiter', 'staff')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'chef',
+    'waiter',
+    'staff',
+  )
   async findOne(
     @Param('restaurantId') restaurantId: string,
     @Param('orderId') orderId: string,
@@ -99,7 +131,17 @@ export class OrderController {
   @ApiOperation({ summary: 'Create new order' })
   @ApiParam({ name: 'restaurantId' })
   @ApiResponse({ status: 201, description: 'Order created' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'waiter', 'staff')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'waiter',
+    'staff',
+    'cashier',
+    'bartender',
+  )
   async create(
     @Param('restaurantId') restaurantId: string,
     @Body() dto: CreateOrderDto,
@@ -113,7 +155,15 @@ export class OrderController {
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'orderId' })
   @ApiResponse({ status: 201, description: 'Item added' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'waiter', 'staff')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'waiter',
+    'staff',
+  )
   async addItem(
     @Param('restaurantId') restaurantId: string,
     @Param('orderId') orderId: string,
@@ -129,7 +179,7 @@ export class OrderController {
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'orderId' })
   @ApiParam({ name: 'itemId' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'waiter')
+  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'restaurant_manager', 'waiter')
   async removeItem(
     @Param('restaurantId') restaurantId: string,
     @Param('orderId') orderId: string,
@@ -143,7 +193,17 @@ export class OrderController {
   @ApiOperation({ summary: 'Send pending items to kitchen' })
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'orderId' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'waiter', 'staff')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'waiter',
+    'staff',
+    'cashier',
+    'bartender',
+  )
   async sendToKitchen(
     @Param('restaurantId') restaurantId: string,
     @Param('orderId') orderId: string,
@@ -157,7 +217,17 @@ export class OrderController {
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'orderId' })
   @ApiBody({ schema: { properties: { status: { type: 'string', example: 'CONFIRMED' } } } })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'chef', 'waiter')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'chef',
+    'waiter',
+    'cashier',
+    'bartender',
+  )
   async updateStatus(
     @Param('restaurantId') restaurantId: string,
     @Param('orderId') orderId: string,
@@ -177,7 +247,19 @@ export class OrderController {
   @ApiOperation({ summary: 'Process payment for order' })
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'orderId' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'waiter', 'accountant')
+  // `cashier` is the role whose entire job is this endpoint — the POS sidebar shows
+  // the payments view to cashier/waiter/manager/tenant_admin. `bartender` is left out
+  // on purpose: it does not see that view.
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'waiter',
+    'accountant',
+    'cashier',
+  )
   async processPayment(
     @Param('restaurantId') restaurantId: string,
     @Param('orderId') orderId: string,
@@ -191,7 +273,16 @@ export class OrderController {
   @ApiOperation({ summary: 'Get order receipt' })
   @ApiParam({ name: 'restaurantId' })
   @ApiParam({ name: 'orderId' })
-  @Roles('platform_admin', 'tenant_admin', 'admin', 'manager', 'waiter', 'accountant', 'staff')
+  @Roles(
+    'platform_admin',
+    'tenant_admin',
+    'admin',
+    'manager',
+    'restaurant_manager',
+    'waiter',
+    'accountant',
+    'staff',
+  )
   async getReceipt(
     @Param('restaurantId') restaurantId: string,
     @Param('orderId') orderId: string,

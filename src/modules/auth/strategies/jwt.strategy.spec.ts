@@ -1,0 +1,224 @@
+import { Test, TestingModule } from '@nestjs/testing';
+import { ConfigService } from '@nestjs/config';
+import { UnauthorizedException } from '@nestjs/common';
+import { PrismaService } from '../../../prisma/prisma.service';
+import { JwtStrategy } from './jwt.strategy';
+
+/**
+ * Coverage target: jwt.strategy.ts — security-critical.
+ *
+ * Tests cover:
+ *   - validate() with no payload → UnauthorizedException
+ *   - platform admin bypass (no DB call)
+ *   - active user → returns claims
+ *   - suspended / expired / inactive user → UnauthorizedException with proper message
+ *   - expiresAt in the past → UnauthorizedException
+ *   - user not found → UnauthorizedException
+ *   - DB error → token still passes (graceful degradation, logger.warn)
+ */
+describe('JwtStrategy', () => {
+  let strategy: JwtStrategy;
+  const userFindUnique = jest.fn();
+
+  const configService = {
+    getOrThrow: jest.fn((key: string) => {
+      if (key === 'JWT_SECRET') return 'test-secret-key';
+      throw new Error(`unexpected config key: ${key}`);
+    }),
+  } as unknown as ConfigService;
+
+  const tenantsFindUnique = jest.fn();
+
+  const prisma = {
+    user: { findUnique: userFindUnique },
+    tenants: { findUnique: tenantsFindUnique },
+  } as unknown as PrismaService;
+
+  beforeEach(async () => {
+    const moduleRef: TestingModule = await Test.createTestingModule({
+      providers: [
+        JwtStrategy,
+        { provide: ConfigService, useValue: configService },
+        { provide: PrismaService, useValue: prisma },
+      ],
+    }).compile();
+    strategy = moduleRef.get(JwtStrategy);
+    userFindUnique.mockReset();
+    tenantsFindUnique.mockReset();
+  });
+
+  it('should be defined', () => {
+    expect(strategy).toBeDefined();
+  });
+
+  describe('validate', () => {
+    it('throws UnauthorizedException when payload is empty', async () => {
+      await expect(strategy.validate(null)).rejects.toBeInstanceOf(UnauthorizedException);
+      await expect(strategy.validate(undefined)).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+
+    it('rejects the 2FA hand-off token used as a bearer token', async () => {
+      // auth.service.generateTempToken() signs this with the same JWT_SECRET.
+      // A caller who knows the password but not the 2FA code receives it from
+      // POST /auth/login — if this strategy accepts it, every route that has
+      // JwtAuthGuard but no @Roles is reachable without completing 2FA.
+      const tempTokenPayload = {
+        sub: 'user-1',
+        email: 'user@example.com',
+        type: '2fa_pending',
+        systemContext: 'main',
+      };
+
+      await expect(strategy.validate(tempTokenPayload)).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
+      expect(userFindUnique).not.toHaveBeenCalled();
+    });
+
+    it('rejects any typed token, not just 2fa_pending', async () => {
+      await expect(
+        strategy.validate({ sub: 'user-1', type: 'password_reset' }),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+
+    it('returns claims for platform admin without hitting DB', async () => {
+      const payload = {
+        sub: 'platform-1',
+        email: 'admin@example.com',
+        role: 'platform_admin',
+        isPlatformAdmin: true,
+      };
+      const result = await strategy.validate(payload);
+
+      expect(userFindUnique).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        sub: 'platform-1',
+        id: 'platform-1',
+        userId: 'platform-1',
+        email: 'admin@example.com',
+        role: 'platform_admin',
+        tenantId: undefined,
+        tenant_id: undefined,
+        tenantStatus: undefined,
+        tenant_status: undefined,
+        isPlatformAdmin: true,
+      });
+    });
+
+    it('returns claims for an active user', async () => {
+      userFindUnique.mockResolvedValue({
+        id: 'user-1',
+        status: 'active',
+        expiresAt: null,
+        tenantId: 'tenant-1',
+      });
+      tenantsFindUnique.mockResolvedValue({
+        id: 'tenant-1',
+        status: 'active',
+      });
+      const payload = {
+        sub: 'user-1',
+        email: 'staff@example.com',
+        role: 'manager',
+        tenantId: 'tenant-1',
+      };
+
+      const result = await strategy.validate(payload);
+
+      expect(userFindUnique).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+        select: expect.objectContaining({
+          id: true,
+          status: true,
+          expiresAt: true,
+          tenantId: true,
+        }),
+      });
+      expect(tenantsFindUnique).toHaveBeenCalledWith({
+        where: { id: 'tenant-1' },
+        select: { status: true },
+      });
+      expect(result).toEqual({
+        sub: 'user-1',
+        id: 'user-1',
+        userId: 'user-1',
+        email: 'staff@example.com',
+        role: 'manager',
+        tenantId: 'tenant-1',
+        tenant_id: 'tenant-1',
+        tenantStatus: 'active',
+        tenant_status: 'active',
+        isPlatformAdmin: false,
+      });
+    });
+
+    // audit 2026-11-09 — a token without (or with another) tenantId ran with no
+    // tenant scope: services querying `where: { tenantId: undefined }` saw every tenant.
+    it('rejects a token whose tenantId is missing while the account has a tenant', async () => {
+      userFindUnique.mockResolvedValue({ id: 'u', status: 'active', expiresAt: null, tenantId: 't-1' });
+      await expect(strategy.validate({ sub: 'u', role: 'waiter' })).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
+    });
+
+    it('rejects a token for another tenant than the account (stale after switch / forged)', async () => {
+      userFindUnique.mockResolvedValue({ id: 'u', status: 'active', expiresAt: null, tenantId: 't-1' });
+      await expect(
+        strategy.validate({ sub: 'u', role: 'tenant_admin', tenantId: 't-2' }),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+
+    it('rejects the old impersonation token shape (tenant_id, no tenantId)', async () => {
+      userFindUnique.mockResolvedValue({ id: 'u', status: 'active', expiresAt: null, tenantId: 't-1' });
+      await expect(
+        strategy.validate({ sub: 'u', tenant_id: 't-1', impersonation_session_id: 's', impersonation_scope: 'read_only' }),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+
+    it('accepts a token whose tenantId matches the account', async () => {
+      userFindUnique.mockResolvedValue({ id: 'u', status: 'active', expiresAt: null, tenantId: 't-1' });
+      tenantsFindUnique.mockResolvedValue({ status: 'active' });
+      const res = await strategy.validate({ sub: 'u', role: 'tenant_admin', tenantId: 't-1' });
+      expect(res.tenantId).toBe('t-1');
+    });
+
+    it('throws when user is not found in DB', async () => {
+      userFindUnique.mockResolvedValue(null);
+      await expect(strategy.validate({ sub: 'ghost-user' })).rejects.toThrow(UnauthorizedException);
+    });
+
+    it.each([
+      ['suspended', 'บัญชีของคุณถูกระงับการใช้งาน'],
+      ['expired', 'บัญชีของคุณหมดอายุการใช้งาน'],
+      ['inactive', 'บัญชีของคุณถูกปิดการใช้งาน'],
+      ['locked', 'บัญชีของคุณไม่อยู่ในสถานะใช้งาน'],
+    ])('throws specific message for status=%s', async (status, expectedMsg) => {
+      userFindUnique.mockResolvedValue({ id: 'user-1', status, expiresAt: null });
+      await expect(strategy.validate({ sub: 'user-1' })).rejects.toThrow(expectedMsg);
+    });
+
+    it('throws when expiresAt is in the past', async () => {
+      userFindUnique.mockResolvedValue({
+        id: 'user-1',
+        status: 'active',
+        expiresAt: new Date(Date.now() - 60_000),
+      });
+      await expect(strategy.validate({ sub: 'user-1' })).rejects.toThrow(
+        'บัญชีของคุณหมดอายุการใช้งาน',
+      );
+    });
+
+    it('lets the token pass when DB query throws (graceful degradation)', async () => {
+      userFindUnique.mockRejectedValue(new Error('DB unreachable'));
+      const result = await strategy.validate({
+        sub: 'user-1',
+        email: 'a@b.com',
+        role: 'manager',
+        tenantId: 't-1',
+      });
+      // Strategy should NOT throw — returns claims so the rest of the request can run.
+      expect(result.id).toBe('user-1');
+      expect(result.email).toBe('a@b.com');
+    });
+  });
+});

@@ -21,12 +21,14 @@ export class PlansService {
       subtitle?: string;
       targetAudience?: string;
       pricePerRoom?: string;
+      system?: string;
     },
   ) {
     const data: any = {
       id: createPlanDto.id,
       code: createPlanDto.code,
       name: createPlanDto.name,
+      system: createPlanDto.system,
       price_monthly: createPlanDto.priceMonthly,
       max_rooms: createPlanDto.maxRooms,
       max_users: createPlanDto.maxUsers,
@@ -54,14 +56,20 @@ export class PlansService {
 
     return this.prisma.plans.create({
       data,
-      include: { plan_features: { include: { features: true } } },
+      include: {
+        plan_features: { include: { features: true } },
+        plan_addons: { include: { add_ons: true } },
+      },
     });
   }
 
   findAll() {
     return this.prisma.plans.findMany({
       where: { is_active: 1 },
-      include: { plan_features: { include: { features: true } } },
+      include: {
+        plan_features: { include: { features: true } },
+        plan_addons: { include: { add_ons: true } },
+      },
       orderBy: [{ display_order: 'asc' }, { price_monthly: 'asc' }],
     });
   }
@@ -69,14 +77,20 @@ export class PlansService {
   findOne(id: string) {
     return this.prisma.plans.findUnique({
       where: { id },
-      include: { plan_features: { include: { features: true } } },
+      include: {
+        plan_features: { include: { features: true } },
+        plan_addons: { include: { add_ons: true } },
+      },
     });
   }
 
   findByCode(code: string) {
     return this.prisma.plans.findUnique({
       where: { code },
-      include: { plan_features: { include: { features: true } } },
+      include: {
+        plan_features: { include: { features: true } },
+        plan_addons: { include: { add_ons: true } },
+      },
     });
   }
 
@@ -94,11 +108,13 @@ export class PlansService {
       subtitle?: string;
       targetAudience?: string;
       pricePerRoom?: string;
+      system?: string;
     },
   ) {
     const data: any = {
       code: updatePlanDto.code,
       name: updatePlanDto.name,
+      system: updatePlanDto.system,
       price_monthly: updatePlanDto.priceMonthly,
       max_rooms: updatePlanDto.maxRooms,
       max_users: updatePlanDto.maxUsers,
@@ -129,7 +145,10 @@ export class PlansService {
     return this.prisma.plans.update({
       where: { id },
       data,
-      include: { plan_features: { include: { features: true } } },
+      include: {
+        plan_features: { include: { features: true } },
+        plan_addons: { include: { add_ons: true } },
+      },
     });
   }
 

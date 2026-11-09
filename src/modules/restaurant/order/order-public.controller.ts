@@ -76,7 +76,7 @@ export class OrderPublicController {
   @Throttle({ default: { limit: 10, ttl: 60 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: '[Public] Lookup guest by name or nationalId (QR ordering)',
+    summary: '[Public] Verify a guest by exact name + last 4 phone digits (QR ordering)',
   })
   @ApiParam({ name: 'restaurantId' })
   @ApiBody({ type: GuestLookupDto })
@@ -88,10 +88,10 @@ export class OrderPublicController {
         {
           properties: {
             matched: { type: 'boolean', example: true },
+            guestToken: { type: 'string', description: 'Send as guestToken when placing the order (valid 2h)' },
             guest: {
               type: 'object',
               properties: {
-                id: { type: 'string' },
                 firstName: { type: 'string' },
                 lastName: { type: 'string' },
                 isVip: { type: 'boolean' },
@@ -108,7 +108,7 @@ export class OrderPublicController {
     },
   })
   async lookupGuest(@Param('restaurantId') restaurantId: string, @Body() dto: GuestLookupDto) {
-    return this.orderService.lookupGuest(restaurantId, dto.query);
+    return this.orderService.lookupGuest(restaurantId, dto);
   }
 
   @Post(':restaurantId/tables/:tableId/orders')
@@ -121,7 +121,7 @@ export class OrderPublicController {
     schema: {
       properties: {
         guestName: { type: 'string', example: 'John Doe' },
-        guestId: { type: 'string', description: 'Optional: matched guest ID for 2% VIP discount' },
+        guestToken: { type: 'string', description: 'Optional: token from guest-lookup (2% guest discount). Raw guestId is ignored.' },
         items: {
           type: 'array',
           items: {
@@ -144,7 +144,7 @@ export class OrderPublicController {
     @Body()
     body: {
       guestName?: string;
-      guestId?: string;
+      guestToken?: string;
       items: { menuItemId: string; quantity: number; notes?: string }[];
     },
   ) {

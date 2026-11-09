@@ -30,11 +30,11 @@ export class LotsService {
 
     const seq = await db.documentSequence.upsert({
       where: { tenantId_docType_yearMonth: { tenantId, docType: 'LOT', yearMonth } },
-      update: { currentNumber: { increment: 1 } },
-      create: { tenantId, docType: 'LOT', yearMonth, currentNumber: 1 },
+      update: { lastNumber: { increment: 1 } },
+      create: { tenantId, docType: 'LOT', prefix: 'LOT', yearMonth, lastNumber: 1 },
     });
 
-    return `LOT-${yearMonth}-${String(seq.currentNumber).padStart(4, '0')}`;
+    return `LOT-${yearMonth}-${String(seq.lastNumber).padStart(4, '0')}`;
   }
 
   // ─── Create lot ──────────────────────────────────────────────────────────────
@@ -79,14 +79,27 @@ export class LotsService {
           notes: dto.notes,
           status: InventoryLotStatus.ACTIVE,
         },
-        include: { item: { select: { id: true, name: true, sku: true } }, warehouse: { select: { id: true, name: true } } },
+        include: {
+          item: { select: { id: true, name: true, sku: true } },
+          warehouse: { select: { id: true, name: true } },
+        },
       });
     });
   }
 
   // ─── List lots with filters ──────────────────────────────────────────────────
   async findAll(tenantId: string, query: QueryLotDto): Promise<PaginatedResponse<any>> {
-    const { page = 1, limit = 20, itemId, warehouseId, status, nearExpiryDays, expiredOnly, expiryFrom, expiryTo } = query;
+    const {
+      page = 1,
+      limit = 20,
+      itemId,
+      warehouseId,
+      status,
+      nearExpiryDays,
+      expiredOnly,
+      expiryFrom,
+      expiryTo,
+    } = query;
     const skip = (page - 1) * limit;
 
     const where: any = { tenantId };
@@ -139,8 +152,13 @@ export class LotsService {
           orderBy: { createdAt: 'desc' },
           take: 50,
           select: {
-            id: true, type: true, quantity: true, unitCost: true,
-            notes: true, createdBy: true, createdAt: true,
+            id: true,
+            type: true,
+            quantity: true,
+            unitCost: true,
+            notes: true,
+            createdBy: true,
+            createdAt: true,
           },
         },
         qcRecords: {

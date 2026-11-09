@@ -1,4 +1,11 @@
 import {
+  recordCompensationChange,
+  sameCompensation,
+  todayBusinessDate,
+  toCompensation,
+} from './compensation/compensation.core';
+import { toBusinessDate } from '../../common/utils/bangkok-day.util';
+import {
   Injectable,
   NotFoundException,
   BadRequestException,
@@ -7,9 +14,49 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmployeeCodeConfigService } from './employee-code-config.service';
+import { HrLifecycleAssignmentService } from './hr-lifecycle-assignment.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { Prisma } from '@prisma/client';
+import { StaffService } from '../staff/staff.service';
+
+/**
+ * ตำแหน่งบนทะเบียนพนักงานปฏิบัติการ เดาจากรหัสแผนกของ HR
+ *
+ * ENG (วิศวกรรม) และแผนกที่ชื่อสื่อถึงงานช่าง → ช่างซ่อมบำรุง
+ * นอกนั้น (HK ฯลฯ) → แม่บ้าน
+ */
+function inferStaffRoleFromDepartment(
+  code?: string | null,
+  name?: string | null,
+): 'housekeeper' | 'technician' {
+  const c = (code ?? '').toUpperCase();
+  if (c === 'ENG' || c === 'MAINT' || c === 'MAINTENANCE') return 'technician';
+  const n = (name ?? '').toLowerCase();
+  if (n.includes('engineer') || n.includes('maintenance') || n.includes('วิศวกรรม')) {
+    return 'technician';
+  }
+  return 'housekeeper';
+}
+
+/** แผนกที่ปกติแล้วมีหน้างานในโรงแรม — ใช้เป็นค่าตั้งต้นของการนำเข้าแบบยกชุด */
+const OPERATIONAL_DEPARTMENT_CODES = ['HK', 'ENG'];
+
+/** สถานะพนักงาน HR ที่ถือว่ายังทำงานอยู่ — คนที่ลาออก/พ้นสภาพต้องไม่ถูกนำเข้า */
+const EMPLOYABLE_STATUSES = ['ACTIVE', 'PROBATION'];
+
+export interface BulkCreateStaffOptions {
+  /** เจาะจงรายคน — ถ้าส่งมา จะไม่สนใจตัวกรองแผนก */
+  employeeIds?: string[];
+  /** กรองตามแผนก HR (id) — ไม่ส่ง = ใช้แผนกปฏิบัติการตั้งต้น (HK, ENG) */
+  departmentIds?: string[];
+  /** true = ไม่กรองแผนกเลย นำเข้าทุกคนที่ยังทำงานอยู่ */
+  allDepartments?: boolean;
+  /** บังคับตำแหน่งเดียวกันทุกคน — ไม่ส่ง = เดาจากแผนกรายคน */
+  role?: 'housekeeper' | 'technician';
+  /** true = รวมคนที่พ้นสภาพแล้วด้วย (ปกติไม่ควรใช้) */
+  includeInactive?: boolean;
+}
 
 @Injectable()
 export class HrService {
@@ -18,6 +65,8 @@ export class HrService {
   constructor(
     private prisma: PrismaService,
     private employeeCodeConfigService: EmployeeCodeConfigService,
+    private hrLifecycleAssignmentService: HrLifecycleAssignmentService,
+    private staffService: StaffService,
   ) {}
 
   async findAll(query: any, tenantId?: string) {
@@ -66,7 +115,15 @@ export class HrService {
         this.prisma.employee.count({ where }),
       ]);
 
-      return { data, total, page, limit };
+      // แผนกที่มาจากระบบคัดสรร (recruitment) จะตั้งแค่ departmentId (FK) ไม่ได้ตั้ง
+      // free-text `department` → frontend ที่อ่าน emp.department จึงเห็นว่าง.
+      // normalize ให้ fallback ไปใช้ชื่อจาก relation hrDepartment เมื่อ string ว่าง.
+      const normalized = (data as any[]).map((emp) => ({
+        ...emp,
+        department: emp.department ?? emp.hrDepartment?.name ?? null,
+      }));
+
+      return { data: normalized, total, page, limit };
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === 'P2021' || error.code === 'P2022') {
@@ -95,10 +152,14 @@ export class HrService {
       throw new NotFoundException(`Employee with ID ${id} not found`);
     }
 
-    return employee;
+    // fallback ชื่อแผนกจาก relation เมื่อ free-text `department` ว่าง (เช่นพนักงานจากระบบคัดสรร)
+    return {
+      ...employee,
+      department: employee.department ?? employee.hrDepartment?.name ?? null,
+    };
   }
 
-  async create(createEmployeeDto: CreateEmployeeDto, tenantId?: string) {
+  async create(createEmployeeDto: CreateEmployeeDto, tenantId?: string, userId?: string) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID is required');
     }
@@ -113,7 +174,7 @@ export class HrService {
       try {
         let departmentCode = '';
         if (createEmployeeDto.departmentId) {
-          const dept = await (this.prisma as any).hrDepartment.findUnique({
+          const dept = await (this.prisma as any).hrDepartment.findFirst({
             where: { id: createEmployeeDto.departmentId },
             select: { code: true, name: true },
           });
@@ -146,21 +207,62 @@ export class HrService {
       }
     }
 
-    return (this.prisma.employee as any).create({
+    // Auto-set consentAt when consentGiven = true (PDPA requirement)
+    const consentAt = rest.consentGiven === true ? new Date() : undefined;
+
+    const created = await (this.prisma.employee as any).create({
       data: {
         ...rest,
         ...(startDate ? { startDate: new Date(startDate) } : {}),
         ...(dateOfBirth ? { dateOfBirth: new Date(dateOfBirth) } : {}),
+        ...(consentAt ? { consentAt } : {}),
         propertyId: finalPropertyId,
         tenantId,
         ...(employeeCode ? { employeeCode } : {}),
       },
       include: { hrDepartment: true, hrPosition: true },
     });
+
+    await this.hrLifecycleAssignmentService
+      .recomputeForEmployee(created.id, tenantId)
+      .catch((error: unknown) => {
+        const msg = error instanceof Error ? error.message : String(error);
+        this.logger.warn(
+          `Lifecycle assignment bootstrap failed for employee ${created.id}: ${msg}`,
+        );
+      });
+
+    // ประวัติค่าตอบแทนแถวแรก (พนักงานที่ HR เพิ่มเอง ไม่ผ่านการสรรหา)
+    if (created.baseSalary !== null && created.baseSalary !== undefined) {
+      await recordCompensationChange(this.prisma, {
+        tenantId,
+        employeeId: created.id,
+        effectiveDate: toBusinessDate(created.startDate ?? new Date()),
+        compensation: toCompensation(created),
+        changeType: 'HIRE',
+        source: 'user',
+        actorUserId: userId ?? null,
+        reason: 'บันทึกพนักงานใหม่',
+        previous: null,
+      }).catch((error: unknown) => {
+        const msg = error instanceof Error ? error.message : String(error);
+        this.logger.warn(
+          `Compensation history bootstrap failed for employee ${created.id}: ${msg}`,
+        );
+      });
+    }
+
+    return created;
   }
 
-  async update(id: string, updateEmployeeDto: UpdateEmployeeDto, tenantId?: string) {
+  async update(
+    id: string,
+    updateEmployeeDto: UpdateEmployeeDto,
+    tenantId?: string,
+    userId?: string,
+  ) {
     const employee = await this.findOne(id, tenantId);
+    const payBefore = toCompensation(employee as Record<string, unknown>);
 
     const { hotelId, propertyId, startDate, dateOfBirth, ...rest } = updateEmployeeDto;
     const finalPropertyId = propertyId || hotelId || (employee as any).propertyId;
@@ -198,6 +300,46 @@ export class HrService {
       },
     })) as any;
 
+    // แก้เงินเดือน/ค่าตำแหน่ง/เบี้ยเลี้ยงจากหน้าข้อมูลพนักงาน → บันทึกประวัติ (มีผลวันนี้)
+    const payAfter = toCompensation(updated);
+    const payTouched = ['baseSalary', 'positionBonus', 'allowance'].some((field) =>
+      Object.prototype.hasOwnProperty.call(updateEmployeeDto, field),
+    );
+    if (payTouched && !sameCompensation(payBefore, payAfter)) {
+      await recordCompensationChange(this.prisma, {
+        tenantId: tenantId!,
+        employeeId: id,
+        effectiveDate: todayBusinessDate(),
+        compensation: payAfter,
+        changeType: 'MANUAL_ADJUST',
+        source: 'user',
+        actorUserId: userId ?? null,
+        reason: 'แก้ไขจากหน้าข้อมูลพนักงาน',
+        previous: payBefore,
+      }).catch((error: unknown) => {
+        const msg = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`Compensation history failed for employee ${id}: ${msg}`);
+      });
+    }
+
+    const lifecycleFieldsChanged = [
+      'propertyId',
+      'hotelId',
+      'departmentId',
+      'positionId',
+      'employmentType',
+      'startDate',
+    ].some((field) => Object.prototype.hasOwnProperty.call(updateEmployeeDto, field));
+
+    if (lifecycleFieldsChanged) {
+      await this.hrLifecycleAssignmentService
+        .recomputeForEmployee(updated.id, tenantId!)
+        .catch((error: unknown) => {
+          const msg = error instanceof Error ? error.message : String(error);
+          this.logger.warn(`Lifecycle recompute failed for employee ${updated.id}: ${msg}`);
+        });
+    }
+
     // Auto-sync basic info to linked Staff record if one exists
     if (updated.staff) {
       await this.syncEmployeeToStaff(updated.staff.id, updated).catch((err: unknown) => {
@@ -207,65 +349,6 @@ export class HrService {
     }
 
     return updated;
-  }
-
-  /**
-   * Dashboard stats: total employees, today's attendance, on-leave, pending leave requests.
-   * All counts are scoped to tenantId and optionally filtered by propertyId (hotelId).
-   * Uses Promise.all for parallel queries — optimized for dashboard rendering.
-   */
-  async getDashboardStats(tenantId?: string, hotelId?: string) {
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID is required');
-    }
-
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const todayEnd = new Date(todayStart);
-    todayEnd.setDate(todayEnd.getDate() + 1);
-
-    const employeeWhere: { tenantId: string; propertyId?: string } = { tenantId };
-    if (hotelId) employeeWhere.propertyId = hotelId;
-
-    const [totalEmployees, todayAttendance, onLeave, pendingLeaveRequests] = await Promise.all([
-      // Total active employees
-      this.prisma.employee.count({ where: employeeWhere }),
-
-      // Today's check-ins (present or late)
-      (this.prisma.hrAttendance as any).count({
-        where: {
-          tenantId,
-          date: { gte: todayStart, lt: todayEnd },
-          status: { in: ['present', 'late'] },
-        },
-      }),
-
-      // Currently on approved leave (today is within leave date range)
-      (this.prisma.hrLeaveRequest as any).count({
-        where: {
-          tenantId,
-          status: 'approved',
-          startDate: { lte: todayStart },
-          endDate: { gte: todayStart },
-        },
-      }),
-
-      // Pending leave requests (awaiting approval)
-      (this.prisma.hrLeaveRequest as any).count({
-        where: { tenantId, status: 'pending' },
-      }),
-    ]);
-
-    const attendanceRate =
-      totalEmployees > 0 ? Math.round((todayAttendance / totalEmployees) * 100) : 0;
-
-    return {
-      totalEmployees,
-      todayAttendance,
-      onLeave,
-      pendingLeaveRequests,
-      attendanceRate,
-    };
   }
 
   async remove(id: string, tenantId?: string) {
@@ -295,87 +378,81 @@ export class HrService {
 
     const employee = await this.findOne(employeeId, tenantId);
 
-    // Resolve role and department: caller-supplied > inferred from employee dept code > defaults
-    const resolvedRole = dto?.role ?? 'housekeeper';
+    // ตำแหน่ง/แผนก: ผู้เรียกระบุมาก่อน → เดาจากแผนก HR ของพนักงาน → แม่บ้าน
+    const resolvedRole =
+      dto?.role ??
+      inferStaffRoleFromDepartment(
+        (employee as any).hrDepartment?.code,
+        (employee as any).hrDepartment?.name ?? (employee as any).department,
+      );
     const resolvedDepartment =
       dto?.department ?? (resolvedRole === 'technician' ? 'maintenance' : 'housekeeping');
 
-    try {
-      // Atomic: guard check + Staff creation in a single transaction.
-      // If the DB fails mid-way, Prisma rolls back automatically.
-      const staff = await this.prisma.$transaction(async (tx) => {
-        // Re-check inside transaction to prevent race conditions
-        const existingStaff = await (tx.staff as any).findUnique({
-          where: { employeeId },
-        });
-        if (existingStaff) {
-          throw new ConflictException(
-            `Employee ${employeeId} already has a linked Staff record (${existingStaff.id})`,
-          );
-        }
+    // ไปทางเดียวกับการเพิ่มพนักงานเองในหน้าแม่บ้าน — ถ้ามีแถวของคนนี้อยู่แล้ว
+    // (เพิ่มไว้ตอนยังไม่ได้เชื่อม HR) จะถูกผูกให้ ไม่สร้างซ้ำ
+    const { staff, action } = await this.staffService.provision(
+      {
+        firstName: employee.firstName,
+        lastName: employee.lastName,
+        email: employee.email,
+        phone: (employee as any).phone ?? null,
+        role: resolvedRole,
+        department: resolvedDepartment,
+        employeeCode: (employee as any).employeeCode ?? null,
+        employeeId: employee.id,
+      },
+      tenantId,
+    );
 
-        return (tx.staff as any).create({
-          data: {
-            tenantId,
-            firstName: employee.firstName,
-            lastName: employee.lastName,
-            email: employee.email,
-            employeeCode: (employee as any).employeeCode ?? undefined,
-            department: resolvedDepartment,
-            role: resolvedRole,
-            status: 'active',
-            employeeId: employee.id,
-          },
-        });
-      });
-
-      this.logger.log(
-        `Staff ${staff.id} (${resolvedRole}) created and linked to Employee ${employee.id} (tenant: ${tenantId})`,
+    if (action === 'existing') {
+      throw new ConflictException(
+        `Employee ${employeeId} already has a linked Staff record (${staff.id})`,
       );
-
-      return {
-        success: true,
-        data: staff,
-        linkedEmployee: {
-          id: employee.id,
-          firstName: employee.firstName,
-          lastName: employee.lastName,
-          email: employee.email,
-        },
-      };
-    } catch (error: unknown) {
-      // Re-throw NestJS HTTP exceptions (ConflictException, NotFoundException, etc.) directly
-      if (
-        error instanceof ConflictException ||
-        error instanceof BadRequestException ||
-        error instanceof NotFoundException
-      ) {
-        throw error;
-      }
-      this.logger.error(
-        `Transaction rolled back — failed to create Staff from Employee ${employeeId}: ${(error as Error).message}`,
-      );
-      throw error;
     }
+
+    this.logger.log(
+      `Staff ${staff.id} (${resolvedRole}) ${action} for Employee ${employee.id} (tenant: ${tenantId})`,
+    );
+
+    return {
+      success: true,
+      data: staff,
+      action,
+      linkedEmployee: {
+        id: employee.id,
+        firstName: employee.firstName,
+        lastName: employee.lastName,
+        email: employee.email,
+      },
+    };
   }
 
   /**
-   * Bulk create Staff records for all HR employees that are not yet linked.
-   * Safe to run multiple times — already-linked employees are skipped.
+   * นำพนักงาน HR ขึ้นทะเบียนพนักงานปฏิบัติการทีเดียวหลายคน
    *
-   * Each employee's creation is wrapped in its own Prisma transaction so a failure
-   * for one employee does not affect others (partial-success is intentional here).
-   * The per-item transaction also prevents races: the linked-check and create are
-   * atomic for each employee.
+   * ของเดิมกวาด "พนักงานทุกคนใน tenant" แล้วยัดตำแหน่ง housekeeper /
+   * แผนก housekeeping ให้ทุกคนแบบตายตัว โรงแรมที่มีพนักงาน 54 คนจึงได้แม่บ้าน
+   * 54 คน รวมทั้งฝ่ายบัญชี ฝ่ายขาย และผู้บริหาร — ตอนนี้:
+   *  • ตั้งต้นเฉพาะแผนกที่มีหน้างานจริง (HK, ENG) ผู้เรียกขยายเองได้
+   *  • ตำแหน่งเดาจากแผนกรายคน (ENG → ช่าง, นอกนั้น → แม่บ้าน)
+   *  • ข้ามคนที่พ้นสภาพแล้ว
+   *  • คนที่มีอยู่บนทะเบียนแล้วจะถูก "ผูก" ไม่ใช่สร้างซ้ำ
+   *
+   * ยังคงเรียกซ้ำได้ปลอดภัย (idempotent) — คนที่ผูกแล้วจะถูกข้าม
    */
-  async bulkCreateStaffFromEmployees(tenantId: string): Promise<{
+  async bulkCreateStaffFromEmployees(
+    tenantId: string,
+    options: BulkCreateStaffOptions = {},
+  ): Promise<{
     created: number;
+    linked: number;
     skipped: number;
     results: Array<{
       employeeId: string;
       employeeName: string;
       staffId?: string;
-      status: 'created' | 'skipped';
+      status: 'created' | 'linked' | 'skipped';
+      role?: string;
       reason?: string;
     }>;
   }> {
@@ -383,61 +460,87 @@ export class HrService {
       throw new BadRequestException('Tenant ID is required');
     }
 
-    // Fetch all employees for this tenant (server-side check, not client-side)
+    const where: Prisma.EmployeeWhereInput = { tenantId };
+
+    if (options.employeeIds?.length) {
+      where.id = { in: options.employeeIds };
+    } else if (options.departmentIds?.length) {
+      where.departmentId = { in: options.departmentIds };
+    } else if (!options.allDepartments) {
+      // ค่าตั้งต้น: เฉพาะแผนกที่มีหน้างานในโรงแรม
+      where.hrDepartment = { code: { in: OPERATIONAL_DEPARTMENT_CODES } };
+    }
+
+    if (!options.includeInactive) {
+      where.status = { in: EMPLOYABLE_STATUSES };
+    }
+
     const employees = await this.prisma.employee.findMany({
-      where: { tenantId },
+      where,
+      include: { hrDepartment: true },
     });
 
     const results: Array<{
       employeeId: string;
       employeeName: string;
       staffId?: string;
-      status: 'created' | 'skipped';
+      status: 'created' | 'linked' | 'skipped';
+      role?: string;
       reason?: string;
     }> = [];
     let created = 0;
+    let linked = 0;
     let skipped = 0;
 
     for (const employee of employees) {
       const employeeName = `${employee.firstName} ${employee.lastName}`;
 
       try {
-        // Each employee gets its own transaction:
-        // - If the employee is already linked → ConflictException is caught below → skipped
-        // - If create fails mid-way → transaction rolls back automatically → no orphan record
-        const staff = await this.prisma.$transaction(async (tx) => {
-          // Atomic guard: check + create (prevents duplicate on concurrent calls)
-          const existingStaff = await (tx.staff as any).findUnique({
-            where: { employeeId: employee.id },
-          });
-          if (existingStaff) {
-            throw new ConflictException(`Already linked to Staff record ${existingStaff.id}`);
-          }
+        const role =
+          options.role ??
+          inferStaffRoleFromDepartment(
+            (employee as any).hrDepartment?.code,
+            (employee as any).hrDepartment?.name ?? employee.department,
+          );
 
-          return (tx.staff as any).create({
-            data: {
-              tenantId,
-              firstName: employee.firstName,
-              lastName: employee.lastName,
-              email: employee.email,
-              employeeCode: (employee as any).employeeCode ?? undefined,
-              department: 'housekeeping',
-              role: 'housekeeper',
-              status: 'active',
-              employeeId: employee.id,
-            },
+        const { staff, action } = await this.staffService.provision(
+          {
+            firstName: employee.firstName,
+            lastName: employee.lastName,
+            email: employee.email,
+            phone: employee.phone ?? null,
+            role,
+            department: role === 'technician' ? 'maintenance' : 'housekeeping',
+            employeeCode: employee.employeeCode ?? null,
+            employeeId: employee.id,
+          },
+          tenantId,
+        );
+
+        if (action === 'existing') {
+          results.push({
+            employeeId: employee.id,
+            employeeName,
+            staffId: staff.id,
+            status: 'skipped',
+            reason: 'Already linked to a Staff record',
           });
-        });
+          skipped++;
+          continue;
+        }
 
         results.push({
           employeeId: employee.id,
           employeeName,
           staffId: staff.id,
-          status: 'created',
+          status: action,
+          role,
         });
-        created++;
+        if (action === 'created') created++;
+        else linked++;
+
         this.logger.log(
-          `Bulk sync: Staff ${staff.id} created and linked to Employee ${employee.id}`,
+          `Bulk sync: Staff ${staff.id} ${action} for Employee ${employee.id} (role=${role})`,
         );
       } catch (error: unknown) {
         const reason =
@@ -451,19 +554,16 @@ export class HrService {
         skipped++;
 
         if (!(error instanceof ConflictException)) {
-          // Unexpected error (not a duplicate) — transaction already rolled back
-          this.logger.warn(
-            `Bulk sync: transaction rolled back for Employee ${employee.id} — ${reason}`,
-          );
+          this.logger.warn(`Bulk sync: skipped Employee ${employee.id} — ${reason}`);
         }
       }
     }
 
     this.logger.log(
-      `Bulk Staff sync complete for tenant ${tenantId}: ${created} created, ${skipped} skipped`,
+      `Bulk sync finished for tenant ${tenantId}: created=${created} linked=${linked} skipped=${skipped}`,
     );
 
-    return { created, skipped, results };
+    return { created, linked, skipped, results };
   }
 
   // ─── Private helpers ────────────────────────────────────────────────────────

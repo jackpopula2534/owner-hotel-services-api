@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Get,
@@ -30,6 +31,8 @@ interface JwtPayload {
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, AddonGuard)
 @RequireAddon('COST_ACCOUNTING_MODULE')
+// Accounting Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('accounting')
 @Controller({ path: 'cost-accounting/cost-centers', version: '1' })
 export class CostCentersController {
   constructor(private readonly costCentersService: CostCentersService) {}

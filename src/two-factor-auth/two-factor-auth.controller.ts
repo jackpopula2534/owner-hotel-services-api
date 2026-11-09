@@ -5,12 +5,15 @@ import {
   Body,
   UseGuards,
   Request,
+  Req,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import type { Request as ExpressRequest } from 'express';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { TwoFactorAuthService } from './two-factor-auth.service';
+import { AuthService } from '../modules/auth/auth.service';
 import {
   Verify2FADto,
   VerifyBackupCodeDto,
@@ -22,7 +25,17 @@ import { Public } from '../common/decorators/public.decorator';
 @ApiTags('Two-Factor Authentication')
 @Controller('auth/2fa')
 export class TwoFactorAuthController {
-  constructor(private readonly twoFactorAuthService: TwoFactorAuthService) {}
+  constructor(
+    private readonly twoFactorAuthService: TwoFactorAuthService,
+    private readonly authService: AuthService,
+  ) {}
+
+  private getDeviceInfo(req: ExpressRequest): { ipAddress?: string; userAgent?: string } {
+    return {
+      ipAddress: req.ip ?? req.socket?.remoteAddress,
+      userAgent: req.headers['user-agent'],
+    };
+  }
 
   @Post('enable')
   @UseGuards(JwtAuthGuard)
@@ -74,10 +87,13 @@ export class TwoFactorAuthController {
   @Post('verify-backup')
   @Public()
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Verify backup code for login' })
-  @ApiResponse({ status: 200, description: 'Backup code verified' })
-  async verifyBackup(@Body() dto: VerifyBackupCodeDto & { tempToken: string }) {
-    const tokenData = this.twoFactorAuthService.verifyTempToken(dto.tempToken);
+  @ApiOperation({ summary: 'Verify backup code for login and issue session tokens' })
+  @ApiResponse({ status: 200, description: 'Backup code verified, session issued' })
+  async verifyBackup(
+    @Body() dto: VerifyBackupCodeDto & { tempToken: string },
+    @Req() req: ExpressRequest,
+  ) {
+    const tokenData = this.authService.verifyTempToken(dto.tempToken);
     if (!tokenData) {
       return { success: false, message: 'Invalid or expired session' };
     }
@@ -87,30 +103,42 @@ export class TwoFactorAuthController {
       dto.backupCode,
     );
 
-    return {
-      success: isValid,
-      message: isValid ? 'Backup code verified' : 'Invalid backup code',
-    };
+    if (!isValid) {
+      return { success: false, message: 'Invalid backup code' };
+    }
+
+    const session = await this.authService.completeLoginWith2FA(
+      tokenData.userId,
+      tokenData.systemContext,
+      this.getDeviceInfo(req),
+    );
+
+    return { success: true, message: 'Backup code verified', ...session };
   }
 
   @Post('validate')
   @Public()
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Validate 2FA code during login' })
-  @ApiResponse({ status: 200, description: '2FA code validated' })
-  async validate(@Body() dto: Login2FADto) {
-    const tokenData = this.twoFactorAuthService.verifyTempToken(dto.tempToken);
+  @ApiOperation({ summary: 'Validate 2FA code during login and issue session tokens' })
+  @ApiResponse({ status: 200, description: '2FA code validated, session issued' })
+  async validate(@Body() dto: Login2FADto, @Req() req: ExpressRequest) {
+    const tokenData = this.authService.verifyTempToken(dto.tempToken);
     if (!tokenData) {
       return { success: false, message: 'Invalid or expired session' };
     }
 
     const isValid = await this.twoFactorAuthService.verifyCode(tokenData.userId, dto.code);
 
-    return {
-      success: isValid,
-      userId: isValid ? tokenData.userId : undefined,
-      email: isValid ? tokenData.email : undefined,
-      message: isValid ? '2FA verified' : 'Invalid code',
-    };
+    if (!isValid) {
+      return { success: false, message: 'Invalid code' };
+    }
+
+    const session = await this.authService.completeLoginWith2FA(
+      tokenData.userId,
+      tokenData.systemContext,
+      this.getDeviceInfo(req),
+    );
+
+    return { success: true, message: '2FA verified', ...session };
   }
 }

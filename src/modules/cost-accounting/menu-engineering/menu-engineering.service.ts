@@ -125,13 +125,13 @@ export class MenuEngineeringService {
       const dogsCount = classifiedItems.filter((i) => i.classification === 'DOG').length;
 
       // Check if snapshot already exists for this period
-      const existingSnapshot = await this.prisma.menuEngineeringSnapshot.findUnique({
+      // findFirst (NOT findUnique): MenuEngineeringSnapshot is tenant-scoped and
+      // the tenant-scope middleware rejects findUnique on scoped models.
+      const existingSnapshot = await this.prisma.menuEngineeringSnapshot.findFirst({
         where: {
-          tenantId_propertyId_period: {
-            tenantId,
-            propertyId: dto.propertyId,
-            period: dto.period,
-          },
+          tenantId,
+          propertyId: dto.propertyId,
+          period: dto.period,
         },
       });
 
@@ -392,8 +392,10 @@ export class MenuEngineeringService {
    */
   async getSnapshot(id: string, tenantId: string): Promise<MenuEngineeringSnapshotEntity> {
     try {
-      const snapshot = await this.prisma.menuEngineeringSnapshot.findUnique({
-        where: { id },
+      // findFirst (NOT findUnique): MenuEngineeringSnapshot is tenant-scoped and
+      // the tenant-scope middleware rejects findUnique on scoped models.
+      const snapshot = await this.prisma.menuEngineeringSnapshot.findFirst({
+        where: { id, tenantId },
         include: {
           items: {
             orderBy: [{ classification: 'asc' }, { totalProfit: 'desc' }],
@@ -507,13 +509,13 @@ export class MenuEngineeringService {
     period: string,
   ): Promise<ClassificationSummary> {
     try {
-      const snapshot = await this.prisma.menuEngineeringSnapshot.findUnique({
+      // findFirst (NOT findUnique): MenuEngineeringSnapshot is tenant-scoped and
+      // the tenant-scope middleware rejects findUnique on scoped models.
+      const snapshot = await this.prisma.menuEngineeringSnapshot.findFirst({
         where: {
-          tenantId_propertyId_period: {
-            tenantId,
-            propertyId,
-            period,
-          },
+          tenantId,
+          propertyId,
+          period,
         },
         include: {
           items: {
@@ -591,13 +593,15 @@ export class MenuEngineeringService {
     snapshotId2: string,
   ): Promise<ComparisonResult> {
     try {
+      // findFirst (NOT findUnique): MenuEngineeringSnapshot is tenant-scoped and
+      // the tenant-scope middleware rejects findUnique on scoped models.
       const [snapshot1, snapshot2] = await Promise.all([
-        this.prisma.menuEngineeringSnapshot.findUnique({
-          where: { id: snapshotId1 },
+        this.prisma.menuEngineeringSnapshot.findFirst({
+          where: { id: snapshotId1, tenantId },
           include: { items: true },
         }),
-        this.prisma.menuEngineeringSnapshot.findUnique({
-          where: { id: snapshotId2 },
+        this.prisma.menuEngineeringSnapshot.findFirst({
+          where: { id: snapshotId2, tenantId },
           include: { items: true },
         }),
       ]);

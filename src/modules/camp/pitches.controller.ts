@@ -1,0 +1,189 @@
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Put,
+  Query,
+  UploadedFiles,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
+import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { FilesInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
+import { StorageService } from '@/common/storage/storage.service';
+import { PitchesService } from './pitches.service';
+import {
+  BatchUpdatePositionsDto,
+  BulkCreatePitchDto,
+  BulkDeletePitchDto,
+  CreatePitchDto,
+  UpdatePitchDto,
+  UpdatePitchPositionDto,
+} from './dto/pitch.dto';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { AddonGuard } from '../../common/guards/addon.guard';
+import { RequireAddon } from '../../common/decorators/require-addon.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { CAMP_READ_ROLES, CAMP_MASTER_WRITE_ROLES } from './camp-roles';
+
+
+interface MulterFile {
+  originalname: string;
+  mimetype: string;
+  size: number;
+  buffer: Buffer;
+  filename: string;
+}
+
+@ApiTags('camp-pitches')
+@ApiBearerAuth('JWT-auth')
+// Camp Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('camp-terminal')
+@Controller({ path: 'camp/pitches', version: '1' })
+@UseGuards(JwtAuthGuard, RolesGuard, AddonGuard)
+@RequireAddon('CAMP_MODULE')
+export class PitchesController {
+  constructor(
+    private readonly service: PitchesService,
+    private readonly storage: StorageService,
+  ) {}
+
+  @Get()
+  @ApiOperation({ summary: 'List pitches by campgroundId' })
+  @Roles(...CAMP_READ_ROLES)
+  findAll(
+    @Query('campgroundId') campgroundId: string,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    return this.service.findAll(campgroundId, user?.tenantId);
+  }
+
+  @Get('availability')
+  @ApiOperation({ summary: 'Pitch availability for a date range (for 2D map)' })
+  @Roles(...CAMP_READ_ROLES)
+  availability(
+    @Query('campgroundId') campgroundId: string,
+    @Query('checkIn') checkIn: string,
+    @Query('checkOut') checkOut: string,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    return this.service.availability(campgroundId, checkIn, checkOut, user?.tenantId);
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Get pitch by id' })
+  @Roles(...CAMP_READ_ROLES)
+  findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
+    return this.service.findOne(id, user?.tenantId);
+  }
+
+  @Post()
+  @ApiOperation({ summary: 'Create pitch' })
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
+  create(@Body() dto: CreatePitchDto, @CurrentUser() user: { tenantId?: string }) {
+    return this.service.create(dto, user?.tenantId);
+  }
+
+  @Post('bulk')
+  @ApiOperation({ summary: 'Bulk create pitches (e.g. A4–A20) for a zone in one request' })
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
+  bulkCreate(
+    @Body() dto: BulkCreatePitchDto,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    return this.service.bulkCreate(dto, user?.tenantId);
+  }
+
+  @Post('bulk-delete')
+  @ApiOperation({
+    summary: 'Bulk delete pitches — all in a campground (Clear all) or all in one zone',
+  })
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
+  bulkDelete(
+    @Body() dto: BulkDeletePitchDto,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    return this.service.bulkDelete(dto.campgroundId, dto.zoneId, user?.tenantId);
+  }
+
+  @Put(':id')
+  @ApiOperation({ summary: 'Update pitch' })
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdatePitchDto,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    return this.service.update(id, dto, user?.tenantId);
+  }
+
+  @Post(':id/images')
+  @ApiOperation({ summary: 'Upload pitch gallery images (multiple) from device' })
+  @ApiConsumes('multipart/form-data')
+  @ApiResponse({ status: 201, description: 'Pitch images uploaded' })
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
+  @UseInterceptors(
+    FilesInterceptor('images', 12, {
+      storage: memoryStorage(),
+      fileFilter: (_req, file, cb) => {
+        if (!file.mimetype.match(/^image\/(jpeg|jpg|png|webp|gif)$/)) {
+          return cb(new BadRequestException('อัปโหลดได้เฉพาะไฟล์รูปภาพ (jpg, png, webp, gif)'), false);
+        }
+        cb(null, true);
+      },
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  async uploadImages(
+    @Param('id') id: string,
+    @UploadedFiles() files: MulterFile[],
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    if (!files || files.length === 0) {
+      throw new BadRequestException('ไม่พบไฟล์รูปภาพ');
+    }
+    const saved = await this.storage.saveMany(files, {
+      folder: 'camp',
+      prefix: `pitch-${id}-img`,
+    });
+    const imageUrls = saved.map((s) => s.url);
+    return this.service.addImages(id, imageUrls, user?.tenantId);
+  }
+
+  @Patch('positions')
+  @ApiOperation({ summary: 'Batch update pitch + facility positions (drag in 3D scene)' })
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
+  updatePositions(
+    @Body() dto: BatchUpdatePositionsDto,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    return this.service.updatePositions(dto, user?.tenantId);
+  }
+
+  @Patch(':id/position')
+  @ApiOperation({ summary: 'Update pitch position on 2D map (owner drag & drop)' })
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
+  updatePosition(
+    @Param('id') id: string,
+    @Body() dto: UpdatePitchPositionDto,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    return this.service.updatePosition(id, dto, user?.tenantId);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Delete pitch' })
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
+  remove(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
+    return this.service.remove(id, user?.tenantId);
+  }
+}

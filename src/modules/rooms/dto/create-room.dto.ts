@@ -9,6 +9,7 @@ import {
   IsBoolean,
   IsEnum,
   ValidateNested,
+  Min,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -80,8 +81,12 @@ export class CreateRoomDto {
   @IsNotEmpty()
   type: string;
 
-  @ApiPropertyOptional({ example: 1 })
+  @ApiPropertyOptional({
+    example: 1,
+    description: 'ชั้นที่ห้องนี้อยู่ — ต้องไม่เกิน property.floors (ไม่ส่งมาจะถือว่าชั้น 1)',
+  })
   @IsInt()
+  @Min(1)
   @IsOptional()
   floor?: number;
 

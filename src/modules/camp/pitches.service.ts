@@ -1,0 +1,357 @@
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service';
+import {
+  BatchUpdatePositionsDto,
+  BulkCreatePitchDto,
+  MAX_BATCH_POSITIONS,
+  CreatePitchDto,
+  UpdatePitchDto,
+  UpdatePitchPositionDto,
+} from './dto/pitch.dto';
+
+const BLOCKING_STATUSES = ['pending', 'confirmed', 'checked_in'];
+
+@Injectable()
+export class PitchesService {
+  private readonly logger = new Logger(PitchesService.name);
+
+  constructor(private readonly prisma: PrismaService) {}
+
+  async findAll(campgroundId: string, tenantId?: string) {
+    const data = await this.prisma.campPitch.findMany({
+      where: { campgroundId, ...(tenantId ? { tenantId } : {}) },
+      orderBy: { code: 'asc' },
+      include: {
+        zone: { select: { id: true, name: true, type: true, color: true, hasElectricity: true } },
+      },
+    });
+    return { success: true, data };
+  }
+
+  async findOne(id: string, tenantId?: string) {
+    const pitch = await this.prisma.campPitch.findFirst({
+      where: { id, ...(tenantId ? { tenantId } : {}) },
+      include: { zone: true },
+    });
+    if (!pitch) {
+      throw new NotFoundException(`Pitch ${id} not found`);
+    }
+    return { success: true, data: pitch };
+  }
+
+  /**
+   * โควตาจุดกางเต็นท์ตามแพ็กเกจ — ใช้คอลัมน์ plans.max_rooms ร่วมกับห้องพักของโรงแรม
+   * (แพ็กเกจ Camp นับเป็น "จุด") · max_rooms <= 0 = ไม่จำกัด
+   */
+  private async assertPitchQuota(tenantId: string | undefined, adding: number): Promise<void> {
+    if (!tenantId) return;
+
+    const subscription = await this.prisma.subscriptions.findFirst({
+      where: { tenant_id: tenantId, status: { in: ['active', 'trial'] } },
+      include: { plans_subscriptions_plan_idToplans: true },
+      orderBy: { created_at: 'desc' },
+    });
+    const plan = subscription?.plans_subscriptions_plan_idToplans;
+    if (!plan || plan.max_rooms <= 0) return;
+
+    const current = await this.prisma.campPitch.count({ where: { tenantId } });
+    if (current + adding > plan.max_rooms) {
+      const remaining = Math.max(0, plan.max_rooms - current);
+      throw new BadRequestException(
+        `ถึงขีดจำกัดจำนวนจุดกางเต็นท์ของแพ็กเกจแล้ว (${plan.max_rooms} จุด สำหรับแพ็กเกจ ${plan.name}) — ` +
+          `ตอนนี้มี ${current} จุด เพิ่มได้อีก ${remaining} จุด กรุณาอัปเกรดแพ็กเกจเพื่อเพิ่มจุดได้มากขึ้น`,
+      );
+    }
+  }
+
+  async create(dto: CreatePitchDto, tenantId?: string) {
+    await this.assertPitchQuota(tenantId, 1);
+
+    const data = await this.prisma.campPitch.create({
+      data: { ...dto, tenantId: tenantId ?? null },
+    });
+    this.logger.log(`Pitch created: ${data.id}`);
+    return { success: true, data };
+  }
+
+  /**
+   * สร้างจุดกางเต็นท์หลายจุดในครั้งเดียว (เช่น A4–A20) แบบ transaction
+   * - ข้ามรหัสที่ซ้ำกันเองในรายการ และรหัสที่มีอยู่แล้วในลาน
+   * - คืนรายการที่สร้างสำเร็จ + รายการที่ถูกข้าม
+   */
+  async bulkCreate(dto: BulkCreatePitchDto, tenantId?: string) {
+    const { campgroundId, zoneId, status, sizeSqm, widthM, depthM, notes } = dto;
+
+    // normalize + ตัดรหัสซ้ำในรายการ (คงลำดับเดิม)
+    const seen = new Set<string>();
+    const requested: string[] = [];
+    for (const raw of dto.codes) {
+      const code = raw.trim();
+      if (!code) continue;
+      const key = code.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      requested.push(code);
+    }
+
+    // หารหัสที่มีอยู่แล้วในลานนี้ เพื่อข้าม (กันชนรหัสซ้ำ)
+    const existing = await this.prisma.campPitch.findMany({
+      where: {
+        campgroundId,
+        ...(tenantId ? { tenantId } : {}),
+        code: { in: requested },
+      },
+      select: { code: true },
+    });
+    const existingSet = new Set(existing.map((p) => p.code.toLowerCase()));
+
+    const toCreate = requested.filter((c) => !existingSet.has(c.toLowerCase()));
+    const skipped = requested.filter((c) => existingSet.has(c.toLowerCase()));
+
+    if (toCreate.length === 0) {
+      return {
+        success: true,
+        data: { created: [], createdCount: 0, skipped, skippedCount: skipped.length },
+      };
+    }
+
+    await this.assertPitchQuota(tenantId, toCreate.length);
+
+    const created = await this.prisma.$transaction(
+      toCreate.map((code) =>
+        this.prisma.campPitch.create({
+          data: {
+            campgroundId,
+            zoneId,
+            code,
+            ...(status ? { status } : {}),
+            ...(sizeSqm != null ? { sizeSqm } : {}),
+            ...(widthM != null ? { widthM } : {}),
+            ...(depthM != null ? { depthM } : {}),
+            ...(notes ? { notes } : {}),
+            tenantId: tenantId ?? null,
+          },
+        }),
+      ),
+    );
+
+    this.logger.log(
+      `Bulk pitch create: ${created.length} created, ${skipped.length} skipped (campground ${campgroundId})`,
+    );
+
+    return {
+      success: true,
+      data: {
+        created,
+        createdCount: created.length,
+        skipped,
+        skippedCount: skipped.length,
+      },
+    };
+  }
+
+  async update(id: string, dto: UpdatePitchDto, tenantId?: string) {
+    await this.ensureExists(id, tenantId);
+    const data = await this.prisma.campPitch.update({
+      where: { id },
+      data: { ...dto },
+    });
+    return { success: true, data };
+  }
+
+  async addImages(id: string, imageUrls: string[], tenantId?: string) {
+    const pitch = await this.prisma.campPitch.findFirst({
+      where: { id, ...(tenantId ? { tenantId } : {}) },
+      select: { id: true, images: true },
+    });
+    if (!pitch) {
+      throw new NotFoundException(`Pitch ${id} not found`);
+    }
+
+    const currentImages = Array.isArray(pitch.images) ? (pitch.images as string[]) : [];
+    const data = await this.prisma.campPitch.update({
+      where: { id },
+      data: { images: [...currentImages, ...imageUrls] },
+    });
+    return { success: true, data };
+  }
+
+  async updatePosition(id: string, dto: UpdatePitchPositionDto, tenantId?: string) {
+    await this.ensureExists(id, tenantId);
+    const data = await this.prisma.campPitch.update({
+      where: { id },
+      data: { posX: dto.posX, posY: dto.posY },
+    });
+    return { success: true, data };
+  }
+
+  /**
+   * บันทึกตำแหน่งหมุดจุดกางเต็นท์ + จุดบริการหลายจุดใน transaction เดียว
+   * ทุก id ต้องอยู่ในลาน campgroundId ของ tenant นี้ — ถ้ามีตัวไหนไม่ใช่ ปฏิเสธทั้งชุด
+   * (ไม่ให้บันทึกครึ่ง ๆ กลาง ๆ และไม่บอกว่า id ไหนมีอยู่ในลานอื่น)
+   */
+  async updatePositions(dto: BatchUpdatePositionsDto, tenantId?: string) {
+    const pitches = dedupeById(dto.pitches ?? []);
+    const facilities = dedupeById(dto.facilities ?? []);
+    if (pitches.length + facilities.length === 0) {
+      throw new BadRequestException('ไม่มีตำแหน่งที่จะบันทึก');
+    }
+    if (pitches.length + facilities.length > MAX_BATCH_POSITIONS) {
+      throw new BadRequestException(`บันทึกได้ครั้งละไม่เกิน ${MAX_BATCH_POSITIONS} จุด`);
+    }
+    const scope = { campgroundId: dto.campgroundId, ...(tenantId ? { tenantId } : {}) };
+
+    const [ownPitches, ownFacilities] = await Promise.all([
+      pitches.length
+        ? this.prisma.campPitch.findMany({
+            where: { ...scope, id: { in: pitches.map((p) => p.id) } },
+            select: { id: true },
+          })
+        : Promise.resolve([]),
+      facilities.length
+        ? this.prisma.campFacility.findMany({
+            where: { ...scope, id: { in: facilities.map((f) => f.id) } },
+            select: { id: true },
+          })
+        : Promise.resolve([]),
+    ]);
+    if (ownPitches.length !== pitches.length || ownFacilities.length !== facilities.length) {
+      throw new NotFoundException('มีจุดที่ไม่อยู่ในลานนี้');
+    }
+
+    // updateMany พร้อม scope ซ้ำอีกชั้น — ต่อให้มีอะไรหลุดก็แก้ข้ามลาน/ข้าม tenant ไม่ได้
+    await this.prisma.$transaction([
+      ...pitches.map((p) =>
+        this.prisma.campPitch.updateMany({
+          where: { ...scope, id: p.id },
+          data: {
+            posX: p.posX,
+            posY: p.posY,
+            ...(p.rotation !== undefined ? { rotation: p.rotation } : {}),
+          },
+        }),
+      ),
+      ...facilities.map((f) =>
+        this.prisma.campFacility.updateMany({
+          where: { ...scope, id: f.id },
+          data: {
+            posX: f.posX,
+            posY: f.posY,
+            ...(f.rotation !== undefined ? { rotation: f.rotation } : {}),
+          },
+        }),
+      ),
+    ]);
+    return {
+      success: true,
+      data: { pitches: pitches.length, facilities: facilities.length },
+    };
+  }
+
+  async remove(id: string, tenantId?: string) {
+    await this.ensureExists(id, tenantId);
+    await this.prisma.campPitch.delete({ where: { id } });
+    return { success: true };
+  }
+
+  /**
+   * ลบจุดกางเต็นท์หลายจุดในครั้งเดียว
+   * - ไม่ระบุ zoneId → ลบทุกจุดในลาน (Clear all)
+   * - ระบุ zoneId → ลบเฉพาะจุดในโซนนั้น
+   *
+   * กันลบจุดที่มีการจองที่ยัง active อยู่ (pending/confirmed/checked_in) — ต้อง
+   * ยกเลิก/เช็คเอาท์ก่อน ส่วนการจองที่จบแล้ว (ประวัติ) จะถูกลบไปพร้อมจุดใน transaction
+   */
+  async bulkDelete(campgroundId: string, zoneId: string | undefined, tenantId?: string) {
+    const where = {
+      campgroundId,
+      ...(tenantId ? { tenantId } : {}),
+      ...(zoneId ? { zoneId } : {}),
+    };
+
+    const targets = await this.prisma.campPitch.findMany({
+      where,
+      select: { id: true },
+    });
+    const pitchIds = targets.map((p) => p.id);
+
+    if (pitchIds.length === 0) {
+      return { success: true, data: { deletedCount: 0 } };
+    }
+
+    const activeCount = await this.prisma.campReservation.count({
+      where: { pitchId: { in: pitchIds }, status: { in: BLOCKING_STATUSES } },
+    });
+    if (activeCount > 0) {
+      throw new BadRequestException(
+        `ลบไม่ได้ — มี ${activeCount} การจองที่ยังใช้งานอยู่บนจุดเหล่านี้ กรุณายกเลิกหรือเช็คเอาท์ก่อน`,
+      );
+    }
+
+    const [, deleted] = await this.prisma.$transaction([
+      this.prisma.campReservation.deleteMany({ where: { pitchId: { in: pitchIds } } }),
+      this.prisma.campPitch.deleteMany({ where }),
+    ]);
+
+    this.logger.log(
+      `Bulk pitch delete: ${deleted.count} pitches removed (campground ${campgroundId}${zoneId ? `, zone ${zoneId}` : ''})`,
+    );
+
+    return { success: true, data: { deletedCount: deleted.count } };
+  }
+
+  /**
+   * คืน pitch ทั้งหมดในลานพร้อมธง available สำหรับช่วงวันที่ระบุ
+   * จุดจะ "ไม่ว่าง" ถ้ามี reservation ที่ทับช่วงเวลาและสถานะ blocking
+   */
+  async availability(campgroundId: string, checkIn: string, checkOut: string, tenantId?: string) {
+    const start = new Date(checkIn);
+    const end = new Date(checkOut);
+
+    const [pitches, overlapping] = await Promise.all([
+      this.prisma.campPitch.findMany({
+        where: { campgroundId, ...(tenantId ? { tenantId } : {}) },
+        include: {
+          zone: { select: { id: true, name: true, type: true, color: true, basePrice: true } },
+        },
+        orderBy: { code: 'asc' },
+      }),
+      this.prisma.campReservation.findMany({
+        where: {
+          campgroundId,
+          ...(tenantId ? { tenantId } : {}),
+          status: { in: BLOCKING_STATUSES },
+          // overlap: existing.checkIn < end AND existing.checkOut > start
+          checkIn: { lt: end },
+          checkOut: { gt: start },
+        },
+        select: { pitchId: true },
+      }),
+    ]);
+
+    const bookedPitchIds = new Set(overlapping.map((r) => r.pitchId));
+    const data = pitches.map((pitch) => ({
+      ...pitch,
+      available: pitch.status === 'available' && !bookedPitchIds.has(pitch.id),
+      // มีการจองทับช่วงนี้ — ใช้แยก "จองแล้ว" ออกจาก "ปิด/ซ่อม" ในหน้าเลือกจุด
+      booked: bookedPitchIds.has(pitch.id),
+    }));
+
+    return { success: true, data };
+  }
+
+  private async ensureExists(id: string, tenantId?: string): Promise<void> {
+    const existing = await this.prisma.campPitch.findFirst({
+      where: { id, ...(tenantId ? { tenantId } : {}) },
+      select: { id: true },
+    });
+    if (!existing) {
+      throw new NotFoundException(`Pitch ${id} not found`);
+    }
+  }
+}
+
+/** id ซ้ำในคำขอ → ใช้ค่าตัวสุดท้าย (ตรงกับลำดับที่ผู้ใช้ลาก) */
+function dedupeById<T extends { id: string }>(items: T[]): T[] {
+  return [...new Map(items.map((i) => [i.id, i])).values()];
+}

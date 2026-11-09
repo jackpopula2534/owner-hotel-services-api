@@ -19,7 +19,9 @@ export class ForecastRequestDto {
   @IsOptional()
   @Transform(({ value }) => {
     if (!value) return undefined;
-    return new Date(value).toISOString().split('T')[0];
+    const date = new Date(value);
+    if (isNaN(date.getTime())) return value; // Let validation handle it
+    return date.toISOString().split('T')[0];
   })
   startDate?: string;
 
@@ -31,7 +33,9 @@ export class ForecastRequestDto {
   @IsOptional()
   @Transform(({ value }) => {
     if (!value) return undefined;
-    return new Date(value).toISOString().split('T')[0];
+    const date = new Date(value);
+    if (isNaN(date.getTime())) return value; // Let validation handle it
+    return date.toISOString().split('T')[0];
   })
   endDate?: string;
 }

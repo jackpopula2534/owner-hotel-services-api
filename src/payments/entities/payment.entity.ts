@@ -5,13 +5,18 @@ import {
   ManyToOne,
   JoinColumn,
   CreateDateColumn,
+  Index,
 } from 'typeorm';
 import { Invoice } from '../../invoices/entities/invoice.entity';
 
+// ต้องมีครบทุกค่าตรงกับ Prisma enum `payments_method` ไม่งั้น dataSource.synchronize()
+// ใน db:refresh จะ ALTER enum ใน DB ให้เหลือแค่ค่าที่ประกาศที่นี่ (drop stripe/truemoney)
 export enum PaymentMethod {
   TRANSFER = 'transfer',
   QR = 'qr',
   CASH = 'cash',
+  STRIPE = 'stripe',
+  TRUEMONEY = 'truemoney',
 }
 
 export enum PaymentStatus {
@@ -32,6 +37,10 @@ export class Payment {
 
   @Column({ name: 'invoice_id' })
   invoiceId: string;
+
+  @Index('payments_tenant_id_idx')
+  @Column({ name: 'tenant_id', length: 255, nullable: true })
+  tenantId: string;
 
   @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
   amount: number;

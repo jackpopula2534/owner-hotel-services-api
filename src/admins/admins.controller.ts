@@ -1,11 +1,16 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards } from '@nestjs/common';
 import { AdminsService } from './admins.service';
 import { SkipSubscriptionCheck } from '../common/decorators/skip-subscription-check.decorator';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
 import { CreateAdminDto } from './dto/create-admin.dto';
 import { UpdateAdminDto } from './dto/update-admin.dto';
 
 @Controller('admins')
 @SkipSubscriptionCheck()
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('platform_admin')
 export class AdminsController {
   constructor(private readonly adminsService: AdminsService) {}
 

@@ -14,9 +14,8 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { existsSync, mkdirSync } from 'fs';
-import { join, extname } from 'path';
+import { memoryStorage } from 'multer';
+import { StorageService } from '@/common/storage/storage.service';
 import {
   ApiTags,
   ApiBearerAuth,
@@ -26,9 +25,17 @@ import {
   ApiConsumes,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
+import { RolesGuard } from '@/common/guards/roles.guard';
+import { Roles } from '@/common/decorators/roles.decorator';
+import { AllowSystems } from '@/common/decorators/allow-systems.decorator';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
 import { DocumentSettingsService } from './document-settings.service';
 import { UpdateDocumentSettingsDto } from './dto/update-document-settings.dto';
+
+// The legal entity printed on every PO, receipt and tax invoice — editing it is
+// a manager's call. procurement_manager is the floor, so manager / tenant_admin /
+// admin inherit; owner and accounting_manager carry no rank and are named outright.
+const SETTINGS_EDITORS = ['procurement_manager', 'owner', 'accounting_manager'] as const;
 
 interface AuthUser {
   tenantId: string;
@@ -37,27 +44,42 @@ interface AuthUser {
 
 @ApiTags('Document Settings')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+// document numbering / print settings — H1 allow-list, audit 2026-11-09
+@AllowSystems('accounting', 'procurement')
 @Controller('document-settings')
 export class DocumentSettingsController {
-  constructor(private readonly service: DocumentSettingsService) {}
+  constructor(
+    private readonly service: DocumentSettingsService,
+    private readonly storage: StorageService,
+  ) {}
 
+  // A tax invoice printed at the till has to name the registered entity behind
+  // the outlet — legal name, tax id, branch — and that lives here. Reading it is
+  // all the POS needs; writing the settings stays closed to POS tokens.
+  @AllowSystems('pos')
   @ApiOperation({ summary: 'Get document settings for a property' })
   @ApiQuery({ name: 'propertyId', required: true, description: 'Property ID' })
   @ApiResponse({ status: 200, description: 'Document settings retrieved' })
+  @ApiResponse({ status: 401, description: 'Missing or invalid access token' })
   @Get()
   async get(
     @Query('propertyId') propertyId: string,
     @CurrentUser() user: AuthUser,
   ): Promise<{ success: boolean; data: Record<string, unknown> }> {
-    const data = await this.service.getByProperty(user.tenantId, propertyId);
-    return { success: true, data };
+    const [data, companyFallback] = await Promise.all([
+      this.service.getByProperty(user.tenantId, propertyId),
+      this.service.getCompanyFallback(user.tenantId),
+    ]);
+    return { success: true, data: { ...data, companyFallback } };
   }
 
   @ApiOperation({ summary: 'Update document settings for a property' })
   @ApiQuery({ name: 'propertyId', required: true, description: 'Property ID' })
   @ApiResponse({ status: 200, description: 'Document settings updated' })
   @Patch()
+  @Roles(...SETTINGS_EDITORS)
+  @ApiResponse({ status: 403, description: 'Role may not edit document settings' })
   async update(
     @Query('propertyId') propertyId: string,
     @Body() dto: UpdateDocumentSettingsDto,
@@ -73,29 +95,15 @@ export class DocumentSettingsController {
   @ApiResponse({ status: 200, description: 'Logo uploaded successfully' })
   @ApiResponse({ status: 400, description: 'Invalid file type or size' })
   @Post('logo')
+  @Roles(...SETTINGS_EDITORS)
+  @ApiResponse({ status: 403, description: 'Role may not edit document settings' })
   @HttpCode(HttpStatus.OK)
   @UseInterceptors(
     FileInterceptor('logo', {
-      storage: diskStorage({
-        destination: (_req, _file, cb) => {
-          const uploadPath = join(process.cwd(), 'uploads', 'document-logos');
-          if (!existsSync(uploadPath)) {
-            mkdirSync(uploadPath, { recursive: true });
-          }
-          cb(null, uploadPath);
-        },
-        filename: (req, file, cb) => {
-          const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-          const ext = extname(file.originalname);
-          cb(null, `logo-${uniqueSuffix}${ext}`);
-        },
-      }),
+      storage: memoryStorage(),
       fileFilter: (_req, file, cb) => {
         if (!file.mimetype.match(/^image\/(jpeg|jpg|png|webp)$/)) {
-          return cb(
-            new BadRequestException('อนุญาตเฉพาะไฟล์ภาพ (JPG, PNG, WebP) เท่านั้น'),
-            false,
-          );
+          return cb(new BadRequestException('อนุญาตเฉพาะไฟล์ภาพ (JPG, PNG, WebP) เท่านั้น'), false);
         }
         cb(null, true);
       },
@@ -111,7 +119,12 @@ export class DocumentSettingsController {
       throw new BadRequestException('กรุณาเลือกไฟล์ Logo');
     }
 
-    const logoUrl = `/uploads/document-logos/${file.filename}`;
+    const saved = await this.storage.save({
+      folder: 'document-logos',
+      file,
+      prefix: 'logo',
+    });
+    const logoUrl = saved.path;
     await this.service.updateLogo(user.tenantId, propertyId, logoUrl);
 
     return { success: true, data: { logoUrl } };
@@ -121,6 +134,8 @@ export class DocumentSettingsController {
   @ApiQuery({ name: 'propertyId', required: true, description: 'Property ID' })
   @ApiResponse({ status: 200, description: 'Logo removed' })
   @Delete('logo')
+  @Roles(...SETTINGS_EDITORS)
+  @ApiResponse({ status: 403, description: 'Role may not edit document settings' })
   async removeLogo(
     @Query('propertyId') propertyId: string,
     @CurrentUser() user: AuthUser,

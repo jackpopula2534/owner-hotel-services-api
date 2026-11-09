@@ -1,0 +1,38 @@
+PASS src/common/guards/platform-admin-routes.spec.ts (6.105 s)
+  platform-admin endpoints require PlatformAdminGuard
+    ✓ [Function AdminAnalyticsController]: every route (2 ms)
+    ✓ [Function DatabaseOptimizationController]: every route
+    ✓ [Function QueueMonitorController]: every route (1 ms)
+    ✓ [Function DunningController]: every route
+    ✓ [Function CouponsController]: every /admin route
+    ✓ [Function AnnouncementsController]: every /admin route
+    ✓ [Function DataExportController]: every /admin route
+    ✓ impersonation: start + list need platform admin; end stays open (service checks originator) (1 ms)
+    ✓ PlatformAdminGuard refuses a tenant user (7 ms)
+
+PASS src/modules/auth/strategies/jwt.strategy.spec.ts
+  JwtStrategy
+    ✓ should be defined (3 ms)
+    validate
+      ✓ throws UnauthorizedException when payload is empty
+      ✓ rejects the 2FA hand-off token used as a bearer token (1 ms)
+      ✓ rejects any typed token, not just 2fa_pending (1 ms)
+      ✓ returns claims for platform admin without hitting DB
+      ✓ returns claims for an active user (1 ms)
+      ✓ rejects a token whose tenantId is missing while the account has a tenant
+      ✓ rejects a token for another tenant than the account (stale after switch / forged) (1 ms)
+      ✓ rejects the old impersonation token shape (tenant_id, no tenantId) (1 ms)
+      ✓ accepts a token whose tenantId matches the account
+      ✓ throws when user is not found in DB (4 ms)
+      ✓ throws specific message for status=suspended (1 ms)
+      ✓ throws specific message for status=expired
+      ✓ throws specific message for status=inactive (1 ms)
+      ✓ throws specific message for status=locked
+      ✓ throws when expiresAt is in the past
+      ✓ lets the token pass when DB query throws (graceful degradation) (1 ms)
+
+Test Suites: 2 passed, 2 total
+Tests:       26 passed, 26 total
+Snapshots:   0 total
+Time:        6.577 s
+Ran all test suites matching /src\/common\/guards\/platform-admin-routes.spec.ts|src\/modules\/auth\/strategies\/jwt.strategy.spec.ts/i.

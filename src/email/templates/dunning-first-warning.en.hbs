@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="th"><head><meta charset="UTF-8"><title>แจ้งเตือนครั้งที่ 1 — {{invoiceNo}}</title></head>
+<body style="margin:0;padding:0;font-family:'Sarabun',Arial,sans-serif;background:#f4f4f4;">
+<table width="100%" style="background:#f4f4f4;padding:24px 0;"><tr><td align="center">
+<table width="600" style="background:#ffffff;border-radius:12px;overflow:hidden;">
+<tr><td style="background:linear-gradient(135deg,#f97316 0%,#ea580c 100%);padding:28px;text-align:center;">
+  <h1 style="color:#ffffff;margin:0;font-size:22px;">⚠️ แจ้งเตือนครั้งที่ 1</h1>
+  <p style="color:rgba(255,255,255,0.95);margin:6px 0 0 0;">ใบแจ้งหนี้เกินกำหนด {{daysOverdue}} วัน</p>
+</td></tr>
+<tr><td style="padding:32px;">
+  <p style="color:#333;">เรียน {{customerName}},</p>
+  <p style="color:#555;line-height:1.7;">
+    ใบแจ้งหนี้ <b>{{invoiceNo}}</b> จำนวน <b>฿{{amount}}</b>
+    เกินกำหนดชำระมาแล้ว <b>{{daysOverdue}} วัน</b>
+  </p>
+  <p style="color:#555;line-height:1.7;">
+    หากไม่ชำระภายในวันที่ <b>{{gracePeriodEnd}}</b>
+    บัญชีของคุณอาจถูกระงับการใช้งานชั่วคราว
+  </p>
+  <table width="100%" style="margin:24px 0;"><tr><td align="center">
+    <a href="{{payInvoiceUrl}}" style="display:inline-block;background:#ea580c;color:#fff;padding:14px 36px;border-radius:8px;text-decoration:none;font-weight:600;">ชำระเงินตอนนี้</a>
+  </td></tr></table>
+  <p style="color:#777;font-size:14px;">ติดต่อสอบถาม: support@staysync.com</p>
+</td></tr>
+<tr><td style="background:#f9fafb;padding:16px;text-align:center;color:#9ca3af;font-size:12px;">StaySync — Hotel Management</td></tr>
+</table></td></tr></table></body></html>

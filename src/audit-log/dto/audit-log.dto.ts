@@ -7,6 +7,7 @@ export enum AuditAction {
   LOGOUT = 'logout',
   LOGIN_FAILED = 'login_failed',
   PASSWORD_RESET = 'password_reset',
+  PASSWORD_CHANGE = 'password_change',
   TWO_FA_ENABLED = '2fa_enabled',
   TWO_FA_DISABLED = '2fa_disabled',
 
@@ -23,6 +24,7 @@ export enum AuditAction {
   BOOKING_CANCEL = 'booking_cancel',
   BOOKING_CHECKIN = 'booking_checkin',
   BOOKING_CHECKOUT = 'booking_checkout',
+  BOOKING_CHECKOUT_UNDO = 'booking_checkout_undo',
   BOOKING_EARLY_CHECKIN_REQUEST = 'booking_early_checkin_request',
   BOOKING_EARLY_CHECKIN_APPROVE = 'booking_early_checkin_approve',
   BOOKING_LATE_CHECKOUT_REQUEST = 'booking_late_checkout_request',
@@ -98,6 +100,82 @@ export enum AuditAction {
   USER_CREATE = 'user_create',
   USER_UPDATE = 'user_update',
   USER_DELETE = 'user_delete',
+  USER_STATUS_CHANGE = 'user_status_change',
+  USER_SUSPEND = 'user_suspend',
+  USER_ACTIVATE = 'user_activate',
+  USER_DEACTIVATE = 'user_deactivate',
+  USER_EXPIRATION_SET = 'user_expiration_set',
+  USER_AUTO_EXPIRED = 'user_auto_expired',
+
+  // Tenant user management (unified /tenant-users API) — dotted names per API contract
+  TENANT_USER_CREATE = 'user.create',
+  TENANT_USER_UPDATE = 'user.update',
+  TENANT_USER_ACCESS_GRANT = 'user.access.grant',
+  TENANT_USER_ACCESS_REVOKE = 'user.access.revoke',
+  TENANT_USER_SUSPEND = 'user.suspend',
+  TENANT_USER_ACTIVATE = 'user.activate',
+  TENANT_USER_DELETE = 'user.delete',
+  TENANT_USER_PASSWORD_RESET = 'user.password.reset',
+  TENANT_USER_IMPORT = 'user.import',
+
+  // Procurement — Price Comparison approval workflow
+  PRICE_COMPARISON_SUBMITTED = 'price_comparison_submitted',
+  PRICE_COMPARISON_APPROVED = 'price_comparison_approved',
+  PRICE_COMPARISON_REJECTED = 'price_comparison_rejected',
+
+  // HR — Phase 1 operational flows
+  SHIFT_ASSIGN = 'shift_assign',
+  SHIFT_UPDATE = 'shift_update',
+  ATTENDANCE_EXCEPTION_SUBMIT = 'attendance_exception_submit',
+  ATTENDANCE_EXCEPTION_APPROVE = 'attendance_exception_approve',
+  ATTENDANCE_EXCEPTION_REJECT = 'attendance_exception_reject',
+  OVERTIME_REQUEST = 'overtime_request',
+  OVERTIME_APPROVE = 'overtime_approve',
+  OVERTIME_REJECT = 'overtime_reject',
+  PAYROLL_RUN = 'payroll_run',
+  PAYROLL_UPDATE = 'payroll_update',
+  PAYROLL_APPROVE = 'payroll_approve',
+  PAYROLL_PAID = 'payroll_paid',
+  PAYROLL_CANCEL = 'payroll_cancel',
+  PAYROLL_POLICY_UPDATE = 'payroll_policy_update',
+
+  // HR — Phase 2 lifecycle & compliance
+  EMPLOYEE_DOCUMENT_UPLOAD = 'employee_document_upload',
+  EMPLOYEE_DOCUMENT_DELETE = 'employee_document_delete',
+  ONBOARDING_UPDATE = 'onboarding_update',
+  PROBATION_DECISION = 'probation_decision',
+  LEAVE_APPROVE_STEP = 'leave_approve_step',
+  OFFBOARDING_INITIATE = 'offboarding_initiate',
+  OFFBOARDING_COMPLETE = 'offboarding_complete',
+  EMPLOYEE_ACCOUNT_REVOKE = 'employee_account_revoke',
+
+  // HR — Phase 3
+  TRAINING_RECORD_UPDATE = 'training_record_update',
+
+  // HR — Recruitment → Probation pipeline (2026-06-10)
+  MANPOWER_SUBMIT = 'manpower_submit',
+  MANPOWER_APPROVE_STEP = 'manpower_approve_step',
+  MANPOWER_REJECT = 'manpower_reject',
+  BUDGET_SUBMIT = 'budget_submit',
+  BUDGET_APPROVE_STEP = 'budget_approve_step',
+  BUDGET_REJECT = 'budget_reject',
+  EQUIPMENT_REQUEST_SUBMIT = 'equipment_request_submit',
+  EQUIPMENT_REQUEST_UPDATE = 'equipment_request_update',
+  EQUIPMENT_REQUEST_APPROVE_STEP = 'equipment_request_approve_step',
+  EQUIPMENT_REQUEST_REJECT = 'equipment_request_reject',
+  INTERVIEW_SCHEDULE = 'interview_schedule',
+  INTERVIEW_RESULT = 'interview_result',
+  OFFER_MADE = 'offer_made',
+  CANDIDATE_HIRE = 'candidate_hire',
+  EQUIPMENT_ISSUE = 'equipment_issue',
+  EQUIPMENT_ACKNOWLEDGE = 'equipment_acknowledge',
+  PROBATION_OPEN = 'probation_open',
+  PROBATION_CHECKPOINT_REVIEW = 'probation_checkpoint_review',
+  // HR — Recruitment redesign (2026-11-02)
+  MANPOWER_RETURN = 'manpower_return',
+  MANPOWER_REMIND = 'manpower_remind',
+  BUDGET_DECLINE = 'budget_decline',
+  POSITION_KIT_UPDATE = 'position_kit_update',
 }
 
 export enum AuditResource {
@@ -120,6 +198,25 @@ export enum AuditResource {
   ORDER = 'order',
   MENU = 'menu',
   STAFF = 'staff',
+  PRICE_COMPARISON = 'price_comparison',
+  SHIFT_ASSIGNMENT = 'shift_assignment',
+  ATTENDANCE_EXCEPTION = 'attendance_exception',
+  OVERTIME_REQUEST = 'overtime_request',
+  PAYROLL = 'payroll',
+  PAYROLL_POLICY = 'payroll_policy',
+  EMPLOYEE_DOCUMENT = 'employee_document',
+  ONBOARDING = 'onboarding',
+  PROBATION = 'probation',
+  LEAVE_REQUEST = 'leave_request',
+  OFFBOARDING = 'offboarding',
+  TRAINING_RECORD = 'training_record',
+  MANPOWER_REQUEST = 'manpower_request',
+  EQUIPMENT_REQUEST = 'equipment_request',
+  CANDIDATE = 'candidate',
+  INTERVIEW = 'interview',
+  HIRE_RECORD = 'hire_record',
+  EQUIPMENT_ISSUANCE = 'equipment_issuance',
+  PRODUCT_CHANGE_REQUEST = 'product_change_request',
 }
 
 /** Category tags for grouping audit logs by system area */
@@ -137,6 +234,8 @@ export enum AuditCategory {
   PROPERTIES = 'properties',
   SETTINGS = 'settings',
   USERS = 'users',
+  USER_MANAGEMENT = 'user-management',
+  PROCUREMENT = 'procurement',
   GENERAL = 'general',
 }
 

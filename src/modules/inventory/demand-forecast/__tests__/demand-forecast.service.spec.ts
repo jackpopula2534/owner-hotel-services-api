@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
 import { DemandForecastService } from '../demand-forecast.service';
 import { PrismaService } from '@/prisma/prisma.service';
+import { withPrismaFallback } from '@/common/test';
 
 describe('DemandForecastService', () => {
   let service: DemandForecastService;
@@ -10,7 +11,7 @@ describe('DemandForecastService', () => {
   const mockTenantId = 'tenant-123';
   const mockPropertyId = 'property-456';
 
-  const mockPrismaService = {
+  const mockPrismaService = withPrismaFallback({
     booking: {
       findMany: jest.fn(),
     },
@@ -20,7 +21,13 @@ describe('DemandForecastService', () => {
     roomType: {
       findMany: jest.fn(),
     },
-  };
+    room: {
+      findMany: jest.fn(),
+    },
+    roomTypeAmenityTemplate: {
+      findMany: jest.fn(),
+    },
+  });
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -57,6 +64,7 @@ describe('DemandForecastService', () => {
           status: 'CONFIRMED',
           room: {
             id: 'room-1',
+            type: 'Deluxe Room',
             roomTypeId: 'roomtype-1',
             roomType: {
               id: 'roomtype-1',
@@ -80,6 +88,15 @@ describe('DemandForecastService', () => {
       ];
 
       mockPrismaService.booking.findMany.mockResolvedValue(mockBookings);
+      mockPrismaService.roomTypeAmenityTemplate.findMany.mockResolvedValue(
+        mockBookings.flatMap((b) =>
+          ((b.room.roomType as any).roomTypeAmenityTemplates || []).map((t: any) => ({
+            ...t,
+            roomType: b.room.type,
+            item: t.amenity,
+          })),
+        ),
+      );
       mockPrismaService.warehouseStock.aggregate.mockResolvedValue({
         _sum: { quantity: 5 },
       });
@@ -126,22 +143,7 @@ describe('DemandForecastService', () => {
           },
         },
         include: {
-          room: {
-            include: {
-              roomType: {
-                include: {
-                  roomTypeAmenityTemplates: {
-                    where: {
-                      taskType: 'checkout',
-                    },
-                    include: {
-                      amenity: true,
-                    },
-                  },
-                },
-              },
-            },
-          },
+          room: true,
         },
       });
     });
@@ -159,6 +161,7 @@ describe('DemandForecastService', () => {
           status: 'CONFIRMED',
           room: {
             id: 'room-1',
+            type: 'Deluxe Room',
             roomTypeId: 'roomtype-1',
             roomType: {
               id: 'roomtype-1',
@@ -182,6 +185,15 @@ describe('DemandForecastService', () => {
       ];
 
       mockPrismaService.booking.findMany.mockResolvedValue(mockBookings);
+      mockPrismaService.roomTypeAmenityTemplate.findMany.mockResolvedValue(
+        mockBookings.flatMap((b) =>
+          ((b.room.roomType as any).roomTypeAmenityTemplates || []).map((t: any) => ({
+            ...t,
+            roomType: b.room.type,
+            item: t.amenity,
+          })),
+        ),
+      );
       mockPrismaService.warehouseStock.aggregate.mockResolvedValue({
         _sum: { quantity: 5 },
       });
@@ -219,6 +231,7 @@ describe('DemandForecastService', () => {
           status: 'CONFIRMED',
           room: {
             id: 'room-1',
+            type: 'Deluxe Room',
             roomTypeId: 'roomtype-1',
             roomType: {
               id: 'roomtype-1',
@@ -270,6 +283,15 @@ describe('DemandForecastService', () => {
       ];
 
       mockPrismaService.booking.findMany.mockResolvedValue(mockBookings);
+      mockPrismaService.roomTypeAmenityTemplate.findMany.mockResolvedValue(
+        mockBookings.flatMap((b) =>
+          ((b.room.roomType as any).roomTypeAmenityTemplates || []).map((t: any) => ({
+            ...t,
+            roomType: b.room.type,
+            item: t.amenity,
+          })),
+        ),
+      );
       mockPrismaService.warehouseStock.aggregate.mockResolvedValue({
         _sum: { quantity: 2 },
       });
@@ -299,6 +321,7 @@ describe('DemandForecastService', () => {
           status: 'CONFIRMED',
           room: {
             id: 'room-1',
+            type: 'Deluxe Room',
             roomTypeId: 'roomtype-1',
             roomType: {
               id: 'roomtype-1',
@@ -310,6 +333,15 @@ describe('DemandForecastService', () => {
       ];
 
       mockPrismaService.booking.findMany.mockResolvedValue(mockBookings);
+      mockPrismaService.roomTypeAmenityTemplate.findMany.mockResolvedValue(
+        mockBookings.flatMap((b) =>
+          ((b.room.roomType as any).roomTypeAmenityTemplates || []).map((t: any) => ({
+            ...t,
+            roomType: b.room.type,
+            item: t.amenity,
+          })),
+        ),
+      );
 
       const result = await service.forecastByDateRange(
         mockTenantId,
@@ -392,14 +424,28 @@ describe('DemandForecastService', () => {
           status: 'CONFIRMED',
           room: {
             id: 'room-1',
+            type: 'Deluxe Room',
             roomTypeId: 'roomtype-1',
             roomType: { id: 'roomtype-1', name: 'Deluxe Room' },
           },
         },
       ];
 
-      mockPrismaService.roomType.findMany.mockResolvedValue(mockRoomTypes);
+      mockPrismaService.room.findMany.mockResolvedValue(
+        mockRoomTypes.flatMap((rt) =>
+          rt.rooms.map((r) => ({ id: r.id, type: rt.name, propertyId: rt.propertyId })),
+        ),
+      );
       mockPrismaService.booking.findMany.mockResolvedValue(mockBookings);
+      mockPrismaService.roomTypeAmenityTemplate.findMany.mockResolvedValue(
+        mockBookings.flatMap((b) =>
+          ((b.room.roomType as any).roomTypeAmenityTemplates || []).map((t: any) => ({
+            ...t,
+            roomType: b.room.type,
+            item: t.amenity,
+          })),
+        ),
+      );
 
       const result = await service.getOccupancyForecast(
         mockTenantId,
@@ -440,7 +486,11 @@ describe('DemandForecastService', () => {
         },
       ];
 
-      mockPrismaService.roomType.findMany.mockResolvedValue(mockRoomTypes);
+      mockPrismaService.room.findMany.mockResolvedValue(
+        mockRoomTypes.flatMap((rt) =>
+          rt.rooms.map((r) => ({ id: r.id, type: rt.name, propertyId: rt.propertyId })),
+        ),
+      );
       mockPrismaService.booking.findMany.mockResolvedValue([]);
 
       const result = await service.getOccupancyForecast(
@@ -460,7 +510,7 @@ describe('DemandForecastService', () => {
       const startDate = '2026-04-15';
       const endDate = '2026-04-22';
 
-      mockPrismaService.roomType.findMany.mockResolvedValue([]);
+      mockPrismaService.room.findMany.mockResolvedValue([]);
       mockPrismaService.booking.findMany.mockResolvedValue([]);
 
       const result = await service.getOccupancyForecast(

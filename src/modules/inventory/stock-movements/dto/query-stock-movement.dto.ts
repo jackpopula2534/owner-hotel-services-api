@@ -36,6 +36,20 @@ export class QueryStockMovementDto {
   itemId?: string;
 
   @ApiPropertyOptional({
+    description: 'Search by item name, SKU, barcode, note, or reference ID',
+  })
+  @IsOptional()
+  @IsString()
+  search?: string;
+
+  @ApiPropertyOptional({
+    description: 'Filter by inventory item category ID',
+  })
+  @IsOptional()
+  @IsString()
+  categoryId?: string;
+
+  @ApiPropertyOptional({
     enum: StockMovementTypeDto,
     description: 'Filter by movement type',
   })

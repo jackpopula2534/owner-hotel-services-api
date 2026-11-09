@@ -1,0 +1,76 @@
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  Put,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ZonesService } from './zones.service';
+import { CreateZoneDto, UpdateZoneDto } from './dto/zone.dto';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { AddonGuard } from '../../common/guards/addon.guard';
+import { RequireAddon } from '../../common/decorators/require-addon.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { CAMP_READ_ROLES, CAMP_MASTER_WRITE_ROLES } from './camp-roles';
+
+
+@ApiTags('camp-zones')
+@ApiBearerAuth('JWT-auth')
+// Camp Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('camp-terminal')
+@Controller({ path: 'camp/zones', version: '1' })
+@UseGuards(JwtAuthGuard, RolesGuard, AddonGuard)
+@RequireAddon('CAMP_MODULE')
+export class ZonesController {
+  constructor(private readonly service: ZonesService) {}
+
+  @Get()
+  @ApiOperation({ summary: 'List zones by campgroundId' })
+  @Roles(...CAMP_READ_ROLES)
+  findAll(
+    @Query('campgroundId') campgroundId: string,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    return this.service.findAll(campgroundId, user?.tenantId);
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Get zone by id' })
+  @Roles(...CAMP_READ_ROLES)
+  findOne(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
+    return this.service.findOne(id, user?.tenantId);
+  }
+
+  @Post()
+  @ApiOperation({ summary: 'Create zone' })
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
+  create(@Body() dto: CreateZoneDto, @CurrentUser() user: { tenantId?: string }) {
+    return this.service.create(dto, user?.tenantId);
+  }
+
+  @Put(':id')
+  @ApiOperation({ summary: 'Update zone' })
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateZoneDto,
+    @CurrentUser() user: { tenantId?: string },
+  ) {
+    return this.service.update(id, dto, user?.tenantId);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Delete zone' })
+  @Roles(...CAMP_MASTER_WRITE_ROLES)
+  remove(@Param('id') id: string, @CurrentUser() user: { tenantId?: string }) {
+    return this.service.remove(id, user?.tenantId);
+  }
+}

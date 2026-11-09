@@ -1,17 +1,35 @@
-import {
-  Injectable,
-  NotFoundException,
-  BadRequestException,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
+import {
+  ApprovalActor,
+  assertCanApproveProcurement,
+  assertCanCancelProcurement,
+} from '../common/approval-access';
 import { CreatePurchaseRequisitionDto } from './dto/create-purchase-requisition.dto';
 import { UpdatePurchaseRequisitionDto } from './dto/update-purchase-requisition.dto';
 import {
   QueryPurchaseRequisitionDto,
   PurchaseRequisitionStatus,
 } from './dto/query-purchase-requisition.dto';
+import {
+  ReceiveRow,
+  fulfillmentByItem,
+  mapLinkedReceives,
+  summariseFulfillment,
+} from './pr-fulfillment.util';
+import { createdAtRange } from '../common/created-at-range';
+
+/** An RFQ this PR was sent out in — just what the progress tracker needs. */
+interface RfqLinkRow {
+  id: string;
+  rfqNumber: string;
+  status: string;
+  round: number;
+  deadline: Date | null;
+  createdAt: Date;
+  recipients: { respondedAt: Date | null; declinedAt: Date | null }[];
+}
 
 @Injectable()
 export class PurchaseRequisitionsService {
@@ -22,13 +40,21 @@ export class PurchaseRequisitionsService {
   /**
    * Resolve user UUIDs to full names (firstName + lastName).
    * Returns a Map<userId, fullName>.
+   *
+   * Scoped by tenant. Most of the IDs passed here are written by the server from
+   * the caller's own token, but `paidBy` on a linked receipt is client-supplied
+   * and its column carries no foreign key — an unfiltered lookup would render
+   * another tenant's name and email back onto this document.
    */
-  private async resolveUserNames(userIds: (string | null | undefined)[]): Promise<Map<string, string>> {
+  private async resolveUserNames(
+    userIds: (string | null | undefined)[],
+    tenantId: string,
+  ): Promise<Map<string, string>> {
     const validIds = userIds.filter((id): id is string => !!id);
     if (validIds.length === 0) return new Map();
 
     const users = await this.prisma.user.findMany({
-      where: { id: { in: validIds } },
+      where: { id: { in: validIds }, tenantId },
       select: { id: true, firstName: true, lastName: true, email: true },
     });
 
@@ -57,11 +83,8 @@ export class PurchaseRequisitionsService {
       ...(query.status && { status: query.status }),
       ...(query.priority && { priority: query.priority }),
       ...(query.requestedBy && { requestedBy: query.requestedBy }),
-      ...(query.startDate && {
-        createdAt: { gte: new Date(query.startDate) },
-      }),
-      ...(query.endDate && {
-        createdAt: { lte: new Date(query.endDate) },
+      ...((query.startDate || query.endDate) && {
+        createdAt: createdAtRange(query.startDate, query.endDate),
       }),
       ...(query.search && {
         prNumber: { contains: query.search },
@@ -86,6 +109,13 @@ export class PurchaseRequisitionsService {
           requestedBy: true,
           approvedBy: true,
           approvedAt: true,
+          // ใบที่ปิดเพราะไปซื้อเองแล้ว กับใบที่ปิดทิ้ง มีสถานะเดียวกันคือ CLOSED
+          // ถ้าไม่ส่งจำนวนใบรับของมาด้วย หน้ารายการก็แยกสองอย่างนี้ไม่ออก
+          // (จำกัดที่ tenant เดียวกัน — ใบรับของถือ tenantId ของตัวเอง)
+          goodsReceives: {
+            where: { tenantId, source: 'CASH_PURCHASE' },
+            select: { id: true },
+          },
           _count: {
             select: { items: true, supplierQuotes: true },
           },
@@ -97,7 +127,7 @@ export class PurchaseRequisitionsService {
 
     // Resolve user names for approvedBy and requestedBy
     const userIds = data.flatMap((pr) => [pr.requestedBy, pr.approvedBy]);
-    const userNameMap = await this.resolveUserNames(userIds);
+    const userNameMap = await this.resolveUserNames(userIds, tenantId);
 
     return {
       data: data.map((pr) => ({
@@ -116,6 +146,7 @@ export class PurchaseRequisitionsService {
         approvedByName: pr.approvedBy ? userNameMap.get(pr.approvedBy) || null : null,
         approvedAt: pr.approvedAt,
         itemCount: pr._count.items,
+        cashPurchaseCount: (pr.goodsReceives ?? []).length,
         _count: {
           items: pr._count.items,
           supplierQuotes: pr._count.supplierQuotes,
@@ -126,8 +157,8 @@ export class PurchaseRequisitionsService {
   }
 
   async findOne(id: string, tenantId: string): Promise<unknown> {
-    const pr = await this.prisma.purchaseRequisition.findUnique({
-      where: { id },
+    const pr = await this.prisma.purchaseRequisition.findFirst({
+      where: { id, tenantId },
       include: {
         items: {
           select: {
@@ -168,6 +199,69 @@ export class PurchaseRequisitionsService {
             },
           },
         },
+        // The kitchen documents parked on this PR. Without this the link only
+        // runs one way and procurement cannot see who is waiting on the goods.
+        materialRequisitions: {
+          select: {
+            id: true,
+            reqNumber: true,
+            status: true,
+            createdAt: true,
+            _count: { select: { items: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+        },
+        // ใบรับของที่ผูกกับใบนี้ — ส่วนใหญ่คือ "ไปซื้อเอง" ที่ข้ามขั้น RFQ/PO ไป
+        // ถ้าไม่ดึงมา หน้ารายละเอียดจะบอกได้แค่ว่าใบนี้ปิดแล้ว แต่ตอบไม่ได้ว่า
+        // ของมาถึงคลังหรือยัง ซึ่งเป็นคำถามเดียวที่คนเปิดใบที่ปิดแล้วอยากรู้
+        goodsReceives: {
+          where: { tenantId },
+          select: {
+            id: true,
+            grNumber: true,
+            receiveDate: true,
+            status: true,
+            source: true,
+            vendorName: true,
+            paymentMethod: true,
+            hasNoReceipt: true,
+            invoiceNumber: true,
+            totalAmount: true,
+            paidBy: true,
+            warehouse: { select: { name: true } },
+            items: {
+              select: {
+                itemId: true,
+                receivedQty: true,
+                unitCost: true,
+                totalCost: true,
+              },
+            },
+          },
+          orderBy: { receiveDate: 'desc' },
+        },
+        // แถบขั้นตอนในหน้ารายละเอียด — ใบนี้ไปถึง RFQ / PO ไหนแล้ว
+        purchaseOrders: {
+          where: { tenantId },
+          select: { id: true, poNumber: true, status: true, expectedDate: true, createdAt: true },
+          orderBy: { createdAt: 'desc' },
+        },
+        rfqLinks: {
+          select: {
+            requestForQuotation: {
+              select: {
+                id: true,
+                rfqNumber: true,
+                status: true,
+                round: true,
+                deadline: true,
+                createdAt: true,
+                recipients: { select: { respondedAt: true, declinedAt: true } },
+              },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+        },
       },
     });
 
@@ -175,12 +269,17 @@ export class PurchaseRequisitionsService {
       throw new NotFoundException('Purchase requisition not found');
     }
 
-    // Resolve user names for requestedBy, approvedBy, cancelledBy
-    const userNameMap = await this.resolveUserNames([
-      pr.requestedBy,
-      pr.approvedBy,
-      pr.cancelledBy,
-    ]);
+    const receives = ((pr as { goodsReceives?: ReceiveRow[] }).goodsReceives ?? []) as ReceiveRow[];
+
+    // Resolve user names for requestedBy, approvedBy, cancelledBy — plus whoever
+    // fronted the money on each linked receipt, which is the one name a reader of
+    // a market-run document actually needs.
+    const userNameMap = await this.resolveUserNames(
+      [pr.requestedBy, pr.approvedBy, pr.cancelledBy, ...receives.map((r) => r.paidBy)],
+      tenantId,
+    );
+
+    const received = fulfillmentByItem(receives);
 
     return {
       id: pr.id,
@@ -214,7 +313,14 @@ export class PurchaseRequisitionsService {
         specifications: item.specifications,
         preferredSupplierId: item.preferredSupplierId,
         notes: item.notes,
+        // ราคาที่จ่ายจริง มาแทนคำว่า "รอใบเสนอราคา" ได้เมื่อของถึงคลังแล้ว
+        // ประมาณการที่ยังค้างอยู่ข้าง ๆ ราคาจริงคือข้อมูลที่ขัดกันเอง
+        receivedQty: received.get(item.itemId)?.receivedQty ?? 0,
+        actualUnitCost: received.get(item.itemId)?.actualUnitCost ?? null,
+        actualTotalCost: received.get(item.itemId)?.actualTotalCost ?? 0,
       })),
+      goodsReceives: mapLinkedReceives(receives, userNameMap),
+      fulfillment: summariseFulfillment(pr.items, receives),
       supplierQuotes: pr.supplierQuotes.map((quote) => ({
         id: quote.id,
         supplierId: quote.supplierId,
@@ -222,6 +328,33 @@ export class PurchaseRequisitionsService {
         quotedDate: quote.quotedDate,
         totalAmount: quote.totalAmount,
         itemCount: quote.items.length,
+      })),
+      // Newest first. The progress tracker reads the latest RFQ / PO of this PR.
+      purchaseOrders: ((pr as { purchaseOrders?: unknown[] }).purchaseOrders ?? []) as {
+        id: string;
+        poNumber: string;
+        status: string;
+        expectedDate: Date | null;
+        createdAt: Date;
+      }[],
+      rfqs: ((pr as { rfqLinks?: { requestForQuotation: RfqLinkRow }[] }).rfqLinks ?? [])
+        .map((l) => l.requestForQuotation)
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+        .map((r) => ({
+          id: r.id,
+          rfqNumber: r.rfqNumber,
+          status: r.status,
+          round: r.round,
+          deadline: r.deadline,
+          recipients: r.recipients.length,
+          responded: r.recipients.filter((x) => x.respondedAt).length,
+        })),
+      materialRequisitions: (pr.materialRequisitions ?? []).map((req) => ({
+        id: req.id,
+        reqNumber: req.reqNumber,
+        status: String(req.status),
+        createdAt: req.createdAt,
+        lineCount: req._count.items,
       })),
     };
   }
@@ -232,8 +365,8 @@ export class PurchaseRequisitionsService {
     tenantId: string,
   ): Promise<unknown> {
     // Validate that property exists
-    const property = await this.prisma.property.findUnique({
-      where: { id: dto.propertyId },
+    const property = await this.prisma.property.findFirst({
+      where: { id: dto.propertyId, tenantId },
     });
 
     if (!property || property.tenantId !== tenantId) {
@@ -276,12 +409,7 @@ export class PurchaseRequisitionsService {
     // Create in transaction: generate PR number, create PR and items
     const pr = await this.prisma.$transaction(async (tx) => {
       // Generate PR number
-      const prNumber = await this.generateDocNumber(
-        tenantId,
-        'PURCHASE_REQUISITION',
-        'PR',
-        tx,
-      );
+      const prNumber = await this.generateDocNumber(tenantId, 'PURCHASE_REQUISITION', 'PR', tx);
 
       // Create purchase requisition
       const newPr = await tx.purchaseRequisition.create({
@@ -316,19 +444,13 @@ export class PurchaseRequisitionsService {
       return newPr;
     });
 
-    this.logger.log(
-      `Purchase requisition created: ${pr.id} (${pr.prNumber}) by user ${userId}`,
-    );
+    this.logger.log(`Purchase requisition created: ${pr.id} (${pr.prNumber}) by user ${userId}`);
     return this.findOne(pr.id, tenantId);
   }
 
-  async update(
-    id: string,
-    dto: UpdatePurchaseRequisitionDto,
-    tenantId: string,
-  ): Promise<unknown> {
-    const pr = await this.prisma.purchaseRequisition.findUnique({
-      where: { id },
+  async update(id: string, dto: UpdatePurchaseRequisitionDto, tenantId: string): Promise<unknown> {
+    const pr = await this.prisma.purchaseRequisition.findFirst({
+      where: { id, tenantId },
     });
 
     if (!pr || pr.tenantId !== tenantId) {
@@ -384,9 +506,7 @@ export class PurchaseRequisitionsService {
         });
 
         if (existingSuppliers.length !== uniqueSupplierIds.length) {
-          throw new NotFoundException(
-            'One or more preferred suppliers not found',
-          );
+          throw new NotFoundException('One or more preferred suppliers not found');
         }
       }
     }
@@ -427,8 +547,8 @@ export class PurchaseRequisitionsService {
   }
 
   async submit(id: string, tenantId: string): Promise<unknown> {
-    const pr = await this.prisma.purchaseRequisition.findUnique({
-      where: { id },
+    const pr = await this.prisma.purchaseRequisition.findFirst({
+      where: { id, tenantId },
     });
 
     if (!pr || pr.tenantId !== tenantId) {
@@ -449,29 +569,24 @@ export class PurchaseRequisitionsService {
       },
     });
 
-    this.logger.log(
-      `Purchase requisition submitted for approval: ${id} (${updated.prNumber})`,
-    );
+    this.logger.log(`Purchase requisition submitted for approval: ${id} (${updated.prNumber})`);
     return this.findOne(updated.id, tenantId);
   }
 
-  async approve(
-    id: string,
-    userId: string,
-    tenantId: string,
-  ): Promise<unknown> {
-    const pr = await this.prisma.purchaseRequisition.findUnique({
-      where: { id },
+  async approve(id: string, actor: ApprovalActor): Promise<unknown> {
+    const { userId, tenantId } = actor;
+    const pr = await this.prisma.purchaseRequisition.findFirst({
+      where: { id, tenantId },
     });
 
     if (!pr || pr.tenantId !== tenantId) {
       throw new NotFoundException('Purchase requisition not found');
     }
 
+    await assertCanApproveProcurement(this.prisma, actor, 'pr.approve', pr.requestedBy);
+
     if (pr.status !== PurchaseRequisitionStatus.PENDING_APPROVAL) {
-      throw new BadRequestException(
-        'Only PENDING_APPROVAL purchase requisitions can be approved',
-      );
+      throw new BadRequestException('Only PENDING_APPROVAL purchase requisitions can be approved');
     }
 
     const updated = await this.prisma.purchaseRequisition.update({
@@ -484,19 +599,13 @@ export class PurchaseRequisitionsService {
       },
     });
 
-    this.logger.log(
-      `Purchase requisition approved: ${id} (${updated.prNumber}) by user ${userId}`,
-    );
+    this.logger.log(`Purchase requisition approved: ${id} (${updated.prNumber}) by user ${userId}`);
     return this.findOne(updated.id, tenantId);
   }
 
-  async requestQuotes(
-    id: string,
-    supplierIds: string[],
-    tenantId: string,
-  ): Promise<unknown> {
-    const pr = await this.prisma.purchaseRequisition.findUnique({
-      where: { id },
+  async requestQuotes(id: string, supplierIds: string[], tenantId: string): Promise<unknown> {
+    const pr = await this.prisma.purchaseRequisition.findFirst({
+      where: { id, tenantId },
     });
 
     if (!pr || pr.tenantId !== tenantId) {
@@ -504,9 +613,7 @@ export class PurchaseRequisitionsService {
     }
 
     if (pr.status !== PurchaseRequisitionStatus.APPROVED) {
-      throw new BadRequestException(
-        'Only APPROVED purchase requisitions can request quotes',
-      );
+      throw new BadRequestException('Only APPROVED purchase requisitions can request quotes');
     }
 
     if (!supplierIds || supplierIds.length === 0) {
@@ -555,19 +662,17 @@ export class PurchaseRequisitionsService {
     return this.findOne(updated.id, tenantId);
   }
 
-  async cancel(
-    id: string,
-    reason: string,
-    userId: string,
-    tenantId: string,
-  ): Promise<unknown> {
-    const pr = await this.prisma.purchaseRequisition.findUnique({
-      where: { id },
+  async cancel(id: string, reason: string, actor: ApprovalActor): Promise<unknown> {
+    const { userId, tenantId } = actor;
+    const pr = await this.prisma.purchaseRequisition.findFirst({
+      where: { id, tenantId },
     });
 
     if (!pr || pr.tenantId !== tenantId) {
       throw new NotFoundException('Purchase requisition not found');
     }
+
+    await assertCanCancelProcurement(this.prisma, actor, 'pr.approve', pr.requestedBy);
 
     const nonCancellableStatuses = [PurchaseRequisitionStatus.PO_CREATED];
 
@@ -600,10 +705,12 @@ export class PurchaseRequisitionsService {
     userId: string,
     tenantId: string,
   ): Promise<unknown> {
-    const pr = await this.prisma.purchaseRequisition.findUnique({
-      where: { id: prId },
+    const pr = await this.prisma.purchaseRequisition.findFirst({
+      where: { id: prId, tenantId },
       include: {
-        items: true,
+        // The item name is only here so an unquoted line can be named back to
+        // the buyer instead of leaving them with a UUID.
+        items: { include: { item: { select: { name: true } } } },
         supplierQuotes: {
           include: {
             items: true,
@@ -617,47 +724,70 @@ export class PurchaseRequisitionsService {
     }
 
     if (pr.status !== PurchaseRequisitionStatus.PENDING_QUOTES) {
-      throw new BadRequestException(
-        'Only PENDING_QUOTES purchase requisitions can create POs',
-      );
+      throw new BadRequestException('Only PENDING_QUOTES purchase requisitions can create POs');
     }
 
     // Verify selected quote exists and belongs to this PR
-    const selectedQuote = pr.supplierQuotes.find(
-      (quote) => quote.id === selectedQuoteId,
-    );
+    const selectedQuote = pr.supplierQuotes.find((quote) => quote.id === selectedQuoteId);
 
     if (!selectedQuote) {
       throw new NotFoundException('Selected quote not found for this PR');
     }
 
     // Verify warehouse exists
-    const warehouse = await this.prisma.warehouse.findUnique({
-      where: { id: warehouseId },
+    const warehouse = await this.prisma.warehouse.findFirst({
+      where: { id: warehouseId, tenantId },
     });
 
     if (!warehouse || warehouse.tenantId !== tenantId) {
       throw new NotFoundException('Warehouse not found');
     }
 
+    // A PR line the supplier never quoted has no price we are entitled to order
+    // at. Writing it anyway used to fall through to 0, putting a free line on a
+    // real purchase order — refuse instead and name what is missing.
+    const unquoted = pr.items.filter(
+      (prItem) => !selectedQuote.items.some((qi) => qi.itemId === prItem.itemId),
+    );
+    if (unquoted.length > 0) {
+      const names = unquoted
+        .slice(0, 3)
+        .map((prItem) => prItem.item?.name ?? prItem.itemId)
+        .join(', ');
+      throw new BadRequestException(
+        `ใบเสนอราคาที่เลือกไม่ได้เสนอราคา ${unquoted.length} รายการ (${names}` +
+          `${unquoted.length > 3 ? ' และอื่น ๆ' : ''}) — ` +
+          'กรุณาขอใบเสนอราคาเพิ่ม หรือตัดรายการออกจากใบขอซื้อก่อนออกใบสั่งซื้อ',
+      );
+    }
+
     // Create PO in transaction
     const result = await this.prisma.$transaction(async (tx) => {
       // Generate PO number
-      const poNumber = await this.generateDocNumber(
-        tenantId,
-        'PURCHASE_ORDER',
-        'PO',
-        tx,
-      );
+      const poNumber = await this.generateDocNumber(tenantId, 'PURCHASE_ORDER', 'PO', tx);
 
-      // Calculate totals from quote items
-      let subtotal = 0;
-      let taxAmount = 0;
+      const taxAmount = 0;
 
-      selectedQuote.items.forEach((item) => {
-        subtotal += Number(item.totalPrice) || 0;
+      // PO lines come from the PR, so the header has to be summed from that same
+      // list — totalling the quote instead let a header disagree with the lines
+      // printed underneath it whenever the two documents were not identical.
+      const lines = pr.items.map((prItem) => {
+        // Safe: every PR item was checked against the quote above.
+        const quoteItem = selectedQuote.items.find((qi) => qi.itemId === prItem.itemId)!;
+        const unitPrice = Number(quoteItem.unitPrice);
+
+        return {
+          itemId: prItem.itemId,
+          quantity: prItem.quantity,
+          unitPrice,
+          discount: 0,
+          taxRate: 0,
+          totalPrice: Number(quoteItem.totalPrice) || unitPrice * prItem.quantity,
+          notes: prItem.notes,
+        };
       });
 
+      const subtotal = lines.reduce((sum, line) => sum + line.totalPrice, 0);
       const totalAmount = subtotal + taxAmount;
 
       // Create purchase order
@@ -679,26 +809,8 @@ export class PurchaseRequisitionsService {
         },
       });
 
-      // Create PO items from PR items
-      const poItems = pr.items.map((prItem, index) => {
-        const quoteItem = selectedQuote.items.find(
-          (qi) => qi.itemId === prItem.itemId,
-        );
-
-        return {
-          purchaseOrderId: po.id,
-          itemId: prItem.itemId,
-          quantity: prItem.quantity,
-          unitPrice: quoteItem?.unitPrice || prItem.estimatedUnitPrice || 0,
-          discount: 0,
-          taxRate: 0,
-          totalPrice: quoteItem?.totalPrice || 0,
-          notes: prItem.notes,
-        };
-      });
-
       await tx.purchaseOrderItem.createMany({
-        data: poItems,
+        data: lines.map((line) => ({ ...line, purchaseOrderId: po.id })),
       });
 
       // Update PR status
@@ -718,8 +830,8 @@ export class PurchaseRequisitionsService {
     );
 
     // Return the PO details
-    return this.prisma.purchaseOrder.findUnique({
-      where: { id: result.id },
+    return this.prisma.purchaseOrder.findFirst({
+      where: { id: result.id, tenantId },
       include: {
         items: true,
         supplier: true,

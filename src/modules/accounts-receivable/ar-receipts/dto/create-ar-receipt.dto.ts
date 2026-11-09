@@ -1,0 +1,101 @@
+import {
+  IsNotEmpty,
+  IsOptional,
+  IsEnum,
+  IsUUID,
+  IsDateString,
+  IsNumber,
+  IsString,
+  IsArray,
+  ValidateNested,
+  Min,
+  MaxLength,
+} from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
+import { AccPaymentMethod } from '../../guest-folio/dto/create-folio-payment.dto';
+
+export class ArReceiptAllocationDto {
+  @ApiProperty({ description: 'AR Invoice ID ที่ต้องการ allocate' })
+  @IsNotEmpty()
+  @IsUUID()
+  invoiceId: string;
+
+  @ApiProperty({ description: 'จำนวนเงินที่จัดสรร', example: 2675.0 })
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
+  @Type(() => Number)
+  amount: number;
+}
+
+export class CreateArReceiptDto {
+  @ApiProperty({ description: 'Property ID' })
+  @IsNotEmpty()
+  @IsUUID()
+  propertyId: string;
+
+  @ApiProperty({ description: 'วันที่รับชำระ', example: '2025-01-15' })
+  @IsDateString()
+  receiptDate: string;
+
+  @ApiPropertyOptional({ description: 'Guest ID' })
+  @IsOptional()
+  @IsUUID()
+  guestId?: string;
+
+  @ApiPropertyOptional({ description: 'ชื่อบริษัท (กรณี City Ledger)' })
+  @IsOptional()
+  @IsString()
+  companyName?: string;
+
+  @ApiProperty({ description: 'วิธีชำระเงิน', enum: AccPaymentMethod })
+  @IsEnum(AccPaymentMethod)
+  method: AccPaymentMethod;
+
+  @ApiProperty({ description: 'ยอดรับชำระรวม', example: 5350.0 })
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
+  @Type(() => Number)
+  totalAmount: number;
+
+  @ApiPropertyOptional({
+    description: 'ภาษีที่ลูกค้าหัก ณ ที่จ่าย (ยอดตัดหนี้ได้ = ยอดรับ + ภาษีถูกหัก)',
+    example: 30.0,
+  })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Type(() => Number)
+  whtAmount?: number;
+
+  @ApiPropertyOptional({ description: 'เลขที่หนังสือรับรอง 50 ทวิ (ถ้าได้รับแล้ว)' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  whtCertNo?: string;
+
+  @ApiPropertyOptional({ description: 'วันที่ในหนังสือรับรอง 50 ทวิ' })
+  @IsOptional()
+  @IsDateString()
+  whtCertDate?: string;
+
+  @ApiPropertyOptional({ description: 'เลขที่อ้างอิง (Transaction ID, cheque no.)' })
+  @IsOptional()
+  @IsString()
+  reference?: string;
+
+  @ApiPropertyOptional({ description: 'หมายเหตุ' })
+  @IsOptional()
+  @IsString()
+  notes?: string;
+
+  @ApiPropertyOptional({
+    description: 'รายการ Invoice ที่ต้องการ allocate',
+    type: [ArReceiptAllocationDto],
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ArReceiptAllocationDto)
+  allocations?: ArReceiptAllocationDto[];
+}

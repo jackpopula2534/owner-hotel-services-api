@@ -18,6 +18,7 @@ export enum BillingEventType {
   CANCELLED = 'cancelled',
   REACTIVATED = 'reactivated',
   EXPIRED = 'expired',
+  TRIAL_REMINDER_SENT = 'trial_reminder_sent',
 }
 
 @Entity('billing_history')

@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { EmailEventsService } from '../email/email-events.service';
 import { InvoicesService } from '../invoices/invoices.service';
@@ -8,6 +9,9 @@ import { HousekeepingService } from '../modules/housekeeping/housekeeping.servic
 import { NotificationsService } from '../notifications/notifications.service';
 import { PaymentsService } from '../payments/payments.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { RevenuePostingService } from '../modules/revenue/revenue-posting.service';
+import { buildRevenuePostingStub } from '../modules/revenue/__tests__/revenue-posting.stub';
+import { mockEventEmitter } from '../common/test/mock-providers';
 
 describe('Booking -> Checkout -> Housekeeping integration flow', () => {
   let bookingsService: BookingsService;
@@ -31,9 +35,16 @@ describe('Booking -> Checkout -> Housekeeping integration flow', () => {
     guest: {
       findFirst: jest.fn(),
     },
+    // ราคาห้องดูวันหยุดของที่พัก — flow นี้ไม่มีวันหยุดพิเศษ
+    propertyHoliday: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     invoices: {
       findFirst: jest.fn(),
     },
+    // เช็คเอาต์เขียนสถานะการจองกับแถวรายได้ในทรานแซกชันเดียวกัน — mock ส่ง client
+    // ตัวเดิมกลับไปให้ callback ทำงานจริง
+    $transaction: jest.fn(async (run: (tx: unknown) => unknown) => run(prismaMock)),
     housekeepingTask: {
       create: jest.fn(),
       findFirst: jest.fn(),
@@ -77,6 +88,8 @@ describe('Booking -> Checkout -> Housekeeping integration flow', () => {
         { provide: LoyaltyService, useValue: loyaltyServiceMock },
         { provide: NotificationsService, useValue: notificationsServiceMock },
         { provide: PaymentsService, useValue: paymentsServiceMock },
+        { provide: EventEmitter2, useValue: mockEventEmitter() },
+        { provide: RevenuePostingService, useValue: buildRevenuePostingStub() },
       ],
     }).compile();
 
@@ -132,8 +145,8 @@ describe('Booking -> Checkout -> Housekeeping integration flow', () => {
     expect(prismaMock.booking.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          scheduledCheckIn: new Date('2026-04-10T14:00:00.000Z'),
-          scheduledCheckOut: new Date('2026-04-12T11:00:00.000Z'),
+          scheduledCheckIn: new Date('2026-04-10T07:00:00.000Z'),
+          scheduledCheckOut: new Date('2026-04-12T04:00:00.000Z'),
         }),
       }),
     );
@@ -170,10 +183,17 @@ describe('Booking -> Checkout -> Housekeeping integration flow', () => {
     const checkedOutBooking = await bookingsService.checkOut('booking-1', 'tenant-1');
 
     expect(checkedOutBooking.status).toBe('checked_out');
+    // dirty = ออกแล้วรอมอบหมายแม่บ้าน / cleaning = แม่บ้านรับงานแล้ว
     expect(prismaMock.room.update).toHaveBeenCalledWith({
       where: { id: 'room-1' },
-      data: { status: 'cleaning' },
+      data: { status: 'dirty' },
     });
+    // งานแม่บ้านถูกสั่งแบบไม่บล็อกการเช็คเอาต์ (fire-and-forget) และตอนนี้ createTask
+    // ต้อง await ตัวกันสร้างซ้ำก่อนถึงจะ create — ต้องปล่อยให้ microtask เดินจบก่อน
+    // ไม่งั้นเช็คตรงนี้เร็วกว่างานที่ยังค้างอยู่ในคิว
+    // (fake timers เปิดอยู่ setImmediate จึงถูกแทน ใช้ microtask ล้วน ๆ แทน)
+    for (let i = 0; i < 5; i += 1) await Promise.resolve();
+
     expect(prismaMock.housekeepingTask.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         roomId: 'room-1',

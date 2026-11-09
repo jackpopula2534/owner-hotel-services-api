@@ -1,6 +1,12 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+  Logger,
+} from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, In, IsNull, Not } from 'typeorm';
 import { SubscriptionFeature } from '../subscription-features/entities/subscription-feature.entity';
 import {
   SubscriptionFeatureLogs,
@@ -9,6 +15,7 @@ import {
 import { Subscription } from '../subscriptions/entities/subscription.entity';
 import { Feature } from '../features/entities/feature.entity';
 import { Invoice, InvoiceStatus } from '../invoices/entities/invoice.entity';
+import { AddonService } from '../modules/addons/addon.service';
 import {
   UpdateSubscriptionFeatureDto,
   RemoveSubscriptionFeatureDto,
@@ -39,6 +46,7 @@ export class AdminSubscriptionFeaturesService {
     private invoicesRepository: Repository<Invoice>,
     @InjectDataSource()
     private dataSource: DataSource,
+    private readonly addonService: AddonService,
   ) {}
 
   /**
@@ -49,7 +57,7 @@ export class AdminSubscriptionFeaturesService {
     // Find subscription by code or UUID
     const subscription = await this.findSubscription(subscriptionId);
 
-    // Get all features for this subscription
+    // Get add-ons purchased directly on this subscription.
     const features = await this.subscriptionFeaturesRepository.find({
       where: { subscriptionId: subscription.id, isActive: true },
       relations: ['feature'],
@@ -67,7 +75,90 @@ export class AdminSubscriptionFeaturesService {
       totalPrice: Number(sf.price) * (sf.quantity || 1),
       isActive: sf.isActive,
       createdAt: sf.createdAt?.toISOString().split('T')[0] || 'N/A',
+      source: 'subscription',
+      includedInPlan: false,
     }));
+
+    const planWithFeatures = subscription.planId
+      ? await this.dataSource
+          .getRepository(Feature)
+          .createQueryBuilder('feature')
+          .innerJoin('feature.planFeatures', 'planFeature', 'planFeature.planId = :planId', {
+            planId: subscription.planId,
+          })
+          .where('feature.isActive = :isActive', { isActive: true })
+          .orderBy('feature.displayOrder', 'ASC')
+          .addOrderBy('feature.name', 'ASC')
+          .getMany()
+      : [];
+
+    const includedFeatures: SubscriptionFeatureItemDto[] = planWithFeatures.map((feature) => ({
+      id: `plan-${subscription.planId}-${feature.id}`,
+      featureId: feature.id,
+      featureName: feature.name || 'Unknown',
+      featureDescription: feature.description || '',
+      featureType: feature.type || 'module',
+      quantity: 1,
+      price: 0,
+      totalPrice: 0,
+      isActive: true,
+      createdAt: subscription.createdAt?.toISOString().split('T')[0] || 'N/A',
+      source: 'plan',
+      includedInPlan: true,
+    }));
+
+    const planAddonsClient = (
+      this.dataSource as unknown as {
+        manager: {
+          query: (
+            sql: string,
+            params?: unknown[],
+          ) => Promise<
+            Array<{
+              addon_id: string;
+              code: string;
+              name: string;
+              description: string | null;
+              price: string | number | null;
+              is_active: number | boolean | null;
+              category: string | null;
+              system: string | null;
+            }>
+          >;
+        };
+      }
+    ).manager;
+
+    const bundledPlanAddons = subscription.planId
+      ? await planAddonsClient.query(
+          `SELECT a.id AS addon_id, a.code, a.name, a.description, a.price, a.is_active,
+                  a.category, a.system
+             FROM plan_addons pa
+             INNER JOIN add_ons a ON a.id = pa.addon_id
+             WHERE pa.plan_id = ?`,
+          [subscription.planId],
+        )
+      : [];
+
+    const includedAddons: SubscriptionFeatureItemDto[] = bundledPlanAddons
+      .filter((addon) => Number(addon.is_active) === 1)
+      .map((addon) => ({
+        id: `plan-addon-${subscription.planId}-${addon.addon_id}`,
+        featureId: addon.addon_id,
+        featureName: addon.name || 'Unknown',
+        featureDescription: addon.description || '',
+        featureType: 'module',
+        quantity: 1,
+        price: Number(addon.price || 0),
+        totalPrice: Number(addon.price || 0),
+        isActive: true,
+        createdAt: subscription.createdAt?.toISOString().split('T')[0] || 'N/A',
+        source: 'plan',
+        includedInPlan: true,
+        code: addon.code,
+        category: addon.category ?? null,
+        system: addon.system ?? 'BOTH',
+      }));
 
     const totalAddonPrice = addons.reduce((sum, a) => sum + a.totalPrice, 0);
     const planPrice = Number(subscription.plan?.priceMonthly || 0);
@@ -78,8 +169,14 @@ export class AdminSubscriptionFeaturesService {
         subscription.subscriptionCode || `SUB-${subscription.id.slice(0, 3).toUpperCase()}`,
       hotelName: subscription.tenant?.name || 'N/A',
       planName: subscription.plan?.name || 'No Plan',
+      planId: subscription.planId || undefined,
+      planCode: subscription.plan?.code || undefined,
+      // สายธุรกิจของแพ็กเกจ — หน้า Admin ใช้กรอง add-on ให้ตรงสายเหมือนหน้า "แผนบริการ"
+      planSystem: (subscription.plan?.system || 'HOTEL').toUpperCase(),
       planPrice,
       addons,
+      includedFeatures,
+      includedAddons,
       totalAddonPrice,
       totalMonthlyPrice: planPrice + totalAddonPrice,
     };
@@ -192,6 +289,7 @@ export class AdminSubscriptionFeaturesService {
     // Mark as inactive (soft delete)
     feature.isActive = false;
     await this.subscriptionFeaturesRepository.save(feature);
+    await this.invalidateEntitlements(feature.subscription?.tenantId);
 
     // Log the removal
     await this.createLog({
@@ -251,6 +349,17 @@ export class AdminSubscriptionFeaturesService {
       throw new NotFoundException(`Feature with ID "${dto.featureId}" not found`);
     }
 
+    // Product-line separation. `subscription_features` points at `features`, which
+    // carries no product line of its own, so the check runs against the module
+    // catalog: both the feature's own code (module-type features share the add-on
+    // code) and its parent module. Without it, "Add add-on" in Admin is a way to
+    // hand a hotel tenant the campground module — exactly the coupling we removed
+    // from the plans.
+    await this.addonService.assertAddonAllowedForTenant(subscription.tenantId, feature.code);
+    if (feature.moduleCode) {
+      await this.addonService.assertAddonAllowedForTenant(subscription.tenantId, feature.moduleCode);
+    }
+
     // Check if already exists and is active
     const existing = await this.subscriptionFeaturesRepository.findOne({
       where: {
@@ -298,6 +407,37 @@ export class AdminSubscriptionFeaturesService {
       const createInvoice = dto.createInvoice !== false; // Default to true
 
       if (createInvoice && proratedAmount > 0) {
+        // Block double-billing: no new subscription invoice while an
+        // outstanding (pending/finalized) one still exists for this tenant.
+        const outstanding = await queryRunner.manager.find(Invoice, {
+          where: {
+            tenantId: subscription.tenantId,
+            bookingId: IsNull(),
+            subscriptionId: Not(IsNull()),
+            status: In(['pending', 'finalized'] as InvoiceStatus[]),
+          },
+        });
+        if (outstanding.length > 0) {
+          const total = outstanding.reduce((sum, inv) => sum + Number(inv.amount), 0);
+          throw new ConflictException({
+            success: false,
+            error: {
+              code: 'OUTSTANDING_INVOICE_EXISTS',
+              message:
+                'มีใบแจ้งหนี้ที่ยังค้างชำระอยู่ กรุณาชำระหรือยกเลิกใบแจ้งหนี้เดิมก่อนจึงจะออกใบแจ้งหนี้ใหม่ได้',
+              outstandingCount: outstanding.length,
+              outstandingTotal: total,
+              invoices: outstanding.map((inv) => ({
+                id: inv.id,
+                invoiceNo: inv.invoiceNo,
+                amount: Number(inv.amount),
+                status: inv.status,
+                dueDate: inv.dueDate,
+              })),
+            },
+          });
+        }
+
         const invoice = await this.createAddonInvoiceWithTransaction(
           queryRunner,
           subscription,
@@ -329,6 +469,7 @@ export class AdminSubscriptionFeaturesService {
 
       // Commit transaction
       await queryRunner.commitTransaction();
+      await this.invalidateEntitlements(subscription.tenantId);
 
       this.logger.log(
         `Added feature ${feature.name} to subscription ${subscription.subscriptionCode || subscription.id}`,
@@ -451,6 +592,14 @@ export class AdminSubscriptionFeaturesService {
     // Prorated amount = (amount / totalDays) * remainingDays
     const prorated = Math.round((amount / totalDays) * remainingDays);
     return prorated;
+  }
+
+  /** ล้าง cache สิทธิ์ add-on (5 นาที) หลัง commit — ไม่งั้น tenant ยังติด gate/403 */
+  private async invalidateEntitlements(tenantId?: string): Promise<void> {
+    if (!tenantId) return;
+    await this.addonService.invalidateAddonCache(tenantId).catch((err) => {
+      this.logger.warn(`Failed to invalidate add-on cache for tenant ${tenantId}: ${err.message}`);
+    });
   }
 
   /**

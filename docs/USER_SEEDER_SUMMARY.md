@@ -10,7 +10,7 @@
 
 ```
 Frontend (Next.js)  →  Backend (NestJS API)  →  Database (MySQL)
-Port 3000              Port 9011                Port 8889
+Port 3000              Port 9011                Port 3306
 ```
 
 **Test Accounts จะใช้ได้ก็ต่อเมื่อ:**

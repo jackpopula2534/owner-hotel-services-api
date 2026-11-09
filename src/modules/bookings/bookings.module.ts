@@ -10,6 +10,7 @@ import { HousekeepingModule } from '../housekeeping/housekeeping.module';
 import { LoyaltyModule } from '../../loyalty/loyalty.module';
 import { NotificationsModule } from '../../notifications/notifications.module';
 import { PaymentsModule } from '../../payments/payments.module';
+import { RevenueModule } from '../revenue/revenue.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { PaymentsModule } from '../../payments/payments.module';
     LoyaltyModule,
     NotificationsModule,
     PaymentsModule,
+    RevenueModule,
   ],
   controllers: [BookingsController],
   providers: [BookingsService, GuestFolioService],

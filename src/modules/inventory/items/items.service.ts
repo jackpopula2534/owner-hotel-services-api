@@ -4,12 +4,15 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { PrismaService } from '@/prisma/prisma.service';
+import { assertProcurementOwnedFieldsUnchanged } from '../product-change-requests/product-change-access';
 import { CreateItemDto } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
-import { QueryItemDto, SortField, SortOrder } from './dto/query-item.dto';
+import { QueryItemDto, SortField, SortOrder, StockStatusFilter } from './dto/query-item.dto';
 import { SearchItemDto } from './dto/search-item.dto';
+import { ScanBarcodeDto } from './dto/scan-barcode.dto';
 
 export interface PaginatedResponse<T> {
   data: T[];
@@ -29,6 +32,10 @@ export interface ItemWithStock {
   description: string | null;
   categoryId: string | null;
   unit: string;
+  /** RAW_MATERIAL = วัตถุดิบ · FINISHED_GOOD = ของสำเร็จรูปที่ผูกเป็นเมนูขายได้ */
+  itemType: string;
+  /** ราคาขายแนะนำต่อหน่วย — null = ยังไม่ตั้ง */
+  sellingPrice: unknown;
   costMethod: string;
   reorderPoint: number;
   reorderQty: number;
@@ -46,6 +53,14 @@ export interface ItemWithStock {
   category: { id: string; name: string } | null;
   totalStock: number;
   lowStock: boolean;
+  /** มูลค่าคงเหลือรวม (ตามคลังที่กรอง ถ้ามี) */
+  stockValue: number;
+  /** คลังที่มีแถวสต็อกของสินค้านี้ เรียงจากยอดมากไปน้อย */
+  stockWarehouses: { id: string; name: string; quantity: number }[];
+  /** lot ที่ยังมีของ (ACTIVE, remainingQty > 0) */
+  activeLotCount: number;
+  /** วันหมดอายุที่ใกล้ที่สุดของ lot ที่ยังมีของ — null = ไม่มี lot ที่มีวันหมดอายุ */
+  nearestExpiry: Date | null;
 }
 
 export interface ItemSearchResult {
@@ -54,12 +69,43 @@ export interface ItemSearchResult {
   name: string;
   unit: string;
   barcode: string | null;
+  /**
+   * ราคาขายที่ตั้งไว้กับตัวสินค้า — null = ยังไม่ตั้ง
+   * ต้องติดมากับผลค้นหาด้วย ไม่ใช่เฉพาะ findAll เพราะหน้าขายหยิบของจากช่องค้นหา
+   * แล้วเข้าตะกร้าเลย ถ้าไม่มีราคามาให้ หน้าจอจะไปเดาราคาเอง
+   */
+  sellingPrice: number | null;
   categoryId: string | null;
   category: { id: string; name: string } | null;
   imageUrl: string | null;
   isPerishable: boolean;
   defaultShelfLifeDays: number | null;
   reorderPoint: number;
+  /** หน่วยซื้อ + อัตราแปลง (จัดซื้อเป็นเจ้าของ) — ฟอร์ม PR/PO ใช้ช่วยปัดจำนวนให้เต็มหน่วยซื้อ */
+  purchaseUnit: string | null;
+  purchaseUnitFactor: number | null;
+  /**
+   * On-hand balance of the item in the warehouse passed via `warehouseId`.
+   * `null` when no warehouse was supplied (the generic typeahead does not join
+   * stock rows). Used by the requisition form to show what can be drawn from
+   * the source warehouse.
+   */
+  stockQuantity?: number | null;
+}
+
+/** ผลของการยิงบาร์โค้ดหนึ่งครั้ง — ต้องเป็นของชิ้นเดียวเสมอ ไม่ใช่รายการให้เลือก */
+export interface ScannedItem {
+  id: string;
+  sku: string;
+  name: string;
+  unit: string;
+  barcode: string | null;
+  imageUrl: string | null;
+  /** ราคาขายที่ผูกกับตัวสินค้า — null = ยังไม่ตั้ง หน้าขายต้องไม่เดาราคาเอง */
+  sellingPrice: number | null;
+  category: { id: string; name: string } | null;
+  /** ยอดคงเหลือของคลังที่ส่ง warehouseId มา — null = ไม่ได้ระบุคลัง */
+  stockQuantity: number | null;
 }
 
 export interface StockSummary {
@@ -67,6 +113,20 @@ export interface StockSummary {
   totalValue: number;
   lowStockCount: number;
   outOfStockCount: number;
+  /** สินค้าที่จุดสั่งซื้อเป็น 0 — ระบบจะไม่เตือนใกล้หมดจนกว่าของหมด */
+  noReorderPointCount: number;
+  /** สินค้าที่ยังไม่อยู่ในหมวดใด */
+  uncategorizedCount: number;
+}
+
+/**
+ * สถานะสต็อกจากยอดรวม — ใช้ที่เดียวทั้งตัวกรองรายการและตัวนับ summary ให้เลขตรงกัน
+ * ยอด 0 หรือติดลบ = หมด, ต่ำกว่าจุดสั่งซื้อ = ใกล้หมด (จุดสั่งซื้อ 0 จึงไม่มีวันใกล้หมด)
+ */
+export function stockStatusOf(totalStock: number, reorderPoint: number): StockStatusFilter {
+  if (totalStock <= 0) return StockStatusFilter.OUT;
+  if (totalStock < reorderPoint) return StockStatusFilter.LOW;
+  return StockStatusFilter.OK;
 }
 
 @Injectable()
@@ -74,6 +134,37 @@ export class ItemsService {
   private readonly logger = new Logger(ItemsService.name);
 
   constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * Resolve a category id to itself plus every descendant id (any depth),
+   * scoped to the tenant. Used so a parent-category filter includes items that
+   * live on child categories. Returns [rootId] when the category has no
+   * children (or is unknown), keeping leaf-category filters unchanged.
+   */
+  private async resolveCategoryTree(tenantId: string, rootId: string): Promise<string[]> {
+    const cats = await this.prisma.itemCategory.findMany({
+      where: { tenantId },
+      select: { id: true, parentId: true },
+    });
+    const childrenOf = new Map<string, string[]>();
+    for (const c of cats) {
+      if (!c.parentId) continue;
+      const list = childrenOf.get(c.parentId) ?? [];
+      list.push(c.id);
+      childrenOf.set(c.parentId, list);
+    }
+    const ids: string[] = [];
+    const seen = new Set<string>();
+    const stack = [rootId];
+    while (stack.length > 0) {
+      const id = stack.pop() as string;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      ids.push(id);
+      for (const child of childrenOf.get(id) ?? []) stack.push(child);
+    }
+    return ids;
+  }
 
   /**
    * Find all items with pagination and filters
@@ -94,14 +185,18 @@ export class ItemsService {
       };
 
       if (query.search) {
-        where.OR = [
-          { name: { contains: query.search, mode: 'insensitive' } },
-          { sku: { contains: query.search, mode: 'insensitive' } },
-        ];
+        // mode: 'insensitive' is not supported by Prisma v5 + MySQL
+        // MySQL utf8mb4_unicode_ci is already case-insensitive by default
+        where.OR = [{ name: { contains: query.search } }, { sku: { contains: query.search } }];
       }
 
       if (query.categoryId) {
-        where.categoryId = query.categoryId;
+        // Categories form a tree (e.g. "F&B วัตถุดิบ" → ผักและผลไม้ / ของแห้ง /
+        // เนื้อสัตว์ …). Items sit on the leaf categories, so an exact match on a
+        // parent returns nothing. Expand the selected category to itself + all
+        // descendants so picking a parent shows every item beneath it.
+        const categoryIds = await this.resolveCategoryTree(tenantId, query.categoryId);
+        where.categoryId = categoryIds.length > 1 ? { in: categoryIds } : query.categoryId;
       }
 
       if (query.isActive !== undefined) {
@@ -110,6 +205,46 @@ export class ItemsService {
 
       if (query.isPerishable !== undefined) {
         where.isPerishable = query.isPerishable;
+      }
+
+      if (query.itemType) {
+        where.itemType = query.itemType;
+      }
+
+      // When filtering by warehouse, only return items that hold stock in it.
+      if (query.warehouseId) {
+        where.warehouseStocks = { some: { warehouseId: query.warehouseId } };
+      }
+
+      if (query.noReorderPoint) {
+        where.reorderPoint = { lte: 0 };
+      }
+
+      if (query.uncategorized) {
+        where.categoryId = null;
+      }
+
+      // สถานะสต็อกคิดจากยอดรวมของหลายแถว จึงกรองใน where ตรง ๆ ไม่ได้ —
+      // หา id ที่เข้าเงื่อนไขก่อน แล้วค่อยแบ่งหน้า (นิยามเดียวกับ lowStock และ getStockSummary)
+      if (query.stockStatus) {
+        const candidates = await this.prisma.inventoryItem.findMany({
+          where,
+          select: {
+            id: true,
+            reorderPoint: true,
+            warehouseStocks: {
+              ...(query.warehouseId ? { where: { warehouseId: query.warehouseId } } : {}),
+              select: { quantity: true },
+            },
+          },
+        });
+        const ids = candidates
+          .filter((c) => {
+            const qty = c.warehouseStocks.reduce((sum, ws) => sum + ws.quantity, 0);
+            return stockStatusOf(qty, c.reorderPoint) === query.stockStatus;
+          })
+          .map((c) => c.id);
+        where.id = { in: ids };
       }
 
       // Get total count
@@ -123,7 +258,14 @@ export class ItemsService {
             select: { id: true, name: true },
           },
           warehouseStocks: {
-            select: { quantity: true },
+            // Scope the stock rows to the selected warehouse so totalStock
+            // reflects that warehouse only; otherwise aggregate across all.
+            ...(query.warehouseId ? { where: { warehouseId: query.warehouseId } } : {}),
+            select: {
+              quantity: true,
+              totalValue: true,
+              warehouse: { select: { id: true, name: true } },
+            },
           },
         },
         skip,
@@ -134,14 +276,39 @@ export class ItemsService {
             : { [sort]: order },
       });
 
+      // lot ที่ยังมีของของสินค้าในหน้านี้ — นับ + วันหมดอายุที่ใกล้สุด (คิวรีเดียวทั้งหน้า)
+      const lotStats = items.length
+        ? await this.prisma.inventoryLot.groupBy({
+            by: ['itemId'],
+            where: {
+              tenantId,
+              itemId: { in: items.map((i) => i.id) },
+              status: 'ACTIVE',
+              remainingQty: { gt: 0 },
+              ...(query.warehouseId ? { warehouseId: query.warehouseId } : {}),
+            },
+            _count: { _all: true },
+            _min: { expiryDate: true },
+          })
+        : [];
+      const lotsByItem = new Map(lotStats.map((l) => [l.itemId, l]));
+
       // Map items and calculate totals
       const data: ItemWithStock[] = items.map((item) => {
         const totalStock = item.warehouseStocks.reduce((sum, ws) => sum + ws.quantity, 0);
+        const stockValue = item.warehouseStocks.reduce((sum, ws) => sum + Number(ws.totalValue), 0);
+        const lots = lotsByItem.get(item.id);
         return {
           ...item,
           category: item.category,
           totalStock,
           lowStock: totalStock < item.reorderPoint,
+          stockValue: Number(stockValue.toFixed(2)),
+          stockWarehouses: item.warehouseStocks
+            .map((ws) => ({ id: ws.warehouse.id, name: ws.warehouse.name, quantity: ws.quantity }))
+            .sort((a, b) => b.quantity - a.quantity),
+          activeLotCount: lots?._count._all ?? 0,
+          nearestExpiry: lots?._min.expiryDate ?? null,
         };
       });
 
@@ -179,19 +346,27 @@ export class ItemsService {
       const isActive = dto.isActive ?? true;
       const query = dto.q.trim();
 
+      // NOTE: `mode: 'insensitive'` is not supported by Prisma v5 with MySQL
+      // and throws a PrismaClientValidationError (→ 400 Bad Request).
+      // MySQL with utf8mb4_unicode_ci is already case-insensitive by default,
+      // so omitting the mode flag produces the same behavior without errors.
       const where: Record<string, unknown> = {
         tenantId,
         deletedAt: null,
         isActive,
         OR: [
-          { name: { contains: query, mode: 'insensitive' } },
-          { sku: { contains: query, mode: 'insensitive' } },
+          { name: { contains: query } },
+          { sku: { contains: query } },
           { barcode: { equals: query } },
         ],
       };
 
       if (dto.categoryId) {
         where.categoryId = dto.categoryId;
+      }
+
+      if (dto.itemType) {
+        where.itemType = dto.itemType;
       }
 
       const items = await this.prisma.inventoryItem.findMany({
@@ -202,21 +377,47 @@ export class ItemsService {
           name: true,
           unit: true,
           barcode: true,
+          sellingPrice: true,
           categoryId: true,
           imageUrl: true,
           isPerishable: true,
           defaultShelfLifeDays: true,
+          requiresLotTracking: true,
           reorderPoint: true,
+          purchaseUnit: true,
+          purchaseUnitFactor: true,
           category: { select: { id: true, name: true } },
+          // Only join stock rows when a warehouse was supplied — keeps the
+          // generic typeahead lightweight (see DTO docblock).
+          ...(dto.warehouseId
+            ? {
+                warehouseStocks: {
+                  where: { warehouseId: dto.warehouseId },
+                  select: { quantity: true },
+                },
+              }
+            : {}),
         },
         take: limit,
         orderBy: [{ name: 'asc' }, { sku: 'asc' }],
       });
 
-      return items.map((item) => ({
-        ...item,
-        category: item.category ?? null,
-      }));
+      return items.map((item) => {
+        const { warehouseStocks, ...rest } = item as typeof item & {
+          warehouseStocks?: Array<{ quantity: number }>;
+        };
+        return {
+          ...rest,
+          category: item.category ?? null,
+          // Decimal → number ตั้งแต่ตรงนี้ หน้าจอจะได้ไม่ต้องแปลงเอง (แล้วลืมแปลง)
+          sellingPrice: item.sellingPrice === null ? null : Number(item.sellingPrice),
+          purchaseUnitFactor:
+            item.purchaseUnitFactor === null ? null : Number(item.purchaseUnitFactor),
+          stockQuantity: dto.warehouseId
+            ? (warehouseStocks ?? []).reduce((sum, ws) => sum + ws.quantity, 0)
+            : null,
+        };
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'unknown error';
       const stack = error instanceof Error ? error.stack : undefined;
@@ -226,13 +427,122 @@ export class ItemsService {
   }
 
   /**
+   * ยิงบาร์โค้ดหนึ่งครั้ง = ได้ของชิ้นเดียว หรือไม่ได้เลย
+   *
+   * ทำไมไม่ใช้ `searchItems`: ตัวนั้นเทียบ name/sku แบบ contains ด้วย แล้วเรียงตามชื่อ
+   * ยิงบาร์โค้ด "8850001000011" จึงมีโอกาสได้ของตัวอื่นมาเป็นรายการแรก ถ้าหน้าขาย
+   * หยิบตัวแรกเข้าตะกร้าอัตโนมัติ แขกจะโดนคิดเงินของผิดตัวโดยไม่มีใครอ่านซ้ำ
+   *
+   * เจอมากกว่าหนึ่ง = ข้อมูลผิดตั้งแต่ต้นทาง ต้องหยุดแล้วบอกว่าไปแก้ที่ไหน
+   * ไม่ใช่เลือกให้เองเงียบ ๆ (กันไว้ตอนสร้าง/แก้สินค้าอีกชั้นด้วย)
+   */
+  async findByBarcode(tenantId: string, dto: ScanBarcodeDto): Promise<ScannedItem> {
+    const code = dto.code.trim();
+
+    const matches = await this.prisma.inventoryItem.findMany({
+      where: { tenantId, deletedAt: null, isActive: true, barcode: code },
+      select: {
+        id: true,
+        sku: true,
+        name: true,
+        unit: true,
+        barcode: true,
+        imageUrl: true,
+        sellingPrice: true,
+        itemType: true,
+        category: { select: { id: true, name: true } },
+        ...(dto.warehouseId
+          ? {
+              warehouseStocks: {
+                where: { warehouseId: dto.warehouseId },
+                select: { quantity: true, reservedQty: true },
+              },
+            }
+          : {}),
+      },
+      take: 2,
+    });
+
+    if (matches.length === 0) {
+      throw new NotFoundException(`ไม่พบสินค้าที่ผูกกับบาร์โค้ด ${code}`);
+    }
+
+    if (matches.length > 1) {
+      throw new ConflictException(
+        `บาร์โค้ด ${code} ผูกอยู่กับสินค้ามากกว่าหนึ่งรายการ — แก้ที่หน้ารายการสินค้าก่อนจึงจะยิงขายได้`,
+      );
+    }
+
+    const item = matches[0] as (typeof matches)[number] & {
+      warehouseStocks?: Array<{ quantity: number; reservedQty: number }>;
+    };
+
+    // เช็คหลังเจอของแล้ว ไม่ใส่ใน where — ถ้ากรองตั้งแต่ query วัตถุดิบจะกลายเป็น
+    // "ไม่พบบาร์โค้ด" ให้พนักงานเข้าใจผิดว่าบาร์โค้ดเสีย และจะซ่อนบาร์โค้ดซ้ำด้วย
+    if (dto.itemType && item.itemType !== dto.itemType) {
+      throw new UnprocessableEntityException(
+        dto.itemType === 'FINISHED_GOOD'
+          ? `${item.name} (${item.sku}) เป็นวัตถุดิบ ไม่ใช่สินค้าขายหน้าร้าน — เปลี่ยนประเภทที่หน้ารายการสินค้าก่อนจึงจะขายได้`
+          : `${item.name} (${item.sku}) ไม่ใช่สินค้าประเภท ${dto.itemType}`,
+      );
+    }
+
+    return {
+      id: item.id,
+      sku: item.sku,
+      name: item.name,
+      unit: item.unit,
+      barcode: item.barcode,
+      imageUrl: item.imageUrl,
+      sellingPrice: item.sellingPrice === null ? null : Number(item.sellingPrice),
+      category: item.category ?? null,
+      // ยอดที่หยิบได้จริงคือคงเหลือหักที่ถูกกันไว้ ไม่ใช่คงเหลือดิบ
+      stockQuantity: dto.warehouseId
+        ? (item.warehouseStocks ?? []).reduce(
+            (sum, ws) => sum + Math.max(ws.quantity - ws.reservedQty, 0),
+            0,
+          )
+        : null,
+    };
+  }
+
+  /**
+   * บาร์โค้ดต้องชี้ไปที่ของชิ้นเดียวในกิจการเดียวกัน
+   * ปล่อยให้ซ้ำได้เมื่อไหร่ หน้าขายจะยิงแล้วได้ของผิดตัวทันที
+   */
+  private async assertBarcodeIsFree(
+    tenantId: string,
+    barcode: string | null | undefined,
+    excludeItemId?: string,
+  ): Promise<void> {
+    const code = typeof barcode === 'string' ? barcode.trim() : '';
+    if (!code) return;
+
+    const clash = await this.prisma.inventoryItem.findFirst({
+      where: {
+        tenantId,
+        barcode: code,
+        deletedAt: null,
+        ...(excludeItemId ? { id: { not: excludeItemId } } : {}),
+      },
+      select: { sku: true, name: true },
+    });
+
+    if (clash) {
+      throw new ConflictException(
+        `บาร์โค้ด ${code} ถูกใช้กับ "${clash.name}" (${clash.sku}) อยู่แล้ว`,
+      );
+    }
+  }
+
+  /**
    * Find a single item by ID with full details
    * Include category, suppliers, and stock per warehouse
    */
   async findOne(id: string, tenantId: string): Promise<any> {
     try {
-      const item = await this.prisma.inventoryItem.findUnique({
-        where: { id },
+      const item = await this.prisma.inventoryItem.findFirst({
+        where: { id, tenantId },
         include: {
           category: true,
           itemSuppliers: {
@@ -259,10 +569,6 @@ export class ItemsService {
       });
 
       if (!item) {
-        throw new NotFoundException(`Item with ID ${id} not found`);
-      }
-
-      if (item.tenantId !== tenantId) {
         throw new NotFoundException(`Item with ID ${id} not found`);
       }
 
@@ -299,13 +605,15 @@ export class ItemsService {
         throw new ConflictException(`Item with SKU ${dto.sku} already exists for this tenant`);
       }
 
+      await this.assertBarcodeIsFree(tenantId, dto.barcode);
+
       // Validate categoryId exists if provided
       if (dto.categoryId) {
-        const category = await this.prisma.itemCategory.findUnique({
-          where: { id: dto.categoryId },
+        const category = await this.prisma.itemCategory.findFirst({
+          where: { id: dto.categoryId, tenantId },
         });
 
-        if (!category || category.tenantId !== tenantId) {
+        if (!category) {
           throw new BadRequestException('Invalid categoryId');
         }
       }
@@ -318,6 +626,8 @@ export class ItemsService {
           description: dto.description || null,
           categoryId: dto.categoryId || null,
           unit: dto.unit || 'PIECE',
+          itemType: dto.itemType || 'RAW_MATERIAL',
+          sellingPrice: dto.sellingPrice ?? null,
           costMethod: dto.costMethod || 'WEIGHTED_AVG',
           reorderPoint: dto.reorderPoint || 0,
           reorderQty: dto.reorderQty || 0,
@@ -351,9 +661,18 @@ export class ItemsService {
    * Update an item
    * Validate SKU uniqueness if changed
    */
-  async update(id: string, dto: UpdateItemDto, tenantId: string): Promise<any> {
+  async update(id: string, dto: UpdateItemDto, tenantId: string, role?: string): Promise<any> {
     try {
       const item = await this.findOne(id, tenantId);
+
+      // ชื่อ/สเปก/ยี่ห้อ เป็นข้อมูลของจัดซื้อ — ฝั่งคลังเปลี่ยนเองไม่ได้ (ต้องผ่านคำขอสินค้า)
+      if (role) {
+        assertProcurementOwnedFieldsUnchanged(
+          role,
+          { name: item.name, description: item.description ?? null, brand: item.brand ?? null },
+          { name: dto.name, description: dto.description, brand: dto.brand },
+        );
+      }
 
       // Check for duplicate SKU if SKU is being changed
       if (dto.sku && dto.sku !== item.sku) {
@@ -371,13 +690,17 @@ export class ItemsService {
         }
       }
 
+      if (dto.barcode !== undefined && dto.barcode !== item.barcode) {
+        await this.assertBarcodeIsFree(tenantId, dto.barcode, id);
+      }
+
       // Validate categoryId if being changed
       if (dto.categoryId && dto.categoryId !== item.categoryId) {
-        const category = await this.prisma.itemCategory.findUnique({
-          where: { id: dto.categoryId },
+        const category = await this.prisma.itemCategory.findFirst({
+          where: { id: dto.categoryId, tenantId },
         });
 
-        if (!category || category.tenantId !== tenantId) {
+        if (!category) {
           throw new BadRequestException('Invalid categoryId');
         }
       }
@@ -390,6 +713,9 @@ export class ItemsService {
           ...(dto.description !== undefined && { description: dto.description }),
           ...(dto.categoryId !== undefined && { categoryId: dto.categoryId }),
           ...(dto.unit && { unit: dto.unit }),
+          ...(dto.itemType && { itemType: dto.itemType }),
+          // null = ล้างราคาขายทิ้ง ต้องเช็ค undefined ไม่ใช่ truthy (0 บาทก็เป็นราคาที่ตั้งได้)
+          ...(dto.sellingPrice !== undefined && { sellingPrice: dto.sellingPrice }),
           ...(dto.costMethod && { costMethod: dto.costMethod }),
           ...(dto.reorderPoint !== undefined && { reorderPoint: dto.reorderPoint }),
           ...(dto.reorderQty !== undefined && { reorderQty: dto.reorderQty }),
@@ -399,6 +725,7 @@ export class ItemsService {
           ...(dto.brand !== undefined && { brand: dto.brand }),
           ...(dto.imageUrl !== undefined && { imageUrl: dto.imageUrl }),
           ...(dto.isPerishable !== undefined && { isPerishable: dto.isPerishable }),
+          ...(dto.isActive !== undefined && { isActive: dto.isActive }),
           ...(dto.defaultShelfLifeDays !== undefined && {
             defaultShelfLifeDays: dto.defaultShelfLifeDays,
           }),
@@ -420,6 +747,30 @@ export class ItemsService {
         throw error;
       }
       this.logger.error(`Error updating item ${id}: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
+  /**
+   * Set the item's image URL (called after a successful file upload).
+   * Validates tenant ownership via findOne before persisting.
+   */
+  async setImageUrl(id: string, imageUrl: string, tenantId: string): Promise<any> {
+    try {
+      await this.findOne(id, tenantId);
+
+      const updated = await this.prisma.inventoryItem.update({
+        where: { id },
+        data: { imageUrl },
+      });
+
+      this.logger.log(`Item ${id} image updated`);
+      return updated;
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      this.logger.error(`Error setting image for item ${id}: ${error.message}`, error.stack);
       throw error;
     }
   }
@@ -527,6 +878,8 @@ export class ItemsService {
       let totalValue = 0;
       let lowStockCount = 0;
       let outOfStockCount = 0;
+      let noReorderPointCount = 0;
+      let uncategorizedCount = 0;
 
       items.forEach((item) => {
         let itemTotalStock = 0;
@@ -541,11 +894,14 @@ export class ItemsService {
 
         totalValue += itemTotalValue;
 
-        if (itemTotalStock === 0) {
+        const status = stockStatusOf(itemTotalStock, item.reorderPoint);
+        if (status === StockStatusFilter.OUT) {
           outOfStockCount++;
-        } else if (itemTotalStock < item.reorderPoint) {
+        } else if (status === StockStatusFilter.LOW) {
           lowStockCount++;
         }
+        if (item.reorderPoint <= 0) noReorderPointCount++;
+        if (!item.categoryId) uncategorizedCount++;
       });
 
       return {
@@ -553,6 +909,8 @@ export class ItemsService {
         totalValue: Number(totalValue.toFixed(2)),
         lowStockCount,
         outOfStockCount,
+        noReorderPointCount,
+        uncategorizedCount,
       };
     } catch (error) {
       this.logger.error(`Error getting stock summary: ${error.message}`, error.stack);

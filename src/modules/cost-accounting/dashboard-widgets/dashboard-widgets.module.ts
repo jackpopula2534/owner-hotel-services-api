@@ -4,9 +4,10 @@ import { KpiSnapshotsModule } from '../kpi-snapshots/kpi-snapshots.module';
 import { DashboardWidgetsService } from './dashboard-widgets.service';
 import { DashboardWidgetsController } from './dashboard-widgets.controller';
 import { AddonModule } from '@/modules/addons/addon.module';
+import { RevenueModule } from '@/modules/revenue/revenue.module';
 
 @Module({
-  imports: [PrismaModule, KpiSnapshotsModule, AddonModule],
+  imports: [PrismaModule, KpiSnapshotsModule, AddonModule, RevenueModule],
   controllers: [DashboardWidgetsController],
   providers: [DashboardWidgetsService],
   exports: [DashboardWidgetsService],

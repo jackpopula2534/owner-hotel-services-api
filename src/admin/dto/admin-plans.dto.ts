@@ -3,12 +3,16 @@ import {
   IsString,
   IsNumber,
   IsInt,
+  IsIn,
   IsOptional,
   IsBoolean,
   Min,
   MinLength,
   MaxLength,
 } from 'class-validator';
+
+/** สายธุรกิจของแผน — ไม่มี 'BOTH' เพราะแผนหนึ่งแผนขายได้ธุรกิจเดียว */
+export const PLAN_SYSTEM_VALUES = ['HOTEL', 'CAMP'] as const;
 
 // ============ Request DTOs ============
 
@@ -30,6 +34,19 @@ export class CreatePlanDto {
   })
   @IsString()
   name: string;
+
+  /**
+   * สายธุรกิจของแผน — โรงแรม หรือ ลานกางเต็นท์ (ไม่มี BOTH: แผนหนึ่งขายธุรกิจเดียว)
+   * ค่านี้เป็นตัวกำหนดว่า add-on ตัวไหนผูกกับแผนนี้ได้บ้าง (ดู isAddonAvailableForSystem)
+   */
+  @ApiPropertyOptional({
+    description: 'Product line: HOTEL (โรงแรม) | CAMP (ลานกางเต็นท์)',
+    enum: PLAN_SYSTEM_VALUES,
+    default: 'HOTEL',
+  })
+  @IsOptional()
+  @IsIn(PLAN_SYSTEM_VALUES, { message: `system must be one of: ${PLAN_SYSTEM_VALUES.join(', ')}` })
+  system?: string;
 
   @ApiProperty({
     description: 'Monthly price in THB',
@@ -157,6 +174,14 @@ export class UpdatePlanDto {
   @IsOptional()
   @IsString()
   name?: string;
+
+  @ApiPropertyOptional({
+    description: 'Product line: HOTEL (โรงแรม) | CAMP (ลานกางเต็นท์)',
+    enum: PLAN_SYSTEM_VALUES,
+  })
+  @IsOptional()
+  @IsIn(PLAN_SYSTEM_VALUES, { message: `system must be one of: ${PLAN_SYSTEM_VALUES.join(', ')}` })
+  system?: string;
 
   @ApiPropertyOptional({
     description: 'Monthly price in THB',
@@ -290,6 +315,9 @@ export class AdminPlanItemDto {
   @ApiProperty({ example: 'M' })
   code: string;
 
+  @ApiProperty({ example: 'HOTEL', enum: PLAN_SYSTEM_VALUES, description: 'สายธุรกิจของแผน' })
+  system: string;
+
   @ApiProperty({ example: 'Medium Plan' })
   name: string;
 
@@ -301,6 +329,12 @@ export class AdminPlanItemDto {
 
   @ApiPropertyOptional({ example: 15 })
   yearlyDiscountPercent?: number;
+
+  @ApiPropertyOptional({
+    example: 5382,
+    description: 'ส่วนต่างที่ประหยัดได้เมื่อจ่ายรายปี (priceMonthly * 12 - priceYearly)',
+  })
+  yearlySavings?: number;
 
   @ApiProperty({ example: 50 })
   maxRooms: number;
@@ -316,6 +350,12 @@ export class AdminPlanItemDto {
 
   @ApiPropertyOptional({ example: 3 })
   featureCount?: number;
+
+  @ApiPropertyOptional({
+    example: 2,
+    description: 'Number of add-ons bundled with this plan via plan_addons',
+  })
+  addonCount?: number;
 
   // Sales Page fields
   @ApiPropertyOptional({
@@ -359,6 +399,9 @@ export class PlanResponseDto {
   @ApiProperty({ example: 'M' })
   code: string;
 
+  @ApiProperty({ example: 'HOTEL', enum: PLAN_SYSTEM_VALUES, description: 'สายธุรกิจของแผน' })
+  system: string;
+
   @ApiProperty({ example: 'Medium Plan' })
   name: string;
 
@@ -370,6 +413,12 @@ export class PlanResponseDto {
 
   @ApiPropertyOptional({ example: 15 })
   yearlyDiscountPercent?: number;
+
+  @ApiPropertyOptional({
+    example: 5382,
+    description: 'ส่วนต่างที่ประหยัดได้เมื่อจ่ายรายปี (priceMonthly * 12 - priceYearly)',
+  })
+  yearlySavings?: number;
 
   @ApiProperty({ example: 50 })
   maxRooms: number;
@@ -388,6 +437,12 @@ export class PlanResponseDto {
 
   @ApiPropertyOptional({ example: 5 })
   subscriptionCount?: number;
+
+  @ApiPropertyOptional({
+    example: 2,
+    description: 'Number of add-ons bundled with this plan via plan_addons',
+  })
+  addonCount?: number;
 
   // Sales Page fields
   @ApiPropertyOptional({

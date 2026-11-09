@@ -1,11 +1,5 @@
-import {
-  Controller,
-  Get,
-  Query,
-  UseGuards,
-  Request,
-  Res,
-} from '@nestjs/common';
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
+import { Controller, Get, Query, UseGuards, Request, Res } from '@nestjs/common';
 import { Response } from 'express';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt-auth.guard';
@@ -15,6 +9,8 @@ import { InventoryLotStatus } from '@prisma/client';
 @ApiTags('Inventory Dashboard')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
+// Warehouse Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('warehouse')
 @Controller('inventory/dashboard')
 export class InventoryDashboardController {
   constructor(private readonly prisma: PrismaService) {}
@@ -35,10 +31,7 @@ export class InventoryDashboardController {
       select: { remainingQty: true, unitCost: true, expiryDate: true },
     });
 
-    const totalValue = lots.reduce(
-      (sum, l) => sum + l.remainingQty * Number(l.unitCost),
-      0,
-    );
+    const totalValue = lots.reduce((sum, l) => sum + l.remainingQty * Number(l.unitCost), 0);
 
     return {
       totalValue,
@@ -66,10 +59,7 @@ export class InventoryDashboardController {
       select: { quantity: true, unitCost: true, totalCost: true },
     });
 
-    const totalWasteCost = wasteMovements.reduce(
-      (sum, m) => sum + Number(m.totalCost),
-      0,
-    );
+    const totalWasteCost = wasteMovements.reduce((sum, m) => sum + Number(m.totalCost), 0);
 
     return {
       totalWasteCost,
@@ -82,6 +72,8 @@ export class InventoryDashboardController {
 @ApiTags('Inventory Reports')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
+// Warehouse Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('warehouse')
 @Controller('inventory/reports')
 export class InventoryReportsController {
   constructor(private readonly prisma: PrismaService) {}
@@ -149,13 +141,16 @@ export class InventoryReportsController {
 
     // Group by ISO week
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const grouped = (lots as any[]).reduce((acc: Record<string, any[]>, lot: any) => {
-      if (!lot.expiryDate) return acc;
-      const weekKey = getISOWeek(lot.expiryDate);
-      acc[weekKey] = acc[weekKey] ?? [];
-      acc[weekKey].push(lot);
-      return acc;
-    }, {} as Record<string, any[]>);
+    const grouped = (lots as any[]).reduce(
+      (acc: Record<string, any[]>, lot: any) => {
+        if (!lot.expiryDate) return acc;
+        const weekKey = getISOWeek(lot.expiryDate);
+        acc[weekKey] = acc[weekKey] ?? [];
+        acc[weekKey].push(lot);
+        return acc;
+      },
+      {} as Record<string, any[]>,
+    );
 
     return { data: grouped };
   }

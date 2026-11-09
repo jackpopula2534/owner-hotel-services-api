@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../common/decorators/allow-systems.decorator';
 import {
   Controller,
   Get,
@@ -34,6 +35,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 export class StaffController {
   constructor(private readonly staffService: StaffService) {}
 
+  @AllowSystems('hotel-terminal') // H1 allow-list (report walk 2026-11-09)
   @Get()
   @ApiOperation({ summary: 'Get all staff members' })
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })

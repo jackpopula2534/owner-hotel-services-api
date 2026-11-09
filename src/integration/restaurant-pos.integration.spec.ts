@@ -3,9 +3,32 @@ import { BadRequestException, ConflictException, NotFoundException } from '@nest
 import { MenuService } from '../modules/restaurant/menu/menu.service';
 import { TableService } from '../modules/restaurant/table/table.service';
 import { ReservationService } from '../modules/restaurant/reservation/reservation.service';
+import { ReservationSortEnum } from '../modules/restaurant/reservation/dto/query-reservations.dto';
 import { OrderService } from '../modules/restaurant/order/order.service';
 import { KitchenService } from '../modules/restaurant/kitchen/kitchen.service';
+import { MenuStockService } from '../modules/restaurant/menu/menu-stock.service';
+import { buildMenuStockStub } from '../modules/restaurant/order/__tests__/menu-stock.stub';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
+import { ConfigService } from '@nestjs/config';
+
+// ─── Collaborator stubs ───────────────────────────────────────────────────────
+// Every restaurant service audits; none of them should reach a real logger here.
+
+const auditLogProvider = () => ({
+  provide: AuditLogService,
+  useValue: { log: jest.fn().mockResolvedValue(undefined) },
+});
+
+const configProvider = () => ({
+  provide: ConfigService,
+  useValue: { get: jest.fn().mockReturnValue(undefined) },
+});
+
+const orderServiceProvider = () => ({
+  provide: OrderService,
+  useValue: { create: jest.fn() },
+});
 
 // ─── Prisma Mock Factory ──────────────────────────────────────────────────────
 
@@ -57,6 +80,7 @@ const makePrismaMock = () => ({
     findFirst: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn(),
     delete: jest.fn(),
     count: jest.fn(),
   },
@@ -108,7 +132,11 @@ describe('MenuService', () => {
     prismaMock = makePrismaMock();
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [MenuService, { provide: PrismaService, useValue: prismaMock }],
+      providers: [
+        MenuService,
+        { provide: PrismaService, useValue: prismaMock },
+        auditLogProvider(),
+      ],
     }).compile();
 
     menuService = module.get<MenuService>(MenuService);
@@ -226,7 +254,12 @@ describe('TableService', () => {
     prismaMock = makePrismaMock();
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [TableService, { provide: PrismaService, useValue: prismaMock }],
+      providers: [
+        TableService,
+        { provide: PrismaService, useValue: prismaMock },
+        configProvider(),
+        auditLogProvider(),
+      ],
     }).compile();
 
     tableService = module.get<TableService>(TableService);
@@ -292,7 +325,10 @@ describe('TableService', () => {
     it('marks tables with active reservations as unavailable', async () => {
       prismaMock.restaurant.findFirst.mockResolvedValue(mockRestaurant);
       prismaMock.restaurantTable.findMany.mockResolvedValue([mockTable]);
-      prismaMock.tableReservation.findMany.mockResolvedValue([{ tableId: 'tbl-1' }]);
+      // A booking only blocks a table if its time range actually overlaps the request.
+      prismaMock.tableReservation.findMany.mockResolvedValue([
+        { tableId: 'tbl-1', startTime: '19:00', endTime: '21:00' },
+      ]);
 
       const result = await tableService.checkAvailability(
         RESTAURANT_ID,
@@ -335,16 +371,86 @@ describe('ReservationService', () => {
     prismaMock = makePrismaMock();
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [ReservationService, { provide: PrismaService, useValue: prismaMock }],
+      providers: [
+        ReservationService,
+        { provide: PrismaService, useValue: prismaMock },
+        auditLogProvider(),
+        orderServiceProvider(),
+      ],
     }).compile();
 
     reservationService = module.get<ReservationService>(ReservationService);
   });
 
+  describe('findAll', () => {
+    beforeEach(() => {
+      prismaMock.tableReservation.findMany.mockResolvedValue([]);
+      prismaMock.tableReservation.count.mockResolvedValue(0);
+    });
+
+    /** The `where` the list query actually ran with. */
+    const whereUsed = () => prismaMock.tableReservation.findMany.mock.calls[0][0].where;
+    const orderByUsed = () => prismaMock.tableReservation.findMany.mock.calls[0][0].orderBy;
+
+    it('pins a single day to UTC midnight for the @db.Date column', async () => {
+      await reservationService.findAll(RESTAURANT_ID, { date: '2026-08-11' }, TENANT_ID);
+
+      expect(whereUsed().reservationDate).toEqual(new Date(Date.UTC(2026, 7, 11)));
+    });
+
+    it('spans from/to as an inclusive range for the calendar grid', async () => {
+      await reservationService.findAll(
+        RESTAURANT_ID,
+        { from: '2026-07-26', to: '2026-09-05' },
+        TENANT_ID,
+      );
+
+      expect(whereUsed().reservationDate).toEqual({
+        gte: new Date(Date.UTC(2026, 6, 26)),
+        lte: new Date(Date.UTC(2026, 8, 5)),
+      });
+    });
+
+    it('returns every booking when no date filter is given', async () => {
+      // This is what the list view relies on — a booking made for next week must
+      // not be invisible just because the caller did not name its date.
+      await reservationService.findAll(RESTAURANT_ID, {}, TENANT_ID);
+
+      expect(whereUsed()).toEqual({ restaurantId: RESTAURANT_ID, tenantId: TENANT_ID });
+      expect(whereUsed().reservationDate).toBeUndefined();
+    });
+
+    it('orders by service time by default', async () => {
+      await reservationService.findAll(RESTAURANT_ID, {}, TENANT_ID);
+
+      expect(orderByUsed()).toEqual([{ reservationDate: 'asc' }, { startTime: 'asc' }]);
+    });
+
+    it('puts the newest booking first when sort=recent', async () => {
+      await reservationService.findAll(
+        RESTAURANT_ID,
+        { sort: ReservationSortEnum.RECENT },
+        TENANT_ID,
+      );
+
+      expect(orderByUsed()).toEqual([{ createdAt: 'desc' }]);
+    });
+
+    it('keeps the tenant scope on every query', async () => {
+      await reservationService.findAll(RESTAURANT_ID, { status: 'PENDING' as never }, TENANT_ID);
+
+      expect(whereUsed()).toMatchObject({
+        restaurantId: RESTAURANT_ID,
+        tenantId: TENANT_ID,
+        status: 'PENDING',
+      });
+    });
+  });
+
   describe('create', () => {
     it('creates reservation when no conflict exists', async () => {
       prismaMock.restaurantTable.findFirst.mockResolvedValue(mockTable);
-      prismaMock.tableReservation.findFirst.mockResolvedValue(null); // no conflict
+      prismaMock.tableReservation.findMany.mockResolvedValue([]); // nothing on that table
       prismaMock.tableReservation.create.mockResolvedValue(mockReservation);
 
       const result = await reservationService.create(
@@ -384,7 +490,10 @@ describe('ReservationService', () => {
 
     it('throws ConflictException for duplicate time slot', async () => {
       prismaMock.restaurantTable.findFirst.mockResolvedValue(mockTable);
-      prismaMock.tableReservation.findFirst.mockResolvedValue(mockReservation); // conflict
+      // 19:00 request lands inside this 19:00–21:00 booking.
+      prismaMock.tableReservation.findMany.mockResolvedValue([
+        { startTime: '19:00', endTime: '21:00' },
+      ]);
 
       await expect(
         reservationService.create(
@@ -408,6 +517,8 @@ describe('ReservationService', () => {
       prismaMock.tableReservation.findFirst.mockResolvedValue({
         ...mockReservation,
         status: 'CONFIRMED',
+        // A no-show has to hand the table back, so the flow reads its status.
+        table: { id: 'tbl-1', status: 'RESERVED' },
       });
       prismaMock.tableReservation.update.mockResolvedValue({
         ...mockReservation,
@@ -428,6 +539,142 @@ describe('ReservationService', () => {
       await expect(
         reservationService.markAsNoShow(RESTAURANT_ID, 'rsv-1', TENANT_ID),
       ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('seat', () => {
+    const confirmed = {
+      ...mockReservation,
+      status: 'CONFIRMED',
+      table: { id: 'tbl-1', status: 'RESERVED', tableNumber: 'T01' },
+    };
+
+    beforeEach(() => {
+      prismaMock.tableReservation.findFirst.mockResolvedValue(confirmed);
+      prismaMock.tableReservation.update.mockResolvedValue({ ...confirmed, status: 'SEATED' });
+      prismaMock.restaurantTable.update.mockResolvedValue({ id: 'tbl-1', status: 'OCCUPIED' });
+    });
+
+    it('seats the party without opening a bill', async () => {
+      // Seating used to open an item-less DINE_IN order, which then sat on the
+      // kitchen display as a ticket with nothing to cook.
+      prismaMock.order.findFirst.mockResolvedValue(null);
+
+      const result = await reservationService.seat(RESTAURANT_ID, 'rsv-1', TENANT_ID);
+
+      expect(prismaMock.order.create).not.toHaveBeenCalled();
+      expect(result.order).toBeNull();
+      expect(prismaMock.restaurantTable.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: 'OCCUPIED' } }),
+      );
+    });
+
+    it('adopts a bill already open on the table instead of creating another', async () => {
+      // A walk-in bill was opened on this table before the booking was seated.
+      prismaMock.order.findFirst.mockResolvedValue({ id: 'ord-1', reservationId: null });
+      prismaMock.order.update.mockResolvedValue({ id: 'ord-1', reservationId: 'rsv-1' });
+
+      const result = await reservationService.seat(RESTAURANT_ID, 'rsv-1', TENANT_ID);
+
+      expect(prismaMock.order.create).not.toHaveBeenCalled();
+      expect(prismaMock.order.update).toHaveBeenCalledWith({
+        where: { id: 'ord-1' },
+        data: { reservationId: 'rsv-1' },
+      });
+      expect(result.order).toMatchObject({ id: 'ord-1', reservationId: 'rsv-1' });
+    });
+
+    it('leaves a bill that belongs to another booking alone', async () => {
+      prismaMock.order.findFirst.mockResolvedValue({ id: 'ord-9', reservationId: 'rsv-other' });
+
+      const result = await reservationService.seat(RESTAURANT_ID, 'rsv-1', TENANT_ID);
+
+      expect(prismaMock.order.update).not.toHaveBeenCalled();
+      expect(result.order).toBeNull();
+    });
+  });
+
+  describe('update to COMPLETED', () => {
+    const seated = {
+      ...mockReservation,
+      status: 'SEATED',
+      table: { id: 'tbl-1', status: 'OCCUPIED', tableNumber: 'T01' },
+    };
+    const complete = () =>
+      reservationService.update(
+        RESTAURANT_ID,
+        'rsv-1',
+        { status: 'COMPLETED' as never },
+        TENANT_ID,
+      );
+
+    beforeEach(() => {
+      prismaMock.tableReservation.findFirst.mockResolvedValue(seated);
+    });
+
+    it('blocks the close and names the unpaid bill', async () => {
+      prismaMock.order.findMany.mockResolvedValue([
+        {
+          id: 'ord-1',
+          orderNumber: 'ORD-20260811-0001',
+          total: 1250,
+          paymentStatus: 'UNPAID',
+          _count: { items: 3 },
+        },
+      ]);
+
+      await expect(complete()).rejects.toThrow(/ORD-20260811-0001/);
+      // Nothing may be written — the booking stays open until the money is in.
+      expect(prismaMock.tableReservation.update).not.toHaveBeenCalled();
+      expect(prismaMock.restaurantTable.update).not.toHaveBeenCalled();
+    });
+
+    it('cancels leftover item-less bills and sends the table to cleaning', async () => {
+      prismaMock.order.findMany.mockResolvedValue([
+        {
+          id: 'ord-empty',
+          orderNumber: 'ORD-20260811-0002',
+          total: 0,
+          paymentStatus: 'UNPAID',
+          _count: { items: 0 },
+        },
+      ]);
+      prismaMock.order.count.mockResolvedValue(0); // nothing real left on the table
+      prismaMock.order.updateMany.mockResolvedValue({ count: 1 });
+      prismaMock.tableReservation.update.mockResolvedValue({ ...seated, status: 'COMPLETED' });
+      prismaMock.restaurantTable.update.mockResolvedValue({ id: 'tbl-1', status: 'CLEANING' });
+
+      const result = await complete();
+
+      expect(prismaMock.order.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: { in: ['ord-empty'] } },
+          data: expect.objectContaining({ status: 'CANCELLED' }),
+        }),
+      );
+      expect(prismaMock.restaurantTable.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: 'CLEANING' } }),
+      );
+      expect(result.status).toBe('COMPLETED');
+    });
+
+    it('keeps the table occupied when another party is still on it', async () => {
+      prismaMock.order.findMany.mockResolvedValue([
+        {
+          id: 'ord-1',
+          orderNumber: 'ORD-20260811-0003',
+          total: 800,
+          paymentStatus: 'PAID',
+          _count: { items: 2 },
+        },
+      ]);
+      prismaMock.order.count.mockResolvedValue(1); // a split bill is still running
+      prismaMock.tableReservation.update.mockResolvedValue({ ...seated, status: 'COMPLETED' });
+
+      await complete();
+
+      expect(prismaMock.order.updateMany).not.toHaveBeenCalled();
+      expect(prismaMock.restaurantTable.update).not.toHaveBeenCalled();
     });
   });
 });
@@ -461,7 +708,13 @@ describe('KitchenService', () => {
     prismaMock = makePrismaMock();
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [KitchenService, { provide: PrismaService, useValue: prismaMock }],
+      providers: [
+        KitchenService,
+        { provide: PrismaService, useValue: prismaMock },
+        auditLogProvider(),
+        // ครัวยกเลิกรายการแล้วต้องคืนของเข้าสต๊อก — สเปกนี้ไม่ได้ทดสอบสต๊อก จึงใช้ตัวแทนปล่อยผ่าน
+        { provide: MenuStockService, useValue: buildMenuStockStub() },
+      ],
     }).compile();
 
     kitchenService = module.get<KitchenService>(KitchenService);
@@ -492,17 +745,12 @@ describe('KitchenService', () => {
 
   describe('completeOrder', () => {
     it('marks order and items as READY', async () => {
-      prismaMock.kitchenOrder.findFirst.mockResolvedValue({
-        ...mockKitchenOrder,
-        status: 'PREPARING',
-        startedAt: now,
-      });
+      // Read once to authorize the transition, once more to return the fresh row —
+      // both go through findFirst so the tenant scope is never dropped.
+      prismaMock.kitchenOrder.findFirst
+        .mockResolvedValueOnce({ ...mockKitchenOrder, status: 'PREPARING', startedAt: now })
+        .mockResolvedValueOnce({ ...mockKitchenOrder, status: 'READY', completedAt: now });
       prismaMock.$transaction.mockResolvedValue([undefined, undefined, undefined]);
-      prismaMock.kitchenOrder.findUnique.mockResolvedValue({
-        ...mockKitchenOrder,
-        status: 'READY',
-        completedAt: now,
-      });
 
       const result = await kitchenService.completeOrder(RESTAURANT_ID, KO_ID, TENANT_ID);
 

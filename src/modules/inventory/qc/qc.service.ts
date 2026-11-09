@@ -12,9 +12,75 @@ import {
   CreateChecklistItemDto,
   CreateQCRecordDto,
   SubmitQCRecordDto,
+  SubmitQCResultDto,
   QueryQCRecordDto,
 } from './dto/qc.dto';
 import { QCRecordStatus } from '@prisma/client';
+
+// ─── Checklist guidance helpers ───────────────────────────────────────────────
+// Spread into Prisma payloads so the new columns (description / unit /
+// requireNoteOnFail / note) don't depend on a regenerated client at compile time.
+
+function checklistGuidance(ci: CreateChecklistItemDto) {
+  const description = ci.description?.trim();
+  const unit = ci.unit?.trim();
+  return {
+    description: description ? description : null,
+    unit: ci.type === 'NUMERIC' && unit ? unit : null,
+    requireNoteOnFail: ci.requireNoteOnFail ?? false,
+  };
+}
+
+function resultNote(r: SubmitQCResultDto) {
+  const note = r.note?.trim();
+  return { note: note ? note : null };
+}
+
+export interface QcItemRule {
+  id: string;
+  label: string;
+  type: string;
+  required: boolean;
+  orderIndex: number;
+  requireNoteOnFail?: boolean | null;
+}
+
+/** True when the submitted value is a real answer for the item's type. */
+export function hasQcAnswer(type: string, r: SubmitQCResultDto | undefined): boolean {
+  if (!r) return false;
+  switch (type) {
+    case 'BOOLEAN':
+      return typeof r.valueBool === 'boolean';
+    case 'NUMERIC':
+      return typeof r.valueNumeric === 'number' && Number.isFinite(r.valueNumeric);
+    case 'TEXT':
+      return (r.valueText ?? '').trim().length > 0;
+    case 'PHOTO':
+      return (r.photoUrls?.length ?? 0) > 0;
+    default:
+      return true;
+  }
+}
+
+/**
+ * Required items without a real answer, and failed items whose template
+ * demands a finding note. `no` = 1-based position as the inspector sees it.
+ */
+export function findQcSubmitIssues(items: QcItemRule[], results: SubmitQCResultDto[]) {
+  const sorted = [...items].sort((a, b) => a.orderIndex - b.orderIndex);
+  const byItem = new Map(results.map((r) => [r.checklistItemId, r]));
+  const missing: Array<{ no: number; label: string }> = [];
+  const noteRequired: Array<{ no: number; label: string }> = [];
+  sorted.forEach((ci, i) => {
+    const r = byItem.get(ci.id);
+    const answered = hasQcAnswer(ci.type, r);
+    if (ci.required && !answered) missing.push({ no: i + 1, label: ci.label });
+    if (answered && r && !r.passed && ci.requireNoteOnFail && !(r.note ?? '').trim()) {
+      noteRequired.push({ no: i + 1, label: ci.label });
+    }
+  });
+  return { missing, noteRequired };
+}
 
 @Injectable()
 export class QCService {
@@ -45,26 +111,144 @@ export class QCService {
       throw new BadRequestException('ต้องระบุ itemId เมื่อ appliesTo = ITEM');
     }
 
-    return this.prisma.qCTemplate.create({
-      data: {
-        tenantId,
-        name: dto.name,
-        appliesTo: dto.appliesTo,
-        categoryId: dto.categoryId,
-        itemId: dto.itemId,
-        checklistItems: dto.checklistItems?.length
-          ? { create: dto.checklistItems }
-          : undefined,
-      },
-      include: { checklistItems: { orderBy: { orderIndex: 'asc' } } },
-    });
+    // Pre-flight existence + tenant-scope check so the user gets a friendly
+    // 404 instead of a Prisma P2003 foreign-key explosion at write time.
+    if (dto.appliesTo === 'CATEGORY' && dto.categoryId) {
+      const cat = await this.prisma.itemCategory.findFirst({
+        where: { id: dto.categoryId, tenantId },
+        select: { id: true },
+      });
+      if (!cat) {
+        throw new NotFoundException(`ไม่พบหมวดหมู่สินค้าในระบบ (categoryId=${dto.categoryId})`);
+      }
+    }
+    if (dto.appliesTo === 'ITEM' && dto.itemId) {
+      const item = await this.prisma.inventoryItem.findFirst({
+        where: { id: dto.itemId, tenantId },
+        select: { id: true },
+      });
+      if (!item) {
+        throw new NotFoundException(`ไม่พบสินค้าในระบบ (itemId=${dto.itemId})`);
+      }
+    }
+
+    // Normalize checklist items so each row gets a sequential orderIndex even
+    // if the client forgot to send one (DTO defaults to 0 → all rows would
+    // collide on the index).
+    const checklistData = (dto.checklistItems ?? []).map((ci, idx) => ({
+      label: ci.label,
+      type: ci.type,
+      required: ci.required ?? true,
+      orderIndex: typeof ci.orderIndex === 'number' ? ci.orderIndex : idx,
+      passCondition: ci.passCondition ? (ci.passCondition as unknown as object) : undefined,
+      ...checklistGuidance(ci),
+    }));
+
+    try {
+      return await this.prisma.qCTemplate.create({
+        data: {
+          tenantId,
+          name: dto.name,
+          appliesTo: dto.appliesTo,
+          categoryId: dto.appliesTo === 'CATEGORY' ? dto.categoryId : null,
+          itemId: dto.appliesTo === 'ITEM' ? dto.itemId : null,
+          checklistItems: checklistData.length ? { create: checklistData } : undefined,
+        },
+        include: { checklistItems: { orderBy: { orderIndex: 'asc' } } },
+      });
+    } catch (e: unknown) {
+      this.logger.error('createTemplate failed', e instanceof Error ? e.stack : String(e));
+      // Surface a meaningful error to the API consumer instead of a 500.
+      throw new BadRequestException(
+        e instanceof Error ? e.message : 'ไม่สามารถสร้าง QC Template ได้',
+      );
+    }
   }
 
   async updateTemplate(tenantId: string, id: string, dto: UpdateQCTemplateDto) {
-    await this.findTemplateOrThrow(tenantId, id);
+    const existing = await this.findTemplateOrThrow(tenantId, id);
+
+    // Resolve effective appliesTo — may come from dto or fall back to current value.
+    const effectiveAppliesTo = dto.appliesTo ?? existing.appliesTo;
+
+    // Validate scope fields when changing appliesTo or the associated ID.
+    if (effectiveAppliesTo === 'CATEGORY') {
+      const effectiveCategoryId =
+        dto.categoryId ?? (existing.appliesTo === 'CATEGORY' ? existing.categoryId : undefined);
+      if (!effectiveCategoryId) {
+        throw new BadRequestException('ต้องระบุ categoryId เมื่อ appliesTo = CATEGORY');
+      }
+      if (dto.categoryId) {
+        const cat = await this.prisma.itemCategory.findFirst({
+          where: { id: dto.categoryId, tenantId },
+          select: { id: true },
+        });
+        if (!cat) throw new NotFoundException(`ไม่พบหมวดหมู่สินค้า (categoryId=${dto.categoryId})`);
+      }
+    }
+
+    if (effectiveAppliesTo === 'ITEM') {
+      const effectiveItemId =
+        dto.itemId ?? (existing.appliesTo === 'ITEM' ? existing.itemId : undefined);
+      if (!effectiveItemId) {
+        throw new BadRequestException('ต้องระบุ itemId เมื่อ appliesTo = ITEM');
+      }
+      if (dto.itemId) {
+        const item = await this.prisma.inventoryItem.findFirst({
+          where: { id: dto.itemId, tenantId },
+          select: { id: true },
+        });
+        if (!item) throw new NotFoundException(`ไม่พบสินค้า (itemId=${dto.itemId})`);
+      }
+    }
+
+    // Build scalar update payload — only include fields actually sent by client.
+    const scalarUpdate: Record<string, unknown> = {};
+    if (dto.name !== undefined) scalarUpdate.name = dto.name;
+    if (dto.isActive !== undefined) scalarUpdate.isActive = dto.isActive;
+    if (dto.appliesTo !== undefined) {
+      scalarUpdate.appliesTo = dto.appliesTo;
+      // Nullify the opposite scope ID when switching scope type.
+      scalarUpdate.categoryId =
+        dto.appliesTo === 'CATEGORY' ? (dto.categoryId ?? existing.categoryId) : null;
+      scalarUpdate.itemId = dto.appliesTo === 'ITEM' ? (dto.itemId ?? existing.itemId) : null;
+    } else {
+      // Scope type unchanged — allow updating individual IDs in place.
+      if (dto.categoryId !== undefined) scalarUpdate.categoryId = dto.categoryId;
+      if (dto.itemId !== undefined) scalarUpdate.itemId = dto.itemId;
+    }
+
+    // If checklistItems were sent, replace the entire set inside a transaction.
+    if (dto.checklistItems !== undefined) {
+      const checklistData = dto.checklistItems.map((ci, idx) => ({
+        label: ci.label,
+        type: ci.type,
+        required: ci.required ?? true,
+        orderIndex: typeof ci.orderIndex === 'number' ? ci.orderIndex : idx,
+        passCondition: ci.passCondition ? (ci.passCondition as unknown as object) : undefined,
+        ...checklistGuidance(ci),
+      }));
+
+      return this.prisma.$transaction(async (tx) => {
+        // Delete all existing checklist items then recreate — simpler than
+        // diffing by label/type and avoids stale orderIndex collisions.
+        await tx.qCChecklistItem.deleteMany({ where: { templateId: id } });
+
+        return tx.qCTemplate.update({
+          where: { id },
+          data: {
+            ...scalarUpdate,
+            checklistItems: checklistData.length ? { create: checklistData } : undefined,
+          },
+          include: { checklistItems: { orderBy: { orderIndex: 'asc' } } },
+        });
+      });
+    }
+
+    // No checklist update — simple scalar patch.
     return this.prisma.qCTemplate.update({
       where: { id },
-      data: { ...dto },
+      data: scalarUpdate,
       include: { checklistItems: { orderBy: { orderIndex: 'asc' } } },
     });
   }
@@ -81,7 +265,18 @@ export class QCService {
   async addChecklistItem(tenantId: string, templateId: string, dto: CreateChecklistItemDto) {
     await this.findTemplateOrThrow(tenantId, templateId);
     return this.prisma.qCChecklistItem.create({
-      data: { templateId, ...dto },
+      data: {
+        templateId,
+        label: dto.label,
+        type: dto.type,
+        required: dto.required ?? true,
+        orderIndex: dto.orderIndex ?? 0,
+        // PassConditionDto is a class instance — Prisma's JSON column accepts
+        // a plain object, so cast through `unknown` to satisfy the typed
+        // generated input.
+        passCondition: dto.passCondition ? (dto.passCondition as unknown as object) : undefined,
+        ...checklistGuidance(dto),
+      },
     });
   }
 
@@ -101,32 +296,138 @@ export class QCService {
   // ═══════════════════════════════════════════════════════════════════════════
 
   async listRecords(tenantId: string, query: QueryQCRecordDto) {
-    const { page = 1, limit = 20, status, supplierId, goodsReceiveId } = query;
+    const { page = 1, limit = 20, status, supplierId, goodsReceiveId, from, to } = query;
     const skip = (page - 1) * limit;
 
     const where: any = { tenantId };
     if (status) where.status = status;
     if (goodsReceiveId) where.goodsReceiveId = goodsReceiveId;
 
-    // Supplier filter via GR linkage
-    if (supplierId) {
-      where.goodsReceive = { purchaseOrder: { supplierId } };
+    // Date range filter on createdAt
+    if (from || to) {
+      where.createdAt = {};
+      if (from) where.createdAt.gte = new Date(from);
+      if (to) {
+        // Include the full end date (set to end-of-day)
+        const toDate = new Date(to);
+        toDate.setHours(23, 59, 59, 999);
+        where.createdAt.lte = toDate;
+      }
     }
 
-    const [data, total] = await Promise.all([
+    // Supplier filter via GR linkage
+    // QCRecord has no direct Prisma relation to GoodsReceive — must resolve GR IDs first
+    if (supplierId) {
+      const linkedGRs = await this.prisma.goodsReceive.findMany({
+        where: { tenantId, purchaseOrder: { supplierId } },
+        select: { id: true },
+      });
+      where.goodsReceiveId = { in: linkedGRs.map((gr) => gr.id) };
+    }
+
+    const [rawData, total] = await Promise.all([
       this.prisma.qCRecord.findMany({
         where,
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
         include: {
-          template: { select: { id: true, name: true } },
+          template: {
+            select: { id: true, name: true, _count: { select: { checklistItems: true } } },
+          },
           lot: { select: { id: true, lotNumber: true } },
-          _count: { select: { results: true } },
+          results: { select: { passed: true } },
         },
       }),
       this.prisma.qCRecord.count({ where }),
     ]);
+
+    // Resolve linked GR + supplier + inspector data in batch round-trips so the
+    // list can show "GR-202604-0001 · Acme Supplier · ตรวจโดย คุณก้อง · 8 นาที"
+    // without extra fetches per row.
+    const grIds = Array.from(
+      new Set(
+        rawData.map((r: any) => r.goodsReceiveId).filter((id: string | null): id is string => !!id),
+      ),
+    );
+    const inspectorIds = Array.from(
+      new Set(rawData.map((r: any) => r.inspectedBy).filter(Boolean)),
+    );
+
+    const [grs, inspectors] = await Promise.all([
+      grIds.length
+        ? this.prisma.goodsReceive.findMany({
+            where: { id: { in: grIds } },
+            select: {
+              id: true,
+              grNumber: true,
+              purchaseOrder: {
+                select: {
+                  id: true,
+                  poNumber: true,
+                  supplier: { select: { id: true, name: true } },
+                },
+              },
+            },
+          })
+        : Promise.resolve([] as any[]),
+      inspectorIds.length
+        ? this.prisma.user.findMany({
+            where: { id: { in: inspectorIds as string[] } },
+            select: { id: true, firstName: true, lastName: true, email: true },
+          })
+        : Promise.resolve([] as any[]),
+    ]);
+
+    const grMap = new Map(grs.map((g: any) => [g.id, g]));
+    const inspectorMap = new Map(
+      inspectors.map((u: any) => [
+        u.id,
+        [u.firstName, u.lastName].filter(Boolean).join(' ') || u.email,
+      ]),
+    );
+
+    const data = rawData.map((rec: any) => {
+      const checklistTotal = rec.template?._count?.checklistItems ?? 0;
+      const completed = rec.results.length;
+      const passed = rec.results.filter((r: any) => r.passed === true).length;
+      const failed = rec.results.filter((r: any) => r.passed === false).length;
+
+      const gr = rec.goodsReceiveId ? grMap.get(rec.goodsReceiveId) : null;
+
+      // Submitted records carry inspectedAt; PENDING records have inspectedAt
+      // = createdAt by Prisma default. Don't compute durationMs for PENDING.
+      const durationMs =
+        rec.status !== 'PENDING' && rec.inspectedAt && rec.createdAt
+          ? new Date(rec.inspectedAt).getTime() - new Date(rec.createdAt).getTime()
+          : null;
+
+      return {
+        id: rec.id,
+        status: rec.status,
+        notes: rec.notes,
+        createdAt: rec.createdAt,
+        inspectedAt: rec.inspectedAt,
+        inspectedBy: rec.inspectedBy,
+        inspectedByName: inspectorMap.get(rec.inspectedBy) ?? null,
+        durationMs,
+        template: rec.template ? { id: rec.template.id, name: rec.template.name } : null,
+        lot: rec.lot,
+        goodsReceiveId: rec.goodsReceiveId,
+        goodsReceiveNumber: gr?.grNumber ?? null,
+        purchaseOrderId: gr?.purchaseOrder?.id ?? null,
+        purchaseOrderNumber: gr?.purchaseOrder?.poNumber ?? null,
+        supplier: gr?.purchaseOrder?.supplier ?? null,
+        progress: {
+          checklistTotal,
+          completed,
+          passed,
+          failed,
+          passRate: completed > 0 ? Math.round((passed / completed) * 100) : 0,
+          completionRate: checklistTotal > 0 ? Math.round((completed / checklistTotal) * 100) : 0,
+        },
+      };
+    });
 
     return { data, meta: { page, limit, total, totalPages: Math.ceil(total / limit) } };
   }
@@ -155,10 +456,118 @@ export class QCService {
         template: { include: { checklistItems: { orderBy: { orderIndex: 'asc' } } } },
         results: { include: { checklistItem: true } },
         lot: { select: { id: true, lotNumber: true, status: true } },
+        goodsReceive: { select: { id: true, status: true } },
       },
     });
     if (!record) throw new NotFoundException(`ไม่พบ QC Record ID: ${id}`);
-    return record;
+
+    // Resolve inspector name from user table so the UI can display a
+    // human-readable name instead of a raw UUID.
+    let inspectedByName: string | null = null;
+    if (record.inspectedBy) {
+      const inspector = await this.prisma.user.findFirst({
+        where: { id: record.inspectedBy, tenantId },
+        select: { firstName: true, lastName: true, email: true },
+      });
+      if (inspector) {
+        inspectedByName =
+          [inspector.firstName, inspector.lastName].filter(Boolean).join(' ') ||
+          inspector.email ||
+          null;
+      }
+    }
+
+    // Fetch GR + PO snapshot separately to avoid mixing Prisma include/select
+    // and keep TypeScript happy. Only fetched when a GR is linked.
+    let grSnapshot: {
+      grNumber: string;
+      receiveDate: Date | null;
+      purchaseOrderId: string | null;
+      poNumber: string | null;
+      poOrderDate: Date | null;
+      supplier: { id: string; name: string; code: string | null } | null;
+      // GR items = สินค้าที่รับเข้าจริงในรอบ GR นี้ (ยอด receivedQty ไม่ใช่ยอดสั่งซื้อตาม PO)
+      grItems: Array<{
+        id: string;
+        itemId: string | null;
+        itemName: string | null;
+        sku: string | null;
+        receivedQty: number;
+        orderedQty: number | null;
+        rejectedQty: number;
+      }>;
+    } | null = null;
+
+    if (record.goodsReceiveId) {
+      const gr = await this.prisma.goodsReceive.findFirst({
+        where: { id: record.goodsReceiveId, tenantId },
+        select: {
+          grNumber: true,
+          receiveDate: true,
+          purchaseOrderId: true,
+          // GR items — รายการที่รับเข้าจริงในใบ GR นี้ (ใช้ receivedQty)
+          items: {
+            select: {
+              id: true,
+              receivedQty: true,
+              orderedQty: true,
+              rejectedQty: true,
+              item: { select: { id: true, name: true, sku: true } },
+            },
+            orderBy: { createdAt: 'asc' },
+          },
+          purchaseOrder: {
+            select: {
+              id: true,
+              poNumber: true,
+              orderDate: true,
+              supplier: { select: { id: true, name: true, code: true } },
+            },
+          },
+        },
+      });
+
+      if (gr) {
+        const po = gr.purchaseOrder;
+        grSnapshot = {
+          grNumber: gr.grNumber,
+          receiveDate: gr.receiveDate ?? null,
+          purchaseOrderId: po?.id ?? null,
+          poNumber: po?.poNumber ?? null,
+          poOrderDate: po?.orderDate ?? null,
+          supplier: po?.supplier
+            ? { id: po.supplier.id, name: po.supplier.name, code: po.supplier.code }
+            : null,
+          grItems: gr.items.map((itm) => ({
+            id: itm.id,
+            itemId: itm.item?.id ?? null,
+            itemName: itm.item?.name ?? null,
+            sku: itm.item?.sku ?? null,
+            receivedQty: itm.receivedQty,
+            orderedQty: itm.orderedQty ?? null,
+            rejectedQty: itm.rejectedQty,
+          })),
+        };
+      }
+    }
+
+    // Surface the GR status as a flat field so the frontend can decide
+    // whether to show Accept/Reject buttons or an "already accepted" badge.
+    return {
+      ...record,
+      goodsReceiveStatus: record.goodsReceive?.status ?? null,
+      // Inspector display name
+      inspectedByName,
+      // GR / PO snapshot fields (null when no GR linked)
+      goodsReceiveNumber: grSnapshot?.grNumber ?? null,
+      goodsReceiveDate: grSnapshot?.receiveDate ?? null,
+      purchaseOrderId: grSnapshot?.purchaseOrderId ?? null,
+      purchaseOrderNumber: grSnapshot?.poNumber ?? null,
+      purchaseOrderDate: grSnapshot?.poOrderDate ?? null,
+      supplier: grSnapshot?.supplier ?? null,
+      grItems: grSnapshot?.grItems ?? [],
+      grItemCount: grSnapshot?.grItems.length ?? 0,
+    };
   }
 
   async submitRecord(tenantId: string, id: string, dto: SubmitQCRecordDto) {
@@ -170,13 +579,16 @@ export class QCService {
     const template = record.template;
     const checklistItems = template.checklistItems;
 
-    // Validate all required items have results
-    const requiredItems = checklistItems.filter((ci) => ci.required);
-    const submittedItemIds = new Set(dto.results.map((r) => r.checklistItemId));
-    const missing = requiredItems.filter((ci) => !submittedItemIds.has(ci.id));
-    if (missing.length > 0) {
+    // Validate all required items have a real answer (not just an empty draft)
+    const issues = findQcSubmitIssues(checklistItems as QcItemRule[], dto.results);
+    if (issues.missing.length > 0) {
       throw new BadRequestException(
-        `ยังไม่ได้กรอก checklist items ที่จำเป็น: ${missing.map((m) => m.label).join(', ')}`,
+        `ยังไม่ได้ตอบข้อที่จำเป็น: ${issues.missing.map((m) => `ข้อ ${m.no} ${m.label}`).join(', ')}`,
+      );
+    }
+    if (issues.noteRequired.length > 0) {
+      throw new BadRequestException(
+        `ข้อที่ไม่ผ่านต้องระบุสิ่งที่พบ: ${issues.noteRequired.map((m) => `ข้อ ${m.no} ${m.label}`).join(', ')}`,
       );
     }
 
@@ -215,6 +627,7 @@ export class QCService {
             valueText: result.valueText,
             photoUrls: result.photoUrls ? result.photoUrls : undefined,
             passed: result.passed,
+            ...resultNote(result),
           },
           create: {
             recordId: id,
@@ -224,6 +637,7 @@ export class QCService {
             valueText: result.valueText,
             photoUrls: result.photoUrls ? result.photoUrls : undefined,
             passed: result.passed,
+            ...resultNote(result),
           },
         });
       }
@@ -258,9 +672,7 @@ export class QCService {
       where: { recordId, checklistItemId },
     });
 
-    const photoUrls = existing
-      ? [...((existing.photoUrls as string[]) ?? []), url]
-      : [url];
+    const photoUrls = existing ? [...((existing.photoUrls as string[]) ?? []), url] : [url];
 
     return this.prisma.qCResult.upsert({
       where: { id: existing?.id ?? '' },

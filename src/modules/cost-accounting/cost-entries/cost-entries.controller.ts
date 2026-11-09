@@ -1,3 +1,4 @@
+import { AllowSystems } from '../../../common/decorators/allow-systems.decorator';
 import { Controller, Get, Post, Body, Param, Query, UseGuards, Req, Version } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
@@ -8,6 +9,8 @@ import { CreateCostEntryDto } from './dto/create-cost-entry.dto';
 import { QueryCostEntryDto } from './dto/query-cost-entry.dto';
 
 @ApiTags('Cost Accounting - Cost Entries')
+// Accounting Terminal — H1 allow-list, audit 2026-11-09
+@AllowSystems('accounting')
 @Controller({ path: 'cost-accounting/cost-entries', version: '1' })
 @UseGuards(JwtAuthGuard, AddonGuard)
 @RequireAddon('COST_ACCOUNTING_MODULE')

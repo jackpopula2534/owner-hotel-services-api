@@ -1,5 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { UNBOOKABLE_ROOM_STATUSES } from '../../common/availability/availability.util';
+import { RevenueSourceModule, RevenueType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { RevenueFilter, RevenueQueryService } from '../revenue/revenue-query.service';
+import {
+  bangkokDayRange,
+  DAY_MS,
+  round2,
+  shiftDate,
+  toBangkokDate,
+} from '../../common/utils/bangkok-day.util';
 
 interface TodayActionsResponse {
   checkInsDue: number;
@@ -36,6 +46,58 @@ interface MetricsResponse {
   arrivalsToday: number;
   departuresToday: number;
   inHouseGuests: number;
+  /**
+   * FIND-15 — card-only estimate, nothing is posted. The ledger recognises room
+   * revenue at checkout, so the ledger-based figures above read ฿0 on most days.
+   * These spread each in-house stay's room price evenly over its nights:
+   * revenue = today's non-room ledger revenue + tonight's room nights.
+   */
+  estimatedRevenueToday: number;
+  estimatedRevenueTrend: number;
+  estimatedAdr: number;
+  estimatedAdrTrend: number;
+  estimatedRevpar: number;
+  /** Room nights the estimate is built from (stays in-house tonight). */
+  estimatedRoomNights: number;
+}
+
+interface StayPriceLike {
+  checkIn: Date;
+  checkOut: Date;
+  totalPrice: unknown;
+  roomSubtotal?: unknown;
+  discountAmount?: unknown;
+}
+
+const num = (v: unknown): number => {
+  const n = Number(v ?? 0);
+  return Number.isFinite(n) ? n : 0;
+};
+
+/** Nights between two Bangkok calendar dates (YYYY-MM-DD). */
+const nightsBetween = (from: string, to: string): number =>
+  Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS);
+
+/**
+ * One night of a stay's room price: (roomSubtotal ?? totalPrice) − discount,
+ * spread evenly over its Bangkok-calendar nights. Same base the ledger later
+ * recognises as ROOM at checkout.
+ */
+export function nightlyRoomRate(stay: StayPriceLike): number {
+  const nights = Math.max(
+    1,
+    nightsBetween(toBangkokDate(stay.checkIn), toBangkokDate(stay.checkOut)),
+  );
+  const base = stay.roomSubtotal != null ? num(stay.roomSubtotal) : num(stay.totalPrice);
+  return Math.max(0, base - num(stay.discountAmount)) / nights;
+}
+
+/** The stay sleeps in the house on the night of `night` (Bangkok date). */
+export function staysNight(
+  stay: Pick<StayPriceLike, 'checkIn' | 'checkOut'>,
+  night: string,
+): boolean {
+  return toBangkokDate(stay.checkIn) <= night && toBangkokDate(stay.checkOut) > night;
 }
 
 interface TimelineEvent {
@@ -84,11 +146,26 @@ interface ActivityFeedResponse {
   activities: ActivityItem[];
 }
 
+const EMPTY_ESTIMATE = {
+  estimatedRevenueToday: 0,
+  estimatedRevenueTrend: 0,
+  estimatedAdr: 0,
+  estimatedAdrTrend: 0,
+  estimatedRevpar: 0,
+  estimatedRoomNights: 0,
+};
+
+const pctChange = (now: number, before: number): number =>
+  before > 0 ? Math.round(((now - before) / before) * 100) : 0;
+
 @Injectable()
 export class DashboardService {
   private readonly logger = new Logger(DashboardService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private readonly revenue: RevenueQueryService,
+  ) {}
 
   async getTodayActions(tenantId?: string, propertyId?: string): Promise<TodayActionsResponse> {
     if (!tenantId) {
@@ -103,10 +180,8 @@ export class DashboardService {
     }
 
     try {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const tomorrow = new Date(today);
-      tomorrow.setDate(tomorrow.getDate() + 1);
+      // Bangkok day — same window the bookings list filters by (booking-list-filter)
+      const { start: today, end: tomorrow } = bangkokDayRange(toBangkokDate(new Date()));
 
       const whereBase: Record<string, unknown> = { tenantId };
       if (propertyId) whereBase.propertyId = propertyId;
@@ -125,7 +200,7 @@ export class DashboardService {
         where: {
           ...whereBase,
           checkOut: { gte: today, lt: tomorrow },
-          status: 'checked-in',
+          status: 'checked_in',
         },
         include: { room: true, guest: true },
         orderBy: { checkOut: 'asc' },
@@ -136,7 +211,8 @@ export class DashboardService {
         roomsToClean = await this.prisma.room.count({
           where: {
             ...whereBase,
-            status: { in: ['dirty', 'occupied_dirty'] },
+            // dirty = รอมอบหมาย, cleaning = แม่บ้านกำลังทำ, occupied_dirty = ยังพักอยู่แต่รอทำ
+            status: { in: ['dirty', 'cleaning', 'occupied_dirty'] },
           },
         });
       } catch {
@@ -220,28 +296,26 @@ export class DashboardService {
         arrivalsToday: 0,
         departuresToday: 0,
         inHouseGuests: 0,
+        ...EMPTY_ESTIMATE,
       };
     }
 
     try {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const tomorrow = new Date(today);
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      const yesterday = new Date(today);
-      yesterday.setDate(yesterday.getDate() - 1);
+      // Bangkok day — same window the bookings list filters by (booking-list-filter)
+      const { start: today, end: tomorrow } = bangkokDayRange(toBangkokDate(new Date()));
+      const yesterday = new Date(today.getTime() - DAY_MS);
 
       const whereBase: Record<string, unknown> = { tenantId };
       if (propertyId) whereBase.propertyId = propertyId;
 
       const totalRooms = await this.prisma.room.count({
-        where: { ...whereBase, status: { not: 'out_of_order' } },
+        where: { ...whereBase, status: { notIn: [...UNBOOKABLE_ROOM_STATUSES] } },
       });
 
       const occupiedBookings = await this.prisma.booking.count({
         where: {
           ...whereBase,
-          status: 'checked-in',
+          status: 'checked_in',
           checkIn: { lte: tomorrow },
           checkOut: { gte: today },
         },
@@ -252,7 +326,7 @@ export class DashboardService {
       const yesterdayOccupied = await this.prisma.booking.count({
         where: {
           ...whereBase,
-          status: { in: ['checked-in', 'checked-out'] },
+          status: { in: ['checked_in', 'checked_out'] },
           checkIn: { lte: yesterday },
           checkOut: { gte: yesterday },
         },
@@ -261,43 +335,79 @@ export class DashboardService {
         totalRooms > 0 ? Math.round((yesterdayOccupied / totalRooms) * 100) : 0;
       const occupancyTrend = occupancyRate - yesterdayOccupancy;
 
-      const todayBookings = await this.prisma.booking.findMany({
-        where: {
-          ...whereBase,
-          status: { in: ['confirmed', 'checked-in', 'checked-out'] },
-          checkIn: { gte: today, lt: tomorrow },
-        },
-        select: { totalPrice: true },
+      // Money comes from the revenue ledger, which files a stay under the day its
+      // folio closed and cuts the day at Bangkok midnight — the same day the
+      // booking counts above use.
+      //
+      // ADR and RevPAR divide *room* revenue, not everything the hotel earned:
+      // a minibar charge is not part of the average daily rate. Reading the
+      // ledger makes that split available for the first time; the old figure
+      // divided grandTotal, add-ons and all, and quietly ran high.
+      const todayDate = toBangkokDate(new Date());
+      const yesterdayDate = shiftDate(todayDate, -1);
+      const hotelFilter = (day: string, roomsOnly = false): RevenueFilter => ({
+        tenantId,
+        from: day,
+        to: day,
+        propertyId,
+        sourceModule: RevenueSourceModule.HOTEL,
+        revenueType: roomsOnly ? RevenueType.ROOM : undefined,
       });
-      const todayRevenue = todayBookings.reduce(
-        (sum, b) => sum + (b.totalPrice ? Number(b.totalPrice) : 0),
-        0,
-      );
+      const todayRoomsFilter = hotelFilter(todayDate, true);
+      const yesterdayRoomsFilter = hotelFilter(yesterdayDate, true);
 
-      const yesterdayBookings = await this.prisma.booking.findMany({
-        where: {
-          ...whereBase,
-          status: { in: ['confirmed', 'checked-in', 'checked-out'] },
-          checkIn: { gte: yesterday, lt: today },
-        },
-        select: { totalPrice: true },
-      });
-      const yesterdayRevenue = yesterdayBookings.reduce(
-        (sum, b) => sum + (b.totalPrice ? Number(b.totalPrice) : 0),
-        0,
-      );
+      const [[todayTotals, yesterdayTotals, todayRooms, yesterdayRooms], todayStays, yesterdayStays] =
+        await Promise.all([
+          this.revenue.totalsOfMany([
+            hotelFilter(todayDate),
+            hotelFilter(yesterdayDate),
+            todayRoomsFilter,
+            yesterdayRoomsFilter,
+          ]),
+          this.revenue.countDocuments(todayRoomsFilter),
+          this.revenue.countDocuments(yesterdayRoomsFilter),
+        ]);
+
+      const todayRevenue = todayTotals.net;
+      const yesterdayRevenue = yesterdayTotals.net;
       const revenueTrend =
         yesterdayRevenue > 0
           ? Math.round(((todayRevenue - yesterdayRevenue) / yesterdayRevenue) * 100)
           : 0;
 
-      const adr = occupiedBookings > 0 ? Math.round(todayRevenue / occupiedBookings) : 0;
+      // ตัวหารเป็น "ใบที่รับรู้ค่าห้องในวันนั้น" ชุดเดียวกับตัวตั้ง ไม่ใช่จำนวนห้องที่มีคน
+      // พักคืนนั้น สมุดรับรู้ค่าห้องทั้งก้อนตอนเช็คเอาต์ การเอาสองชุดมาหารกันจึงได้
+      // ตัวเลขที่ไม่มีความหมาย (เช่นเข้าพัก 3 คืนเช็คเอาต์วันนี้ หารด้วยห้องที่ยังมีคนพัก)
+      const adr = todayStays > 0 ? Math.round(todayRooms.net / todayStays) : 0;
       const yesterdayAdr =
-        yesterdayOccupied > 0 ? Math.round(yesterdayRevenue / yesterdayOccupied) : 0;
+        yesterdayStays > 0 ? Math.round(yesterdayRooms.net / yesterdayStays) : 0;
       const adrTrend =
         yesterdayAdr > 0 ? Math.round(((adr - yesterdayAdr) / yesterdayAdr) * 100) : 0;
 
-      const revpar = totalRooms > 0 ? Math.round(todayRevenue / totalRooms) : 0;
+      const revpar = totalRooms > 0 ? Math.round(todayRooms.net / totalRooms) : 0;
+
+      // FIND-15 (b): estimate from the stays sleeping here tonight / last night.
+      const [tonightNights, lastNight] = await Promise.all([
+        this.roomNights(whereBase, ['checked_in'], todayDate),
+        this.roomNights(whereBase, ['checked_in', 'checked_out'], yesterdayDate),
+      ]);
+      const estimatedRevenueToday = round2(
+        todayTotals.net - todayRooms.net + tonightNights.revenue,
+      );
+      const estimatedRevenueYesterday =
+        yesterdayTotals.net - yesterdayRooms.net + lastNight.revenue;
+      const estimatedAdr =
+        tonightNights.count > 0 ? Math.round(tonightNights.revenue / tonightNights.count) : 0;
+      const estimatedAdrYesterday =
+        lastNight.count > 0 ? Math.round(lastNight.revenue / lastNight.count) : 0;
+      const estimate = {
+        estimatedRevenueToday,
+        estimatedRevenueTrend: pctChange(estimatedRevenueToday, estimatedRevenueYesterday),
+        estimatedAdr,
+        estimatedAdrTrend: pctChange(estimatedAdr, estimatedAdrYesterday),
+        estimatedRevpar: totalRooms > 0 ? Math.round(tonightNights.revenue / totalRooms) : 0,
+        estimatedRoomNights: tonightNights.count,
+      };
 
       const arrivalsToday = await this.prisma.booking.count({
         where: {
@@ -311,14 +421,14 @@ export class DashboardService {
         where: {
           ...whereBase,
           checkOut: { gte: today, lt: tomorrow },
-          status: 'checked-in',
+          status: 'checked_in',
         },
       });
 
       const guestsSum = await this.prisma.booking.aggregate({
         where: {
           ...whereBase,
-          status: 'checked-in',
+          status: 'checked_in',
           checkIn: { lte: tomorrow },
           checkOut: { gte: today },
         },
@@ -327,7 +437,11 @@ export class DashboardService {
         },
       });
       const inHouseGuests = guestsSum._sum.numberOfGuests || 0;
-      const availableRooms = totalRooms - occupiedBookings;
+      // ว่างพร้อมขาย = ห้องสถานะ available จริง ๆ — เดิมเอา totalRooms − ห้องมีแขก ซึ่งนับห้อง
+      // รอทำความสะอาด/ซ่อมเป็น "ว่าง" ด้วย เลยไม่ตรงกับหน้าโรงแรมและหน้าภาพรวม (นับจากสถานะห้อง)
+      const availableRooms = await this.prisma.room.count({
+        where: { ...whereBase, status: 'available' },
+      });
 
       return {
         occupancyRate,
@@ -335,7 +449,7 @@ export class DashboardService {
         adr,
         adrTrend,
         revpar,
-        todayRevenue,
+        todayRevenue: round2(todayRevenue),
         revenueTrend,
         totalRooms,
         occupiedRooms: occupiedBookings,
@@ -343,6 +457,7 @@ export class DashboardService {
         arrivalsToday,
         departuresToday,
         inHouseGuests,
+        ...estimate,
       };
     } catch (error: unknown) {
       this.logger.error(
@@ -362,18 +477,47 @@ export class DashboardService {
         arrivalsToday: 0,
         departuresToday: 0,
         inHouseGuests: 0,
+        ...EMPTY_ESTIMATE,
       };
     }
+  }
+
+  /**
+   * Stays that sleep in the house on the night of `night` (Bangkok date —
+   * arrived on/before it, leaving after it) and their room price for that night.
+   */
+  private async roomNights(
+    whereBase: Record<string, unknown>,
+    statuses: string[],
+    night: string,
+  ): Promise<{ count: number; revenue: number }> {
+    const { start, end } = bangkokDayRange(night);
+    const candidates = await this.prisma.booking.findMany({
+      where: {
+        ...whereBase,
+        status: { in: statuses },
+        checkIn: { lt: end },
+        checkOut: { gte: start },
+      },
+      select: {
+        checkIn: true,
+        checkOut: true,
+        totalPrice: true,
+        roomSubtotal: true,
+        discountAmount: true,
+      },
+    });
+    const stays = candidates.filter((stay) => staysNight(stay, night));
+    const revenue = stays.reduce((sum, stay) => sum + nightlyRoomRate(stay), 0);
+    return { count: stays.length, revenue: round2(revenue) };
   }
 
   async getTimeline(tenantId?: string, propertyId?: string): Promise<TimelineResponse> {
     if (!tenantId) return { events: [] };
 
     try {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const tomorrow = new Date(today);
-      tomorrow.setDate(tomorrow.getDate() + 1);
+      // Bangkok day — same window the bookings list filters by (booking-list-filter)
+      const { start: today, end: tomorrow } = bangkokDayRange(toBangkokDate(new Date()));
 
       const whereBase: Record<string, unknown> = { tenantId };
       if (propertyId) whereBase.propertyId = propertyId;
@@ -383,7 +527,7 @@ export class DashboardService {
           where: {
             ...whereBase,
             checkIn: { gte: today, lt: tomorrow },
-            status: { in: ['confirmed', 'pending', 'checked-in'] },
+            status: { in: ['confirmed', 'pending', 'checked_in'] },
           },
           include: { room: true, guest: true },
         }),
@@ -391,7 +535,7 @@ export class DashboardService {
           where: {
             ...whereBase,
             checkOut: { gte: today, lt: tomorrow },
-            status: { in: ['checked-in', 'checked-out'] },
+            status: { in: ['checked_in', 'checked_out'] },
           },
           include: { room: true, guest: true },
         }),
@@ -447,7 +591,7 @@ export class DashboardService {
         where: whereBase,
         include: {
           bookings: {
-            where: { status: 'checked-in' },
+            where: { status: 'checked_in' },
             include: { guest: true },
             take: 1,
           },
@@ -477,10 +621,14 @@ export class DashboardService {
 
       const summary = {
         vacantClean: rooms.filter((r) => r.status === 'available').length,
-        vacantDirty: rooms.filter((r) => r.status === 'dirty').length,
-        occupied: rooms.filter((r) => r.status === 'occupied' || (r.bookings?.length ?? 0) > 0)
-          .length,
-        outOfOrder: rooms.filter((r) => r.status === 'out_of_order').length,
+        // dirty = รอมอบหมายแม่บ้าน, cleaning = กำลังทำความสะอาดอยู่ — ทั้งสองยังไม่พร้อมรับแขก
+        vacantDirty: rooms.filter((r) => r.status === 'dirty' || r.status === 'cleaning').length,
+        occupied: rooms.filter(
+          (r) => r.status === 'occupied' || (r.bookings?.length ?? 0) > 0,
+        ).length,
+        outOfOrder: rooms.filter(
+          (r) => r.status === 'out_of_order' || r.status === 'maintenance',
+        ).length,
         total: rooms.length,
       };
 

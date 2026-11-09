@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bull';
 import { AddonModule } from '@/modules/addons/addon.module';
+import { IntegrationsModule } from '@/modules/integrations/integrations.module';
 import { CategoriesModule } from './categories/categories.module';
 import { ItemsModule } from './items/items.module';
 import { WarehousesModule } from './warehouses/warehouses.module';
+import { SourceWarehouseModule } from './warehouses/source-warehouse.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 import { StockMovementsModule } from './stock-movements/stock-movements.module';
 import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
@@ -19,10 +21,22 @@ import { PriceComparisonsModule } from './price-comparisons/price-comparisons.mo
 import { PurchaseRequisitionsModule } from './purchase-requisitions/purchase-requisitions.module';
 import { RfqsModule } from './rfqs/rfqs.module';
 import { InventoryEventListener } from './events/inventory-event.listener';
+import { RestaurantStockDeductionService } from './events/restaurant-stock-deduction.service';
 // New 2026-Q2 modules
 import { LotsModule } from './lots/lots.module';
 import { QRModule } from './qr/qr.module';
 import { QCModule } from './qc/qc.module';
+// Sprint 3: procurement-side read aggregator over WarehouseStock + InventoryLot
+import { ProcurementStockModule } from './procurement-stock/procurement-stock.module';
+// Sprint 5: realtime WS broadcaster for gr.completed / po.received
+import { ProcurementEventsModule } from './procurement-events/procurement-events.module';
+// Retail / POS checkout + sales history
+import { RetailSalesModule } from './retail-sales/retail-sales.module';
+import { MinibarModule } from './minibar/minibar.module';
+// คำขอสร้าง/แก้ไขสินค้าจากจัดซื้อ → คลังอนุมัติ (สินค้าสร้างได้จากฝั่งคลังเท่านั้น)
+import { ProductChangeRequestsModule } from './product-change-requests/product-change-requests.module';
+// สินค้าหน้าร้าน — มุมมองของสินค้าสำเร็จรูปที่ขายได้ (ตั้งราคา / ผูกเป็นเมนู / กำไรต่อชิ้น)
+import { RetailProductsModule } from './retail-products/retail-products.module';
 import {
   InventoryDashboardController,
   InventoryReportsController,
@@ -34,10 +48,12 @@ import { PrismaModule } from '@/prisma/prisma.module';
 @Module({
   imports: [
     AddonModule,
+    IntegrationsModule,
     PrismaModule,
     CategoriesModule,
     ItemsModule,
     WarehousesModule,
+    SourceWarehouseModule,
     SuppliersModule,
     StockMovementsModule,
     PurchaseOrdersModule,
@@ -56,10 +72,21 @@ import { PrismaModule } from '@/prisma/prisma.module';
     LotsModule,
     QRModule,
     QCModule,
+    ProcurementStockModule,
+    ProcurementEventsModule,
+    RetailSalesModule,
+    RetailProductsModule,
+    MinibarModule,
+    ProductChangeRequestsModule,
     BullModule.registerQueue({ name: INVENTORY_QUEUE }),
   ],
   controllers: [InventoryDashboardController, InventoryReportsController],
-  providers: [InventoryEventListener, InventoryQueueProcessor, InventoryQueueScheduler],
+  providers: [
+    InventoryEventListener,
+    RestaurantStockDeductionService,
+    InventoryQueueProcessor,
+    InventoryQueueScheduler,
+  ],
   exports: [
     CategoriesModule,
     ItemsModule,
@@ -81,6 +108,10 @@ import { PrismaModule } from '@/prisma/prisma.module';
     LotsModule,
     QRModule,
     QCModule,
+    ProcurementStockModule,
+    ProcurementEventsModule,
+    RetailSalesModule,
+    ProductChangeRequestsModule,
   ],
 })
 export class InventoryModule {}

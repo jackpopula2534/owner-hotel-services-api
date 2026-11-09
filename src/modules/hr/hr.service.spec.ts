@@ -2,6 +2,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConflictException, NotFoundException, BadRequestException } from '@nestjs/common';
 import { HrService } from './hr.service';
 import { EmployeeCodeConfigService } from './employee-code-config.service';
+import { HrLifecycleAssignmentService } from './hr-lifecycle-assignment.service';
+import { StaffService } from '../staff/staff.service';
 import { PrismaService } from '../../prisma/prisma.service';
 
 function createMockPrisma() {
@@ -24,6 +26,13 @@ describe('HrService', () => {
   let prisma: ReturnType<typeof createMockPrisma>;
   let codeConfigService: { generateNextCode: jest.Mock };
 
+  /**
+   * HrService สั่งงานสองบริการนี้ต่อ — ทะเบียนพนักงานปฏิบัติการ (StaffService) กับ
+   * งานเดินเรื่องพนักงานใหม่ ที่นี่สนใจแค่ตัว HrService จึงใส่ตัวแทนไว้พอให้ประกอบได้
+   */
+  const lifecycleService = { recomputeForEmployee: jest.fn().mockResolvedValue(undefined) };
+  const staffService = { provision: jest.fn() };
+
   beforeEach(async () => {
     prisma = createMockPrisma();
     codeConfigService = { generateNextCode: jest.fn() };
@@ -33,6 +42,8 @@ describe('HrService', () => {
         HrService,
         { provide: PrismaService, useValue: prisma },
         { provide: EmployeeCodeConfigService, useValue: codeConfigService },
+        { provide: HrLifecycleAssignmentService, useValue: lifecycleService },
+        { provide: StaffService, useValue: staffService },
       ],
     }).compile();
 

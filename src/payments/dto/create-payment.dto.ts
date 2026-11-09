@@ -11,15 +11,18 @@ export class CreatePaymentDto {
   invoiceId: string;
 
   @ApiProperty({
-    example: 'bank_transfer',
-    description: 'Payment method (bank_transfer, credit_card, promptpay, etc)',
+    example: 'transfer',
+    enum: PaymentMethod,
+    description: 'Payment method: transfer | qr | cash',
   })
-  @IsEnum(PaymentMethod)
+  @IsEnum(PaymentMethod, {
+    message: `method ต้องเป็น ${Object.values(PaymentMethod).join(' | ')}`,
+  })
   method: PaymentMethod;
 
   @ApiPropertyOptional({
-    example: 'https://example.com/payment-slip.jpg',
-    description: 'URL to payment confirmation slip image',
+    example: '/uploads/payment-slips/slip-1234567890.jpg',
+    description: 'URL ของสลิปยืนยันการชำระเงิน (set automatically when uploading via multipart)',
   })
   @IsString()
   @IsOptional()
@@ -27,7 +30,8 @@ export class CreatePaymentDto {
 
   @ApiPropertyOptional({
     example: 'pending',
-    description: 'Payment status (pending, completed, failed, rejected)',
+    enum: PaymentStatus,
+    description: 'Payment status — defaults to pending',
   })
   @IsEnum(PaymentStatus)
   @IsOptional()
